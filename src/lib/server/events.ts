@@ -6,7 +6,7 @@ import { formatEventLine, type EventLevel } from './events-format';
 export { formatEventLine, type EventLevel } from './events-format';
 
 /** How many of the most recent events to retain when pruning. */
-export const EVENT_RETENTION = 1000;
+export const EVENT_RETENTION = 2000;
 
 /** Prune roughly every this-many inserts, to keep the table bounded cheaply. */
 const PRUNE_EVERY = 50;

@@ -5,6 +5,7 @@ import {
 	resolveConfig,
 	requireConfig,
 	requireActiveServer,
+	setCachedLibraries,
 	type ApplyMethod
 } from '$lib/server/config';
 import { resolveActiveServer, serverTypeLabel } from '$lib/server/media-server';
@@ -33,6 +34,8 @@ export async function runSyncJob(ctx: JobContext): Promise<void> {
 	if (!server) throw new Error(`${serverTypeLabel(config.serverType)} is not configured`);
 
 	const allSections = await server.listLibraries();
+	// Refresh the Settings "Libraries to sync" cache from this authoritative list.
+	await setCachedLibraries(allSections);
 	const sections = config.includedSections.length
 		? allSections.filter((s) => config.includedSections.includes(s.key))
 		: allSections;
@@ -236,19 +239,11 @@ export async function runApplyJob(
 					method: payload.method,
 					config
 				});
+				// Per-method success/failure is logged inside applyToItem; here we
+				// only tally the per-item result for the run summary.
 				const failures = outcomes.filter((o) => o.status === 'failed');
-				if (failures.length) {
-					failed++;
-					for (const f of failures) {
-						await logEvent('error', 'apply', `Apply failed for "${item.title}" (${f.method})`, {
-							title: item.title,
-							method: f.method,
-							error: f.error
-						});
-					}
-				} else {
-					applied++;
-				}
+				if (failures.length) failed++;
+				else applied++;
 			}
 		} catch (e) {
 			// Record-keeping happens inside applyToItem; an unexpected error still counts.

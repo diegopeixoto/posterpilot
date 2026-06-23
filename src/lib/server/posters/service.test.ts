@@ -42,6 +42,9 @@ vi.mock('$lib/server/media-server', () => ({
 	}
 }));
 vi.mock('$lib/server/kometa/yaml', () => ({ writeKometaYaml: h.writeKometaYaml }));
+// applyToItem now logs per-method outcomes; stub the event log so it doesn't touch
+// the db (and so it isn't counted among the appliedPosters inserts under test).
+vi.mock('$lib/server/events', () => ({ logEvent: vi.fn(() => Promise.resolve()) }));
 
 import { applyToItem } from './service';
 

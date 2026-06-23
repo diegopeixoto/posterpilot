@@ -1,10 +1,12 @@
-import type { PageServerLoad } from './$types';
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 import { listEvents, type EventLevelFilter } from '$lib/server/queries';
 
 const PAGE_SIZE = 50;
 const LEVELS: EventLevelFilter[] = ['info', 'warn', 'error'];
 
-export const load: PageServerLoad = async ({ url }) => {
+/** Page the activity log for the Settings → Activity tab (filter + id cursor). */
+export const GET: RequestHandler = async ({ url }) => {
 	const levelParam = url.searchParams.get('level');
 	const level = LEVELS.includes(levelParam as EventLevelFilter)
 		? (levelParam as EventLevelFilter)
@@ -18,5 +20,5 @@ export const load: PageServerLoad = async ({ url }) => {
 	const events = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
 	const nextCursor = hasMore ? events[events.length - 1].id : null;
 
-	return { events, level: level ?? 'all', nextCursor };
+	return json({ events, nextCursor });
 };

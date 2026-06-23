@@ -81,6 +81,14 @@ export async function discoverForItem(
 		.set({ hasMediux: rows.length > 0, updatedAt: new Date() })
 		.where(eq(mediaItems.id, item.id));
 
+	// Per-item info when covers were found (kept to the found case to bound volume).
+	if (rows.length) {
+		await logEvent('info', 'discover', `Found ${rows.length} covers for "${item.title}"`, {
+			title: item.title,
+			count: rows.length
+		});
+	}
+
 	return rows.length;
 }
 
@@ -147,6 +155,7 @@ export async function applyToItem(
 	if (doServer) {
 		// Persisted as 'plex' (the direct-server method) for schema compatibility,
 		// but routed through whichever provider is active.
+		const serverLabel = serverTypeLabel(config.serverType);
 		let outcome: ApplyOutcome = { method: 'plex', status: 'success' };
 		try {
 			const server = requireActiveServerOrThrow(config);
@@ -164,6 +173,24 @@ export async function applyToItem(
 			status: outcome.status,
 			error: outcome.error ?? null
 		});
+		if (outcome.status === 'success') {
+			await logEvent('info', 'apply', `Applied cover to "${item.title}" via ${serverLabel}`, {
+				title: item.title,
+				method: 'plex',
+				url: posterUrl
+			});
+		} else {
+			await logEvent(
+				'error',
+				'apply',
+				`Failed to apply cover to "${item.title}" via ${serverLabel}`,
+				{
+					title: item.title,
+					method: 'plex',
+					error: outcome.error
+				}
+			);
+		}
 		outcomes.push(outcome);
 	}
 
@@ -184,6 +211,19 @@ export async function applyToItem(
 			status: outcome.status,
 			error: outcome.error ?? null
 		});
+		if (outcome.status === 'success') {
+			await logEvent('info', 'apply', `Applied cover to "${item.title}" via Kometa`, {
+				title: item.title,
+				method: 'kometa',
+				url: posterUrl
+			});
+		} else {
+			await logEvent('error', 'apply', `Failed to apply cover to "${item.title}" via Kometa`, {
+				title: item.title,
+				method: 'kometa',
+				error: outcome.error
+			});
+		}
 		outcomes.push(outcome);
 	}
 
@@ -225,6 +265,12 @@ export async function applyCustomUpload(
 		method: 'plex',
 		status: 'success'
 	});
+	await logEvent(
+		'info',
+		'apply',
+		`Applied custom upload to "${item.title}" via ${serverTypeLabel(config.serverType)}`,
+		{ title: item.title, method: 'upload' }
+	);
 }
 
 /**
@@ -246,4 +292,10 @@ export async function revertItem(item: MediaItem, config: AppConfig): Promise<vo
 		.update(mediaItems)
 		.set({ selectedPosterUrl: null, selectedBackgroundUrl: null, updatedAt: new Date() })
 		.where(eq(mediaItems.id, item.id));
+	await logEvent(
+		'info',
+		'apply',
+		`Reverted "${item.title}" to its original cover on ${serverTypeLabel(config.serverType)}`,
+		{ title: item.title }
+	);
 }

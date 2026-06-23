@@ -28,8 +28,6 @@
 	const links = $derived([
 		{ href: '/', label: m.nav_dashboard() },
 		{ href: '/library', label: m.nav_library() },
-		{ href: '/jobs', label: m.nav_jobs() },
-		{ href: '/events', label: m.nav_events() },
 		{ href: '/settings', label: m.nav_settings() }
 	]);
 
@@ -73,7 +71,7 @@
 							: 'text-neutral-400 hover:text-neutral-100'}"
 					>
 						{link.label}
-						{#if link.href === '/jobs' && data.activeJobs > 0}
+						{#if link.href === '/' && data.activeJobs > 0}
 							<span class="ml-1 rounded-full bg-accent-500 px-1.5 text-[10px] text-white"
 								>{data.activeJobs}</span
 							>

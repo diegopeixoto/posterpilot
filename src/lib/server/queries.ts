@@ -178,6 +178,15 @@ export async function getJob(id: number) {
 	return (await db.select().from(jobs).where(eq(jobs.id, id)).limit(1))[0] ?? null;
 }
 
+/** All pending/running jobs (newest first) for the dashboard's live progress list. */
+export async function listActiveJobs() {
+	return db
+		.select()
+		.from(jobs)
+		.where(sql`${jobs.status} in ('pending','running')`)
+		.orderBy(desc(jobs.id));
+}
+
 export async function activeJobCount(): Promise<number> {
 	const [row] = await db
 		.select({ c: sql<number>`count(*)` })

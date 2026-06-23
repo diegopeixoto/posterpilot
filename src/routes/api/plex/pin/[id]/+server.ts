@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { ensurePlexClientId, saveSettings } from '$lib/server/config';
 import { pollPin } from '$lib/server/media-server/plex-auth';
+import { logEvent } from '$lib/server/events';
 
 /**
  * Poll a plex.tv PIN. On success, persist the acquired token as `plexToken` and
@@ -18,6 +19,7 @@ export const GET: RequestHandler = async ({ params }) => {
 		const token = await pollPin(id, clientId);
 		if (token) {
 			await saveSettings({ plexToken: token, serverType: 'plex' });
+			await logEvent('info', 'settings', 'Plex connected (signed in via PIN)');
 			return json({ authorized: true });
 		}
 		return json({ authorized: false });

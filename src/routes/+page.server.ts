@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { getStats, listJobs } from '$lib/server/queries';
+import { getStats, listActiveJobs, listJobs } from '$lib/server/queries';
 import { resolveConfig } from '$lib/server/config';
 import { getActiveServer } from '$lib/server/media-server';
 
@@ -14,6 +14,8 @@ export const load: PageServerLoad = async () => {
 	}
 	return {
 		stats: await getStats(),
+		// All pending/running jobs get live progress + cancel on the dashboard.
+		activeJobsList: await listActiveJobs(),
 		jobs: await listJobs(8)
 	};
 };

@@ -1,18 +1,29 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { SvelteSet } from 'svelte/reactivity';
 	import JobProgress from '$lib/components/JobProgress.svelte';
 	import { m } from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
-	let syncJobId = $state<number | null>(null);
-	let running = $state(false);
 	let busy = $state(false);
+	// Jobs started in this session (so a just-launched sync shows progress before
+	// the next server load surfaces it in `data.activeJobsList`).
+	const startedJobIds = new SvelteSet<number>();
 
-	// While a job is running, refresh dashboard data (stats + recent jobs) live so
-	// the cards and job list climb alongside the progress bar.
+	// The set of job ids to show live progress for: server-reported active jobs plus
+	// anything started in this session that hasn't terminated yet.
+	const activeJobIds = $derived.by(() => {
+		const ids = new SvelteSet<number>(startedJobIds);
+		for (const j of data.activeJobsList) ids.add(j.id);
+		return [...ids].sort((a, b) => b - a);
+	});
+	const hasActive = $derived(activeJobIds.length > 0);
+
+	// While any job is active, refresh dashboard data (stats + recent jobs) live so
+	// the cards and job list climb alongside the progress bars.
 	$effect(() => {
-		if (!running) return;
+		if (!hasActive) return;
 		const timer = setInterval(() => invalidateAll(), 3000);
 		return () => clearInterval(timer);
 	});
@@ -31,11 +42,15 @@
 		try {
 			const res = await fetch('/api/sync', { method: 'POST' });
 			const { jobId } = await res.json();
-			syncJobId = jobId;
-			running = true;
+			if (typeof jobId === 'number') startedJobIds.add(jobId);
 		} finally {
 			busy = false;
 		}
+	}
+
+	function onJobDone(id: number) {
+		startedJobIds.delete(id);
+		invalidateAll();
 	}
 </script>
 
@@ -48,16 +63,12 @@
 	</button>
 </div>
 
-{#if syncJobId}
-	<div class="mt-4">
-		<JobProgress
-			jobId={syncJobId}
-			onDone={() => {
-				running = false;
-				invalidateAll();
-			}}
-		/>
-	</div>
+{#if hasActive}
+	<section class="mt-4 space-y-3">
+		{#each activeJobIds as jobId (jobId)}
+			<JobProgress {jobId} onDone={() => onJobDone(jobId)} />
+		{/each}
+	</section>
 {/if}
 
 <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -69,7 +80,12 @@
 	{/each}
 </div>
 
-<h2 class="section-title mt-8">{m.dashboard_recent_jobs()}</h2>
+<div class="mt-8 flex items-center justify-between">
+	<h2 class="section-title">{m.dashboard_recent_jobs()}</h2>
+	<a href="/settings?tab=activity" class="text-xs text-neutral-400 hover:text-accent-200"
+		>{m.dashboard_view_activity()}</a
+	>
+</div>
 <div class="surface overflow-hidden">
 	{#if data.jobs.length === 0}
 		<p class="p-4 text-sm text-neutral-500">{m.dashboard_no_jobs()}</p>

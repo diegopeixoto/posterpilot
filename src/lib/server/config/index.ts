@@ -259,6 +259,52 @@ export async function ensurePlexClientId(): Promise<string> {
 	return id;
 }
 
+/** A cached media-server library entry (persisted so Settings renders instantly). */
+export interface CachedLibrary {
+	key: string;
+	title: string;
+	type: string;
+}
+
+/** Internal settings key holding the cached library list (not a WRITABLE_KEY). */
+const CACHED_LIBRARIES_KEY = 'cachedLibraries';
+
+/**
+ * Read the last-known media-server library list from the settings KV. This is an
+ * internal cache (not a user-editable WRITABLE_KEY) so the Settings page can render
+ * the "Libraries to sync" checklist instantly without a network round-trip.
+ */
+export async function getCachedLibraries(): Promise<CachedLibrary[]> {
+	const row = (
+		await db.select().from(settings).where(eq(settings.key, CACHED_LIBRARIES_KEY)).limit(1)
+	)[0];
+	if (!row?.value) return [];
+	try {
+		const arr = JSON.parse(row.value);
+		if (!Array.isArray(arr)) return [];
+		return arr
+			.filter((e) => e && typeof e.key === 'string')
+			.map((e) => ({
+				key: String(e.key),
+				title: String(e.title ?? ''),
+				type: String(e.type ?? '')
+			}));
+	} catch {
+		return [];
+	}
+}
+
+/** Persist the media-server library list to the settings KV (internal cache). */
+export async function setCachedLibraries(libraries: CachedLibrary[]): Promise<void> {
+	const value = JSON.stringify(
+		libraries.map((l) => ({ key: l.key, title: l.title, type: l.type }))
+	);
+	await db
+		.insert(settings)
+		.values({ key: CACHED_LIBRARIES_KEY, value })
+		.onConflictDoUpdate({ target: settings.key, set: { value } });
+}
+
 /** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
 export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
 	const entries = Object.entries(values).filter(([k]) => WRITABLE_KEYS.includes(k as ConfigKey));

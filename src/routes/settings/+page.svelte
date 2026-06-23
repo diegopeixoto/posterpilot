@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages';
 	import { setLocale } from '$lib/paraglide/runtime';
@@ -8,23 +10,118 @@
 	let { data } = $props();
 	const env = data.config.envManaged;
 
-	const allSectionKeys = data.sections.map((s) => s.key);
+	// The library checklist: cached server libraries (rendered instantly) that a
+	// Refresh button can re-fetch live without blocking the page.
+	type Section = { key: string; title: string; type: string };
+	let sections = $state<Section[]>(data.sections);
 	const selectedSections = new SvelteSet<string>(
-		data.config.includedSections.length ? data.config.includedSections : allSectionKeys
+		data.config.includedSections.length
+			? data.config.includedSections
+			: data.sections.map((s) => s.key)
+	);
+	// All currently-known libraries selected → persist [] (sync everything, incl.
+	// future libraries). Recomputed against the live `sections` list.
+	const allSelected = $derived(
+		sections.length > 0 && sections.every((s) => selectedSections.has(s.key))
 	);
 	function toggleSection(key: string) {
 		if (selectedSections.has(key)) selectedSections.delete(key);
 		else selectedSections.add(key);
 	}
 
-	type Tab = 'server' | 'providers' | 'advanced' | 'language';
-	let tab = $state<Tab>('server');
+	let refreshingLibs = $state(false);
+	let libsError = $state<string | null>(null);
+	async function refreshLibraries() {
+		refreshingLibs = true;
+		libsError = null;
+		try {
+			const res = await fetch('/api/plex/sections');
+			const body = (await res.json()) as { sections?: Section[]; error?: string };
+			if (Array.isArray(body.sections)) {
+				const wasAll = allSelected || selectedSections.size === 0;
+				sections = body.sections;
+				// If everything was selected, keep "select all" semantics across the
+				// refreshed list (so a newly-added library defaults to synced).
+				if (wasAll) {
+					selectedSections.clear();
+					for (const s of sections) selectedSections.add(s.key);
+				}
+			}
+			if (body.error) libsError = body.error;
+		} catch (e) {
+			libsError = e instanceof Error ? e.message : String(e);
+		} finally {
+			refreshingLibs = false;
+		}
+	}
+
+	// Auto-refresh once in the background so the cached list stays current.
+	onMount(() => {
+		refreshLibraries();
+	});
+
+	type Tab = 'server' | 'providers' | 'advanced' | 'language' | 'activity';
+	const TABS: Tab[] = ['server', 'providers', 'advanced', 'language', 'activity'];
+	const initialTab = page.url.searchParams.get('tab');
+	let tab = $state<Tab>(TABS.includes(initialTab as Tab) ? (initialTab as Tab) : 'server');
 	const tabs: { key: Tab; label: () => string }[] = [
 		{ key: 'server', label: m.settings_tab_server },
 		{ key: 'providers', label: m.settings_tab_providers },
 		{ key: 'advanced', label: m.settings_tab_advanced },
-		{ key: 'language', label: m.settings_tab_language }
+		{ key: 'language', label: m.settings_tab_language },
+		{ key: 'activity', label: m.settings_tab_activity }
 	];
+
+	// ── Activity log (Events moved into this tab) ──────────────────────────────
+	type LevelFilter = 'all' | 'info' | 'warn' | 'error';
+	type EventRow = {
+		id: number;
+		level: string;
+		type: string;
+		message: string;
+		createdAt: string | Date | null;
+	};
+	const levelFilters: { key: LevelFilter; label: () => string }[] = [
+		{ key: 'all', label: m.events_level_all },
+		{ key: 'info', label: m.events_level_info },
+		{ key: 'warn', label: m.events_level_warn },
+		{ key: 'error', label: m.events_level_error }
+	];
+	let events = $state<EventRow[]>(data.events as EventRow[]);
+	let eventsCursor = $state<number | null>(data.eventsNextCursor);
+	let eventLevel = $state<LevelFilter>('all');
+	let eventsLoading = $state(false);
+
+	const eventBadgeClass: Record<string, string> = {
+		info: 'badge badge-info',
+		warn: 'badge badge-warn',
+		error: 'badge badge-error'
+	};
+	function fmtTime(ts: string | Date | null): string {
+		return ts ? new Date(ts).toLocaleString(data.locale) : '—';
+	}
+
+	async function loadEvents(opts: { level?: LevelFilter; before?: number | null } = {}) {
+		eventsLoading = true;
+		try {
+			const params = new URLSearchParams();
+			const lvl = opts.level ?? eventLevel;
+			if (lvl !== 'all') params.set('level', lvl);
+			if (opts.before != null) params.set('before', String(opts.before));
+			const res = await fetch(`/api/events?${params.toString()}`);
+			const body = (await res.json()) as { events: EventRow[]; nextCursor: number | null };
+			events = opts.before != null ? [...events, ...body.events] : body.events;
+			eventsCursor = body.nextCursor;
+		} finally {
+			eventsLoading = false;
+		}
+	}
+
+	function setEventLevel(level: LevelFilter) {
+		if (level === eventLevel) return;
+		eventLevel = level;
+		loadEvents({ level, before: null });
+	}
 
 	let serverType = $state<'plex' | 'jellyfin' | 'emby'>(data.config.serverType);
 
@@ -90,9 +187,8 @@
 			payload.providerTmdb = String(providerTmdb);
 			payload.providerFanart = String(providerFanart);
 			payload.providerThePosterDb = String(providerThePosterDb);
-			// All sections selected → [] (sync everything, incl. future libraries).
-			const sel = [...selectedSections];
-			payload.includedSections = sel.length === allSectionKeys.length ? [] : sel;
+			// All known sections selected → [] (sync everything, incl. future libraries).
+			payload.includedSections = allSelected ? [] : [...selectedSections];
 
 			await fetch('/api/settings', {
 				method: 'POST',
@@ -270,13 +366,28 @@
 		{/if}
 
 		<div>
-			<span class="mb-1 block text-sm font-medium">{m.settings_libraries_to_sync()}</span>
-			{#if data.sections.length === 0}
+			<div class="mb-1 flex items-center gap-2">
+				<span class="text-sm font-medium">{m.settings_libraries_to_sync()}</span>
+				<button
+					type="button"
+					onclick={refreshLibraries}
+					disabled={refreshingLibs}
+					class="btn btn-ghost px-2 py-0.5 text-xs"
+				>
+					{refreshingLibs ? m.settings_libraries_refreshing() : m.settings_libraries_refresh()}
+				</button>
+			</div>
+			{#if libsError}
+				<p class="mb-2 text-xs text-amber-400">
+					{m.settings_libraries_refresh_failed({ error: libsError })}
+				</p>
+			{/if}
+			{#if sections.length === 0}
 				<p class="text-xs text-neutral-500">{m.settings_libraries_connect_first()}</p>
 			{:else}
 				<p class="mb-2 text-xs text-neutral-500">{m.settings_libraries_hint()}</p>
 				<div class="space-y-1">
-					{#each data.sections as section (section.key)}
+					{#each sections as section (section.key)}
 						<label class="flex items-center gap-2 text-sm text-neutral-300">
 							<input
 								type="checkbox"
@@ -402,7 +513,7 @@
 				<option value="kometa">{m.settings_method_kometa_only()}</option>
 			</select>
 		</div>
-	{:else}
+	{:else if tab === 'language'}
 		<div>
 			<label for="language" class="mb-1 block text-sm font-medium">{m.settings_language()}</label>
 			<select id="language" value={language} onchange={changeLanguage} class="input">
@@ -411,30 +522,92 @@
 				{/each}
 			</select>
 		</div>
+	{:else}
+		<div>
+			<div class="flex flex-wrap items-center gap-1">
+				{#each levelFilters as f (f.key)}
+					<button
+						type="button"
+						onclick={() => setEventLevel(f.key)}
+						class="chip {eventLevel === f.key ? 'chip-active' : ''}"
+					>
+						{f.label()}
+					</button>
+				{/each}
+			</div>
+
+			<div class="surface mt-4 overflow-hidden">
+				{#if events.length === 0}
+					<p class="p-4 text-sm text-neutral-500">{m.events_empty()}</p>
+				{:else}
+					<table class="w-full text-sm">
+						<thead class="text-left text-xs text-neutral-500">
+							<tr class="border-b border-neutral-800">
+								<th class="px-4 py-2 font-medium">{m.events_col_level()}</th>
+								<th class="px-4 py-2 font-medium">{m.events_col_type()}</th>
+								<th class="px-4 py-2 font-medium">{m.events_col_message()}</th>
+								<th class="px-4 py-2 font-medium">{m.events_col_time()}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each events as event (event.id)}
+								<tr class="border-b border-neutral-800/60 align-top last:border-0">
+									<td class="px-4 py-2">
+										<span class={eventBadgeClass[event.level] ?? 'badge badge-muted'}>
+											{event.level}
+										</span>
+									</td>
+									<td class="px-4 py-2 text-neutral-400">{event.type}</td>
+									<td class="px-4 py-2 text-neutral-200">{event.message}</td>
+									<td class="px-4 py-2 whitespace-nowrap text-neutral-500"
+										>{fmtTime(event.createdAt)}</td
+									>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			</div>
+
+			{#if eventsCursor != null}
+				<div class="mt-4 text-center">
+					<button
+						type="button"
+						onclick={() => loadEvents({ before: eventsCursor })}
+						disabled={eventsLoading}
+						class="btn btn-ghost"
+					>
+						{eventsLoading ? m.settings_activity_loading() : m.events_load_more()}
+					</button>
+				</div>
+			{/if}
+		</div>
 	{/if}
 
-	<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
-		<button onclick={save} disabled={saving} class="btn btn-accent px-4 py-2"
-			>{saving ? m.settings_saving() : m.settings_save()}</button
-		>
-		<button onclick={test} disabled={testing} class="btn btn-subtle px-4 py-2"
-			>{testing ? m.settings_testing() : m.settings_test_connections()}</button
-		>
-		{#if saved}<span class="text-sm text-emerald-400">{m.settings_saved()}</span>{/if}
-	</div>
-
-	{#if testResult}
-		<div class="surface space-y-1 p-3 text-sm">
-			<p>
-				{serverLabel}: {testResult.plex.ok
-					? m.settings_test_result_ok()
-					: m.settings_test_result_fail({ error: testResult.plex.error ?? '' })}
-			</p>
-			<p>
-				TMDB: {testResult.tmdb.ok
-					? m.settings_test_result_ok()
-					: m.settings_test_result_fail({ error: testResult.tmdb.error ?? '' })}
-			</p>
+	{#if tab !== 'activity'}
+		<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
+			<button onclick={save} disabled={saving} class="btn btn-accent px-4 py-2"
+				>{saving ? m.settings_saving() : m.settings_save()}</button
+			>
+			<button onclick={test} disabled={testing} class="btn btn-subtle px-4 py-2"
+				>{testing ? m.settings_testing() : m.settings_test_connections()}</button
+			>
+			{#if saved}<span class="text-sm text-emerald-400">{m.settings_saved()}</span>{/if}
 		</div>
+
+		{#if testResult}
+			<div class="surface space-y-1 p-3 text-sm">
+				<p>
+					{serverLabel}: {testResult.plex.ok
+						? m.settings_test_result_ok()
+						: m.settings_test_result_fail({ error: testResult.plex.error ?? '' })}
+				</p>
+				<p>
+					TMDB: {testResult.tmdb.ok
+						? m.settings_test_result_ok()
+						: m.settings_test_result_fail({ error: testResult.tmdb.error ?? '' })}
+				</p>
+			</div>
+		{/if}
 	{/if}
 </div>
