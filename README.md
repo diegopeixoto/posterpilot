@@ -4,6 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/diegopeixoto/posterpilot?sort=semver)](https://github.com/diegopeixoto/posterpilot/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-posterpilot-2496ED?logo=docker&logoColor=white)](https://github.com/diegopeixoto/posterpilot/pkgs/container/posterpilot)
+[![Documentation](https://img.shields.io/badge/docs-posterpilot-4F46E5?logo=astro&logoColor=white)](https://diegopeixoto.github.io/posterpilot)
 [![Translation status](https://hosted.weblate.org/widget/posterpilot/svg-badge.svg)](https://hosted.weblate.org/engage/posterpilot/)
 
 Self-hosted web app to browse a Plex library, find artwork covers on
@@ -14,6 +15,10 @@ Docker container on a Mac and on an Unraid server.
 > Spec-driven via [OpenSpec](https://github.com/Fission-AI/OpenSpec). See
 > `openspec/specs/` for the capability specs and `openspec/changes/` for in-flight
 > proposals.
+
+📖 **Documentation:** full installation, configuration, usage, contributing, and
+translating guides live at
+**[diegopeixoto.github.io/posterpilot](https://diegopeixoto.github.io/posterpilot)**.
 
 ## What it does
 

@@ -26,6 +26,12 @@ vite.config.ts.timestamp-*
 # on dev/build/check; not source — regenerated and never committed).
 /src/lib/paraglide/
 
+# Docs site (isolated Astro Starlight workspace under docs/) — generated output
+# and its own dependencies; the docs/ source and lockfile are committed.
+/docs/node_modules/
+/docs/dist/
+/docs/.astro/
+
 # Runtime data (SQLite db + Kometa exports)
 /data/
 *.sqlite

@@ -1,0 +1,86 @@
+---
+title: PosterPilot
+description: Self-hosted web app to browse your media library, find artwork covers across multiple providers, and apply them to Plex/Jellyfin/Emby and/or via Kometa YAML.
+template: splash
+hero:
+  tagline: Browse your library, find better artwork, and apply it — directly to your media server or as Kometa-ready YAML.
+  actions:
+    - text: Get started
+      link: /posterpilot/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/diegopeixoto/posterpilot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+PosterPilot is a self-hosted web app that browses a media library
+([Plex](https://www.plex.tv/), with provisional [Jellyfin](https://jellyfin.org/)
+and [Emby](https://emby.media/) support), finds artwork covers across multiple
+providers, and applies a chosen cover to your media server — directly via its API
+and/or by exporting [Kometa](https://kometa.wiki/)/PMM-compatible YAML. It runs as
+a single Docker container on a Mac or on an Unraid server.
+
+{/* TODO: add a hero screenshot of the library wall here once captured. */}
+
+## What it does
+
+<CardGrid stagger>
+	<Card title="Sync your library" icon="seti:db">
+		Sync your movie and show libraries and resolve each title to a TMDB id so artwork providers can
+		be queried accurately.
+	</Card>
+	<Card title="Find covers" icon="seti:image">
+		Fan out across enabled providers — MediUX, Fanart.tv, TMDB, and ThePosterDB — and compare poster
+		and background candidates grouped by provider and set.
+	</Card>
+	<Card title="Apply covers" icon="approve-check">
+		Apply a chosen cover via the media-server API (uploads and locks the field, instantly) and/or
+		via a Kometa YAML export that your Kometa instance consumes on its next run.
+	</Card>
+	<Card title="Stay localized" icon="translate">
+		The UI ships in English, Spanish, Simplified Chinese, Japanese, and Brazilian Portuguese, with
+		per-key English fallback — managed through Weblate.
+	</Card>
+</CardGrid>
+
+Library-wide work runs as background jobs with live progress over Server-Sent
+Events.
+
+## Where to go next
+
+<CardGrid>
+	<LinkCard
+		title="Installation"
+		href="/posterpilot/installation/"
+		description="Run PosterPilot with Docker Compose on a Mac or Unraid using the official GHCR image."
+	/>
+	<LinkCard
+		title="Configuration"
+		href="/posterpilot/configuration/"
+		description="Connect a media server, set your TMDB key, enable artwork providers, and learn the full env-var reference."
+	/>
+	<LinkCard
+		title="Usage"
+		href="/posterpilot/usage/"
+		description="Sync a library, find covers, apply them, build custom sets, and filter the library wall."
+	/>
+	<LinkCard
+		title="Contributing"
+		href="/posterpilot/contributing/"
+		description="Set up the project locally and run the quality gates before submitting a change."
+	/>
+</CardGrid>
+
+## Stack
+
+- **SvelteKit** (TypeScript) on **Bun**, built with `adapter-node`
+- **SQLite + Drizzle ORM** (libsql) for the library cache, candidates, history,
+  jobs, and settings
+- **Tailwind CSS v4**, a dark, image-forward UI
+- An in-process job queue with **Server-Sent Events** for live progress
+
+PosterPilot is released under the [MIT License](https://github.com/diegopeixoto/posterpilot/blob/main/LICENSE).

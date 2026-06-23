@@ -1,0 +1,63 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# Least-privilege by default; the deploy job widens to what GitHub Pages needs.
+permissions:
+  contents: read
+
+# Allow one concurrent deployment; let an in-progress run finish so a partial
+# deploy is never cancelled mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2'
+      - name: Install dependencies
+        working-directory: docs
+        run: bun install --frozen-lockfile
+      - name: Build site
+        working-directory: docs
+        run: bun run build
+      - name: Upload Pages artifact
+        # Only need the artifact when we are going to deploy (push to main /
+        # manual dispatch). On pull requests this step is skipped, so the job is
+        # build-only and a broken build still fails the PR check.
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/dist
+
+  deploy:
+    # Deploy only on pushes to main and manual dispatch — never on pull requests.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

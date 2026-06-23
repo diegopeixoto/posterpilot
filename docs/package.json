@@ -1,0 +1,19 @@
+{
+	"name": "posterpilot-docs",
+	"type": "module",
+	"version": "0.0.1",
+	"private": true,
+	"description": "Documentation site for PosterPilot, built with Astro Starlight.",
+	"scripts": {
+		"dev": "astro dev",
+		"start": "astro dev",
+		"build": "astro build",
+		"preview": "astro preview",
+		"astro": "astro"
+	},
+	"dependencies": {
+		"@astrojs/starlight": "^0.40.0",
+		"astro": "^6.4.8",
+		"sharp": "^0.34.0"
+	}
+}
