@@ -1,6 +1,13 @@
-import { and, asc, desc, eq, gte, like, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, like, lt, sql, type SQL } from 'drizzle-orm';
 import { db } from './db';
-import { appliedPosters, jobs, mediaItems, posterCandidates, type MediaItem } from './db/schema';
+import {
+	appliedPosters,
+	events,
+	jobs,
+	mediaItems,
+	posterCandidates,
+	type MediaItem
+} from './db/schema';
 import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 
 /** Sort orders offered by the library grid. */
@@ -177,4 +184,30 @@ export async function activeJobCount(): Promise<number> {
 		.from(jobs)
 		.where(sql`${jobs.status} in ('pending','running')`);
 	return row?.c ?? 0;
+}
+
+export type EventLevelFilter = 'info' | 'warn' | 'error';
+
+/**
+ * List activity-log events newest-first. Filter by `level`, page with `limit`,
+ * and continue from a prior page by passing the last seen id as `before` (an id
+ * cursor — rows with a smaller id, i.e. older, are returned).
+ */
+export async function listEvents(
+	opts: {
+		level?: EventLevelFilter;
+		limit?: number;
+		before?: number;
+	} = {}
+) {
+	const limit = opts.limit ?? 50;
+	const conds: SQL[] = [];
+	if (opts.level) conds.push(eq(events.level, opts.level));
+	if (typeof opts.before === 'number') conds.push(lt(events.id, opts.before));
+	return db
+		.select()
+		.from(events)
+		.where(conds.length ? and(...conds) : undefined)
+		.orderBy(desc(events.id))
+		.limit(limit);
 }

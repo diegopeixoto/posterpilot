@@ -29,6 +29,13 @@
       "when": 1782234755796,
       "tag": "0003_clear_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782243736933,
+      "tag": "0004_natural_banshee",
+      "breakpoints": true
     }
   ]
 }

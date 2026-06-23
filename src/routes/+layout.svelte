@@ -29,6 +29,7 @@
 		{ href: '/', label: m.nav_dashboard() },
 		{ href: '/library', label: m.nav_library() },
 		{ href: '/jobs', label: m.nav_jobs() },
+		{ href: '/events', label: m.nav_events() },
 		{ href: '/settings', label: m.nav_settings() }
 	]);
 

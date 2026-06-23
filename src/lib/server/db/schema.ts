@@ -103,9 +103,25 @@ export const settings = sqliteTable('settings', {
 	value: text('value').notNull()
 });
 
+/** Operational activity log (job lifecycle, failures, notable system events). */
+export const events = sqliteTable('events', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	level: text('level', { enum: ['info', 'warn', 'error'] }).notNull(),
+	/** Coarse category, e.g. 'sync' | 'discover' | 'apply' | 'provider' | 'system'. */
+	type: text('type').notNull(),
+	message: text('message').notNull(),
+	/** Optional structured detail, serialized as JSON. */
+	context: text('context'),
+	createdAt: integer('created_at', { mode: 'timestamp' })
+		.notNull()
+		.$defaultFn(() => new Date())
+});
+
 export type MediaItem = typeof mediaItems.$inferSelect;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type PosterCandidate = typeof posterCandidates.$inferSelect;
 export type NewPosterCandidate = typeof posterCandidates.$inferInsert;
 export type AppliedPoster = typeof appliedPosters.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
+export type Event = typeof events.$inferSelect;
+export type NewEvent = typeof events.$inferInsert;

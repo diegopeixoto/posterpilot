@@ -9,6 +9,7 @@ import {
 import type { AppConfig, ApplyMethod } from '$lib/server/config';
 import { resolveActiveServer, serverTypeLabel } from '$lib/server/media-server';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
+import { logEvent } from '$lib/server/events';
 import { availableProviders, PROVIDER_ORDER, type ProviderId } from './providers';
 
 /**
@@ -29,6 +30,25 @@ export async function discoverForItem(
 				.then((sets) => ({ provider: p.id, sets }))
 		)
 	);
+
+	// A provider that errored is skipped (the others still contribute) but its
+	// failure is worth a warn so it shows up in the activity log.
+	for (let i = 0; i < settled.length; i++) {
+		const r = settled[i];
+		if (r.status === 'rejected') {
+			const reason = r.reason;
+			await logEvent(
+				'warn',
+				'provider',
+				`${providers[i].id} discovery failed for "${item.title}"`,
+				{
+					provider: providers[i].id,
+					title: item.title,
+					error: reason instanceof Error ? reason.message : String(reason)
+				}
+			);
+		}
+	}
 
 	const rows = settled
 		.filter(

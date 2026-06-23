@@ -10,7 +10,12 @@ import {
 import { resolveActiveServer, serverTypeLabel } from '$lib/server/media-server';
 import { fetchMetadata, resolveTmdb } from '$lib/server/tmdb/client';
 import { applyToItem, autoSelectPoster, discoverForItem } from '$lib/server/posters/service';
+import { logEvent, pruneEvents } from '$lib/server/events';
 import type { JobContext } from './runner';
+
+function errorMessage(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
+}
 
 export type JobType = 'sync' | 'discover' | 'apply';
 
@@ -47,6 +52,7 @@ export async function runSyncJob(ctx: JobContext): Promise<void> {
 	}
 
 	await ctx.setTotal(work.length);
+	await logEvent('info', 'sync', 'Library sync started', { items: work.length });
 	let processed = 0;
 	for (const { sectionKey, item } of work) {
 		if (ctx.isCancelled()) break;
@@ -131,6 +137,13 @@ export async function runSyncJob(ctx: JobContext): Promise<void> {
 		processed++;
 		await ctx.progress(processed, item.title);
 	}
+
+	if (ctx.isCancelled()) {
+		await logEvent('warn', 'sync', 'Library sync interrupted', { processed, total: work.length });
+	} else {
+		await logEvent('info', 'sync', `Library sync finished (${processed} items)`, { processed });
+	}
+	await pruneEvents();
 }
 
 /** Discover: find MediaUX candidates for the given items (or all resolved items). */
@@ -145,18 +158,40 @@ export async function runDiscoverJob(
 			: await db.select().from(mediaItems).where(eq(mediaItems.resolved, true));
 
 	await ctx.setTotal(items.length);
+	await logEvent('info', 'discover', 'Discovery started', { items: items.length });
 	let processed = 0;
+	let failed = 0;
 	for (const item of items) {
 		if (ctx.isCancelled()) break;
 		await ctx.progress(processed, item.title);
 		try {
 			await discoverForItem(item, config, { forceRefresh: payload.forceRefresh });
-		} catch {
+		} catch (e) {
 			// Skip an item that fails discovery; the rest continue.
+			failed++;
+			await logEvent('warn', 'discover', `Discovery failed for "${item.title}"`, {
+				title: item.title,
+				error: errorMessage(e)
+			});
 		}
 		processed++;
 		await ctx.progress(processed, item.title);
 	}
+
+	if (ctx.isCancelled()) {
+		await logEvent('warn', 'discover', 'Discovery interrupted', { processed, failed });
+	} else {
+		await logEvent(
+			'info',
+			'discover',
+			`Discovery finished (${processed} items, ${failed} failed)`,
+			{
+				processed,
+				failed
+			}
+		);
+	}
+	await pruneEvents();
 }
 
 /** Apply: apply selected (or auto-selected) covers to the given items. */
@@ -172,7 +207,10 @@ export async function runApplyJob(
 	const items = await db.select().from(mediaItems).where(inArray(mediaItems.id, payload.itemIds));
 
 	await ctx.setTotal(items.length);
+	await logEvent('info', 'apply', 'Apply started', { items: items.length, method: payload.method });
 	let processed = 0;
+	let applied = 0;
+	let failed = 0;
 	for (const item of items) {
 		if (ctx.isCancelled()) break;
 		await ctx.progress(processed, item.title);
@@ -192,12 +230,43 @@ export async function runApplyJob(
 			}
 
 			if (posterUrl) {
-				await applyToItem(item, { posterUrl, backgroundUrl, method: payload.method, config });
+				const outcomes = await applyToItem(item, {
+					posterUrl,
+					backgroundUrl,
+					method: payload.method,
+					config
+				});
+				const failures = outcomes.filter((o) => o.status === 'failed');
+				if (failures.length) {
+					failed++;
+					for (const f of failures) {
+						await logEvent('error', 'apply', `Apply failed for "${item.title}" (${f.method})`, {
+							title: item.title,
+							method: f.method,
+							error: f.error
+						});
+					}
+				} else {
+					applied++;
+				}
 			}
-		} catch {
-			// Record-keeping happens inside applyToItem; skip on unexpected errors.
+		} catch (e) {
+			// Record-keeping happens inside applyToItem; an unexpected error still counts.
+			failed++;
+			await logEvent('error', 'apply', `Apply failed for "${item.title}"`, {
+				title: item.title,
+				method: payload.method,
+				error: errorMessage(e)
+			});
 		}
 		processed++;
 		await ctx.progress(processed, item.title);
 	}
+
+	await logEvent('info', 'apply', `Applied ${applied} covers (${failed} failed)`, {
+		applied,
+		failed,
+		processed
+	});
+	await pruneEvents();
 }

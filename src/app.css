@@ -63,6 +63,15 @@ body {
 	.badge-muted {
 		@apply border border-neutral-700 bg-black/50 text-neutral-300;
 	}
+	.badge-info {
+		@apply bg-neutral-800 text-neutral-300;
+	}
+	.badge-warn {
+		@apply bg-amber-900/50 text-amber-300;
+	}
+	.badge-error {
+		@apply bg-red-900/50 text-red-300;
+	}
 
 	.btn {
 		@apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-50;
