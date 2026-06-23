@@ -23,6 +23,12 @@
 	let httpCacheTtlDays = $state(String(data.config.httpCacheTtlDays));
 	let defaultApplyMethod = $state(data.config.defaultApplyMethod);
 
+	let providerMediux = $state(data.config.providerMediux);
+	let providerTmdb = $state(data.config.providerTmdb);
+	let providerFanart = $state(data.config.providerFanart);
+	let providerThePosterDb = $state(data.config.providerThePosterDb);
+	let fanartKey = $state('');
+
 	let saving = $state(false);
 	let testing = $state(false);
 	let saved = $state(false);
@@ -46,6 +52,11 @@
 			// Only send secrets when (re)entered, so a blank field keeps the stored value.
 			if (plexToken) payload.plexToken = plexToken;
 			if (tmdbKey) payload.tmdbKey = tmdbKey;
+			if (fanartKey) payload.fanartKey = fanartKey;
+			payload.providerMediux = String(providerMediux);
+			payload.providerTmdb = String(providerTmdb);
+			payload.providerFanart = String(providerFanart);
+			payload.providerThePosterDb = String(providerThePosterDb);
 			// All sections selected → [] (sync everything, incl. future libraries).
 			const sel = [...selectedSections];
 			payload.includedSections = sel.length === allSectionKeys.length ? [] : sel;
@@ -57,6 +68,7 @@
 			});
 			plexToken = '';
 			tmdbKey = '';
+			fanartKey = '';
 			saved = true;
 			await invalidateAll();
 		} finally {
@@ -171,6 +183,61 @@
 			<option value="plex">Plex only</option>
 			<option value="kometa">Kometa only</option>
 		</select>
+	</div>
+
+	<div>
+		<span class="mb-1 block text-sm font-medium">Artwork providers</span>
+		<p class="mb-2 text-xs text-neutral-500">
+			Sources searched when finding covers. MediUX and TMDB need no key; Fanart.tv needs a key;
+			ThePosterDB is experimental.
+		</p>
+		<div class="space-y-1">
+			<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<input
+					type="checkbox"
+					bind:checked={providerMediux}
+					disabled={data.config.envManaged.providerMediux}
+				/> MediUX
+			</label>
+			<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<input
+					type="checkbox"
+					bind:checked={providerTmdb}
+					disabled={data.config.envManaged.providerTmdb}
+				/> TMDB artwork
+			</label>
+			<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<input
+					type="checkbox"
+					bind:checked={providerFanart}
+					disabled={data.config.envManaged.providerFanart}
+				/> Fanart.tv
+			</label>
+			<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<input
+					type="checkbox"
+					bind:checked={providerThePosterDb}
+					disabled={data.config.envManaged.providerThePosterDb}
+				/>
+				ThePosterDB <span class="text-xs text-neutral-500">(experimental)</span>
+			</label>
+		</div>
+		<div class="mt-3">
+			<label for="fanartKey" class="mb-1 block text-sm font-medium">Fanart.tv API key</label>
+			<input
+				id="fanartKey"
+				type="password"
+				bind:value={fanartKey}
+				disabled={data.config.envManaged.fanartKey}
+				placeholder={data.config.fanartKeySet
+					? '•••••••• (set — leave blank to keep)'
+					: 'Fanart.tv personal API key'}
+				class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-accent-500 disabled:opacity-50"
+			/>
+			{#if data.config.envManaged.fanartKey}<p class="mt-1 text-xs text-amber-400">
+					Set from environment
+				</p>{/if}
+		</div>
 	</div>
 
 	<div>

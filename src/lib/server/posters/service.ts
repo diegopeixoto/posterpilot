@@ -9,58 +9,79 @@ import {
 import { requireConfig, type AppConfig, type ApplyMethod } from '$lib/server/config';
 import { setPosterLock, uploadPosterBytes, uploadPosterFromUrl } from '$lib/server/plex/client';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
-import { discoverCandidates } from '$lib/server/mediux/scraper';
+import { availableProviders, PROVIDER_ORDER, type ProviderId } from './providers';
 
 /**
- * Discover MediaUX candidates for an item and persist them (replacing any prior
- * candidates), then flag whether the item has MediaUX artwork. Returns the count.
+ * Discover artwork candidates for an item across all enabled providers and persist
+ * them (replacing any prior candidates), tagging each with its provider. A provider
+ * that fails is skipped so the others still contribute. Returns the candidate count.
  */
 export async function discoverForItem(
 	item: MediaItem,
 	config: AppConfig,
 	opts?: { forceRefresh?: boolean }
 ): Promise<number> {
-	if (!item.tmdbId || !item.mediaType) return 0;
+	const providers = availableProviders(config);
+	const settled = await Promise.allSettled(
+		providers.map((p) =>
+			p
+				.discover(item, config, { forceRefresh: opts?.forceRefresh })
+				.then((sets) => ({ provider: p.id, sets }))
+		)
+	);
 
-	const sets = await discoverCandidates(item.tmdbId, item.mediaType, {
-		delayMs: config.mediuxDelayMs,
-		concurrency: config.mediuxConcurrency,
-		cacheTtlDays: config.httpCacheTtlDays,
-		forceRefresh: opts?.forceRefresh
-	});
-	const flat = sets.flatMap((s) => s.candidates);
+	const rows = settled
+		.filter(
+			(
+				r
+			): r is PromiseFulfilledResult<{
+				provider: ProviderId;
+				sets: Awaited<ReturnType<(typeof providers)[number]['discover']>>;
+			}> => r.status === 'fulfilled'
+		)
+		.flatMap((r) =>
+			r.value.sets.flatMap((set) =>
+				set.candidates.map((c) => ({
+					mediaItemId: item.id,
+					provider: r.value.provider,
+					setId: c.setId,
+					setAuthor: c.setAuthor,
+					url: c.url,
+					kind: c.kind,
+					season: c.season,
+					episode: c.episode
+				}))
+			)
+		);
 
 	await db.delete(posterCandidates).where(eq(posterCandidates.mediaItemId, item.id));
-	if (flat.length) {
-		await db.insert(posterCandidates).values(
-			flat.map((c) => ({
-				mediaItemId: item.id,
-				setId: c.setId,
-				setAuthor: c.setAuthor,
-				url: c.url,
-				kind: c.kind,
-				season: c.season,
-				episode: c.episode
-			}))
-		);
-	}
+	if (rows.length) await db.insert(posterCandidates).values(rows);
 	await db
 		.update(mediaItems)
-		.set({ hasMediux: flat.length > 0, updatedAt: new Date() })
+		.set({ hasMediux: rows.length > 0, updatedAt: new Date() })
 		.where(eq(mediaItems.id, item.id));
 
-	return flat.length;
+	return rows.length;
 }
 
-/** The newest set's primary poster: the first 'poster' candidate in insertion order. */
+/**
+ * Auto-select a primary poster across providers: the first poster candidate from the
+ * most-preferred available provider (by PROVIDER_ORDER), then earliest insertion.
+ */
 export async function autoSelectPoster(itemId: number): Promise<string | null> {
 	const rows = await db
 		.select()
 		.from(posterCandidates)
 		.where(and(eq(posterCandidates.mediaItemId, itemId), eq(posterCandidates.kind, 'poster')))
-		.orderBy(asc(posterCandidates.id))
-		.limit(1);
-	return rows[0]?.url ?? null;
+		.orderBy(asc(posterCandidates.id));
+	if (!rows.length) return null;
+	const rank = (p: string) => {
+		const i = PROVIDER_ORDER.indexOf(p as ProviderId);
+		return i < 0 ? PROVIDER_ORDER.length : i;
+	};
+	// Stable sort keeps insertion order within a provider.
+	const sorted = [...rows].sort((a, b) => rank(a.provider) - rank(b.provider));
+	return sorted[0].url;
 }
 
 /** Record a user's pending cover selection for an item. */

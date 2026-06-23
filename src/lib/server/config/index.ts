@@ -17,10 +17,17 @@ export interface AppConfig {
 	defaultApplyMethod: ApplyMethod;
 	/** Plex section keys to sync; empty = all movie/show sections. */
 	includedSections: string[];
+	/** Artwork provider enable flags. */
+	providerMediux: boolean;
+	providerTmdb: boolean;
+	providerFanart: boolean;
+	providerThePosterDb: boolean;
+	/** Fanart.tv API key (the only keyed provider); null when unset. */
+	fanartKey: string | null;
 }
 
 /** Config keys that are secrets — never returned to the client, redacted in logs. */
-export const SECRET_KEYS = ['plexToken', 'tmdbKey'] as const;
+export const SECRET_KEYS = ['plexToken', 'tmdbKey', 'fanartKey'] as const;
 type ConfigKey = keyof AppConfig;
 
 /** Settings key -> environment variable name. Env always overrides persisted settings. */
@@ -33,7 +40,12 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	mediuxConcurrency: 'MEDIUX_CONCURRENCY',
 	httpCacheTtlDays: 'HTTP_CACHE_TTL_DAYS',
 	defaultApplyMethod: 'DEFAULT_APPLY_METHOD',
-	includedSections: 'INCLUDED_SECTIONS'
+	includedSections: 'INCLUDED_SECTIONS',
+	providerMediux: 'PROVIDER_MEDIUX',
+	providerTmdb: 'PROVIDER_TMDB',
+	providerFanart: 'PROVIDER_FANART',
+	providerThePosterDb: 'PROVIDER_THEPOSTERDB',
+	fanartKey: 'FANART_KEY'
 };
 
 const DEFAULTS = {
@@ -41,7 +53,13 @@ const DEFAULTS = {
 	mediuxDelayMs: 2000,
 	mediuxConcurrency: 5,
 	httpCacheTtlDays: 7,
-	defaultApplyMethod: 'both' as ApplyMethod
+	defaultApplyMethod: 'both' as ApplyMethod,
+	// MediUX + TMDB artwork on by default (no key / key already present); the keyed/
+	// scrape providers are opt-in.
+	providerMediux: true,
+	providerTmdb: true,
+	providerFanart: false,
+	providerThePosterDb: false
 };
 
 /** Persisted-settings keys that the UI is allowed to write. */
@@ -54,7 +72,12 @@ export const WRITABLE_KEYS: ConfigKey[] = [
 	'mediuxConcurrency',
 	'httpCacheTtlDays',
 	'defaultApplyMethod',
-	'includedSections'
+	'includedSections',
+	'providerMediux',
+	'providerTmdb',
+	'providerFanart',
+	'providerThePosterDb',
+	'fanartKey'
 ];
 
 async function loadSettings(): Promise<Record<string, string>> {
@@ -74,6 +97,12 @@ function rawValue(key: ConfigKey, persisted: Record<string, string>): string | u
 function toInt(value: string | undefined, fallback: number): number {
 	const n = value === undefined ? NaN : Number.parseInt(value, 10);
 	return Number.isFinite(n) ? n : fallback;
+}
+
+/** Parse a boolean flag ('1'/'true'/'on' = true), falling back when unset. */
+function toBool(value: string | undefined, fallback: boolean): boolean {
+	if (value === undefined) return fallback;
+	return ['1', 'true', 'on', 'yes'].includes(value.trim().toLowerCase());
 }
 
 /** Parse section keys from a JSON array (persisted) or comma-separated list (env). */
@@ -110,7 +139,15 @@ export async function resolveConfig(): Promise<AppConfig> {
 			method === 'plex' || method === 'kometa' || method === 'both'
 				? method
 				: DEFAULTS.defaultApplyMethod,
-		includedSections: parseSections(rawValue('includedSections', persisted))
+		includedSections: parseSections(rawValue('includedSections', persisted)),
+		providerMediux: toBool(rawValue('providerMediux', persisted), DEFAULTS.providerMediux),
+		providerTmdb: toBool(rawValue('providerTmdb', persisted), DEFAULTS.providerTmdb),
+		providerFanart: toBool(rawValue('providerFanart', persisted), DEFAULTS.providerFanart),
+		providerThePosterDb: toBool(
+			rawValue('providerThePosterDb', persisted),
+			DEFAULTS.providerThePosterDb
+		),
+		fanartKey: rawValue('fanartKey', persisted) ?? null
 	};
 }
 
@@ -129,7 +166,9 @@ export class MissingConfigError extends Error {
 
 /** Throw MissingConfigError if any required key is unset. */
 export function requireConfig(config: AppConfig, keys: ConfigKey[]): void {
-	const missing = keys.filter((k) => config[k] === null || config[k] === undefined || config[k] === '');
+	const missing = keys.filter(
+		(k) => config[k] === null || config[k] === undefined || config[k] === ''
+	);
 	if (missing.length) throw new MissingConfigError(missing);
 }
 
@@ -162,6 +201,11 @@ export interface PublicConfig {
 	httpCacheTtlDays: number;
 	defaultApplyMethod: ApplyMethod;
 	includedSections: string[];
+	providerMediux: boolean;
+	providerTmdb: boolean;
+	providerFanart: boolean;
+	providerThePosterDb: boolean;
+	fanartKeySet: boolean;
 	envManaged: Partial<Record<ConfigKey, boolean>>;
 }
 
@@ -179,6 +223,11 @@ export async function publicConfig(): Promise<PublicConfig> {
 		httpCacheTtlDays: c.httpCacheTtlDays,
 		defaultApplyMethod: c.defaultApplyMethod,
 		includedSections: c.includedSections,
+		providerMediux: c.providerMediux,
+		providerTmdb: c.providerTmdb,
+		providerFanart: c.providerFanart,
+		providerThePosterDb: c.providerThePosterDb,
+		fanartKeySet: c.fanartKey !== null,
 		envManaged
 	};
 }

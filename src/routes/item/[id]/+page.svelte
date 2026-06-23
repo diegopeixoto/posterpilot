@@ -58,6 +58,16 @@
 		return set.candidates.filter((c) => c.kind === kind);
 	}
 
+	const PROVIDER_LABELS: Record<string, string> = {
+		mediux: 'MediUX',
+		tmdb: 'TMDB',
+		fanarttv: 'Fanart.tv',
+		theposterdb: 'ThePosterDB'
+	};
+	function providerLabel(id: string): string {
+		return PROVIDER_LABELS[id] ?? id;
+	}
+
 	/** Persist the current staged poster + background as the pending selection. */
 	async function persistSelection() {
 		await fetch(`/api/items/${data.item.id}/select`, {
@@ -310,73 +320,81 @@
 	</section>
 {/if}
 
-<!-- Artwork sets -->
-{#if data.sets.length}
-	<section class="mt-8 space-y-4 pb-32">
-		<h2 class="section-title">Artwork sets ({data.sets.length})</h2>
-		{#each data.sets as set (set.setId)}
-			{@const posters = setKinds(set, 'poster')}
-			{@const backdrops = setKinds(set, 'background')}
-			{@const seasons = setKinds(set, 'season')}
-			{@const cards = setKinds(set, 'title_card')}
-			<div class="surface p-4">
-				<div class="mb-3 flex items-center justify-between">
-					<p class="text-sm text-neutral-300">
-						{#if set.author}by <span class="font-semibold text-neutral-100">{set.author}</span
-							>{:else}<span class="text-neutral-500">Unattributed set</span>{/if}
-					</p>
-					{#if posters.length || backdrops.length}
-						<button onclick={() => useSet(set)} class="btn btn-accent px-3 py-1 text-xs"
-							>Use this set</button
-						>
-					{/if}
-				</div>
+<!-- Artwork sets, grouped by provider -->
+{#if data.providerGroups.length}
+	<section class="mt-8 space-y-6 pb-32">
+		{#each data.providerGroups as group (group.provider)}
+			<h2 class="section-title">
+				{providerLabel(group.provider)} · {group.sets.length} set{group.sets.length === 1
+					? ''
+					: 's'}
+			</h2>
+			{#each group.sets as set (set.setId)}
+				{@const posters = setKinds(set, 'poster')}
+				{@const backdrops = setKinds(set, 'background')}
+				{@const seasons = setKinds(set, 'season')}
+				{@const cards = setKinds(set, 'title_card')}
+				<div class="surface p-4">
+					<div class="mb-3 flex items-center justify-between">
+						<p class="text-sm text-neutral-300">
+							{#if set.author}by <span class="font-semibold text-neutral-100">{set.author}</span
+								>{:else}<span class="text-neutral-500">Unattributed set</span>{/if}
+						</p>
+						{#if posters.length || backdrops.length}
+							<button onclick={() => useSet(set)} class="btn btn-accent px-3 py-1 text-xs"
+								>Use this set</button
+							>
+						{/if}
+					</div>
 
-				<div class="flex flex-col gap-4 sm:flex-row">
-					{#if posters.length}
-						<div class="flex-none">
-							<p class="mb-1 text-[11px] text-neutral-500">Poster{posters.length > 1 ? 's' : ''}</p>
-							<div class="flex gap-2">
-								{#each posters as c (c.id)}<div class="w-20">{@render posterTile(c)}</div>{/each}
+					<div class="flex flex-col gap-4 sm:flex-row">
+						{#if posters.length}
+							<div class="flex-none">
+								<p class="mb-1 text-[11px] text-neutral-500">
+									Poster{posters.length > 1 ? 's' : ''}
+								</p>
+								<div class="flex gap-2">
+									{#each posters as c (c.id)}<div class="w-20">{@render posterTile(c)}</div>{/each}
+								</div>
+							</div>
+						{/if}
+						{#if backdrops.length}
+							<div class="min-w-0 flex-1">
+								<p class="mb-1 text-[11px] text-neutral-500">
+									Backdrop{backdrops.length > 1 ? 's' : ''}
+								</p>
+								<div class="grid grid-cols-2 gap-2">
+									{#each backdrops as c (c.id)}{@render backdropTile(c)}{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+
+					{#if isShow && seasons.length}
+						<div class="mt-4">
+							<p class="mb-1 text-[11px] text-neutral-500">Season posters ({seasons.length})</p>
+							<div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
+								{#each seasons as c (c.id)}{@render posterTile(c)}{/each}
 							</div>
 						</div>
 					{/if}
-					{#if backdrops.length}
-						<div class="min-w-0 flex-1">
-							<p class="mb-1 text-[11px] text-neutral-500">
-								Backdrop{backdrops.length > 1 ? 's' : ''}
-							</p>
-							<div class="grid grid-cols-2 gap-2">
-								{#each backdrops as c (c.id)}{@render backdropTile(c)}{/each}
+					{#if isShow && cards.length}
+						<div class="mt-4">
+							<p class="mb-1 text-[11px] text-neutral-500">Title cards ({cards.length})</p>
+							<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+								{#each cards as c (c.id)}{@render backdropTile(c)}{/each}
 							</div>
 						</div>
 					{/if}
 				</div>
-
-				{#if isShow && seasons.length}
-					<div class="mt-4">
-						<p class="mb-1 text-[11px] text-neutral-500">Season posters ({seasons.length})</p>
-						<div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
-							{#each seasons as c (c.id)}{@render posterTile(c)}{/each}
-						</div>
-					</div>
-				{/if}
-				{#if isShow && cards.length}
-					<div class="mt-4">
-						<p class="mb-1 text-[11px] text-neutral-500">Title cards ({cards.length})</p>
-						<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-							{#each cards as c (c.id)}{@render backdropTile(c)}{/each}
-						</div>
-					</div>
-				{/if}
-			</div>
+			{/each}
 		{/each}
 	</section>
 {:else}
 	<p class="mt-8 pb-32 text-sm text-neutral-500">
 		No candidates yet. {data.item.resolved
-			? 'Click “Find covers” to search MediaUX.'
-			: 'This item has no resolved TMDB id, so MediaUX cannot be searched.'}
+			? 'Click “Find covers” to search the enabled providers.'
+			: 'This item has no resolved TMDB id, so providers cannot be searched.'}
 	</p>
 {/if}
 

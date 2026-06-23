@@ -26,3 +26,30 @@ export function groupCandidatesBySet(candidates: PosterCandidate[]): CandidateSe
 	}
 	return order.map((id) => bySet.get(id)!);
 }
+
+/** Candidates from one provider, grouped into that provider's sets. */
+export interface ProviderGroup {
+	provider: string;
+	sets: CandidateSet[];
+}
+
+/**
+ * Group candidates first by provider (first-seen order) and then by set within each
+ * provider. Two providers may emit the same setId without colliding because they are
+ * kept in separate groups. Pure — no DB imports.
+ */
+export function groupByProvider(candidates: PosterCandidate[]): ProviderGroup[] {
+	const byProvider = new Map<string, PosterCandidate[]>();
+	const order: string[] = [];
+	for (const c of candidates) {
+		if (!byProvider.has(c.provider)) {
+			byProvider.set(c.provider, []);
+			order.push(c.provider);
+		}
+		byProvider.get(c.provider)!.push(c);
+	}
+	return order.map((provider) => ({
+		provider,
+		sets: groupCandidatesBySet(byProvider.get(provider)!)
+	}));
+}

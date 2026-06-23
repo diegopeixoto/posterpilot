@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, like, sql, type SQL } from 'drizzle-orm';
 import { db } from './db';
 import { appliedPosters, jobs, mediaItems, posterCandidates, type MediaItem } from './db/schema';
-import { groupCandidatesBySet } from './posters/sets';
+import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 
 /** Sort orders offered by the library grid. */
 export type LibrarySort = 'title' | 'year' | 'rating' | 'runtime' | 'recent';
@@ -144,7 +144,13 @@ export async function getItemDetail(id: number) {
 		.where(eq(appliedPosters.mediaItemId, id))
 		.orderBy(desc(appliedPosters.appliedAt))
 		.limit(20);
-	return { item, candidates, sets: groupCandidatesBySet(candidates), history };
+	return {
+		item,
+		candidates,
+		sets: groupCandidatesBySet(candidates),
+		providerGroups: groupByProvider(candidates),
+		history
+	};
 }
 
 export async function listJobs(limit = 50) {

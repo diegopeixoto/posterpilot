@@ -43,7 +43,9 @@ export const posterCandidates = sqliteTable('poster_candidates', {
 		.notNull()
 		.references(() => mediaItems.id, { onDelete: 'cascade' }),
 	setId: text('set_id').notNull(),
-	/** Uploader/author of the MediaUX set, when present in the payload. */
+	/** Which artwork provider produced this candidate (mediux, tmdb, fanarttv, theposterdb). */
+	provider: text('provider').notNull().default('mediux'),
+	/** Uploader/author of the set, when present in the payload. */
 	setAuthor: text('set_author'),
 	url: text('url').notNull(),
 	kind: text('kind', { enum: ['poster', 'background', 'season', 'title_card'] }).notNull(),

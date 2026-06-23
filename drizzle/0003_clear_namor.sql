@@ -1,0 +1,1 @@
+ALTER TABLE `poster_candidates` ADD `provider` text DEFAULT 'mediux' NOT NULL;
