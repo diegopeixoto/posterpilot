@@ -12,7 +12,12 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	const body = (await request.json().catch(() => ({}))) as { forceRefresh?: boolean };
 	const config = await resolveConfig();
-	const count = await discoverForItem(item, config, { forceRefresh: body.forceRefresh });
-	const detail = await getItemDetail(id);
-	return json({ count, candidates: detail?.candidates ?? [] });
+	try {
+		const count = await discoverForItem(item, config, { forceRefresh: body.forceRefresh });
+		const detail = await getItemDetail(id);
+		return json({ count, candidates: detail?.candidates ?? [] });
+	} catch (e) {
+		// MediaUX fetch/parse failure — report it without 500-ing the request.
+		return json({ count: 0, candidates: [], error: e instanceof Error ? e.message : String(e) });
+	}
 };

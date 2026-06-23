@@ -25,8 +25,12 @@
 		message = null;
 		try {
 			const res = await fetch(`/api/items/${data.item.id}/discover`, { method: 'POST' });
-			const { count } = await res.json();
-			message = `Found ${count} candidate${count === 1 ? '' : 's'}.`;
+			const result = await res.json();
+			if (!res.ok || result.error) {
+				message = `Discovery failed: ${result.error ?? res.status}`;
+			} else {
+				message = `Found ${result.count} cover${result.count === 1 ? '' : 's'}.`;
+			}
 			await invalidateAll();
 		} finally {
 			busy = false;

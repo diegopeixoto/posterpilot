@@ -1,235 +1,133 @@
 /**
- * Pure extraction helpers for MediaUX (mediux.pro) pages.
+ * Pure extraction of MediaUX artwork candidates from a mediux.pro **listing page**
+ * (`/movies/{tmdbId}` or `/shows/{tmdbId}`).
  *
- * These functions parse the embedded Next.js streaming payload found in the HTML
- * of mediux.pro listing and set pages. They are intentionally free of any
- * network / environment / database dependencies so they can be unit-tested in
- * isolation and reused by the network orchestration layer in `scraper.ts`.
+ * mediux.pro is a Next.js app. Individual `/sets/{id}` pages now return 500 site-wide,
+ * but the listing page embeds the item's full set/file data in its RSC payload
+ * (`self.__next_f.push([...])` chunks). We decode that payload and read the file
+ * records directly — one network request per item, no per-set fetches.
  *
- * The extraction mirrors the legacy Python scraper (`find_mediux_sets`,
- * `extract_json_segment`, `generate_yaml_from_set_data`): mediux.pro embeds its
- * data as `<script>self.__next_f.push([...])</script>` chunks, each of which is
- * a JSON-encoded string of the form `"<index>:<json-array>"`. Asset files are
- * referenced by id and served from `https://api.mediux.pro/assets/<file_id>`.
+ * Each file looks like:
+ *   {"set_id":{"id":"8472",...},"id":"<uuid>","filename_disk":"<uuid>.jpg",
+ *    "title":"2 Fast 2 Furious (2003)","fileType":"poster", ...}
+ * and the asset is served at https://api.mediux.pro/assets/<uuid>.
  */
 
-import type { MediuxCandidate } from '$lib/server/types';
+import type { CandidateKind, MediuxCandidate, MediuxSet } from '$lib/server/types';
 
 const ASSET_BASE = 'https://api.mediux.pro/assets';
 
-/** Matches `<a ... href="/sets/<id>" ...>` anchors, capturing the numeric id. */
-const SET_LINK_RE = /<a\b[^>]*\bhref="\/sets\/(\d+)"[^>]*>/g;
+// A file record's own id + title + fileType (filename_disk anchors a real file).
+const FILE_RE =
+	/"id":"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})","filename_disk":"[^"]*","title":"((?:[^"\\]|\\.)*)","fileType":"([a-z_]+)"/g;
 
-/** Matches each `<script>self.__next_f.push(<payload>)</script>` chunk. */
-const NEXT_PUSH_RE = /<script>self\.__next_f\.push\((.*?)\)<\/script>/gs;
+// Each file object starts with its owning set: "set_id":{"id":"8472",...
+const SET_MARK_RE = /"set_id":\{"id":"(\d+)"/g;
 
-/**
- * Extract MediaUX set ids from a listing page's HTML.
- *
- * Scans for `<a href="/sets/<id>">` anchors. Results are de-duplicated and
- * returned newest-first (the reverse of document order), matching the legacy
- * behavior where the list is inverted before use.
- *
- * @param html Raw HTML of a mediux.pro movie or show page.
- * @returns Set ids, newest-first and de-duplicated.
- */
-export function extractSetLinks(html: string): string[] {
-	const ordered: string[] = [];
-	const seen = new Set<string>();
-	for (const match of html.matchAll(SET_LINK_RE)) {
-		const id = match[1];
-		if (!seen.has(id)) {
-			seen.add(id);
-			ordered.push(id);
+const PUSH_RE = /self\.__next_f\.push\(\[\d+,"((?:[^"\\]|\\.)*)"\]\)/g;
+
+/** Decode and concatenate the Next.js RSC payload chunks embedded in a page. */
+export function decodeRscPayload(html: string): string {
+	let out = '';
+	for (const m of html.matchAll(PUSH_RE)) {
+		try {
+			out += JSON.parse(`"${m[1]}"`);
+		} catch {
+			// A chunk that doesn't unescape cleanly is skipped, not fatal.
 		}
 	}
-	// Newest-first: reverse document order.
-	return ordered.reverse();
+	return out;
 }
 
-/** Heuristic: a payload chunk worth parsing references set/show/file data. */
-function isDataChunk(chunk: string): boolean {
-	return (
-		chunk.includes('set_description') ||
-		chunk.includes('original_name') ||
-		chunk.includes('show') ||
-		chunk.includes('files')
-	);
-}
-
-/**
- * Decode a single `__next_f.push(...)` chunk into its inner JSON value.
- *
- * Each chunk is a JS argument list whose first string literal encodes
- * `"<index>:<json>"`. We isolate that string literal (first quote to last
- * quote), JSON-parse it once to unescape, split off the leading `<index>:`,
- * then JSON-parse the remainder into the streaming array. The meaningful data
- * sits at index 3 of that array (mirroring the legacy `json_data[3]`).
- *
- * @returns The decoded value at array index 3, or null when the chunk does not
- *   match the expected shape.
- */
-function decodeChunk(chunk: string): unknown {
-	const begin = chunk.indexOf('"');
-	const end = chunk.lastIndexOf('"');
-	if (begin === -1 || end === -1 || begin >= end) return null;
-
-	let outer: unknown;
+function unescapeJsonString(escaped: string): string {
 	try {
-		outer = JSON.parse(chunk.slice(begin, end + 1));
+		return JSON.parse(`"${escaped}"`);
 	} catch {
-		return null;
+		return escaped;
 	}
-	if (typeof outer !== 'string') return null;
-
-	const colon = outer.indexOf(':');
-	if (colon === -1) return null;
-
-	let inner: unknown;
-	try {
-		inner = JSON.parse(outer.slice(colon + 1));
-	} catch {
-		return null;
-	}
-	if (!Array.isArray(inner) || inner.length < 4) return null;
-	return inner[3];
 }
 
-/** Type guard: a plain (non-array) object record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** True when a decoded payload carries the set/files data we care about. */
-function hasSetData(value: unknown): boolean {
-	return isRecord(value) && ('set' in value || 'files' in value);
-}
-
-/**
- * Extract and JSON-parse the embedded Next.js data payload from a set page.
- *
- * Replicates the legacy `extract_json_segment`: scan every `__next_f.push(...)`
- * chunk, keep the data-bearing ones, decode each (double JSON-parse + index-3
- * selection), and return the first decoded value that contains `set`/`files`.
- *
- * @param html Raw HTML of a mediux.pro set page.
- * @returns The decoded payload object (typically `{ set: {...} }`).
- * @throws Error when no parseable data payload is present.
- */
-export function extractNextPayload(html: string): unknown {
-	for (const match of html.matchAll(NEXT_PUSH_RE)) {
-		const chunk = match[1];
-		if (!isDataChunk(chunk)) continue;
-		const decoded = decodeChunk(chunk);
-		if (hasSetData(decoded)) return decoded;
+/** Map a mediux fileType + title to a candidate kind, or null to skip the file. */
+function classify(
+	fileType: string,
+	title: string
+): { kind: CandidateKind; season: number | null; episode: number | null } | null {
+	if (fileType === 'backdrop') return { kind: 'background', season: null, episode: null };
+	if (fileType === 'title_card') {
+		const se = title.match(/S(\d+)\s*E(\d+)/i);
+		return {
+			kind: 'title_card',
+			season: se ? Number(se[1]) : null,
+			episode: se ? Number(se[2]) : null
+		};
 	}
-	throw new Error('No parseable MediaUX data payload found in HTML');
-}
-
-/** Build an absolute asset URL from a file id. */
-function assetUrl(fileId: string): string {
-	return `${ASSET_BASE}/${fileId}`;
-}
-
-/**
- * Normalize a `show_id` / `movie_id` field, which may be a bare id (string or
- * number) or an object `{ id }`. Returns the id as a string, or null when the
- * value is absent / a known sentinel ("None", "0").
- */
-function normalizeRefId(value: unknown): string | null {
-	if (value === null || value === undefined) return null;
-	if (isRecord(value)) {
-		const inner = value['id'];
-		if (inner === null || inner === undefined) return null;
-		const s = String(inner);
-		return s === '' || s === 'None' || s === '0' ? null : s;
+	if (fileType === 'poster') {
+		const season = title.match(/Season (\d+)/i);
+		if (season) return { kind: 'season', season: Number(season[1]), episode: null };
+		return { kind: 'poster', season: null, episode: null };
 	}
-	if (typeof value === 'string' || typeof value === 'number') {
-		const s = String(value);
-		return s === '' || s === 'None' || s === '0' ? null : s;
-	}
+	// misc, album_art, logo, etc. are not cover candidates.
 	return null;
 }
 
-/** Pull the numeric season out of a title like "... Season 3". */
-function parseSeason(title: string): number | null {
-	const m = /Season (\d+)/.exec(title);
-	return m ? Number.parseInt(m[1], 10) : null;
-}
-
-/** Pull season/episode out of a title-card title like "... S02 E05". */
-function parseEpisode(title: string): { season: number; episode: number } | null {
-	const m = /S(\d+) E(\d+)/.exec(title);
-	if (!m) return null;
-	return { season: Number.parseInt(m[1], 10), episode: Number.parseInt(m[2], 10) };
-}
+// Set headers look like "id":"8472","set_name":"2 Fast 2 Furious (2003) Set".
+const SET_NAME_RE = /"id":"(\d+)","set_name":"((?:[^"\\]|\\.)*)"/g;
 
 /**
- * Walk a decoded set payload and collect its artwork as candidates.
+ * Extract the candidate sets for the *target* item from its listing-page HTML.
  *
- * Reads `payload.set.files[]` and classifies each file by `fileType` and the
- * presence of show/movie/season identifiers, mirroring the legacy
- * `generate_yaml_from_set_data` mapping:
- *
- * - `poster` attached to a show/movie -> `poster`
- * - `backdrop` -> `background`
- * - `poster` with a `season_id` (and a "Season N" title) -> `season`
- * - `title_card` (with an "Sxx Eyy" title) -> `title_card`
- *
- * Files without a valid id, or without any show/movie reference, are skipped.
- * The walk is defensive: malformed entries are ignored rather than thrown.
- *
- * @param payload Decoded payload from `extractNextPayload`.
- * @param setId The set id to stamp onto each produced candidate.
- * @returns Candidates with absolute asset URLs and season/episode where present.
+ * The page embeds the item's own user sets plus its whole collection — collection
+ * sets (named "… Collection") hold artwork for sibling titles, so they are dropped.
+ * The rest are grouped by set, newest set first. Returns `[]` when nothing
+ * parseable is found.
  */
-export function parseSetCandidates(payload: unknown, setId: string): MediuxCandidate[] {
-	if (!isRecord(payload)) return [];
-	const set = payload['set'];
-	if (!isRecord(set)) return [];
-	const files = set['files'];
-	if (!Array.isArray(files)) return [];
+export function parseListingSets(html: string): MediuxSet[] {
+	const rsc = decodeRscPayload(html);
+	if (!rsc) return [];
 
-	const candidates: MediuxCandidate[] = [];
-
-	for (const raw of files) {
-		if (!isRecord(raw)) continue;
-
-		const fileId = raw['id'];
-		if (fileId === null || fileId === undefined || String(fileId) === '') continue;
-		const url = assetUrl(String(fileId));
-
-		const fileType = typeof raw['fileType'] === 'string' ? raw['fileType'] : '';
-		const title = typeof raw['title'] === 'string' ? raw['title'] : '';
-		const showId = normalizeRefId(raw['show_id']);
-		const movieId = normalizeRefId(raw['movie_id']);
-		const hasSeason = raw['season_id'] !== null && raw['season_id'] !== undefined;
-
-		// Skip files with no media association (parity with legacy skip).
-		if (showId === null && movieId === null) continue;
-
-		if (fileType === 'poster' && hasSeason) {
-			const season = parseSeason(title);
-			if (season !== null) {
-				candidates.push({ setId, url, kind: 'season', season, episode: null });
-			}
-		} else if (fileType === 'poster') {
-			candidates.push({ setId, url, kind: 'poster', season: null, episode: null });
-		} else if (fileType === 'backdrop') {
-			candidates.push({ setId, url, kind: 'background', season: null, episode: null });
-		} else if (fileType === 'title_card') {
-			const se = parseEpisode(title);
-			if (se !== null) {
-				candidates.push({
-					setId,
-					url,
-					kind: 'title_card',
-					season: se.season,
-					episode: se.episode
-				});
-			}
-		}
+	// set id -> set name, so we can drop collection sets (sibling-title artwork).
+	const setNames = new Map<string, string>();
+	for (const m of rsc.matchAll(SET_NAME_RE)) {
+		setNames.set(m[1], unescapeJsonString(m[2]));
 	}
 
-	return candidates;
+	const setMarks = [...rsc.matchAll(SET_MARK_RE)].map((m) => ({
+		idx: m.index ?? 0,
+		setId: m[1]
+	}));
+	const setIdBefore = (idx: number): string => {
+		let found = 'unknown';
+		for (const mark of setMarks) {
+			if (mark.idx <= idx) found = mark.setId;
+			else break;
+		}
+		return found;
+	};
+
+	const bySet = new Map<string, MediuxCandidate[]>();
+	const order: string[] = [];
+	for (const m of rsc.matchAll(FILE_RE)) {
+		const mapped = classify(m[3], unescapeJsonString(m[2]));
+		if (!mapped) continue;
+		const setId = setIdBefore(m.index ?? 0);
+		if (/collection/i.test(setNames.get(setId) ?? '')) continue; // sibling-title artwork
+		const candidate: MediuxCandidate = {
+			setId,
+			url: `${ASSET_BASE}/${m[1]}`,
+			kind: mapped.kind,
+			season: mapped.season,
+			episode: mapped.episode
+		};
+		if (!bySet.has(setId)) {
+			bySet.set(setId, []);
+			order.push(setId);
+		}
+		bySet.get(setId)?.push(candidate);
+	}
+
+	// Sets appear oldest-first in the payload; present newest-first.
+	return order
+		.reverse()
+		.map((setId) => ({ setId, candidates: bySet.get(setId) ?? [] }))
+		.filter((set) => set.candidates.length > 0);
 }

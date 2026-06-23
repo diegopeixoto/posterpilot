@@ -1,151 +1,74 @@
 import { describe, it, expect } from 'vitest';
-import { extractSetLinks, extractNextPayload, parseSetCandidates } from './parser';
-import type { MediuxCandidate } from '$lib/server/types';
+import { decodeRscPayload, parseListingSets } from './parser';
 
 /**
- * Build a `<script>self.__next_f.push(...)</script>` chunk the way mediux.pro
- * (Next.js streaming) emits it: the push argument's string literal encodes
- * `"<index>:<json-array>"`, where the meaningful data sits at array index 3.
- *
- * We construct it by JSON-encoding twice so escaping matches the real payload,
- * which `extractNextPayload` must reverse via its double-parse.
+ * Build a mediux.pro-style page from a raw RSC payload string. mediux emits the
+ * payload as `self.__next_f.push([1,"<escaped>"])` chunks; JSON.stringify produces
+ * exactly that escaping, and the parser decodes it back.
  */
-function makePushScript(streamIndex: string, dataAtIndex3: unknown): string {
-	const innerArray = [streamIndex, null, null, dataAtIndex3];
-	// First encode the inner streaming array, then prefix the stream index and
-	// encode the whole thing as a single string literal (the push argument).
-	const literal = JSON.stringify(`${streamIndex}:${JSON.stringify(innerArray)}`);
-	return `<script>self.__next_f.push([1,${literal}])</script>`;
+function page(rsc: string): string {
+	return `<!doctype html><script>self.__next_f.push([1,${JSON.stringify(rsc)}])</script>`;
 }
 
-/** A set payload exercising poster / backdrop / season / title_card files. */
-const SET_PAYLOAD = {
-	set: {
-		id: '777',
-		user_created: { username: 'creator' },
-		files: [
-			{ id: 'poster-file', fileType: 'poster', show_id: { id: '42' }, title: 'Main Poster' },
-			{ id: 'backdrop-file', fileType: 'backdrop', show_id: '42', title: 'Backdrop' },
-			{
-				id: 'season-file',
-				fileType: 'poster',
-				show_id: { id: '42' },
-				season_id: { id: '9001' },
-				title: 'Season 2'
-			},
-			{
-				id: 'titlecard-file',
-				fileType: 'title_card',
-				show_id: { id: '42' },
-				title: 'S02 E05 — The One'
-			},
-			// No show/movie ref -> must be skipped.
-			{ id: 'orphan-file', fileType: 'poster', title: 'Orphan' },
-			// Sentinel ref id -> must be skipped.
-			{ id: 'sentinel-file', fileType: 'poster', show_id: '0', title: 'Sentinel' }
-		]
-	}
-};
+function file(setId: string, uuid: string, title: string, fileType: string): string {
+	return `{"set_id":{"id":"${setId}","posterCheck":[]},"id":"${uuid}","filename_disk":"${uuid}.jpg","title":"${title}","fileType":"${fileType}"}`;
+}
 
-const SET_PAGE_HTML = `<!doctype html><html><head></head><body>
-<script>self.__next_f.push([0,"some bootstrap noise"])</script>
-${makePushScript('a', SET_PAYLOAD)}
-</body></html>`;
+const P = '11111111-1111-1111-1111-111111111111'; // poster
+const B = '22222222-2222-2222-2222-222222222222'; // backdrop
+const S = '33333333-3333-3333-3333-333333333333'; // season poster
+const T = '44444444-4444-4444-4444-444444444444'; // title card
+const M = '55555555-5555-5555-5555-555555555555'; // misc (skipped)
+const C = '66666666-6666-6666-6666-666666666666'; // collection poster (excluded)
 
-describe('extractSetLinks', () => {
-	it('returns set ids newest-first (reverse of document order), de-duplicated', () => {
-		const html = `
-			<a href="/sets/100" class="x">First</a>
-			<a href="/sets/200">Second</a>
-			<a data-y href="/sets/300">Third</a>
-			<a href="/sets/200">Duplicate of second</a>
-		`;
-		expect(extractSetLinks(html)).toEqual(['300', '200', '100']);
-	});
+const rsc =
+	`"sets":[{"id":"8472","set_name":"Test Movie (2003) Set","files":[` +
+	`${file('8472', P, 'Test Movie (2003)', 'poster')},` +
+	`${file('8472', B, 'Test Movie (2003)', 'backdrop')},` +
+	`${file('8472', S, 'Test Show Season 2', 'poster')},` +
+	`${file('8472', T, 'Test Show S01E03', 'title_card')},` +
+	`${file('8472', M, 'Test Movie (2003)', 'misc')}` +
+	`]}],` +
+	`"id":"1481","set_name":"Test Collection","files":[${file('1481', C, 'Other Movie', 'poster')}]`;
 
-	it('returns an empty array when there are no set links', () => {
-		expect(extractSetLinks('<div>nothing here</div>')).toEqual([]);
+describe('decodeRscPayload', () => {
+	it('returns empty string when no payload chunks exist', () => {
+		expect(decodeRscPayload('<html><body>no payload</body></html>')).toBe('');
 	});
 });
 
-describe('extractNextPayload', () => {
-	it('decodes the embedded Next.js payload (double-parse + index-3 selection)', () => {
-		const payload = extractNextPayload(SET_PAGE_HTML);
-		expect(payload).toEqual(SET_PAYLOAD);
+describe('parseListingSets', () => {
+	const sets = parseListingSets(page(rsc));
+	const all = sets.flatMap((s) => s.candidates);
+
+	it('drops collection sets (sibling-title artwork)', () => {
+		expect(sets.map((s) => s.setId)).toEqual(['8472']);
+		expect(all.some((c) => c.url.includes(C))) .toBe(false);
 	});
 
-	it('throws when no parseable data payload is present', () => {
-		const html = '<html><body><script>self.__next_f.push([0,"no data"])</script></body></html>';
-		expect(() => extractNextPayload(html)).toThrow();
+	it('builds api.mediux.pro asset URLs and classifies kinds', () => {
+		const poster = all.find((c) => c.url.endsWith(P));
+		expect(poster).toEqual({
+			setId: '8472',
+			url: `https://api.mediux.pro/assets/${P}`,
+			kind: 'poster',
+			season: null,
+			episode: null
+		});
+		expect(all.find((c) => c.url.endsWith(B))?.kind).toBe('background');
 	});
 
-	it('throws on malformed (truncated) push payloads', () => {
-		const html = '<html><body><script>self.__next_f.push(["files broken</body></html>';
-		expect(() => extractNextPayload(html)).toThrow();
-	});
-});
-
-describe('parseSetCandidates', () => {
-	it('maps poster/background/season/title_card files to candidates with absolute urls', () => {
-		const payload = extractNextPayload(SET_PAGE_HTML);
-		const candidates = parseSetCandidates(payload, '777');
-
-		const expected: MediuxCandidate[] = [
-			{
-				setId: '777',
-				url: 'https://api.mediux.pro/assets/poster-file',
-				kind: 'poster',
-				season: null,
-				episode: null
-			},
-			{
-				setId: '777',
-				url: 'https://api.mediux.pro/assets/backdrop-file',
-				kind: 'background',
-				season: null,
-				episode: null
-			},
-			{
-				setId: '777',
-				url: 'https://api.mediux.pro/assets/season-file',
-				kind: 'season',
-				season: 2,
-				episode: null
-			},
-			{
-				setId: '777',
-				url: 'https://api.mediux.pro/assets/titlecard-file',
-				kind: 'title_card',
-				season: 2,
-				episode: 5
-			}
-		];
-		expect(candidates).toEqual(expected);
+	it('detects season posters and title cards from the title', () => {
+		expect(all.find((c) => c.url.endsWith(S))).toMatchObject({ kind: 'season', season: 2 });
+		expect(all.find((c) => c.url.endsWith(T))).toMatchObject({
+			kind: 'title_card',
+			season: 1,
+			episode: 3
+		});
 	});
 
-	it('skips files lacking any show/movie reference and sentinel ids', () => {
-		const payload = extractNextPayload(SET_PAGE_HTML);
-		const urls = parseSetCandidates(payload, '777').map((c) => c.url);
-		expect(urls).not.toContain('https://api.mediux.pro/assets/orphan-file');
-		expect(urls).not.toContain('https://api.mediux.pro/assets/sentinel-file');
-	});
-
-	it('returns [] for a payload with the wrong shape (no crash)', () => {
-		expect(parseSetCandidates({ nope: true }, 's')).toEqual([]);
-		expect(parseSetCandidates(null, 's')).toEqual([]);
-		expect(parseSetCandidates({ set: { files: 'not-an-array' } }, 's')).toEqual([]);
-	});
-
-	it('end-to-end: malformed page parses to nothing without throwing through parseSetCandidates', () => {
-		// Mirrors the scraper's skip-and-continue: extractNextPayload throws, the
-		// caller swallows it, and the effective result is an empty candidate list.
-		const html = '<html><body>no next payload at all</body></html>';
-		let candidates: MediuxCandidate[];
-		try {
-			candidates = parseSetCandidates(extractNextPayload(html), 's');
-		} catch {
-			candidates = [];
-		}
-		expect(candidates).toEqual([]);
+	it('skips non-cover files (misc/album_art) and unparseable pages', () => {
+		expect(all.some((c) => c.url.includes(M))).toBe(false);
+		expect(parseListingSets('<html>nothing</html>')).toEqual([]);
 	});
 });

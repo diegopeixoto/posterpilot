@@ -5,7 +5,16 @@
 	let { data } = $props();
 
 	let syncJobId = $state<number | null>(null);
+	let running = $state(false);
 	let busy = $state(false);
+
+	// While a job is running, refresh dashboard data (stats + recent jobs) live so
+	// the cards and job list climb alongside the progress bar.
+	$effect(() => {
+		if (!running) return;
+		const timer = setInterval(() => invalidateAll(), 3000);
+		return () => clearInterval(timer);
+	});
 
 	const cards = $derived([
 		{ label: 'Items', value: data.stats.total },
@@ -22,6 +31,7 @@
 			const res = await fetch('/api/sync', { method: 'POST' });
 			const { jobId } = await res.json();
 			syncJobId = jobId;
+			running = true;
 		} finally {
 			busy = false;
 		}
@@ -41,7 +51,7 @@
 
 {#if syncJobId}
 	<div class="mt-4">
-		<JobProgress jobId={syncJobId} onDone={() => invalidateAll()} />
+		<JobProgress jobId={syncJobId} onDone={() => { running = false; invalidateAll(); }} />
 	</div>
 {/if}
 
