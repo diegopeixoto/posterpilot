@@ -224,6 +224,38 @@ export async function uploadPosterFromUrl(
 }
 
 /**
+ * Upload raw image bytes as an item's poster (e.g. a user's custom file) and lock
+ * the field. Posts the bytes directly to the `posters` endpoint, so no public
+ * hosting is needed. Throws with the Plex status text on failure.
+ *
+ * @param baseUrl The Plex server base URL.
+ * @param token The `X-Plex-Token` to authenticate with.
+ * @param ratingKey The item's rating key.
+ * @param data The image bytes.
+ * @param contentType The image MIME type (defaults to image/jpeg).
+ */
+export async function uploadPosterBytes(
+	baseUrl: string,
+	token: string,
+	ratingKey: string,
+	data: ArrayBuffer,
+	contentType = 'image/jpeg'
+): Promise<void> {
+	const base = normalizeBase(baseUrl);
+	const key = encodeURIComponent(ratingKey);
+	const url = `${base}/library/metadata/${key}/posters?X-Plex-Token=${encodeURIComponent(token)}`;
+	const res = await fetch(url, {
+		method: 'POST',
+		headers: { 'X-Plex-Token': token, 'Content-Type': contentType },
+		body: data
+	});
+	if (!res.ok) {
+		throw new Error(`Plex rejected the poster upload: HTTP ${res.status} ${res.statusText}`);
+	}
+	await setPosterLock(baseUrl, token, ratingKey, true);
+}
+
+/**
  * Lock or unlock an item's poster field. Unlocking (`locked=false`) lets Plex's
  * agents manage the artwork again — used when reverting to the original poster.
  *

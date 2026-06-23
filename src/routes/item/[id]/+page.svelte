@@ -8,6 +8,34 @@
 	let busy = $state(false);
 	let message = $state<string | null>(null);
 
+	let customUrl = $state('');
+	let customFile = $state<File | null>(null);
+
+	function useCustomUrl() {
+		const url = customUrl.trim();
+		if (!url) return;
+		selectedUrl = url;
+		message = 'Custom URL selected — click Apply above.';
+	}
+
+	async function uploadCustomFile() {
+		if (!customFile) return;
+		busy = true;
+		message = null;
+		try {
+			const fd = new FormData();
+			fd.append('file', customFile);
+			const res = await fetch(`/api/items/${data.item.id}/upload`, { method: 'POST', body: fd });
+			const result = await res.json();
+			message = result.ok
+				? 'Custom poster uploaded to Plex.'
+				: `Upload failed: ${result.error ?? res.status}`;
+			await invalidateAll();
+		} finally {
+			busy = false;
+		}
+	}
+
 	const posters = $derived(data.candidates.filter((c) => c.kind === 'poster'));
 	const backgrounds = $derived(data.candidates.filter((c) => c.kind === 'background'));
 
@@ -141,6 +169,46 @@
 		</div>
 	</div>
 </div>
+
+<section class="mt-8 rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
+	<h2 class="mb-3 text-sm font-semibold text-neutral-400">Custom cover</h2>
+	<div class="flex flex-wrap items-end gap-4">
+		<div class="min-w-[260px] flex-1">
+			<span class="mb-1 block text-xs text-neutral-500">Image URL — applies to Plex + Kometa</span>
+			<div class="flex gap-2">
+				<input
+					bind:value={customUrl}
+					placeholder="https://…/poster.jpg"
+					class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+				/>
+				<button
+					onclick={useCustomUrl}
+					disabled={!customUrl.trim()}
+					class="rounded-md bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+					>Use URL</button
+				>
+			</div>
+			<p class="mt-1 text-xs text-neutral-600">Selects it — then click Apply above with your method.</p>
+		</div>
+		<div>
+			<span class="mb-1 block text-xs text-neutral-500">Upload file — Plex only</span>
+			<div class="flex items-center gap-2">
+				<input
+					type="file"
+					accept="image/*"
+					onchange={(e) => (customFile = e.currentTarget.files?.[0] ?? null)}
+					class="max-w-[200px] text-xs text-neutral-400"
+				/>
+				<button
+					onclick={uploadCustomFile}
+					disabled={busy || !customFile}
+					class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+					>Upload to Plex</button
+				>
+			</div>
+		</div>
+	</div>
+</section>
 
 {#if posters.length}
 	<h2 class="mt-8 mb-3 text-sm font-semibold text-neutral-400">Poster candidates ({posters.length})</h2>

@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, notInArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { mediaItems } from '$lib/server/db/schema';
 import { resolveConfig, requireConfig, type ApplyMethod } from '$lib/server/config';
@@ -25,6 +25,14 @@ export async function runSyncJob(ctx: JobContext): Promise<void> {
 	const sections = config.includedSections.length
 		? allSections.filter((s) => config.includedSections.includes(s.key))
 		: allSections;
+
+	// Prune items from libraries no longer synced (excluded in settings, or removed
+	// from Plex). Cascades to their candidates/history. Keeps the count accurate.
+	const keepKeys = sections.map((s) => s.key);
+	if (keepKeys.length) {
+		await db.delete(mediaItems).where(notInArray(mediaItems.sectionKey, keepKeys));
+	}
+
 	const work: { sectionKey: string; item: Awaited<ReturnType<typeof listItems>>[number] }[] = [];
 	for (const section of sections) {
 		const items = await listItems(plexUrl, plexToken, section.key);

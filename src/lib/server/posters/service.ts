@@ -2,7 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { appliedPosters, mediaItems, posterCandidates, type MediaItem } from '$lib/server/db/schema';
 import { requireConfig, type AppConfig, type ApplyMethod } from '$lib/server/config';
-import { setPosterLock, uploadPosterFromUrl } from '$lib/server/plex/client';
+import { setPosterLock, uploadPosterBytes, uploadPosterFromUrl } from '$lib/server/plex/client';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
 import { discoverCandidates } from '$lib/server/mediux/scraper';
 
@@ -140,6 +140,27 @@ export async function applyToItem(
 
 function errorMessage(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Apply a user-supplied image file as the item's poster, directly to Plex (no
+ * hosting). Records the application. For a custom URL (which both Plex and Kometa
+ * can consume) use the normal apply flow with the URL as the poster instead.
+ */
+export async function applyCustomUpload(
+	item: MediaItem,
+	data: ArrayBuffer,
+	contentType: string,
+	config: AppConfig
+): Promise<void> {
+	requireConfig(config, ['plexUrl', 'plexToken']);
+	await uploadPosterBytes(config.plexUrl!, config.plexToken!, item.ratingKey, data, contentType);
+	await db.insert(appliedPosters).values({
+		mediaItemId: item.id,
+		url: 'custom-upload',
+		method: 'plex',
+		status: 'success'
+	});
 }
 
 /**
