@@ -46,6 +46,22 @@
 		});
 	}
 
+	async function revert() {
+		busy = true;
+		message = null;
+		try {
+			const res = await fetch(`/api/items/${data.item.id}/revert`, { method: 'POST' });
+			const result = await res.json();
+			message = result.ok
+				? 'Reverted to the original Plex poster.'
+				: `Revert failed: ${result.error ?? res.status}`;
+			selectedUrl = null;
+			await invalidateAll();
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function apply() {
 		if (!selectedUrl) return;
 		busy = true;
@@ -112,6 +128,15 @@
 			>
 				Apply
 			</button>
+			{#if data.history.length}
+				<button
+					onclick={revert}
+					disabled={busy}
+					class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+				>
+					Revert to Plex original
+				</button>
+			{/if}
 			{#if message}<span class="text-xs text-neutral-400">{message}</span>{/if}
 		</div>
 	</div>

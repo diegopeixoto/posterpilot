@@ -6,6 +6,8 @@ export interface LibraryFilter {
 	type?: 'movie' | 'show';
 	missingPoster?: boolean;
 	hasMediux?: boolean;
+	/** Only items posterpilot has not applied a cover to (still on the Plex default). */
+	unchanged?: boolean;
 	q?: string;
 }
 
@@ -15,6 +17,10 @@ export async function listLibrary(filter: LibraryFilter = {}) {
 	if (filter.type) conds.push(eq(mediaItems.type, filter.type));
 	if (filter.hasMediux) conds.push(eq(mediaItems.hasMediux, true));
 	if (filter.missingPoster) conds.push(sql`${mediaItems.currentPosterUrl} is null`);
+	if (filter.unchanged)
+		conds.push(
+			sql`not exists (select 1 from applied_posters ap where ap.media_item_id = ${mediaItems.id} and ap.status = 'success')`
+		);
 	if (filter.q) conds.push(like(mediaItems.title, `%${filter.q}%`));
 	return db
 		.select()

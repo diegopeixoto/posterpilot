@@ -220,11 +220,33 @@ export async function uploadPosterFromUrl(
 	}
 
 	// Only lock once the poster has been accepted.
-	const lockUrl = `${base}/library/metadata/${key}?thumb.locked=1&X-Plex-Token=${encodedToken}`;
-	const lockRes = await fetch(lockUrl, { method: 'PUT', headers: plexHeaders(token) });
-	if (!lockRes.ok) {
+	await setPosterLock(baseUrl, token, ratingKey, true);
+}
+
+/**
+ * Lock or unlock an item's poster field. Unlocking (`locked=false`) lets Plex's
+ * agents manage the artwork again — used when reverting to the original poster.
+ *
+ * @param baseUrl The Plex server base URL.
+ * @param token The `X-Plex-Token` to authenticate with.
+ * @param ratingKey The item's rating key.
+ * @param locked Whether the poster field should be locked.
+ * @throws Error if Plex rejects the request.
+ */
+export async function setPosterLock(
+	baseUrl: string,
+	token: string,
+	ratingKey: string,
+	locked: boolean
+): Promise<void> {
+	const base = normalizeBase(baseUrl);
+	const key = encodeURIComponent(ratingKey);
+	const encodedToken = encodeURIComponent(token);
+	const url = `${base}/library/metadata/${key}?thumb.locked=${locked ? 1 : 0}&X-Plex-Token=${encodedToken}`;
+	const res = await fetch(url, { method: 'PUT', headers: plexHeaders(token) });
+	if (!res.ok) {
 		throw new Error(
-			`Plex rejected locking the poster: HTTP ${lockRes.status} ${lockRes.statusText}`
+			`Plex rejected ${locked ? 'locking' : 'unlocking'} the poster: HTTP ${res.status} ${res.statusText}`
 		);
 	}
 }

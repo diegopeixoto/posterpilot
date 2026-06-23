@@ -1,8 +1,18 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	let { data } = $props();
 	const env = data.config.envManaged;
+
+	const allSectionKeys = data.sections.map((s) => s.key);
+	const selectedSections = new SvelteSet<string>(
+		data.config.includedSections.length ? data.config.includedSections : allSectionKeys
+	);
+	function toggleSection(key: string) {
+		if (selectedSections.has(key)) selectedSections.delete(key);
+		else selectedSections.add(key);
+	}
 
 	let plexUrl = $state(data.config.plexUrl ?? '');
 	let plexToken = $state('');
@@ -24,7 +34,7 @@
 		saving = true;
 		saved = false;
 		try {
-			const payload: Record<string, string> = {
+			const payload: Record<string, unknown> = {
 				plexUrl,
 				kometaAssetsDir,
 				mediuxDelayMs,
@@ -35,6 +45,9 @@
 			// Only send secrets when (re)entered, so a blank field keeps the stored value.
 			if (plexToken) payload.plexToken = plexToken;
 			if (tmdbKey) payload.tmdbKey = tmdbKey;
+			// All sections selected → [] (sync everything, incl. future libraries).
+			const sel = [...selectedSections];
+			payload.includedSections = sel.length === allSectionKeys.length ? [] : sel;
 
 			await fetch('/api/settings', {
 				method: 'POST',
@@ -135,6 +148,31 @@
 			<option value="plex">Plex only</option>
 			<option value="kometa">Kometa only</option>
 		</select>
+	</div>
+
+	<div>
+		<span class="mb-1 block text-sm font-medium">Libraries to sync</span>
+		{#if data.sections.length === 0}
+			<p class="text-xs text-neutral-500">Connect Plex and save, then reload to choose libraries.</p>
+		{:else}
+			<p class="mb-2 text-xs text-neutral-500">
+				Uncheck libraries you don't want synced (e.g. a YouTube collection). All checked syncs
+				everything.
+			</p>
+			<div class="space-y-1">
+				{#each data.sections as section (section.key)}
+					<label class="flex items-center gap-2 text-sm text-neutral-300">
+						<input
+							type="checkbox"
+							checked={selectedSections.has(section.key)}
+							onchange={() => toggleSection(section.key)}
+						/>
+						{section.title}
+						<span class="text-xs text-neutral-500">({section.type})</span>
+					</label>
+				{/each}
+			</div>
+		{/if}
 	</div>
 
 	<div class="flex items-center gap-3 pt-2">

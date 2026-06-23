@@ -57,6 +57,9 @@
 	<label class="flex items-center gap-1.5 text-neutral-400">
 		<input type="checkbox" name="missing" value="1" checked={data.filter.missingPoster} /> missing poster
 	</label>
+	<label class="flex items-center gap-1.5 text-neutral-400">
+		<input type="checkbox" name="unchanged" value="1" checked={data.filter.unchanged} /> default (unchanged)
+	</label>
 	<button class="rounded-md bg-neutral-800 px-3 py-1.5 hover:bg-neutral-700">Filter</button>
 </form>
 

@@ -2,7 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { appliedPosters, mediaItems, posterCandidates, type MediaItem } from '$lib/server/db/schema';
 import { requireConfig, type AppConfig, type ApplyMethod } from '$lib/server/config';
-import { uploadPosterFromUrl } from '$lib/server/plex/client';
+import { setPosterLock, uploadPosterFromUrl } from '$lib/server/plex/client';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
 import { discoverCandidates } from '$lib/server/mediux/scraper';
 
@@ -140,4 +140,24 @@ export async function applyToItem(
 
 function errorMessage(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Revert an item to its original Plex poster: re-set the poster captured at sync,
+ * unlock the field so Plex manages it again, and clear posterpilot's applied
+ * history + pending selection so the item reads as unchanged. The Kometa YAML
+ * export (if any) is left in place — remove it from your Kometa config to fully
+ * undo a Kometa apply.
+ */
+export async function revertItem(item: MediaItem, config: AppConfig): Promise<void> {
+	requireConfig(config, ['plexUrl', 'plexToken']);
+	if (item.currentPosterUrl) {
+		await uploadPosterFromUrl(config.plexUrl!, config.plexToken!, item.ratingKey, item.currentPosterUrl);
+	}
+	await setPosterLock(config.plexUrl!, config.plexToken!, item.ratingKey, false);
+	await db.delete(appliedPosters).where(eq(appliedPosters.mediaItemId, item.id));
+	await db
+		.update(mediaItems)
+		.set({ selectedPosterUrl: null, selectedBackgroundUrl: null, updatedAt: new Date() })
+		.where(eq(mediaItems.id, item.id));
 }

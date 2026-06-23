@@ -73,6 +73,6 @@
 
 ## 11. Verification
 
-- [ ] 11.1 End-to-end check: configure → sync a Plex section → discover covers → apply (direct) → confirm in Plex
+- [x] 11.1 End-to-end check: configure → sync → discover covers → apply (Plex + Kometa) → confirmed in Plex (2 Fast 2 Furious, both applied_posters rows success, new poster visible in Plex)
 - [x] 11.2 End-to-end check: apply (Kometa export) → confirm YAML lands in the mounted dir in a Kometa-consumable shape
 - [x] 11.3 Run `fallow health` (maintainability 92/good) and trim a redundant re-export; tests pass (44)

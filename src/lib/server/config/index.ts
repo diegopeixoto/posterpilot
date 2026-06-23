@@ -15,6 +15,8 @@ export interface AppConfig {
 	mediuxConcurrency: number;
 	httpCacheTtlDays: number;
 	defaultApplyMethod: ApplyMethod;
+	/** Plex section keys to sync; empty = all movie/show sections. */
+	includedSections: string[];
 }
 
 /** Config keys that are secrets — never returned to the client, redacted in logs. */
@@ -30,7 +32,8 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	mediuxDelayMs: 'MEDIUX_REQUEST_DELAY_MS',
 	mediuxConcurrency: 'MEDIUX_CONCURRENCY',
 	httpCacheTtlDays: 'HTTP_CACHE_TTL_DAYS',
-	defaultApplyMethod: 'DEFAULT_APPLY_METHOD'
+	defaultApplyMethod: 'DEFAULT_APPLY_METHOD',
+	includedSections: 'INCLUDED_SECTIONS'
 };
 
 const DEFAULTS = {
@@ -50,7 +53,8 @@ export const WRITABLE_KEYS: ConfigKey[] = [
 	'mediuxDelayMs',
 	'mediuxConcurrency',
 	'httpCacheTtlDays',
-	'defaultApplyMethod'
+	'defaultApplyMethod',
+	'includedSections'
 ];
 
 async function loadSettings(): Promise<Record<string, string>> {
@@ -72,6 +76,24 @@ function toInt(value: string | undefined, fallback: number): number {
 	return Number.isFinite(n) ? n : fallback;
 }
 
+/** Parse section keys from a JSON array (persisted) or comma-separated list (env). */
+function parseSections(value: string | undefined): string[] {
+	if (!value) return [];
+	const trimmed = value.trim();
+	if (trimmed.startsWith('[')) {
+		try {
+			const arr = JSON.parse(trimmed);
+			return Array.isArray(arr) ? arr.map(String) : [];
+		} catch {
+			return [];
+		}
+	}
+	return trimmed
+		.split(',')
+		.map((s) => s.trim())
+		.filter(Boolean);
+}
+
 /** Resolve the effective configuration (env over persisted settings). Server-only. */
 export async function resolveConfig(): Promise<AppConfig> {
 	const persisted = await loadSettings();
@@ -87,7 +109,8 @@ export async function resolveConfig(): Promise<AppConfig> {
 		defaultApplyMethod:
 			method === 'plex' || method === 'kometa' || method === 'both'
 				? method
-				: DEFAULTS.defaultApplyMethod
+				: DEFAULTS.defaultApplyMethod,
+		includedSections: parseSections(rawValue('includedSections', persisted))
 	};
 }
 
@@ -138,6 +161,7 @@ export interface PublicConfig {
 	mediuxConcurrency: number;
 	httpCacheTtlDays: number;
 	defaultApplyMethod: ApplyMethod;
+	includedSections: string[];
 	envManaged: Partial<Record<ConfigKey, boolean>>;
 }
 
@@ -154,6 +178,7 @@ export async function publicConfig(): Promise<PublicConfig> {
 		mediuxConcurrency: c.mediuxConcurrency,
 		httpCacheTtlDays: c.httpCacheTtlDays,
 		defaultApplyMethod: c.defaultApplyMethod,
+		includedSections: c.includedSections,
 		envManaged
 	};
 }

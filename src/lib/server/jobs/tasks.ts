@@ -21,7 +21,10 @@ export async function runSyncJob(ctx: JobContext): Promise<void> {
 	const plexUrl = config.plexUrl!;
 	const plexToken = config.plexToken!;
 
-	const sections = await listSections(plexUrl, plexToken);
+	const allSections = await listSections(plexUrl, plexToken);
+	const sections = config.includedSections.length
+		? allSections.filter((s) => config.includedSections.includes(s.key))
+		: allSections;
 	const work: { sectionKey: string; item: Awaited<ReturnType<typeof listItems>>[number] }[] = [];
 	for (const section of sections) {
 		const items = await listItems(plexUrl, plexToken, section.key);
