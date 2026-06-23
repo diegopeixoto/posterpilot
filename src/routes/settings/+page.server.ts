@@ -7,11 +7,12 @@ export const load: PageServerLoad = async () => {
 	let sections: ServerLibrary[] = [];
 	const server = getActiveServer(config);
 	if (server) {
-		try {
-			sections = await server.listLibraries();
-		} catch {
-			sections = [];
-		}
+		// Never block the page: bound the library fetch to 5s. A slow/unreachable
+		// server returns an empty list instead of hanging the Settings page.
+		sections = await Promise.race([
+			server.listLibraries().catch(() => [] as ServerLibrary[]),
+			new Promise<ServerLibrary[]>((resolve) => setTimeout(() => resolve([]), 5000))
+		]);
 	}
 	return { config: await publicConfig(), sections };
 };
