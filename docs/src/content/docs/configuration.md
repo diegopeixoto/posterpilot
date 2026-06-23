@@ -8,7 +8,11 @@ PosterPilot is configured two ways, and they work together:
 - **Environment variables** — set on the container. Good for unattended setups
   and secret management.
 - **The in-app Settings page** — entered in the UI and persisted to the SQLite
-  database under `/data` so they survive restarts.
+  database under `/data` so they survive restarts. Settings is organized into
+  tabs: **Media server**, **Metadata & providers**, **Kometa & advanced**,
+  **Language**, and **Activity** (the in-app event log). A guided
+  [first-install wizard](/posterpilot/installation/#first-run) at `/setup` covers
+  the same ground in order for a fresh install.
 
 ## Environment vs. the Settings UI
 
@@ -49,25 +53,24 @@ Plex needs a base URL and an `X-Plex-Token`. You can supply them three ways:
 
 ### Jellyfin
 
-:::caution[Provisional]
-Jellyfin support is provided behind the shared media-server interface. Validate
-the specifics against your setup; the field shapes below match the configuration
-model but the integration is newer than the Plex path.
-:::
-
 Jellyfin needs a base URL (`JELLYFIN_URL`) and an API key (`JELLYFIN_API_KEY`).
-Set `SERVER_TYPE=jellyfin` to make it the active server. Posters are uploaded to
-the Jellyfin image API (`Primary` for poster, `Backdrop` for background).
+Set `SERVER_TYPE=jellyfin` to make it the active server. Posters and backgrounds
+are uploaded to the Jellyfin image API (`Primary` for poster, `Backdrop` for
+background). There is no PIN login or connection discovery for Jellyfin — supply
+the URL and API key directly.
+
+:::note
+The Plex path is the most battle-tested; the Jellyfin and Emby integrations are
+newer. They run behind the same media-server interface, so sync, discover, and
+apply work identically — but if you hit a server-specific quirk, please file an
+issue.
+:::
 
 ### Emby
 
-:::caution[Provisional]
-Emby support, like Jellyfin, is provided behind the shared media-server interface
-and is newer than the Plex path. Validate the specifics against your setup.
-:::
-
 Emby needs a base URL (`EMBY_URL`) and an API key (`EMBY_API_KEY`). Set
-`SERVER_TYPE=emby` to make it the active server.
+`SERVER_TYPE=emby` to make it the active server. Like Jellyfin, Emby uses a URL +
+API key directly (no PIN login or connection discovery).
 
 ## TMDB key
 
@@ -128,7 +131,7 @@ extra mount is required.
 The Activity log table is capped at `EVENT_RETENTION` rows (default `2000`);
 older rows are pruned automatically. You can wipe the table at any time with the
 **Clear activity** button on the Activity tab (this does not delete the on-disk
-log file). The English page documents these; translations can follow.
+log file).
 
 ## Environment-variable reference
 

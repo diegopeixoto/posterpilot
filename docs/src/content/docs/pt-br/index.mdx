@@ -18,11 +18,16 @@ hero:
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 O PosterPilot é um aplicativo web auto-hospedado que navega por uma biblioteca de mídia
-([Plex](https://www.plex.tv/), com suporte provisório a [Jellyfin](https://jellyfin.org/)
-e [Emby](https://emby.media/)), encontra capas de artwork em vários
+([Plex](https://www.plex.tv/), [Jellyfin](https://jellyfin.org/) ou
+[Emby](https://emby.media/) — um ativo por vez), encontra capas de artwork em vários
 provedores e aplica a capa escolhida ao seu servidor de mídia — diretamente via sua API
 e/ou exportando YAML compatível com [Kometa](https://kometa.wiki/)/PMM. Ele roda como
 um único contêiner Docker em um Mac ou em um servidor Unraid.
+
+Um assistente guiado de primeira instalação leva você desde a escolha de um idioma até a
+conexão do seu servidor, a chave do TMDB e os provedores, a escolha de bibliotecas e uma
+primeira sincronização — e, para o Plex, inclui um login por PIN e a descoberta de conexões
+para que você nunca precise caçar um token ou uma URL.
 
 {/* TODO: add a hero screenshot of the library wall here once captured. */}
 
@@ -35,7 +40,8 @@ um único contêiner Docker em um Mac ou em um servidor Unraid.
 	</Card>
 	<Card title="Encontre capas" icon="seti:image">
 		Distribua a busca entre os provedores habilitados — MediUX, Fanart.tv, TMDB e ThePosterDB — e compare candidatos de pôster
-		e de fundo agrupados por provedor e conjunto.
+		e de fundo agrupados por provedor e conjunto. Use um conjunto inteiro, misture peças entre
+		provedores ou monte um conjunto personalizado a partir de uma URL colada ou um arquivo enviado.
 	</Card>
 	<Card title="Aplique capas" icon="approve-check">
 		Aplique a capa escolhida via API do servidor de mídia (envia e bloqueia o campo, instantaneamente) e/ou
@@ -48,7 +54,9 @@ um único contêiner Docker em um Mac ou em um servidor Unraid.
 </CardGrid>
 
 O trabalho em toda a biblioteca roda como jobs em segundo plano com progresso ao vivo via Server-Sent
-Events.
+Events, exibido diretamente no Dashboard. Um log granular de **Atividade** (Configurações →
+Atividade) e um log de arquivo rotativo registram cada evento operacional, e um verificador de
+atualizações com um modal "Novidades" apresenta os novos releases.
 
 ## Para onde ir a seguir
 

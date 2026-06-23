@@ -18,11 +18,16 @@ hero:
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 PosterPilot is a self-hosted web app that browses a media library
-([Plex](https://www.plex.tv/), with provisional [Jellyfin](https://jellyfin.org/)
-and [Emby](https://emby.media/) support), finds artwork covers across multiple
-providers, and applies a chosen cover to your media server — directly via its API
-and/or by exporting [Kometa](https://kometa.wiki/)/PMM-compatible YAML. It runs as
-a single Docker container on a Mac or on an Unraid server.
+([Plex](https://www.plex.tv/), [Jellyfin](https://jellyfin.org/), or
+[Emby](https://emby.media/) — one active at a time), finds artwork covers across
+multiple providers, and applies a chosen cover to your media server — directly via
+its API and/or by exporting [Kometa](https://kometa.wiki/)/PMM-compatible YAML. It
+runs as a single Docker container on a Mac or on an Unraid server.
+
+A guided first-install wizard walks you from picking a language through connecting
+your server, TMDB key, and providers, choosing libraries, and a first sync — and
+for Plex it includes a PIN login and connection discovery so you never have to
+hunt down a token or URL.
 
 {/* TODO: add a hero screenshot of the library wall here once captured. */}
 
@@ -35,7 +40,8 @@ a single Docker container on a Mac or on an Unraid server.
 	</Card>
 	<Card title="Find covers" icon="seti:image">
 		Fan out across enabled providers — MediUX, Fanart.tv, TMDB, and ThePosterDB — and compare poster
-		and background candidates grouped by provider and set.
+		and background candidates grouped by provider and set. Use a whole set, mix pieces across
+		providers, or assemble a custom set from a pasted URL or an uploaded file.
 	</Card>
 	<Card title="Apply covers" icon="approve-check">
 		Apply a chosen cover via the media-server API (uploads and locks the field, instantly) and/or
@@ -48,7 +54,9 @@ a single Docker container on a Mac or on an Unraid server.
 </CardGrid>
 
 Library-wide work runs as background jobs with live progress over Server-Sent
-Events.
+Events, shown right on the Dashboard. A granular **Activity** log (Settings →
+Activity) and a rotating file log record every operational event, and an update
+checker with a "What's New" modal surfaces new releases.
 
 ## Where to go next
 

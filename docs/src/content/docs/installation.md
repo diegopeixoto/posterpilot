@@ -134,12 +134,16 @@ container on port 3000.
 
 1. Start the container and open `http://<host>:3000` (e.g.
    `http://localhost:3000`).
-2. On first run no library is synced yet, so the library wall shows an empty
-   state prompting you to configure your media server and run a sync.
-3. Open **Settings** and connect a media server and a TMDB key (see
-   [Configuration](/posterpilot/configuration/)). If you set credentials via
-   environment variables, they appear already configured and locked from editing.
-4. Run a sync, then start finding and applying covers (see
+2. On first run nothing is synced yet. A banner points you at the **first-install
+   wizard** at `/setup`, which walks you through six steps: choose a language,
+   connect a media server, add a TMDB key, enable artwork providers, pick which
+   libraries to sync, and run the first sync. For Plex the wizard includes a PIN
+   login and connection discovery so you never have to paste a token or URL. The
+   wizard is skippable — you can configure everything in **Settings** instead.
+3. If you set credentials via environment variables, they appear already
+   configured and locked from editing in both the wizard and Settings (see
+   [Configuration](/posterpilot/configuration/)).
+4. Once synced, start finding and applying covers (see
    [Usage](/posterpilot/usage/)).
 
 ## Health check

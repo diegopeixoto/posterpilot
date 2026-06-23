@@ -18,11 +18,16 @@ hero:
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 PosterPilot は、メディアライブラリ
-（[Plex](https://www.plex.tv/)、暫定的な [Jellyfin](https://jellyfin.org/)
-および [Emby](https://emby.media/) サポート付き）を閲覧し、複数のプロバイダーをまたいでアートワークのカバーを
+（[Plex](https://www.plex.tv/)、[Jellyfin](https://jellyfin.org/)、または
+[Emby](https://emby.media/) — 一度に 1 つがアクティブ）を閲覧し、複数のプロバイダーをまたいでアートワークのカバーを
 見つけ、選んだカバーをメディアサーバーに適用するセルフホスト型ウェブアプリです — その API を通じて直接、
 かつ／または [Kometa](https://kometa.wiki/)/PMM 互換の YAML をエクスポートすることで適用できます。これは
 Mac または Unraid サーバー上で単一の Docker コンテナとして動作します。
+
+ガイド付きの初回インストールウィザードが、言語の選択から、サーバー、TMDB キー、
+プロバイダーの接続、ライブラリの選択、そして最初の同期まで、順を追って案内します — そして
+Plex の場合は PIN ログインと接続検出も含まれているため、トークンや URL を探し回る必要は
+ありません。
 
 {/* TODO: add a hero screenshot of the library wall here once captured. */}
 
@@ -35,7 +40,9 @@ Mac または Unraid サーバー上で単一の Docker コンテナとして動
 	</Card>
 	<Card title="カバーを見つける" icon="seti:image">
 		有効なプロバイダー — MediUX、Fanart.tv、TMDB、ThePosterDB — をまたいで展開し、ポスターと背景の
-		候補をプロバイダーとセットごとにグループ化して比較します。
+		候補をプロバイダーとセットごとにグループ化して比較します。セット全体を使うことも、複数の
+		プロバイダーをまたいでピースを組み合わせることも、貼り付けた URL やアップロードしたファイルから
+		カスタムセットを組み立てることもできます。
 	</Card>
 	<Card title="カバーを適用" icon="approve-check">
 		選んだカバーを、メディアサーバーの API 経由（フィールドをアップロードしてロックし、即座に反映）で、
@@ -48,7 +55,9 @@ Mac または Unraid サーバー上で単一の Docker コンテナとして動
 </CardGrid>
 
 ライブラリ全体にわたる処理は、Server-Sent Events によるライブ進捗付きのバックグラウンドジョブとして
-実行されます。
+実行され、進捗はダッシュボードに直接表示されます。きめ細かい **アクティビティ** ログ（設定 →
+アクティビティ）とローテーションするファイルログがすべての操作イベントを記録し、「新着情報」
+モーダルを備えた更新チェッカーが新しいリリースを通知します。
 
 ## 次に進む場所
 

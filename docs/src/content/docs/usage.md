@@ -1,11 +1,32 @@
 ---
 title: Usage
-description: Sync a library, find covers, apply them via the media-server API or Kometa export, build custom sets, and use the library filters and sorting.
+description: Run the setup wizard, sync a library, find covers across providers, apply them via the media-server API or Kometa export, build custom sets, filter and sort the library, and read the Activity log.
 ---
 
 This page walks through the day-to-day workflow once PosterPilot is
 [installed](/posterpilot/installation/) and
 [configured](/posterpilot/configuration/).
+
+## First-install wizard
+
+On a fresh install a banner points you at the wizard at `/setup`. It walks you
+through six steps in order, persisting each as you go:
+
+1. **Language** — pick the UI locale.
+2. **Media server** — choose Plex, Jellyfin, or Emby. For Plex you can sign in
+   with a PIN (PosterPilot shows a code and an authorization link, then stores the
+   acquired token for you) and pick a discovered local/remote connection; Jellyfin
+   and Emby take a URL and API key. A **Test** button verifies the connection.
+3. **TMDB** — paste a TMDB API key (a link to TMDB's API settings is provided).
+4. **Providers** — toggle the artwork providers (MediUX, TMDB, Fanart.tv,
+   ThePosterDB) and enter a Fanart.tv key if you use it.
+5. **Libraries** — once connected, the wizard lists your movie and show libraries;
+   tick the ones to sync (all selected by default, which also picks up libraries
+   you add later).
+6. **First sync** — run the initial sync, then jump to the Dashboard.
+
+The wizard is **skippable** at any point (the _Skip_ link goes straight to the
+Dashboard) — everything it covers is also available in **Settings**.
 
 ## Sync a library
 
@@ -15,10 +36,13 @@ providers can be queried.
 
 1. Make sure the active server type's credentials and a TMDB key are configured.
    A sync is blocked (with a clear message about what is missing) if they are not.
-2. Optionally narrow which sections are synced with `INCLUDED_SECTIONS` (or the
-   equivalent Settings field) — leave it empty to sync all movie and show
-   sections.
-3. Run the sync. It runs as a background job with live progress.
+2. Optionally narrow which sections are synced from the **Libraries to sync**
+   checklist (in the wizard or Settings → Media server) or with `INCLUDED_SECTIONS`
+   — leave it empty to sync all movie and show sections, including ones you add
+   later.
+3. Run the sync from the **Dashboard** (the **Sync** button). It runs as a
+   background job with live progress shown right there; the stat cards (items,
+   movies, shows, resolved, with MediUX, applied) climb as it runs.
 
 Each item comes back with its title, year, type, external GUIDs (tmdb/imdb/tvdb
 when present), and current poster. An item with no external GUID is still listed
@@ -26,13 +50,19 @@ but flagged as unresolvable for provider lookup rather than dropped.
 
 ## The library wall
 
-The synced library renders as a poster grid. You can:
+The synced library renders as a poster grid with a Notion-style toolbar. You can:
 
 - **Search** by title.
-- **Filter** by media type (movie / show), missing poster, MediUX availability
-  (has candidates), change state (unchanged / still on the default poster),
-  minimum rating, and genre.
-- **Sort** by title, release year, rating, runtime, or most-recently-changed.
+- **Filter** from the **Filter** popover: media type (movie / show), minimum
+  rating, genre, missing poster, MediUX availability (has candidates), and change
+  state (unchanged / still on the default poster). The Filter button shows a badge
+  with the number of active facets.
+- **Sort** from the **Sort** popover by title, release year, rating, runtime, or
+  most-recently-changed, with an independent ascending/descending toggle.
+- Each active filter and the sort show up as **removable chips** below the toolbar
+  — click a chip's ✕ to drop just that one, or **Clear all** to reset everything.
+- Toggle **auto-apply** (the ⚡ button): on, each change navigates immediately; off,
+  changes are staged until you hit **Apply**. The choice is remembered.
 - See a **spotlight banner** — a backdrop for a recently-changed item above the
   wall once at least one cover has been applied.
 
@@ -43,7 +73,7 @@ changed), with the title and year revealed on hover.
 
 Open an item to see its detail view: a backdrop hero with the item's logo (or its
 title when no logo exists), rating, year, runtime (or season/episode counts for
-shows), genres, and overview.
+shows), genres, and overview, plus the top-billed cast.
 
 - If covers have not been discovered yet, use **Find covers** to run discovery for
   that item.
@@ -114,8 +144,28 @@ primary poster (and a background where available) using a deterministic provider
 preference order, falling back to the next provider when the most-preferred one
 has no poster for the item.
 
-## Jobs view
+## Dashboard and jobs
 
-The jobs view lists active and past jobs, with live progress for running jobs
-(updating over Server-Sent Events without a manual refresh) and final status for
-completed ones.
+The **Dashboard** is home base. It shows the library stat cards, the **Sync**
+button, and any running jobs with a **live progress bar** (updating over
+Server-Sent Events, no refresh needed) that you can **cancel**. The nav badge next
+to Dashboard reflects how many jobs are active. Below that, a **Recent jobs** table
+lists the latest jobs with their type, processed/total counts, and final status.
+There is no separate Jobs page — live progress and recent history both live on the
+Dashboard.
+
+## Activity log
+
+The granular event log lives under **Settings → Activity**. Every operational event
+is recorded there (and mirrored to the container console and a rotating file log).
+You can:
+
+- Filter by level — **All / Info / Warn / Error**.
+- Page through history with **Load more**.
+- **Clear activity** to wipe the in-app table (this does not delete the on-disk log
+  file).
+
+The table is capped at `EVENT_RETENTION` rows (default `2000`); older rows are
+pruned automatically. See
+[Configuration → Logging and activity log](/posterpilot/configuration/#logging-and-activity-log)
+for the file log and retention details.

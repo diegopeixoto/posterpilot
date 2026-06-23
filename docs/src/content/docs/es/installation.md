@@ -24,8 +24,10 @@ concreta.
 Importan dos volúmenes:
 
 - **`/data`** — estado persistente de la app: la base de datos SQLite, tus ajustes
-  guardados y el historial de aplicaciones. Mantenlo en un volumen montado para
-  que el estado sobreviva a las actualizaciones del contenedor.
+  guardados, el historial de aplicaciones y el archivo de registro rotativo
+  (`/data/logs/posterpilot.log`). Mantenlo en un volumen montado para que el estado
+  sobreviva a las actualizaciones del contenedor; el archivo de registro vive dentro
+  de `/data`, así que no necesita un volumen adicional.
 - **`/kometa`** — monta aquí tu directorio de assets/config de Kometa para que el
   YAML exportado caiga donde Kometa lo lee. Solo necesario si usas la exportación
   de Kometa.
@@ -138,14 +140,17 @@ contenedor en el puerto 3000.
 
 1. Arranca el contenedor y abre `http://<host>:3000` (p. ej.
    `http://localhost:3000`).
-2. En la primera ejecución aún no hay ninguna biblioteca sincronizada, por lo que
-   el muro de la biblioteca muestra un estado vacío que te invita a configurar tu
-   servidor multimedia y a ejecutar una sincronización.
-3. Abre **Ajustes** y conecta un servidor multimedia y una clave de TMDB (consulta
-   [Configuración](/posterpilot/es/configuration/)). Si defines las credenciales
-   mediante variables de entorno, aparecen ya configuradas y bloqueadas para su
-   edición.
-4. Ejecuta una sincronización y empieza a encontrar y aplicar carátulas (consulta
+2. En la primera ejecución aún no hay nada sincronizado. Un banner te dirige al
+   **asistente de primera instalación** en `/setup`, que te guía por seis pasos:
+   elegir un idioma, conectar un servidor multimedia, añadir una clave de TMDB,
+   habilitar proveedores de carátulas, elegir qué bibliotecas sincronizar y ejecutar
+   la primera sincronización. Para Plex, el asistente incluye un inicio de sesión con
+   PIN y el descubrimiento de conexiones, así que nunca tienes que pegar un token o
+   una URL. El asistente se puede omitir: puedes configurarlo todo en **Ajustes**.
+3. Si defines las credenciales mediante variables de entorno, aparecen ya
+   configuradas y bloqueadas para su edición tanto en el asistente como en Ajustes
+   (consulta [Configuración](/posterpilot/es/configuration/)).
+4. Una vez sincronizado, empieza a encontrar y aplicar carátulas (consulta
    [Uso](/posterpilot/es/usage/)).
 
 ## Comprobación de estado

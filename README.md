@@ -56,17 +56,23 @@ translating guides live at
 1. **Sync** your Plex / Jellyfin / Emby movie & show libraries, resolving each
    title to a TMDB id with rich metadata (backdrop, logo, rating, genres, cast).
 2. **Find covers** across the enabled providers (MediUX, Fanart.tv, TMDB,
-   ThePosterDB), grouped into artwork **sets** — pick a whole set or assemble a
-   custom poster + backdrop set.
+   ThePosterDB), grouped into artwork **sets** per provider — pick a whole set or
+   assemble a custom poster + backdrop set from any provider, a pasted URL, or an
+   uploaded file.
 3. **Apply** a chosen cover, two ways (selectable):
    - **Media server API** — uploads the poster (and backdrop) and, on Plex, locks
      the field so agents won't overwrite it.
    - **Kometa export** — writes `url_poster`/`url_background` YAML into a mounted
      directory your existing Kometa instance consumes on its next run.
 
-A metadata-rich item page, library filtering/sorting (rating, genre, recency),
-and a UI localized into five languages round it out. Library-wide work runs as
-background jobs with live progress (SSE).
+A guided **first-install wizard** (language → server → TMDB → providers →
+libraries → first sync) gets you running fast; for Plex it includes **PIN login**
+and **connection discovery** so you never have to hunt down a token or URL. A
+metadata-rich item page (backdrop hero, cast, artwork grouped into sets), a
+Notion-style filtered/sorted library wall, an in-app **Activity** log, and a UI
+localized into five languages round it out. Library-wide work runs as background
+jobs with live progress (SSE) right on the Dashboard, and an update checker plus
+**What's New** modal surface new releases.
 
 ## Stack
 
@@ -123,21 +129,24 @@ Configuration is via environment variables (or the in-app **Settings** page).
 Core variables — see the [Configuration docs](https://diegopeixoto.github.io/posterpilot/configuration/)
 for the complete reference:
 
-| var                                                      | meaning                                                         |
-| -------------------------------------------------------- | --------------------------------------------------------------- |
-| `SERVER_TYPE`                                            | `plex` (default), `jellyfin`, or `emby`                         |
-| `PLEX_URL` / `PLEX_TOKEN`                                | Plex base URL and `X-Plex-Token` (or acquire via in-app login)  |
-| `JELLYFIN_URL` / `JELLYFIN_API_KEY`                      | Jellyfin server URL and API key                                 |
-| `EMBY_URL` / `EMBY_API_KEY`                              | Emby server URL and API key                                     |
-| `TMDB_KEY`                                               | TMDB v3 API key **or** v4 bearer/JWT (auto-detected)            |
-| `FANART_KEY`                                             | Fanart.tv API key (enables the Fanart.tv provider)              |
-| `PROVIDER_MEDIUX` / `_TMDB` / `_FANART` / `_THEPOSTERDB` | per-provider on/off toggles                                     |
-| `LANGUAGE`                                               | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`            |
-| `DATABASE_URL`                                           | libsql file URL (default `file:/data/posterpilot.db` in Docker) |
-| `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)       |
-| `LOG_DIR`                                                | rotating log file folder (default `/data/logs` in Docker)       |
-| `EVENT_RETENTION`                                        | max activity-log rows kept in the db (default `2000`)           |
-| `PORT`                                                   | listen port (default `3000`)                                    |
+| var                                                      | meaning                                                          |
+| -------------------------------------------------------- | ---------------------------------------------------------------- |
+| `SERVER_TYPE`                                            | active media server: `plex` (default), `jellyfin`, or `emby`     |
+| `PLEX_URL` / `PLEX_TOKEN`                                | Plex base URL and `X-Plex-Token` (or acquire via in-app login)   |
+| `PLEX_CLIENT_ID`                                         | stable per-install id for Plex PIN login / discovery (generated) |
+| `JELLYFIN_URL` / `JELLYFIN_API_KEY`                      | Jellyfin server URL and API key                                  |
+| `EMBY_URL` / `EMBY_API_KEY`                              | Emby server URL and API key                                      |
+| `TMDB_KEY`                                               | TMDB v3 API key **or** v4 bearer/JWT (auto-detected)             |
+| `FANART_KEY`                                             | Fanart.tv API key (enables the Fanart.tv provider)               |
+| `PROVIDER_MEDIUX` / `_TMDB` / `_FANART` / `_THEPOSTERDB` | per-provider on/off toggles                                      |
+| `DEFAULT_APPLY_METHOD`                                   | default apply method: `plex`, `kometa`, or `both` (default)      |
+| `INCLUDED_SECTIONS`                                      | library section keys to sync (empty = all movie/show libraries)  |
+| `LANGUAGE`                                               | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`             |
+| `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)        |
+| `LOG_DIR`                                                | rotating log file folder (default `/data/logs` in Docker)        |
+| `EVENT_RETENTION`                                        | max activity-log rows kept in the db (default `2000`)            |
+| `DATABASE_URL`                                           | libsql file URL (default `file:/data/posterpilot.db` in Docker)  |
+| `PORT`                                                   | listen port (default `3000`)                                     |
 
 Two volumes matter:
 

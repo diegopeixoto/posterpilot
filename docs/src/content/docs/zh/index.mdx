@@ -18,11 +18,16 @@ hero:
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 PosterPilot 是一个自托管的 Web 应用，可浏览媒体库
-（[Plex](https://www.plex.tv/)，并临时支持 [Jellyfin](https://jellyfin.org/)
-和 [Emby](https://emby.media/)），跨多个提供方查找封面海报，
+（[Plex](https://www.plex.tv/)、[Jellyfin](https://jellyfin.org/)
+或 [Emby](https://emby.media/)——一次激活一个），跨多个提供方查找封面海报，
 并将选定的封面应用到你的媒体服务器——可直接通过其 API
 应用，和/或通过导出 [Kometa](https://kometa.wiki/)/PMM 兼容的 YAML 应用。它在
 Mac 或 Unraid 服务器上作为单个 Docker 容器运行。
+
+引导式的首次安装向导会带你从选择语言开始，逐步连接你的
+服务器、TMDB 密钥和提供方，选择媒体库，并完成首次同步——
+对于 Plex，它还包含 PIN 登录和连接发现，这样你就永远不必
+费力去查找 token 或 URL。
 
 {/* TODO: add a hero screenshot of the library wall here once captured. */}
 
@@ -34,7 +39,7 @@ Mac 或 Unraid 服务器上作为单个 Docker 容器运行。
 	</Card>
 	<Card title="查找封面" icon="seti:image">
 		跨所有启用的提供方——MediUX、Fanart.tv、TMDB 和 ThePosterDB——发散查找，并按提供方和套图分组比较海报
-		和背景候选项。
+		和背景候选项。可以使用整个套图、跨提供方混搭各个部分，或从粘贴的 URL 或上传的文件组装自定义套图。
 	</Card>
 	<Card title="应用封面" icon="approve-check">
 		通过媒体服务器 API 应用选定的封面（即时上传并锁定该字段），和/或
@@ -47,7 +52,9 @@ Mac 或 Unraid 服务器上作为单个 Docker 容器运行。
 </CardGrid>
 
 库范围的工作作为后台任务运行，并通过 Server-Sent
-Events 提供实时进度。
+Events 提供实时进度，直接显示在仪表板上。细粒度的 **活动**
+日志（设置 → 活动）和一个滚动的文件日志会记录每一个操作事件，
+而带有"What's New"弹窗的更新检查器会提示新发布的版本。
 
 ## 接下来去哪里
 

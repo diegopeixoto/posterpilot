@@ -1,11 +1,35 @@
 ---
 title: Uso
-description: Sincroniza una biblioteca, encuentra carátulas, aplícalas mediante la API del servidor multimedia o la exportación de Kometa, crea conjuntos personalizados y usa los filtros y la ordenación de la biblioteca.
+description: Ejecuta el asistente de configuración, sincroniza una biblioteca, encuentra carátulas en varios proveedores, aplícalas mediante la API del servidor multimedia o la exportación de Kometa, crea conjuntos personalizados, filtra y ordena la biblioteca y consulta el registro de actividad.
 ---
 
 Esta página recorre el flujo de trabajo cotidiano una vez que PosterPilot está
 [instalado](/posterpilot/es/installation/) y
 [configurado](/posterpilot/es/configuration/).
+
+## Asistente de primera instalación
+
+En una instalación nueva, un banner te dirige al asistente en `/setup`. Te guía
+por seis pasos en orden, persistiendo cada uno a medida que avanzas:
+
+1. **Idioma** — elige el locale de la interfaz.
+2. **Servidor multimedia** — elige Plex, Jellyfin o Emby. Para Plex puedes iniciar
+   sesión con un PIN (PosterPilot muestra un código y un enlace de autorización, y
+   luego almacena el token obtenido por ti) y elegir una conexión local/remota
+   descubierta; Jellyfin y Emby toman una URL y una clave de API. Un botón de
+   **Probar** verifica la conexión.
+3. **TMDB** — pega una clave de API de TMDB (se proporciona un enlace a los ajustes
+   de la API de TMDB).
+4. **Proveedores** — activa los proveedores de carátulas (MediUX, TMDB, Fanart.tv,
+   ThePosterDB) e introduce una clave de Fanart.tv si la usas.
+5. **Bibliotecas** — una vez conectado, el asistente lista tus bibliotecas de
+   películas y series; marca las que quieras sincronizar (todas seleccionadas por
+   defecto, lo que también recoge las bibliotecas que añadas más tarde).
+6. **Primera sincronización** — ejecuta la sincronización inicial y luego salta al
+   Panel.
+
+El asistente se puede **omitir** en cualquier momento (el enlace de _Omitir_ va
+directo al Panel); todo lo que cubre también está disponible en **Ajustes**.
 
 ## Sincronizar una biblioteca
 
@@ -16,11 +40,14 @@ id de TMDB para que los proveedores de carátulas puedan consultarse.
 1. Asegúrate de que las credenciales del tipo de servidor activo y una clave de
    TMDB están configuradas. Una sincronización se bloquea (con un mensaje claro
    sobre qué falta) si no lo están.
-2. Opcionalmente, acota qué secciones se sincronizan con `INCLUDED_SECTIONS` (o el
-   campo equivalente de Ajustes); déjalo vacío para sincronizar todas las secciones
-   de películas y series.
-3. Ejecuta la sincronización. Se ejecuta como una tarea en segundo plano con
-   progreso en vivo.
+2. Opcionalmente, acota qué secciones se sincronizan desde la lista de verificación
+   **Bibliotecas a sincronizar** (en el asistente o en Ajustes → Servidor
+   multimedia) o con `INCLUDED_SECTIONS`; déjalo vacío para sincronizar todas las
+   secciones de películas y series, incluidas las que añadas más tarde.
+3. Ejecuta la sincronización desde el **Panel** (el botón **Sincronizar**). Se
+   ejecuta como una tarea en segundo plano con progreso en vivo mostrado justo ahí;
+   las tarjetas de estadísticas (elementos, películas, series, resueltos, con
+   MediUX, aplicados) suben a medida que avanza.
 
 Cada elemento vuelve con su título, año, tipo, GUID externos (tmdb/imdb/tvdb cuando
 están presentes) y póster actual. Un elemento sin GUID externo sigue apareciendo en
@@ -29,14 +56,24 @@ de descartarse.
 
 ## El muro de la biblioteca
 
-La biblioteca sincronizada se muestra como una cuadrícula de pósters. Puedes:
+La biblioteca sincronizada se muestra como una cuadrícula de pósters con una barra
+de herramientas al estilo de Notion. Puedes:
 
 - **Buscar** por título.
-- **Filtrar** por tipo de medio (película / serie), póster faltante,
-  disponibilidad en MediUX (tiene candidatas), estado de cambio (sin cambios / aún
-  con el póster predeterminado), valoración mínima y género.
-- **Ordenar** por título, año de estreno, valoración, duración o más recientemente
-  cambiados.
+- **Filtrar** desde el menú emergente **Filtrar**: tipo de medio (película /
+  serie), valoración mínima, género, póster faltante, disponibilidad en MediUX
+  (tiene candidatas) y estado de cambio (sin cambios / aún con el póster
+  predeterminado). El botón Filtrar muestra una insignia con el número de facetas
+  activas.
+- **Ordenar** desde el menú emergente **Ordenar** por título, año de estreno,
+  valoración, duración o más recientemente cambiados, con un selector ascendente/
+  descendente independiente.
+- Cada filtro activo y la ordenación aparecen como **chips eliminables** debajo de
+  la barra de herramientas; haz clic en la ✕ de un chip para descartar solo ese, o
+  en **Limpiar todo** para reiniciarlo todo.
+- Alterna la **aplicación automática** (el botón ⚡): activada, cada cambio navega
+  de inmediato; desactivada, los cambios se preparan hasta que pulsas **Aplicar**.
+  La elección se recuerda.
 - Ver un **banner destacado** — un fondo de un elemento cambiado recientemente
   sobre el muro una vez que se ha aplicado al menos una carátula.
 
@@ -48,7 +85,8 @@ cursor.
 
 Abre un elemento para ver su vista de detalle: un héroe de fondo con el logo del
 elemento (o su título cuando no existe logo), la valoración, el año, la duración (o
-los recuentos de temporadas/episodios para las series), los géneros y la sinopsis.
+los recuentos de temporadas/episodios para las series), los géneros y la sinopsis,
+además del reparto principal.
 
 - Si aún no se han descubierto carátulas, usa **Encontrar carátulas** para ejecutar
   el descubrimiento de ese elemento.
@@ -128,9 +166,30 @@ habilitados: elige un póster principal (y un fondo donde esté disponible) usan
 orden de preferencia de proveedor determinista, recurriendo al siguiente proveedor
 cuando el más preferido no tiene póster para el elemento.
 
-## Vista de tareas
+## Panel y tareas
 
-La vista de tareas lista las tareas activas y pasadas, con progreso en vivo para
-las tareas en ejecución (actualizándose mediante Server-Sent Events sin
-actualización manual) y el estado final para las completadas.
+El **Panel** es el centro de operaciones. Muestra las tarjetas de estadísticas de
+la biblioteca, el botón **Sincronizar** y cualquier tarea en ejecución con una
+**barra de progreso en vivo** (que se actualiza mediante Server-Sent Events, sin
+necesidad de actualizar) que puedes **cancelar**. La insignia de navegación junto a
+Panel refleja cuántas tareas están activas. Debajo, una tabla de **Tareas
+recientes** lista las últimas tareas con su tipo, los recuentos
+procesados/totales y el estado final. No hay una página de Tareas aparte: el
+progreso en vivo y el historial reciente viven ambos en el Panel.
+
+## Registro de actividad
+
+El registro de eventos granular vive en **Ajustes → Actividad**. Cada evento
+operativo se registra allí (y se replica en la consola del contenedor y en un
+archivo de registro rotativo). Puedes:
+
+- Filtrar por nivel — **Todos / Info / Aviso / Error**.
+- Recorrer el historial con **Cargar más**.
+- **Limpiar actividad** para vaciar la tabla de la app (esto no elimina el archivo
+  de registro en disco).
+
+La tabla está limitada a `EVENT_RETENTION` filas (por defecto `2000`); las filas más
+antiguas se podan automáticamente. Consulta
+[Configuración → Registro y registro de actividad](/posterpilot/es/configuration/#registro-y-registro-de-actividad)
+para los detalles del registro de archivo y la retención.
 </content>

@@ -22,9 +22,10 @@ tag de versão específica, se preferir upgrades reproduzíveis.
 
 Dois volumes importam:
 
-- **`/data`** — estado persistente do app: o banco de dados SQLite, suas configurações salvas
-  e o histórico de aplicações. Mantenha isto em um volume montado para que o estado sobreviva às
-  atualizações do contêiner.
+- **`/data`** — estado persistente do app: o banco de dados SQLite, suas configurações salvas,
+  o histórico de aplicações e o arquivo de log rotativo (`/data/logs/posterpilot.log`).
+  Mantenha isto em um volume montado para que o estado sobreviva às atualizações do contêiner;
+  o arquivo de log fica dentro de `/data`, então não é necessário um volume extra para ele.
 - **`/kometa`** — monte aqui o diretório de assets/config do Kometa para que o
   YAML exportado caia onde o Kometa o lê. Só é necessário se você usar a exportação do Kometa.
 
@@ -133,12 +134,17 @@ contêiner na porta 3000.
 
 1. Inicie o contêiner e abra `http://<host>:3000` (por exemplo,
    `http://localhost:3000`).
-2. Na primeira execução, nenhuma biblioteca ainda foi sincronizada, então o mural da biblioteca mostra um estado
-   vazio convidando você a configurar seu servidor de mídia e executar uma sincronização.
-3. Abra **Configurações** e conecte um servidor de mídia e uma chave do TMDB (veja
-   [Configuração](/posterpilot/pt-br/configuration/)). Se você definir credenciais via
-   variáveis de ambiente, elas aparecem já configuradas e bloqueadas para edição.
-4. Execute uma sincronização e então comece a encontrar e aplicar capas (veja
+2. Na primeira execução, nada ainda foi sincronizado. Um banner aponta você para o **assistente
+   de primeira instalação** em `/setup`, que conduz você por seis passos: escolher um idioma,
+   conectar um servidor de mídia, adicionar uma chave do TMDB, habilitar provedores de artwork,
+   escolher quais bibliotecas sincronizar e executar a primeira sincronização. Para o Plex, o
+   assistente inclui um login por PIN e a descoberta de conexões, de modo que você nunca precisa
+   colar um token ou uma URL. O assistente é pulável — você pode configurar tudo em
+   **Configurações**.
+3. Se você definir credenciais via variáveis de ambiente, elas aparecem já configuradas e
+   bloqueadas para edição tanto no assistente quanto em Configurações (veja
+   [Configuração](/posterpilot/pt-br/configuration/)).
+4. Após a sincronização, comece a encontrar e aplicar capas (veja
    [Uso](/posterpilot/pt-br/usage/)).
 
 ## Verificação de saúde

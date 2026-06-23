@@ -18,12 +18,17 @@ hero:
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 PosterPilot es una aplicación web autoalojada que explora una biblioteca
-multimedia ([Plex](https://www.plex.tv/), con soporte provisional para
-[Jellyfin](https://jellyfin.org/) y [Emby](https://emby.media/)), encuentra
-carátulas en varios proveedores y aplica la carátula elegida a tu servidor
-multimedia, directamente a través de su API o exportando YAML compatible con
+multimedia ([Plex](https://www.plex.tv/), [Jellyfin](https://jellyfin.org/) o
+[Emby](https://emby.media/), uno activo a la vez), encuentra carátulas en varios
+proveedores y aplica una carátula elegida a tu servidor multimedia, directamente
+a través de su API o exportando YAML compatible con
 [Kometa](https://kometa.wiki/)/PMM. Se ejecuta como un único contenedor Docker en
 un Mac o en un servidor Unraid.
+
+Un asistente guiado de primera instalación te lleva desde elegir un idioma hasta
+conectar tu servidor, la clave de TMDB y los proveedores, elegir bibliotecas y una
+primera sincronización; y para Plex incluye un inicio de sesión con PIN y el
+descubrimiento de conexiones, así que nunca tienes que buscar un token o una URL.
 
 {/* TODO: add a hero screenshot of the library wall here once captured. */}
 
@@ -36,7 +41,9 @@ un Mac o en un servidor Unraid.
 	</Card>
 	<Card title="Encuentra carátulas" icon="seti:image">
 		Despliega la búsqueda entre los proveedores habilitados —MediUX, Fanart.tv, TMDB y ThePosterDB—
-		y compara las candidatas de pósters y fondos agrupadas por proveedor y conjunto.
+		y compara las candidatas de pósters y fondos agrupadas por proveedor y conjunto. Usa un conjunto
+		entero, mezcla piezas de varios proveedores o arma un conjunto personalizado a partir de una URL
+		pegada o un archivo subido.
 	</Card>
 	<Card title="Aplica carátulas" icon="approve-check">
 		Aplica una carátula elegida mediante la API del servidor multimedia (sube y bloquea el campo, al
@@ -50,7 +57,10 @@ un Mac o en un servidor Unraid.
 </CardGrid>
 
 El trabajo sobre toda la biblioteca se ejecuta como tareas en segundo plano con
-progreso en vivo mediante Server-Sent Events.
+progreso en vivo mediante Server-Sent Events, mostrado directamente en el Panel.
+Un registro de **Actividad** granular (Ajustes → Actividad) y un registro de
+archivo rotativo anotan cada evento operativo, y un comprobador de actualizaciones
+con un modal de "Novedades" da a conocer las nuevas versiones.
 
 ## A dónde ir después
 
