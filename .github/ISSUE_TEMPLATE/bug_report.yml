@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a problem with PosterPilot
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please fill out the details below.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to '...'
+        2. Click '...'
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: PosterPilot version (see /api/health) or image tag / commit
+    validations:
+      required: true
+  - type: dropdown
+    id: media-server
+    attributes:
+      label: Media server
+      options:
+        - Plex
+        - Jellyfin
+        - Emby
+        - Not applicable
+    validations:
+      required: false
+  - type: input
+    id: deployment
+    attributes:
+      label: Deployment
+      description: Docker (GHCR/compose), Unraid, local dev, etc.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server logs or console errors (redact tokens/keys).
+      render: shell
