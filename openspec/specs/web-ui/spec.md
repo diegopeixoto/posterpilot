@@ -6,7 +6,7 @@ TBD - created by archiving change add-poster-manager. Update Purpose after archi
 ## Requirements
 ### Requirement: Library grid with filters and search
 
-The system SHALL present the synced library as a poster grid that can be searched by title and filtered by media type (movie/show), poster state (missing poster), MediaUX availability (has candidates), change state (unchanged / still on the Plex default), minimum rating, and genre. The grid SHALL be sortable by title, release year, rating, runtime, and most-recently-changed. The grid SHALL show a spotlight backdrop banner for a recently-changed item above the wall, and each tile SHALL surface the item's rating and a status badge (e.g. MediUX-available, changed) with the title and year revealed on hover.
+The system SHALL present the synced library as a poster grid that can be searched by title and filtered by media type (movie/show), poster state (missing poster), MediaUX availability (has candidates), change state (unchanged / still on the Plex default), minimum rating, and genre. The grid SHALL be sortable by title, release year, rating, runtime, and most-recently-changed. The grid SHALL show a spotlight backdrop banner for a recently-changed item above the wall, and each tile SHALL surface the item's rating and a status badge (e.g. MediUX-available, changed) with the title and year revealed on hover. All of the grid's own UI text — filter and sort labels, control placeholders, status badges, and the empty state — SHALL render in the active locale.
 
 #### Scenario: Filter and search applied
 
@@ -33,9 +33,14 @@ The system SHALL present the synced library as a poster grid that can be searche
 - **WHEN** no library has been synced yet
 - **THEN** the grid shows an empty state prompting the user to configure Plex and run a sync
 
+#### Scenario: Localized controls and badges
+
+- **WHEN** the active locale is not English
+- **THEN** the filter/sort labels, control placeholders, status badges, and empty-state text are rendered in the active locale (falling back to English for any untranslated message)
+
 ### Requirement: Item detail with candidate comparison
 
-The system SHALL provide an item detail view led by a backdrop hero that displays the item's clearlogo (falling back to the title text when no logo exists), its rating, release year, and runtime for movies or season and episode counts for shows, its genres, and its overview, with the discover and apply actions available in the hero. Below the hero the system SHALL present the discovered MediaUX candidates grouped into sets, each set showing its uploader attribution with poster and backdrop together, and SHALL let the user stage a whole set or an individual piece, preview the current selection, and apply it via the chosen method(s). For shows the view SHALL additionally present season-poster sets and title-card sets.
+The system SHALL provide an item detail view led by a backdrop hero that displays the item's clearlogo (falling back to the title text when no logo exists), its rating, release year, and runtime for movies or season and episode counts for shows, its genres, and its overview, with the discover and apply actions available in the hero. Below the hero the system SHALL present the discovered MediaUX candidates grouped into sets, each set showing its uploader attribution with poster and backdrop together, and SHALL let the user stage a whole set or an individual piece, preview the current selection, and apply it via the chosen method(s). For shows the view SHALL additionally present season-poster sets and title-card sets. All of the view's own UI text — action buttons (discover/apply/revert), section and slot labels, and method/option labels — SHALL render in the active locale; movie/show titles, overviews, genres, and uploader names remain the upstream data values.
 
 #### Scenario: Hero with metadata
 
@@ -57,6 +62,11 @@ The system SHALL provide an item detail view led by a backdrop hero that display
 - **WHEN** the user opens an item whose covers have not been discovered
 - **THEN** the view offers a "find covers" action that runs discovery for that item
 
+#### Scenario: Localized actions and labels
+
+- **WHEN** the active locale is not English
+- **THEN** the discover/apply/revert actions, section and slot labels, and method/option labels render in the active locale, while item titles, overviews, genres, and uploader names render as their upstream data values
+
 ### Requirement: Bulk actions
 
 The system SHALL support selecting multiple items and running discovery and/or apply across the selection as a background job.
@@ -68,41 +78,36 @@ The system SHALL support selecting multiple items and running discovery and/or a
 
 ### Requirement: Jobs view with live progress
 
-The system SHALL provide a jobs view listing active and past jobs with live progress for running jobs and final status for completed ones.
+The system SHALL provide a jobs view listing active and past jobs with live progress for running jobs and final status for completed ones. The view's own UI text — column headers, job-type and status labels, progress text, and action labels — SHALL render in the active locale.
 
 #### Scenario: Live progress shown
 
 - **WHEN** a job is running and the user opens the jobs view
 - **THEN** the view shows a live progress indicator that updates without a manual refresh
 
+#### Scenario: Localized job labels
+
+- **WHEN** the active locale is not English
+- **THEN** the jobs view's column headers, status and job-type labels, and progress text render in the active locale (falling back to English for any untranslated message)
+
 ### Requirement: Settings view
 
-The system SHALL provide a settings view to choose the active media server type (Plex, Jellyfin, or Emby), enter and test the active provider's connection credentials, and configure the TMDB credential, Kometa assets directory, and default apply method. For Plex, the view SHALL offer a "Log in" button that runs the PIN-based token-acquire flow and a local/remote connection picker populated from plex.tv connection discovery, so the user need not paste a token or type a URL. For Jellyfin and Emby, the view SHALL offer base URL + API key fields. Saving SHALL validate connectivity for the active provider (and TMDB) and persist the configuration, reporting any validation failure inline.
-
-#### Scenario: Server type selected
-
-- **WHEN** the user selects a server type (Plex, Jellyfin, or Emby)
-- **THEN** the settings view shows that provider's credential fields and connection controls, and the active type is persisted on save
-
-#### Scenario: Plex login via PIN
-
-- **WHEN** the user clicks the Plex "Log in" button
-- **THEN** the view shows the PIN code and plex.tv authorization link, polls until a token is acquired, and indicates that a Plex token is now set without revealing it
-
-#### Scenario: Plex connection picked
-
-- **WHEN** a Plex token is available and the user opens the connection picker
-- **THEN** the view lists discovered Plex connections labeled local or remote (relay flagged) and lets the user select one as the Plex URL, which is tested before saving
-
-#### Scenario: Jellyfin or Emby credentials saved and validated
-
-- **WHEN** the user enters a Jellyfin/Emby base URL and API key and saves
-- **THEN** the system tests connectivity against that provider and persists the configuration, reporting any validation failure inline
+The system SHALL provide a settings view to enter and test the Plex URL/token, TMDB credential, Kometa assets directory, default apply method, and preferred UI language. The view's own UI text — field labels, helper text, validation messages, and action buttons — SHALL render in the active locale.
 
 #### Scenario: Settings saved and validated
 
 - **WHEN** the user enters configuration in settings and saves
-- **THEN** the system validates connectivity (the active media server and TMDB) and persists the configuration, reporting any validation failure inline
+- **THEN** the system validates connectivity (Plex and TMDB) and persists the configuration, reporting any validation failure inline
+
+#### Scenario: Language selectable in settings
+
+- **WHEN** the user selects a preferred UI language in settings and saves
+- **THEN** the system persists it as the preferred-language setting and applies it as the active locale, consistent with the header language switcher
+
+#### Scenario: Localized settings text
+
+- **WHEN** the active locale is not English
+- **THEN** the settings field labels, helper text, validation messages, and action buttons render in the active locale (falling back to English for any untranslated message)
 
 ### Requirement: Custom set builder
 
@@ -125,7 +130,7 @@ The system SHALL provide a persistent, sticky builder on the item detail view wi
 
 ### Requirement: Unified MediUX visual language
 
-The system SHALL render every page (Dashboard, Library, Item detail, Jobs, Settings) within a shared application shell using one consistent theme: a near-black background, a single accent color, a glassy sticky header with navigation, and consistent card styling.
+The system SHALL render every page (Dashboard, Library, Item detail, Jobs, Settings) within a shared application shell using one consistent theme: a near-black background, a single accent color, a glassy sticky header with navigation, and consistent card styling. The shell header SHALL include a language switcher that is available on every page, and all of the shell's own text (navigation labels, the configure-to-get-started banner) SHALL render in the active locale.
 
 #### Scenario: Consistent shell across pages
 
@@ -136,6 +141,16 @@ The system SHALL render every page (Dashboard, Library, Item detail, Jobs, Setti
 
 - **WHEN** the user is on a given page
 - **THEN** the corresponding navigation item is visually marked as active
+
+#### Scenario: Language switcher in the shell
+
+- **WHEN** the user is on any page
+- **THEN** the shell header shows a language switcher reflecting the active locale, and selecting another language re-renders the app in that locale
+
+#### Scenario: Localized shell text
+
+- **WHEN** the active locale is not English
+- **THEN** the navigation labels and the configure-to-get-started banner render in the active locale (falling back to English for any untranslated message)
 
 ### Requirement: Candidates grouped by provider
 

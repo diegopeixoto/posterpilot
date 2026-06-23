@@ -6,7 +6,7 @@ TBD - created by archiving change add-poster-manager. Update Purpose after archi
 ## Requirements
 ### Requirement: Provide and persist runtime configuration
 
-The system SHALL accept runtime configuration — an active server type (`plex` | `jellyfin` | `emby`), per-provider connection credentials (Plex base URL + token; Jellyfin base URL + API key; Emby base URL + API key), TMDB credential, Kometa assets directory, and default apply method — from environment variables and from the settings UI, and SHALL persist UI-entered values so they survive restarts. The per-provider environment variables SHALL be `PLEX_URL`/`PLEX_TOKEN`, `JELLYFIN_URL`/`JELLYFIN_API_KEY`, and `EMBY_URL`/`EMBY_API_KEY`, plus a server-type variable.
+The system SHALL accept runtime configuration — Plex base URL, Plex token, TMDB credential, Kometa assets directory, default apply method, and preferred UI language — from environment variables and from the settings UI, and SHALL persist UI-entered values so they survive restarts. The preferred UI language SHALL be one of the supported locales; when set, it is the highest-precedence input to UI locale resolution.
 
 #### Scenario: Configuration from environment
 
@@ -23,10 +23,20 @@ The system SHALL accept runtime configuration — an active server type (`plex` 
 - **WHEN** a value is set both in the environment and in persisted settings
 - **THEN** the environment value takes precedence and the UI indicates the value is environment-managed
 
-#### Scenario: Server type selects active credentials
+#### Scenario: Preferred language persisted
 
-- **WHEN** the active server type is set to `jellyfin` or `emby`
-- **THEN** the system treats that provider's base URL and API key as the active connection credentials, while keeping any stored Plex/other-provider credentials inert until their type is selected
+- **WHEN** the user sets a preferred UI language (via the settings UI or the header switcher) to one of the supported locales
+- **THEN** the system persists it as the `language` setting and uses it as the highest-precedence input when resolving the UI locale on subsequent requests
+
+#### Scenario: Preferred language from environment
+
+- **WHEN** a preferred UI language is supplied via its environment variable
+- **THEN** the system uses that locale as the configured preference and the UI indicates the value is environment-managed
+
+#### Scenario: Invalid or unset preferred language
+
+- **WHEN** the persisted or environment preferred-language value is absent or names an unsupported locale
+- **THEN** the system treats the preference as unset and falls back to `Accept-Language` then English when resolving the UI locale, without error
 
 ### Requirement: Validate required configuration
 
