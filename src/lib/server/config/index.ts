@@ -1,0 +1,169 @@
+import { eq, inArray } from 'drizzle-orm';
+import { env } from '$env/dynamic/private';
+import { db } from '$lib/server/db';
+import { settings } from '$lib/server/db/schema';
+
+export type ApplyMethod = 'plex' | 'kometa' | 'both';
+
+/** Effective runtime configuration. Secrets are null when unset. */
+export interface AppConfig {
+	plexUrl: string | null;
+	plexToken: string | null;
+	tmdbKey: string | null;
+	kometaAssetsDir: string;
+	mediuxDelayMs: number;
+	mediuxConcurrency: number;
+	httpCacheTtlDays: number;
+	defaultApplyMethod: ApplyMethod;
+}
+
+/** Config keys that are secrets — never returned to the client, redacted in logs. */
+export const SECRET_KEYS = ['plexToken', 'tmdbKey'] as const;
+type ConfigKey = keyof AppConfig;
+
+/** Settings key -> environment variable name. Env always overrides persisted settings. */
+const ENV_MAP: Record<ConfigKey, string> = {
+	plexUrl: 'PLEX_URL',
+	plexToken: 'PLEX_TOKEN',
+	tmdbKey: 'TMDB_KEY',
+	kometaAssetsDir: 'KOMETA_ASSETS_DIR',
+	mediuxDelayMs: 'MEDIUX_REQUEST_DELAY_MS',
+	mediuxConcurrency: 'MEDIUX_CONCURRENCY',
+	httpCacheTtlDays: 'HTTP_CACHE_TTL_DAYS',
+	defaultApplyMethod: 'DEFAULT_APPLY_METHOD'
+};
+
+const DEFAULTS = {
+	kometaAssetsDir: './data/kometa',
+	mediuxDelayMs: 2000,
+	mediuxConcurrency: 5,
+	httpCacheTtlDays: 7,
+	defaultApplyMethod: 'both' as ApplyMethod
+};
+
+/** Persisted-settings keys that the UI is allowed to write. */
+export const WRITABLE_KEYS: ConfigKey[] = [
+	'plexUrl',
+	'plexToken',
+	'tmdbKey',
+	'kometaAssetsDir',
+	'mediuxDelayMs',
+	'mediuxConcurrency',
+	'httpCacheTtlDays',
+	'defaultApplyMethod'
+];
+
+async function loadSettings(): Promise<Record<string, string>> {
+	const rows = await db.select().from(settings);
+	return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+/** Read a single raw value: env wins, else persisted setting, else undefined. */
+function rawValue(key: ConfigKey, persisted: Record<string, string>): string | undefined {
+	const fromEnv = env[ENV_MAP[key]];
+	if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
+	const fromDb = persisted[key];
+	if (fromDb !== undefined && fromDb !== '') return fromDb;
+	return undefined;
+}
+
+function toInt(value: string | undefined, fallback: number): number {
+	const n = value === undefined ? NaN : Number.parseInt(value, 10);
+	return Number.isFinite(n) ? n : fallback;
+}
+
+/** Resolve the effective configuration (env over persisted settings). Server-only. */
+export async function resolveConfig(): Promise<AppConfig> {
+	const persisted = await loadSettings();
+	const method = rawValue('defaultApplyMethod', persisted) as ApplyMethod | undefined;
+	return {
+		plexUrl: rawValue('plexUrl', persisted) ?? null,
+		plexToken: rawValue('plexToken', persisted) ?? null,
+		tmdbKey: rawValue('tmdbKey', persisted) ?? null,
+		kometaAssetsDir: rawValue('kometaAssetsDir', persisted) ?? DEFAULTS.kometaAssetsDir,
+		mediuxDelayMs: toInt(rawValue('mediuxDelayMs', persisted), DEFAULTS.mediuxDelayMs),
+		mediuxConcurrency: toInt(rawValue('mediuxConcurrency', persisted), DEFAULTS.mediuxConcurrency),
+		httpCacheTtlDays: toInt(rawValue('httpCacheTtlDays', persisted), DEFAULTS.httpCacheTtlDays),
+		defaultApplyMethod:
+			method === 'plex' || method === 'kometa' || method === 'both'
+				? method
+				: DEFAULTS.defaultApplyMethod
+	};
+}
+
+/** True when a key is sourced from the environment (and thus locked from UI editing). */
+export function isEnvManaged(key: ConfigKey): boolean {
+	const v = env[ENV_MAP[key]];
+	return v !== undefined && v !== '';
+}
+
+export class MissingConfigError extends Error {
+	constructor(public readonly missing: ConfigKey[]) {
+		super(`Missing required configuration: ${missing.join(', ')}`);
+		this.name = 'MissingConfigError';
+	}
+}
+
+/** Throw MissingConfigError if any required key is unset. */
+export function requireConfig(config: AppConfig, keys: ConfigKey[]): void {
+	const missing = keys.filter((k) => config[k] === null || config[k] === undefined || config[k] === '');
+	if (missing.length) throw new MissingConfigError(missing);
+}
+
+/** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
+export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
+	const entries = Object.entries(values).filter(([k]) => WRITABLE_KEYS.includes(k as ConfigKey));
+	for (const [key, value] of entries) {
+		if (value === '' || value === undefined) {
+			await db.delete(settings).where(eq(settings.key, key));
+		} else {
+			await db
+				.insert(settings)
+				.values({ key, value })
+				.onConflictDoUpdate({ target: settings.key, set: { value } });
+		}
+	}
+}
+
+/**
+ * Client-safe view of configuration: secrets become a boolean "set" flag, and each
+ * key reports whether it is environment-managed (read-only in the UI).
+ */
+export interface PublicConfig {
+	plexUrl: string | null;
+	plexTokenSet: boolean;
+	tmdbKeySet: boolean;
+	kometaAssetsDir: string;
+	mediuxDelayMs: number;
+	mediuxConcurrency: number;
+	httpCacheTtlDays: number;
+	defaultApplyMethod: ApplyMethod;
+	envManaged: Partial<Record<ConfigKey, boolean>>;
+}
+
+export async function publicConfig(): Promise<PublicConfig> {
+	const c = await resolveConfig();
+	const envManaged: Partial<Record<ConfigKey, boolean>> = {};
+	for (const k of WRITABLE_KEYS) envManaged[k] = isEnvManaged(k);
+	return {
+		plexUrl: c.plexUrl,
+		plexTokenSet: c.plexToken !== null,
+		tmdbKeySet: c.tmdbKey !== null,
+		kometaAssetsDir: c.kometaAssetsDir,
+		mediuxDelayMs: c.mediuxDelayMs,
+		mediuxConcurrency: c.mediuxConcurrency,
+		httpCacheTtlDays: c.httpCacheTtlDays,
+		defaultApplyMethod: c.defaultApplyMethod,
+		envManaged
+	};
+}
+
+/** Redact known secret values from an arbitrary string (for safe logging). */
+export function redact(text: string, config: AppConfig): string {
+	let out = text;
+	for (const key of SECRET_KEYS) {
+		const secret = config[key];
+		if (secret && secret.length >= 4) out = out.split(secret).join('***');
+	}
+	return out;
+}

@@ -14,9 +14,9 @@
 
 ## 3. Configuration
 
-- [ ] 3.1 Implement config loading: environment variables overriding persisted settings (env wins)
-- [ ] 3.2 Implement settings persistence (read/write the `settings` table) with secret redaction (never return stored secrets to the client; "set/not set" only)
-- [ ] 3.3 Implement required-config validation and clear missing-config errors for sync/resolve operations
+- [x] 3.1 Implement config loading: environment variables overriding persisted settings (env wins)
+- [x] 3.2 Implement settings persistence (read/write the `settings` table) with secret redaction (never return stored secrets to the client; "set/not set" only)
+- [x] 3.3 Implement required-config validation and clear missing-config errors for sync/resolve operations
 
 ## 4. Plex integration
 
