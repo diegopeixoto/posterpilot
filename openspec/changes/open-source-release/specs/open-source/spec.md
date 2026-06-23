@@ -73,3 +73,79 @@ The repository SHALL include a `.github/FUNDING.yml` with the maintainer's spons
 
 - **WHEN** a visitor views the repository on GitHub
 - **THEN** a Sponsor option is shown, sourced from `.github/FUNDING.yml`
+
+### Requirement: Copyright attribution
+
+The `LICENSE` file SHALL name the copyright holder "Diego Peixoto" and the release year, and the README SHALL include a short copyright/notice line in its footer.
+
+#### Scenario: License names holder and year
+
+- **WHEN** a visitor opens the `LICENSE` file
+- **THEN** the copyright line reads "Copyright (c) <year> Diego Peixoto" with the current release year
+
+#### Scenario: README footer carries a notice
+
+- **WHEN** a visitor reads the bottom of the README
+- **THEN** a footer line attributes copyright to Diego Peixoto and references the MIT license
+
+### Requirement: Official container image publishing
+
+The repository SHALL publish a multi-architecture (linux/amd64 and linux/arm64) container image to GitHub Container Registry at `ghcr.io/diegopeixoto/posterpilot` on tagged releases, built with `docker/build-push-action`, and the README SHALL document pulling and running the official image.
+
+#### Scenario: Image published on a tagged release
+
+- **WHEN** a release tag (e.g. `v1.2.0`) is created
+- **THEN** a workflow builds the image for both `linux/amd64` and `linux/arm64` and pushes it to `ghcr.io/diegopeixoto/posterpilot`
+
+#### Scenario: Image tagged with version and latest
+
+- **WHEN** the image for release `v1.2.0` is pushed
+- **THEN** it is tagged with the semantic version (`1.2.0`), the major/minor aliases, and `latest`
+
+#### Scenario: README documents the official image
+
+- **WHEN** a user reads the README deployment section
+- **THEN** it shows how to `docker pull ghcr.io/diegopeixoto/posterpilot:latest` and run it with the required volumes and environment
+
+#### Scenario: Image runs on Mac and Unraid hardware
+
+- **WHEN** the published image is pulled on an arm64 Mac and on an amd64 Unraid host
+- **THEN** the matching architecture variant is selected automatically and the container starts on both
+
+### Requirement: Release automation and changelog
+
+The repository SHALL automate versioning, changelog, tags, and GitHub Releases from Conventional Commits using `release-please`, which maintains a release pull request that updates `CHANGELOG.md` and the package version and, when merged, creates the tag and GitHub Release.
+
+#### Scenario: Release PR maintained from commits
+
+- **WHEN** Conventional Commits (e.g. `feat:`, `fix:`) land on the default branch
+- **THEN** release-please opens or updates a release pull request that bumps the version and appends the corresponding entries to `CHANGELOG.md`
+
+#### Scenario: Merging the release PR cuts a release
+
+- **WHEN** the maintainer merges the release pull request
+- **THEN** release-please creates the version tag and a GitHub Release whose notes are generated from the Conventional Commits
+
+#### Scenario: Release tag triggers image publish
+
+- **WHEN** the release tag is created by release-please
+- **THEN** the container-image publishing workflow runs for that tag and pushes the versioned image
+
+### Requirement: Health endpoint
+
+The application SHALL expose an unauthenticated `GET /api/health` endpoint that returns HTTP 200 with a JSON body reporting application status and version, so deployments can health-check the container, and the README SHALL document it.
+
+#### Scenario: Health check returns ok and version
+
+- **WHEN** a client sends `GET /api/health`
+- **THEN** the response is HTTP 200 with a JSON body containing `status: "ok"` and the running application `version`
+
+#### Scenario: Endpoint requires no authentication
+
+- **WHEN** an orchestrator (Docker/Unraid health check) calls `GET /api/health` without credentials
+- **THEN** it receives the 200 status response and can use it as a container health probe
+
+#### Scenario: README documents the endpoint
+
+- **WHEN** an operator reads the README
+- **THEN** it documents the `/api/health` endpoint and shows an example container health-check using it
