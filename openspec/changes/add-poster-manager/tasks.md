@@ -53,7 +53,7 @@
 - [x] 8.2 Implement job types: library sync, bulk discovery, bulk apply
 - [x] 8.3 Implement SSE progress streaming (processed/total, current item, status), including snapshot-on-subscribe for in-progress jobs
 - [x] 8.4 Implement job cancellation and persist job history; mark interrupted jobs failed on startup
-- [ ] 8.5 Tests for progress reporting, cancellation, and restart handling
+- [x] 8.5 Tests for progress reporting, cancellation, and restart handling (events.test.ts bus; runner.test.ts against an in-memory libsql DB: completion, failure, cancel mid-run, mark-interrupted)
 
 ## 9. Web UI
 
