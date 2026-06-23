@@ -45,7 +45,7 @@
 - [x] 7.2 Implement direct apply (delegate to Plex `uploadPosterFromUrl`) recording method "plex"
 - [x] 7.3 Implement Kometa YAML export (`url_poster`/`url_background`) to the mounted assets dir, updating existing entries in place, recording method "kometa"
 - [x] 7.4 Implement combined apply (both methods) recording each outcome independently
-- [ ] 7.5 Record applied posters in history; tests for each method and partial-failure visibility
+- [x] 7.5 Record applied posters in history; tests for each method and partial-failure visibility (service.test.ts: plex/kometa/both/partial-failure/missing-config)
 
 ## 8. Background jobs
 
@@ -68,7 +68,7 @@
 
 - [x] 10.1 Write a single Dockerfile (Bun base) building UI + API + worker into one image (builds clean, exit 0)
 - [x] 10.2 Write a documented `docker-compose.yml` for Unraid: data volume, Kometa assets volume, published port, required env
-- [ ] 10.3 Image builds (verified: `docker build` exit 0) and the identical native server (`bun ./build/index.js`) boots and serves 200 on all routes (verified). IN-CONTAINER runtime NOT yet verified — the OrbStack Docker daemon went down right after the build, so `docker run`/`compose up` could not be exercised. Re-run `docker compose up -d --build` once Docker is back to confirm. Kometa export to a mounted dir verified separately.
+- [x] 10.3 Verified end to end: `docker compose up -d --build` runs the container, which serves 200 on all routes (`/`, `/library`, `/jobs`, `/settings`, `/api/settings/test`) with 0 errors in logs. Same image for Unraid; Kometa export to a mounted dir verified separately.
 - [x] 10.4 Write README: setup, env vars, running on Mac vs. Unraid, and how Kometa consumes the exports
 
 ## 11. Verification
