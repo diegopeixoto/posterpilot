@@ -1,0 +1,89 @@
+---
+title: PosterPilot
+description: Aplicación web autoalojada para explorar tu biblioteca multimedia, encontrar carátulas en varios proveedores y aplicarlas a Plex/Jellyfin/Emby o mediante YAML de Kometa.
+template: splash
+hero:
+  tagline: Explora tu biblioteca, encuentra mejores carátulas y aplícalas, directamente a tu servidor multimedia o como YAML listo para Kometa.
+  actions:
+    - text: Comenzar
+      link: /posterpilot/es/installation/
+      icon: right-arrow
+      variant: primary
+    - text: Ver en GitHub
+      link: https://github.com/diegopeixoto/posterpilot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+PosterPilot es una aplicación web autoalojada que explora una biblioteca
+multimedia ([Plex](https://www.plex.tv/), con soporte provisional para
+[Jellyfin](https://jellyfin.org/) y [Emby](https://emby.media/)), encuentra
+carátulas en varios proveedores y aplica la carátula elegida a tu servidor
+multimedia, directamente a través de su API o exportando YAML compatible con
+[Kometa](https://kometa.wiki/)/PMM. Se ejecuta como un único contenedor Docker en
+un Mac o en un servidor Unraid.
+
+{/* TODO: add a hero screenshot of the library wall here once captured. */}
+
+## Qué hace
+
+<CardGrid stagger>
+	<Card title="Sincroniza tu biblioteca" icon="seti:db">
+		Sincroniza tus bibliotecas de películas y series y resuelve cada título a un id de TMDB para que
+		los proveedores de carátulas puedan consultarse con precisión.
+	</Card>
+	<Card title="Encuentra carátulas" icon="seti:image">
+		Despliega la búsqueda entre los proveedores habilitados —MediUX, Fanart.tv, TMDB y ThePosterDB—
+		y compara las candidatas de pósters y fondos agrupadas por proveedor y conjunto.
+	</Card>
+	<Card title="Aplica carátulas" icon="approve-check">
+		Aplica una carátula elegida mediante la API del servidor multimedia (sube y bloquea el campo, al
+		instante) o mediante una exportación de YAML de Kometa que tu instancia de Kometa consume en su
+		próxima ejecución.
+	</Card>
+	<Card title="Mantén la localización" icon="translate">
+		La interfaz se ofrece en inglés, español, chino simplificado, japonés y portugués de Brasil, con
+		reserva al inglés por clave, gestionada a través de Weblate.
+	</Card>
+</CardGrid>
+
+El trabajo sobre toda la biblioteca se ejecuta como tareas en segundo plano con
+progreso en vivo mediante Server-Sent Events.
+
+## A dónde ir después
+
+<CardGrid>
+	<LinkCard
+		title="Instalación"
+		href="/posterpilot/es/installation/"
+		description="Ejecuta PosterPilot con Docker Compose en un Mac o Unraid usando la imagen oficial de GHCR."
+	/>
+	<LinkCard
+		title="Configuración"
+		href="/posterpilot/es/configuration/"
+		description="Conecta un servidor multimedia, define tu clave de TMDB, habilita proveedores de carátulas y conoce la referencia completa de variables de entorno."
+	/>
+	<LinkCard
+		title="Uso"
+		href="/posterpilot/es/usage/"
+		description="Sincroniza una biblioteca, encuentra carátulas, aplícalas, crea conjuntos personalizados y filtra el muro de la biblioteca."
+	/>
+	<LinkCard
+		title="Contribuir"
+		href="/posterpilot/es/contributing/"
+		description="Configura el proyecto localmente y ejecuta los controles de calidad antes de enviar un cambio."
+	/>
+</CardGrid>
+
+## Stack
+
+- **SvelteKit** (TypeScript) sobre **Bun**, compilado con `adapter-node`
+- **SQLite + Drizzle ORM** (libsql) para la caché de la biblioteca, las
+  candidatas, el historial, las tareas y los ajustes
+- **Tailwind CSS v4**, una interfaz oscura centrada en las imágenes
+- Una cola de tareas en proceso con **Server-Sent Events** para el progreso en
+  vivo
+
+PosterPilot se publica bajo la [licencia MIT](https://github.com/diegopeixoto/posterpilot/blob/main/LICENSE).

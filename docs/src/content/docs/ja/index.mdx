@@ -1,0 +1,85 @@
+---
+title: PosterPilot
+description: メディアライブラリを閲覧し、複数のプロバイダーをまたいでアートワークのカバーを見つけ、Plex/Jellyfin/Emby に、または Kometa YAML 経由で適用するセルフホスト型ウェブアプリ。
+template: splash
+hero:
+  tagline: ライブラリを閲覧し、より良いアートワークを見つけて適用しましょう — メディアサーバーに直接、または Kometa 対応の YAML として。
+  actions:
+    - text: 始める
+      link: /posterpilot/ja/installation/
+      icon: right-arrow
+      variant: primary
+    - text: GitHub で見る
+      link: https://github.com/diegopeixoto/posterpilot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+PosterPilot は、メディアライブラリ
+（[Plex](https://www.plex.tv/)、暫定的な [Jellyfin](https://jellyfin.org/)
+および [Emby](https://emby.media/) サポート付き）を閲覧し、複数のプロバイダーをまたいでアートワークのカバーを
+見つけ、選んだカバーをメディアサーバーに適用するセルフホスト型ウェブアプリです — その API を通じて直接、
+かつ／または [Kometa](https://kometa.wiki/)/PMM 互換の YAML をエクスポートすることで適用できます。これは
+Mac または Unraid サーバー上で単一の Docker コンテナとして動作します。
+
+{/* TODO: add a hero screenshot of the library wall here once captured. */}
+
+## 機能
+
+<CardGrid stagger>
+	<Card title="ライブラリを同期" icon="seti:db">
+		映画と番組のライブラリを同期し、各タイトルを TMDB id に解決することで、アートワークプロバイダーに
+		正確に問い合わせできるようにします。
+	</Card>
+	<Card title="カバーを見つける" icon="seti:image">
+		有効なプロバイダー — MediUX、Fanart.tv、TMDB、ThePosterDB — をまたいで展開し、ポスターと背景の
+		候補をプロバイダーとセットごとにグループ化して比較します。
+	</Card>
+	<Card title="カバーを適用" icon="approve-check">
+		選んだカバーを、メディアサーバーの API 経由（フィールドをアップロードしてロックし、即座に反映）で、
+		かつ／または、次回の実行時に Kometa インスタンスが取り込む Kometa YAML エクスポート経由で適用します。
+	</Card>
+	<Card title="ローカライズを維持" icon="translate">
+		UI は英語、スペイン語、簡体字中国語、日本語、ブラジルポルトガル語で提供され、キーごとに英語へ
+		フォールバックします — Weblate を通じて管理されています。
+	</Card>
+</CardGrid>
+
+ライブラリ全体にわたる処理は、Server-Sent Events によるライブ進捗付きのバックグラウンドジョブとして
+実行されます。
+
+## 次に進む場所
+
+<CardGrid>
+	<LinkCard
+		title="インストール"
+		href="/posterpilot/ja/installation/"
+		description="公式の GHCR イメージを使って、Mac または Unraid 上で Docker Compose により PosterPilot を実行します。"
+	/>
+	<LinkCard
+		title="設定"
+		href="/posterpilot/ja/configuration/"
+		description="メディアサーバーを接続し、TMDB キーを設定し、アートワークプロバイダーを有効にして、環境変数の完全なリファレンスを学びます。"
+	/>
+	<LinkCard
+		title="使い方"
+		href="/posterpilot/ja/usage/"
+		description="ライブラリを同期し、カバーを見つけて適用し、カスタムセットを作成し、ライブラリウォールをフィルタします。"
+	/>
+	<LinkCard
+		title="貢献"
+		href="/posterpilot/ja/contributing/"
+		description="プロジェクトをローカルでセットアップし、変更を提出する前に品質ゲートを実行します。"
+	/>
+</CardGrid>
+
+## 技術スタック
+
+- **Bun** 上の **SvelteKit**（TypeScript）、`adapter-node` でビルド
+- ライブラリキャッシュ、候補、履歴、ジョブ、設定のための **SQLite + Drizzle ORM**（libsql）
+- **Tailwind CSS v4**、ダークで画像中心の UI
+- ライブ進捗のための **Server-Sent Events** を備えたインプロセスジョブキュー
+
+PosterPilot は [MIT License](https://github.com/diegopeixoto/posterpilot/blob/main/LICENSE) の下でリリースされています。

@@ -14,6 +14,18 @@ export default defineConfig({
 			title: 'PosterPilot',
 			description:
 				'Self-hosted web app to browse a Plex/Jellyfin/Emby library, find artwork covers across multiple providers, and apply them to your media server and/or via Kometa YAML.',
+			// Match the app's locales. English is the root locale, so it stays at
+			// /posterpilot/ with no /en prefix; the others get a /<locale>/ prefix.
+			// Starlight adds a language picker to the header automatically and falls
+			// back to the default locale for any untranslated page.
+			defaultLocale: 'root',
+			locales: {
+				root: { label: 'English', lang: 'en' },
+				es: { label: 'Español', lang: 'es' },
+				zh: { label: '简体中文', lang: 'zh' },
+				ja: { label: '日本語', lang: 'ja' },
+				'pt-br': { label: 'Português (BR)', lang: 'pt-BR' }
+			},
 			logo: {
 				light: './src/assets/logo-light.png',
 				dark: './src/assets/logo-dark.png',
@@ -22,6 +34,9 @@ export default defineConfig({
 			},
 			favicon: '/favicon.svg',
 			lastUpdated: true,
+			components: {
+				Footer: './src/components/Footer.astro'
+			},
 			head: [
 				{ tag: 'link', attrs: { rel: 'icon', href: '/favicon.ico', sizes: '32x32' } },
 				{ tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } }

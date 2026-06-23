@@ -1,0 +1,24 @@
+---
+// Wraps Starlight's default footer and appends a trademark/affiliation disclaimer
+// shown on every page and every locale.
+import Default from '@astrojs/starlight/components/Footer.astro';
+---
+
+<Default />
+
+<p class="pp-disclaimer">
+	PosterPilot is an independent project, not affiliated with or endorsed by Plex, Jellyfin, Emby,
+	MediUX, Fanart.tv, TMDB, ThePosterDB, or Kometa. Trademarks belong to their respective owners.
+	This product uses the TMDB API but is not endorsed or certified by TMDB.
+</p>
+
+<style>
+	.pp-disclaimer {
+		margin-top: 2rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--sl-color-hairline);
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+		text-align: center;
+	}
+</style>

@@ -1,0 +1,85 @@
+---
+title: PosterPilot
+description: 自托管 Web 应用，可浏览你的媒体库，跨多个提供方查找封面海报，并将其应用到 Plex/Jellyfin/Emby 和/或通过 Kometa YAML 应用。
+template: splash
+hero:
+  tagline: 浏览你的媒体库，查找更好的封面海报，并将其直接应用到你的媒体服务器，或导出为可供 Kometa 使用的 YAML。
+  actions:
+    - text: 开始使用
+      link: /posterpilot/zh/installation/
+      icon: right-arrow
+      variant: primary
+    - text: 在 GitHub 上查看
+      link: https://github.com/diegopeixoto/posterpilot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+PosterPilot 是一个自托管的 Web 应用，可浏览媒体库
+（[Plex](https://www.plex.tv/)，并临时支持 [Jellyfin](https://jellyfin.org/)
+和 [Emby](https://emby.media/)），跨多个提供方查找封面海报，
+并将选定的封面应用到你的媒体服务器——可直接通过其 API
+应用，和/或通过导出 [Kometa](https://kometa.wiki/)/PMM 兼容的 YAML 应用。它在
+Mac 或 Unraid 服务器上作为单个 Docker 容器运行。
+
+{/* TODO: add a hero screenshot of the library wall here once captured. */}
+
+## 它能做什么
+
+<CardGrid stagger>
+	<Card title="同步你的媒体库" icon="seti:db">
+		同步你的电影和剧集媒体库，并将每个标题解析为 TMDB id，以便准确地查询封面提供方。
+	</Card>
+	<Card title="查找封面" icon="seti:image">
+		跨所有启用的提供方——MediUX、Fanart.tv、TMDB 和 ThePosterDB——发散查找，并按提供方和套图分组比较海报
+		和背景候选项。
+	</Card>
+	<Card title="应用封面" icon="approve-check">
+		通过媒体服务器 API 应用选定的封面（即时上传并锁定该字段），和/或
+		通过 Kometa YAML 导出应用，由你的 Kometa 实例在下次运行时使用。
+	</Card>
+	<Card title="保持本地化" icon="translate">
+		界面提供英语、西班牙语、简体中文、日语和巴西葡萄牙语版本，并带有
+		按键的英语回退——通过 Weblate 管理。
+	</Card>
+</CardGrid>
+
+库范围的工作作为后台任务运行，并通过 Server-Sent
+Events 提供实时进度。
+
+## 接下来去哪里
+
+<CardGrid>
+	<LinkCard
+		title="安装"
+		href="/posterpilot/zh/installation/"
+		description="使用官方 GHCR 镜像，在 Mac 或 Unraid 上通过 Docker Compose 运行 PosterPilot。"
+	/>
+	<LinkCard
+		title="配置"
+		href="/posterpilot/zh/configuration/"
+		description="连接媒体服务器、设置你的 TMDB 密钥、启用封面提供方，并了解完整的环境变量参考。"
+	/>
+	<LinkCard
+		title="使用"
+		href="/posterpilot/zh/usage/"
+		description="同步媒体库、查找封面、应用封面、构建自定义套图，并筛选库墙。"
+	/>
+	<LinkCard
+		title="贡献"
+		href="/posterpilot/zh/contributing/"
+		description="在本地搭建项目，并在提交更改前运行质量检查。"
+	/>
+</CardGrid>
+
+## 技术栈
+
+- **SvelteKit**（TypeScript）运行于 **Bun** 之上，使用 `adapter-node` 构建
+- **SQLite + Drizzle ORM**（libsql），用于库缓存、候选项、历史记录、
+  任务和设置
+- **Tailwind CSS v4**，深色、以图像为主的界面
+- 进程内任务队列，配合 **Server-Sent Events** 提供实时进度
+
+PosterPilot 以 [MIT License](https://github.com/diegopeixoto/posterpilot/blob/main/LICENSE) 发布。
