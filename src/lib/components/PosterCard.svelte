@@ -27,36 +27,42 @@
 					class="h-full w-full object-cover transition group-hover:scale-[1.03]"
 				/>
 			{:else}
-				<div class="flex h-full items-center justify-center text-xs text-neutral-600">No poster</div>
+				<div class="flex h-full items-center justify-center text-xs text-neutral-600">
+					No poster
+				</div>
 			{/if}
 		</div>
-		<div class="p-2">
-			<p class="truncate text-sm font-medium text-neutral-100" title={item.title}>{item.title}</p>
-			<p class="text-xs text-neutral-500">{item.year ?? '—'} · {item.type}</p>
+
+		<!-- Hover title/year overlay -->
+		<div
+			class="pointer-events-none absolute inset-x-0 bottom-0 translate-y-2 bg-gradient-to-t from-black/90 to-transparent p-2 opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100"
+		>
+			<p class="truncate text-sm font-medium text-white" title={item.title}>{item.title}</p>
+			<p class="text-xs text-neutral-300">{item.year ?? '—'} · {item.type}</p>
 		</div>
 	</a>
 
-	<div class="pointer-events-none absolute left-2 top-2 flex gap-1">
-		{#if item.hasMediux}
-			<span class="rounded bg-violet-600/90 px-1.5 py-0.5 text-[10px] font-semibold text-white"
-				>MediaUX</span
-			>
-		{/if}
-		{#if item.selectedPosterUrl}
-			<span class="rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-semibold text-white"
-				>picked</span
-			>
-		{/if}
+	<!-- Status badges -->
+	<div class="pointer-events-none absolute top-2 left-2 flex gap-1">
+		{#if item.hasMediux}<span class="badge badge-mediux">MediUX</span>{/if}
+		{#if item.selectedPosterUrl}<span class="badge badge-changed">✓ changed</span>{/if}
 	</div>
+
+	<!-- Rating -->
+	{#if item.rating}
+		<span class="badge badge-muted absolute bottom-2 left-2 text-amber-300"
+			>★ {item.rating.toFixed(1)}</span
+		>
+	{/if}
 
 	{#if selectable}
 		<button
 			type="button"
 			onclick={onToggle}
 			aria-label={selected ? 'Deselect' : 'Select'}
-			class="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded border text-xs font-bold transition {selected
-				? 'border-indigo-400 bg-indigo-500 text-white'
-				: 'border-neutral-600 bg-neutral-900/80 text-transparent hover:border-neutral-400'}"
+			class="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded border text-xs font-bold transition {selected
+				? 'border-accent-400 bg-accent-500 text-white'
+				: 'border-neutral-600 bg-neutral-900/80 text-transparent opacity-0 group-hover:opacity-100 hover:border-neutral-400'}"
 		>
 			✓
 		</button>

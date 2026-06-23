@@ -1,6 +1,11 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { appliedPosters, mediaItems, posterCandidates, type MediaItem } from '$lib/server/db/schema';
+import {
+	appliedPosters,
+	mediaItems,
+	posterCandidates,
+	type MediaItem
+} from '$lib/server/db/schema';
 import { requireConfig, type AppConfig, type ApplyMethod } from '$lib/server/config';
 import { setPosterLock, uploadPosterBytes, uploadPosterFromUrl } from '$lib/server/plex/client';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
@@ -31,6 +36,7 @@ export async function discoverForItem(
 			flat.map((c) => ({
 				mediaItemId: item.id,
 				setId: c.setId,
+				setAuthor: c.setAuthor,
 				url: c.url,
 				kind: c.kind,
 				season: c.season,
@@ -173,7 +179,12 @@ export async function applyCustomUpload(
 export async function revertItem(item: MediaItem, config: AppConfig): Promise<void> {
 	requireConfig(config, ['plexUrl', 'plexToken']);
 	if (item.currentPosterUrl) {
-		await uploadPosterFromUrl(config.plexUrl!, config.plexToken!, item.ratingKey, item.currentPosterUrl);
+		await uploadPosterFromUrl(
+			config.plexUrl!,
+			config.plexToken!,
+			item.ratingKey,
+			item.currentPosterUrl
+		);
 	}
 	await setPosterLock(config.plexUrl!, config.plexToken!, item.ratingKey, false);
 	await db.delete(appliedPosters).where(eq(appliedPosters.mediaItemId, item.id));

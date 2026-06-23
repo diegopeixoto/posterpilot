@@ -36,12 +36,38 @@ export interface TmdbResolution {
 	mediaType: TmdbMediaType;
 }
 
+/** A top-billed cast member, as shown on the item hero. */
+export interface TmdbCastMember {
+	name: string;
+	character: string | null;
+	profileUrl: string | null;
+}
+
+/**
+ * Display metadata for an item, derived from the TMDB detail (+credits) response
+ * and the images endpoint. All fields are optional — TMDB may omit any of them.
+ */
+export interface TmdbMetadata {
+	overview: string | null;
+	tagline: string | null;
+	genres: string[];
+	runtime: number | null;
+	rating: number | null;
+	backdropUrl: string | null;
+	logoUrl: string | null;
+	seasonCount: number | null;
+	episodeCount: number | null;
+	cast: TmdbCastMember[];
+}
+
 // --- MediaUX ---
 
 export type CandidateKind = 'poster' | 'background' | 'season' | 'title_card';
 
 export interface MediuxCandidate {
 	setId: string;
+	/** Uploader/author of the owning set, when present in the payload. */
+	setAuthor: string | null;
 	/** Absolute asset URL, e.g. https://api.mediux.pro/assets/<file_id> */
 	url: string;
 	kind: CandidateKind;
@@ -53,5 +79,6 @@ export interface MediuxCandidate {
 
 export interface MediuxSet {
 	setId: string;
+	author: string | null;
 	candidates: MediuxCandidate[];
 }

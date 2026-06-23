@@ -1,5 +1,21 @@
 @import 'tailwindcss';
 
+/* MediUX-style palette: a single violet accent on a near-black base. Defining the
+   accent as theme tokens generates `accent` color utilities (bg-accent-600, etc.)
+   so every page shares one accent instead of the old indigo/violet mix. */
+@theme {
+	--color-accent-100: #ede9fe;
+	--color-accent-200: #ddd6fe;
+	--color-accent-300: #c4b5fd;
+	--color-accent-400: #a78bfa;
+	--color-accent-500: #8b5cf6;
+	--color-accent-600: #7c3aed;
+	--color-accent-700: #6d28d9;
+	--color-accent-800: #5b21b6;
+	--color-accent-900: #4c1d95;
+	--color-accent-950: #2e1065;
+}
+
 :root {
 	color-scheme: dark;
 }
@@ -13,4 +29,55 @@ body {
 	background-color: #0a0a0a;
 	color: #fafafa;
 	-webkit-font-smoothing: antialiased;
+}
+
+/* Shared building blocks used across pages. */
+@layer components {
+	.surface {
+		@apply rounded-xl border border-neutral-800 bg-neutral-900/60;
+	}
+
+	.section-title {
+		@apply mb-3 text-sm font-semibold tracking-wide text-neutral-400 uppercase;
+	}
+
+	.chip {
+		@apply inline-flex items-center rounded-full border border-neutral-700 px-2.5 py-0.5 text-xs text-neutral-300 transition;
+	}
+	.chip:hover {
+		@apply border-neutral-500;
+	}
+	.chip-active {
+		@apply border-accent-600 bg-accent-950/60 text-accent-200;
+	}
+
+	.badge {
+		@apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold;
+	}
+	.badge-mediux {
+		@apply bg-accent-600/90 text-white;
+	}
+	.badge-changed {
+		@apply bg-emerald-600/90 text-white;
+	}
+	.badge-muted {
+		@apply border border-neutral-700 bg-black/50 text-neutral-300;
+	}
+
+	.btn {
+		@apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-50;
+	}
+	.btn-accent {
+		@apply bg-accent-600 text-white hover:bg-accent-500;
+	}
+	.btn-ghost {
+		@apply border border-neutral-700 text-neutral-200 hover:bg-neutral-800;
+	}
+	.btn-subtle {
+		@apply bg-neutral-800 text-neutral-100 hover:bg-neutral-700;
+	}
+
+	.input {
+		@apply rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-accent-500;
+	}
 }

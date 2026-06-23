@@ -4,7 +4,9 @@
 
 	let { data } = $props();
 
-	const active = $derived(data.jobs.filter((j) => j.status === 'pending' || j.status === 'running'));
+	const active = $derived(
+		data.jobs.filter((j) => j.status === 'pending' || j.status === 'running')
+	);
 	const past = $derived(data.jobs.filter((j) => j.status !== 'pending' && j.status !== 'running'));
 
 	function fmt(ts: Date | null): string {
@@ -22,8 +24,8 @@
 	</section>
 {/if}
 
-<h2 class="mt-8 mb-3 text-sm font-semibold text-neutral-400">History</h2>
-<div class="overflow-hidden rounded-lg border border-neutral-800">
+<h2 class="section-title mt-8">History</h2>
+<div class="surface overflow-hidden">
 	{#if past.length === 0}
 		<p class="p-4 text-sm text-neutral-500">No past jobs.</p>
 	{:else}

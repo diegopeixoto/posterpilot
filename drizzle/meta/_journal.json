@@ -15,6 +15,13 @@
       "when": 1782181318450,
       "tag": "0001_tidy_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782229655495,
+      "tag": "0002_thin_maverick",
+      "breakpoints": true
     }
   ]
 }

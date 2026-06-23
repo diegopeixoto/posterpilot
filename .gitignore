@@ -31,3 +31,5 @@ vite.config.ts.timestamp-*
 # Editor
 .obsidian/
 .vscode/
+
+.superpowers/

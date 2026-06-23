@@ -29,6 +29,12 @@ const FILE_RE =
 // Each file object starts with its owning set: "set_id":{"id":"8472",...
 const SET_MARK_RE = /"set_id":\{"id":"(\d+)"/g;
 
+// A set definition carries its uploader as user_created.username. The window between
+// set_name and user_created is bounded and forbidden from crossing into the next set
+// (another "set_name":) so an author is never mis-attributed to an authorless set.
+const SET_AUTHOR_RE =
+	/"id":"(\d+)","set_name":"(?:[^"\\]|\\.)*"(?:(?!"set_name":)[\s\S]){0,400}?"user_created":\{(?:(?!"set_name":)[\s\S]){0,200}?"username":"((?:[^"\\]|\\.)*)"/g;
+
 const PUSH_RE = /self\.__next_f\.push\(\[\d+,"((?:[^"\\]|\\.)*)"\]\)/g;
 
 /** Decode and concatenate the Next.js RSC payload chunks embedded in a page. */
@@ -59,6 +65,19 @@ function normalize(s: string): string {
 		.trim();
 }
 
+/**
+ * Map each set id to its uploader username, best-effort. Sets without an
+ * identifiable author are simply absent from the map (the UI shows no author).
+ */
+export function extractSetAuthors(rsc: string): Map<string, string> {
+	const authors = new Map<string, string>();
+	for (const m of rsc.matchAll(SET_AUTHOR_RE)) {
+		const author = unescapeJsonString(m[2]).trim();
+		if (author) authors.set(m[1], author);
+	}
+	return authors;
+}
+
 /** The target item's display title from the embedded movie/show object, or null. */
 export function extractTargetTitle(rsc: string, tmdbId: string): string | null {
 	const re = new RegExp(
@@ -80,9 +99,7 @@ export function titleMatchesTarget(fileTitle: string, targetTitle: string | null
 	const target = normalize(targetTitle.replace(/\(\d{4}\)/g, ''));
 	if (!target) return true;
 	if (/\(\d{4}\)/.test(fileTitle)) {
-		const sansYear = normalize(
-			fileTitle.replace(/\(\d{4}\)/g, '').replace(/\s*-\s*ost\b/i, '')
-		);
+		const sansYear = normalize(fileTitle.replace(/\(\d{4}\)/g, '').replace(/\s*-\s*ost\b/i, ''));
 		return sansYear === target;
 	}
 	return normalize(fileTitle).startsWith(target);
@@ -127,6 +144,7 @@ export function parseListingSets(
 	if (!rsc) return [];
 
 	const targetTitle = mediaType === 'movie' ? extractTargetTitle(rsc, tmdbId) : null;
+	const authors = extractSetAuthors(rsc);
 
 	const setMarks = [...rsc.matchAll(SET_MARK_RE)].map((m) => ({ idx: m.index ?? 0, setId: m[1] }));
 	const setIdBefore = (idx: number): string => {
@@ -149,6 +167,7 @@ export function parseListingSets(
 		const setId = setIdBefore(m.index ?? 0);
 		const candidate: MediuxCandidate = {
 			setId,
+			setAuthor: authors.get(setId) ?? null,
 			url: `${ASSET_BASE}/${m[1]}`,
 			kind: mapped.kind,
 			season: mapped.season,
@@ -164,6 +183,10 @@ export function parseListingSets(
 	// Sets appear oldest-first in the payload; present newest-first.
 	return order
 		.reverse()
-		.map((setId) => ({ setId, candidates: bySet.get(setId) ?? [] }))
+		.map((setId) => ({
+			setId,
+			author: authors.get(setId) ?? null,
+			candidates: bySet.get(setId) ?? []
+		}))
 		.filter((set) => set.candidates.length > 0);
 }

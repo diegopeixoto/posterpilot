@@ -1,6 +1,7 @@
 import { fetchJson } from '$lib/server/http';
-import type { PlexGuids, TmdbMediaType, TmdbResolution } from '$lib/server/types';
+import type { PlexGuids, TmdbMediaType, TmdbMetadata, TmdbResolution } from '$lib/server/types';
 import { parseFindResult, pickExternalId, tmdbAuth, type TmdbAuth } from './auth';
+import { parseDetailMetadata, pickLogoUrl } from './metadata';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const DEFAULT_CACHE_TTL_DAYS = 30;
@@ -89,4 +90,53 @@ export async function resolveTmdb(
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Fetch display metadata for a resolved TMDB id: the detail document (with credits
+ * appended) plus the images endpoint for a clearlogo. Parsing is delegated to the
+ * pure helpers in `metadata.ts`. A failure on either request degrades gracefully —
+ * the missing fields are simply left empty rather than aborting enrichment.
+ *
+ * @param tmdbId The resolved TMDB id.
+ * @param mediaType The TMDB media type ('movie' or 'tv').
+ * @param key The TMDB credential.
+ * @param opts Optional cache controls and a flag to skip the (separate) logo call.
+ */
+export async function fetchMetadata(
+	tmdbId: string,
+	mediaType: TmdbMediaType,
+	key: string,
+	opts: { forceRefresh?: boolean; cacheTtlDays?: number; fetchLogo?: boolean } = {}
+): Promise<TmdbMetadata> {
+	const { forceRefresh = false, cacheTtlDays = DEFAULT_CACHE_TTL_DAYS, fetchLogo = true } = opts;
+	const auth = tmdbAuth(key);
+
+	const detailUrl = withAuthQuery(
+		`${TMDB_BASE}/${mediaType}/${tmdbId}?append_to_response=credits`,
+		auth.query
+	);
+	const detail = await fetchJson<unknown>(detailUrl, {
+		headers: auth.headers,
+		cacheTtlDays,
+		forceRefresh
+	});
+	const base = parseDetailMetadata(detail, mediaType);
+
+	let logoUrl: string | null = null;
+	if (fetchLogo) {
+		const imagesUrl = withAuthQuery(`${TMDB_BASE}/${mediaType}/${tmdbId}/images`, auth.query);
+		try {
+			const images = await fetchJson<unknown>(imagesUrl, {
+				headers: auth.headers,
+				cacheTtlDays,
+				forceRefresh
+			});
+			logoUrl = pickLogoUrl(images);
+		} catch {
+			// No logo is fine — the hero falls back to the title text.
+		}
+	}
+
+	return { ...base, logoUrl };
 }

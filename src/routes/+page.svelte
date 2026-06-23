@@ -40,32 +40,34 @@
 
 <div class="flex items-center justify-between">
 	<h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
-	<button
-		onclick={sync}
-		disabled={busy}
-		class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-50"
-	>
+	<button onclick={sync} disabled={busy} class="btn btn-accent px-4 py-2">
 		{busy ? 'Starting…' : 'Sync library'}
 	</button>
 </div>
 
 {#if syncJobId}
 	<div class="mt-4">
-		<JobProgress jobId={syncJobId} onDone={() => { running = false; invalidateAll(); }} />
+		<JobProgress
+			jobId={syncJobId}
+			onDone={() => {
+				running = false;
+				invalidateAll();
+			}}
+		/>
 	</div>
 {/if}
 
 <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
 	{#each cards as card (card.label)}
-		<div class="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-			<p class="text-2xl font-semibold">{card.value}</p>
+		<div class="surface p-4">
+			<p class="text-2xl font-semibold text-accent-300">{card.value}</p>
 			<p class="text-xs text-neutral-500">{card.label}</p>
 		</div>
 	{/each}
 </div>
 
-<h2 class="mt-8 mb-3 text-sm font-semibold text-neutral-400">Recent jobs</h2>
-<div class="overflow-hidden rounded-lg border border-neutral-800">
+<h2 class="section-title mt-8">Recent jobs</h2>
+<div class="surface overflow-hidden">
 	{#if data.jobs.length === 0}
 		<p class="p-4 text-sm text-neutral-500">No jobs yet. Run a sync to populate your library.</p>
 	{:else}
@@ -83,7 +85,7 @@
 									: job.status === 'failed' || job.status === 'interrupted'
 										? 'bg-red-900/50 text-red-300'
 										: job.status === 'running'
-											? 'bg-indigo-900/50 text-indigo-300'
+											? 'bg-accent-900/50 text-accent-300'
 											: 'bg-neutral-800 text-neutral-400'}">{job.status}</span
 							>
 						</td>

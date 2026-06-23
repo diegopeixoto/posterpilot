@@ -1,8 +1,5 @@
 <script lang="ts">
-	let {
-		jobId,
-		onDone
-	}: { jobId: number; onDone?: (status: string) => void } = $props();
+	let { jobId, onDone }: { jobId: number; onDone?: (status: string) => void } = $props();
 
 	let processed = $state(0);
 	let total = $state(0);
@@ -47,7 +44,7 @@
 				? 'bg-red-500'
 				: status === 'completed'
 					? 'bg-emerald-500'
-					: 'bg-indigo-500'}"
+					: 'bg-accent-500'}"
 			style="width: {pct}%"
 		></div>
 	</div>

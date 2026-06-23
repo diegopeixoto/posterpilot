@@ -26,9 +26,10 @@
 	let saving = $state(false);
 	let testing = $state(false);
 	let saved = $state(false);
-	let testResult = $state<{ plex: { ok: boolean; error?: string }; tmdb: { ok: boolean; error?: string } } | null>(
-		null
-	);
+	let testResult = $state<{
+		plex: { ok: boolean; error?: string };
+		tmdb: { ok: boolean; error?: string };
+	} | null>(null);
 
 	async function save() {
 		saving = true;
@@ -85,7 +86,7 @@
 			bind:value={plexUrl}
 			disabled={env.plexUrl}
 			placeholder="http://192.168.1.10:32400"
-			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
+			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-accent-500 disabled:opacity-50"
 		/>
 		{#if env.plexUrl}<p class="mt-1 text-xs text-amber-400">Set from environment</p>{/if}
 	</div>
@@ -97,8 +98,10 @@
 			type="password"
 			bind:value={plexToken}
 			disabled={env.plexToken}
-			placeholder={data.config.plexTokenSet ? '•••••••• (set — leave blank to keep)' : 'X-Plex-Token'}
-			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
+			placeholder={data.config.plexTokenSet
+				? '•••••••• (set — leave blank to keep)'
+				: 'X-Plex-Token'}
+			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-accent-500 disabled:opacity-50"
 		/>
 		{#if env.plexToken}<p class="mt-1 text-xs text-amber-400">Set from environment</p>{/if}
 	</div>
@@ -110,40 +113,60 @@
 			type="password"
 			bind:value={tmdbKey}
 			disabled={env.tmdbKey}
-			placeholder={data.config.tmdbKeySet ? '•••••••• (set — leave blank to keep)' : 'TMDB credential'}
-			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
+			placeholder={data.config.tmdbKeySet
+				? '•••••••• (set — leave blank to keep)'
+				: 'TMDB credential'}
+			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-accent-500 disabled:opacity-50"
 		/>
 		{#if env.tmdbKey}<p class="mt-1 text-xs text-amber-400">Set from environment</p>{/if}
 	</div>
 
 	<div>
-		<label for="kometaAssetsDir" class="mb-1 block text-sm font-medium">Kometa assets directory</label>
+		<label for="kometaAssetsDir" class="mb-1 block text-sm font-medium"
+			>Kometa assets directory</label
+		>
 		<input
 			id="kometaAssetsDir"
 			bind:value={kometaAssetsDir}
 			disabled={env.kometaAssetsDir}
-			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
+			class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-accent-500 disabled:opacity-50"
 		/>
 	</div>
 
 	<div class="grid grid-cols-3 gap-3">
 		<div>
 			<label for="delay" class="mb-1 block text-sm font-medium">Delay (ms)</label>
-			<input id="delay" bind:value={mediuxDelayMs} class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm" />
+			<input
+				id="delay"
+				bind:value={mediuxDelayMs}
+				class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+			/>
 		</div>
 		<div>
 			<label for="conc" class="mb-1 block text-sm font-medium">Concurrency</label>
-			<input id="conc" bind:value={mediuxConcurrency} class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm" />
+			<input
+				id="conc"
+				bind:value={mediuxConcurrency}
+				class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+			/>
 		</div>
 		<div>
 			<label for="ttl" class="mb-1 block text-sm font-medium">Cache (days)</label>
-			<input id="ttl" bind:value={httpCacheTtlDays} class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm" />
+			<input
+				id="ttl"
+				bind:value={httpCacheTtlDays}
+				class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+			/>
 		</div>
 	</div>
 
 	<div>
 		<label for="method" class="mb-1 block text-sm font-medium">Default apply method</label>
-		<select id="method" bind:value={defaultApplyMethod} class="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-2 text-sm">
+		<select
+			id="method"
+			bind:value={defaultApplyMethod}
+			class="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-2 text-sm"
+		>
 			<option value="both">Plex + Kometa</option>
 			<option value="plex">Plex only</option>
 			<option value="kometa">Kometa only</option>
@@ -153,7 +176,9 @@
 	<div>
 		<span class="mb-1 block text-sm font-medium">Libraries to sync</span>
 		{#if data.sections.length === 0}
-			<p class="text-xs text-neutral-500">Connect Plex and save, then reload to choose libraries.</p>
+			<p class="text-xs text-neutral-500">
+				Connect Plex and save, then reload to choose libraries.
+			</p>
 		{:else}
 			<p class="mb-2 text-xs text-neutral-500">
 				Uncheck libraries you don't want synced (e.g. a YouTube collection). All checked syncs
@@ -176,23 +201,17 @@
 	</div>
 
 	<div class="flex items-center gap-3 pt-2">
-		<button
-			onclick={save}
-			disabled={saving}
-			class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+		<button onclick={save} disabled={saving} class="btn btn-accent px-4 py-2"
 			>{saving ? 'Saving…' : 'Save'}</button
 		>
-		<button
-			onclick={test}
-			disabled={testing}
-			class="rounded-md bg-neutral-800 px-4 py-2 text-sm hover:bg-neutral-700 disabled:opacity-50"
+		<button onclick={test} disabled={testing} class="btn btn-subtle px-4 py-2"
 			>{testing ? 'Testing…' : 'Test connections'}</button
 		>
 		{#if saved}<span class="text-sm text-emerald-400">Saved</span>{/if}
 	</div>
 
 	{#if testResult}
-		<div class="space-y-1 rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm">
+		<div class="surface space-y-1 p-3 text-sm">
 			<p>Plex: {testResult.plex.ok ? '✅ connected' : `❌ ${testResult.plex.error}`}</p>
 			<p>TMDB: {testResult.tmdb.ok ? '✅ connected' : `❌ ${testResult.tmdb.error}`}</p>
 		</div>

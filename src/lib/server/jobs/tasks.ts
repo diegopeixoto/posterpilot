@@ -3,7 +3,7 @@ import { db } from '$lib/server/db';
 import { mediaItems } from '$lib/server/db/schema';
 import { resolveConfig, requireConfig, type ApplyMethod } from '$lib/server/config';
 import { listSections, listItems } from '$lib/server/plex/client';
-import { resolveTmdb } from '$lib/server/tmdb/client';
+import { fetchMetadata, resolveTmdb } from '$lib/server/tmdb/client';
 import { applyToItem, autoSelectPoster, discoverForItem } from '$lib/server/posters/service';
 import type { JobContext } from './runner';
 
@@ -84,6 +84,36 @@ export async function runSyncJob(ctx: JobContext): Promise<void> {
 						updatedAt: new Date()
 					})
 					.where(eq(mediaItems.id, itemId));
+
+				// Enrich with TMDB display metadata. Best-effort: a failure here leaves
+				// the item resolved but un-enriched, to be backfilled on a later sync.
+				try {
+					const meta = await fetchMetadata(
+						resolution.tmdbId,
+						resolution.mediaType,
+						config.tmdbKey!,
+						{ cacheTtlDays: config.httpCacheTtlDays, fetchLogo: !existing?.logoUrl }
+					);
+					await db
+						.update(mediaItems)
+						.set({
+							overview: meta.overview,
+							tagline: meta.tagline,
+							genres: meta.genres,
+							runtime: meta.runtime,
+							rating: meta.rating,
+							backdropUrl: meta.backdropUrl,
+							// Keep an existing logo if we skipped the images call this run.
+							logoUrl: meta.logoUrl ?? existing?.logoUrl ?? null,
+							seasonCount: meta.seasonCount,
+							episodeCount: meta.episodeCount,
+							cast: meta.cast,
+							updatedAt: new Date()
+						})
+						.where(eq(mediaItems.id, itemId));
+				} catch {
+					// Enrichment failed (network/parse); leave metadata for the next sync.
+				}
 			} else {
 				await db.update(mediaItems).set({ resolved: false }).where(eq(mediaItems.id, itemId));
 			}

@@ -1,4 +1,5 @@
-import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, real, text } from 'drizzle-orm/sqlite-core';
+import type { TmdbCastMember } from '$lib/server/types';
 
 /** A Plex library item (movie or show) and its resolved metadata. */
 export const mediaItems = sqliteTable('media_items', {
@@ -17,6 +18,17 @@ export const mediaItems = sqliteTable('media_items', {
 	/** User's pending cover selection (applied on the next apply action). */
 	selectedPosterUrl: text('selected_poster_url'),
 	selectedBackgroundUrl: text('selected_background_url'),
+	/** TMDB display metadata, populated during sync; null until enriched. */
+	overview: text('overview'),
+	tagline: text('tagline'),
+	genres: text('genres', { mode: 'json' }).$type<string[]>(),
+	runtime: integer('runtime'),
+	rating: real('rating'),
+	backdropUrl: text('backdrop_url'),
+	logoUrl: text('logo_url'),
+	seasonCount: integer('season_count'),
+	episodeCount: integer('episode_count'),
+	cast: text('cast', { mode: 'json' }).$type<TmdbCastMember[]>(),
 	hasMediux: integer('has_mediux', { mode: 'boolean' }),
 	resolved: integer('resolved', { mode: 'boolean' }).notNull().default(false),
 	updatedAt: integer('updated_at', { mode: 'timestamp' })
@@ -31,6 +43,8 @@ export const posterCandidates = sqliteTable('poster_candidates', {
 		.notNull()
 		.references(() => mediaItems.id, { onDelete: 'cascade' }),
 	setId: text('set_id').notNull(),
+	/** Uploader/author of the MediaUX set, when present in the payload. */
+	setAuthor: text('set_author'),
 	url: text('url').notNull(),
 	kind: text('kind', { enum: ['poster', 'background', 'season', 'title_card'] }).notNull(),
 	season: integer('season'),

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { decodeRscPayload, parseListingSets, titleMatchesTarget } from './parser';
+import {
+	decodeRscPayload,
+	extractSetAuthors,
+	parseListingSets,
+	titleMatchesTarget
+} from './parser';
 
 /** Wrap a raw RSC payload the way mediux emits it (a self.__next_f.push chunk). */
 function page(rsc: string): string {
@@ -17,7 +22,7 @@ const M = '44444444-4444-4444-4444-444444444444'; // misc (dropped)
 
 const rsc =
 	`"movie":{"id":"584","title":"Test Movie","tagline":"x"},` +
-	`"sets":[{"id":"8472","set_name":"Test Movie Set","files":[` +
+	`"sets":[{"id":"8472","set_name":"Test Movie Set","user_created":{"username":"poster_maker"},"files":[` +
 	`${file('8472', P, 'Test Movie (2003)', 'poster')},` +
 	`${file('8472', B, 'Test Movie (2003)', 'backdrop')},` +
 	`${file('8472', X, 'Other Movie 6 (2013)', 'poster')},` +
@@ -56,6 +61,7 @@ describe('parseListingSets', () => {
 		const poster = all.find((c) => c.url.endsWith(P));
 		expect(poster).toEqual({
 			setId: '8472',
+			setAuthor: 'poster_maker',
 			url: `https://api.mediux.pro/assets/${P}`,
 			kind: 'poster',
 			season: null,
@@ -72,5 +78,38 @@ describe('parseListingSets', () => {
 
 	it('returns [] for an unparseable page', () => {
 		expect(parseListingSets('<html>nothing</html>', '584', 'movie')).toEqual([]);
+	});
+
+	it('attaches the set author to every candidate in the set', () => {
+		expect(all.every((c) => c.setAuthor === 'poster_maker')).toBe(true);
+		expect(sets[0].author).toBe('poster_maker');
+	});
+});
+
+describe('extractSetAuthors', () => {
+	it('maps a set id to its uploader username', () => {
+		const rscA = `"sets":[{"id":"100","set_name":"Alice Set","user_created":{"username":"alice"},"files":[]}]`;
+		expect(extractSetAuthors(rscA).get('100')).toBe('alice');
+	});
+
+	it('omits sets that have no identifiable author', () => {
+		const rscB = `"sets":[{"id":"101","set_name":"No Author","files":[]}]`;
+		expect(extractSetAuthors(rscB).has('101')).toBe(false);
+	});
+
+	it('maps multiple sets independently', () => {
+		const rscC =
+			`"sets":[` +
+			`{"id":"200","set_name":"A","user_created":{"username":"bob"},"files":[]},` +
+			`{"id":"201","set_name":"B","user_created":{"username":"carol"},"files":[]}` +
+			`]`;
+		const m = extractSetAuthors(rscC);
+		expect(m.get('200')).toBe('bob');
+		expect(m.get('201')).toBe('carol');
+	});
+
+	it('never throws on malformed input', () => {
+		expect(() => extractSetAuthors('garbage {{{')).not.toThrow();
+		expect(extractSetAuthors('garbage {{{').size).toBe(0);
 	});
 });
