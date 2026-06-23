@@ -17,6 +17,7 @@ export interface LibraryFilter {
 	/** Restrict to items tagged with this genre. */
 	genre?: string;
 	sort?: LibrarySort;
+	dir?: SortDir;
 	q?: string;
 }
 
@@ -26,20 +27,29 @@ const lastAppliedAt = sql`(
 	where ap.media_item_id = ${mediaItems.id} and ap.status = 'success'
 )`;
 
-/** Build the ORDER BY clause for a library sort (nulls sort last for DESC orders). */
-function orderFor(sort: LibrarySort | undefined): SQL {
+export type SortDir = 'asc' | 'desc';
+
+/** The natural default direction for a sort field (title ascends; the rest descend). */
+export function defaultSortDir(sort: LibrarySort | undefined): SortDir {
+	return sort === 'title' || sort === undefined ? 'asc' : 'desc';
+}
+
+/** Build the ORDER BY clause for a library sort + direction. */
+function orderFor(sort: LibrarySort | undefined, dir: SortDir | undefined): SQL {
+	const d = dir ?? defaultSortDir(sort);
+	const ascending = d === 'asc';
 	switch (sort) {
 		case 'year':
-			return desc(mediaItems.year);
+			return ascending ? asc(mediaItems.year) : desc(mediaItems.year);
 		case 'rating':
-			return desc(mediaItems.rating);
+			return ascending ? asc(mediaItems.rating) : desc(mediaItems.rating);
 		case 'runtime':
-			return desc(mediaItems.runtime);
+			return ascending ? asc(mediaItems.runtime) : desc(mediaItems.runtime);
 		case 'recent':
-			return sql`${lastAppliedAt} desc`;
+			return sql`${lastAppliedAt} ${sql.raw(ascending ? 'asc' : 'desc')}`;
 		case 'title':
 		default:
-			return asc(mediaItems.title);
+			return ascending ? asc(mediaItems.title) : desc(mediaItems.title);
 	}
 }
 
@@ -64,7 +74,7 @@ export async function listLibrary(filter: LibraryFilter = {}) {
 		.select()
 		.from(mediaItems)
 		.where(conds.length ? and(...conds) : undefined)
-		.orderBy(orderFor(filter.sort));
+		.orderBy(orderFor(filter.sort, filter.dir));
 }
 
 /** Distinct genres present across the library, for the filter chips. */

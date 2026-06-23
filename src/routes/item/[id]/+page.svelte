@@ -364,12 +364,14 @@
 
 					<div class="flex flex-col gap-4 sm:flex-row">
 						{#if posters.length}
-							<div class="flex-none">
+							<div class="min-w-0 flex-1">
 								<p class="mb-1 text-[11px] text-neutral-500">
 									{posters.length > 1 ? m.item_posters() : m.item_poster()}
 								</p>
-								<div class="flex gap-2">
-									{#each posters as c (c.id)}<div class="w-20">{@render posterTile(c)}</div>{/each}
+								<div class="flex gap-2 overflow-x-auto pb-2">
+									{#each posters as c (c.id)}<div class="w-20 flex-none">
+											{@render posterTile(c)}
+										</div>{/each}
 								</div>
 							</div>
 						{/if}

@@ -43,11 +43,13 @@
 		</div>
 	</a>
 
-	<!-- Status badges -->
+	<!-- Status badge: applied takes priority over "covers available" (mutually exclusive). -->
 	<div class="pointer-events-none absolute top-2 left-2 flex gap-1">
-		{#if item.hasMediux}<span class="badge badge-mediux">{m.library_filter_mediux()}</span>{/if}
-		{#if item.selectedPosterUrl}<span class="badge badge-changed">{m.poster_badge_changed()}</span
-			>{/if}
+		{#if item.selectedPosterUrl}
+			<span class="badge badge-changed">✓ {m.poster_badge_changed()}</span>
+		{:else if item.hasMediux}
+			<span class="badge badge-mediux">{m.poster_badge_covers()}</span>
+		{/if}
 	</div>
 
 	<!-- Rating -->

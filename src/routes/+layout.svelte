@@ -1,6 +1,19 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
+	import { onNavigate } from '$app/navigation';
 	import { page } from '$app/state';
+
+	// Cross-fade between pages using the View Transitions API where supported.
+	onNavigate((navigation) => {
+		if (!document.startViewTransition) return;
+		return new Promise((resolve) => {
+			document.startViewTransition(async () => {
+				resolve();
+				await navigation.complete;
+			});
+		});
+	});
 	import { m } from '$lib/paraglide/messages';
 	import { setLocale } from '$lib/paraglide/runtime';
 	import { registerClientLocaleStrategy, seedClientLocale } from '$lib/i18n/strategy.client';
@@ -22,6 +35,19 @@
 	function isActive(href: string): boolean {
 		return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
 	}
+
+	// Best-effort update check (cached server-side; never blocks the page).
+	let update = $state<{ updateAvailable: boolean; latest: string | null; url: string } | null>(
+		null
+	);
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/update');
+			if (res.ok) update = await res.json();
+		} catch {
+			// Ignore — the update check is optional.
+		}
+	});
 
 	// Selecting a language persists it (via the custom strategy's settings write)
 	// and reloads so the next SSR pass renders in the new locale.
@@ -79,7 +105,30 @@
 		</div>
 	{/if}
 
+	{#if update?.updateAvailable}
+		<div
+			class="border-b border-accent-900/50 bg-accent-950/40 px-4 py-2 text-center text-sm text-accent-200"
+		>
+			{m.update_available({ version: update.latest ?? '' })}
+			<a href={update.url} target="_blank" rel="noopener" class="font-semibold underline"
+				>{m.update_view()}</a
+			>
+		</div>
+	{/if}
+
 	<main class="mx-auto max-w-7xl px-4 py-6">
 		{@render children()}
 	</main>
+
+	<footer class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-neutral-600">
+		<a
+			href="https://github.com/diegopeixoto/posterpilot"
+			target="_blank"
+			rel="noopener"
+			class="hover:text-neutral-400"
+		>
+			{m.app_name()}
+		</a>
+		<span class="text-neutral-700">·</span> v{data.version}
+	</footer>
 </div>

@@ -11,6 +11,45 @@
 	let method = $state<'plex' | 'kometa' | 'both'>('both');
 	let jobId = $state<number | null>(null);
 
+	// Filters apply on change by default; the user can toggle this off (persisted).
+	let autoApply = $state(true);
+	let searchTimer: ReturnType<typeof setTimeout>;
+	$effect(() => {
+		const saved = localStorage.getItem('pp_autoapply');
+		if (saved !== null) autoApply = saved === '1';
+	});
+	function toggleAuto() {
+		autoApply = !autoApply;
+		localStorage.setItem('pp_autoapply', autoApply ? '1' : '0');
+	}
+	function submitForm(el: EventTarget | null) {
+		(el as HTMLElement | null)?.closest('form')?.requestSubmit();
+	}
+	function onControlChange(e: Event) {
+		if (autoApply) submitForm(e.currentTarget);
+	}
+	function onSearchInput(e: Event) {
+		if (!autoApply) return;
+		clearTimeout(searchTimer);
+		const target = e.currentTarget;
+		searchTimer = setTimeout(() => submitForm(target), 400);
+	}
+
+	// Sort field + direction. Title ascends by default; other fields descend.
+	function defaultDir(sort: string | undefined): 'asc' | 'desc' {
+		return sort === 'title' || sort === undefined ? 'asc' : 'desc';
+	}
+	let dir = $state<'asc' | 'desc'>(data.filter.dir ?? defaultDir(data.filter.sort));
+	function onSortChange(e: Event) {
+		const sel = e.currentTarget as HTMLSelectElement;
+		dir = defaultDir(sel.value); // reset to the field's natural direction
+		if (autoApply) submitForm(sel);
+	}
+	function toggleDir(e: Event) {
+		dir = dir === 'asc' ? 'desc' : 'asc';
+		if (autoApply) submitForm(e.currentTarget);
+	}
+
 	function toggle(id: number) {
 		if (selected.has(id)) selected.delete(id);
 		else selected.add(id);
@@ -62,21 +101,39 @@
 		name="q"
 		value={data.filter.q ?? ''}
 		placeholder={m.library_search_placeholder()}
+		oninput={onSearchInput}
 		class="input w-44"
 	/>
-	<select name="type" value={data.filter.type ?? ''} class="input">
+	<select name="type" value={data.filter.type ?? ''} onchange={onControlChange} class="input">
 		<option value="">{m.library_all_types()}</option>
 		<option value="movie">{m.library_type_movies()}</option>
 		<option value="show">{m.library_type_shows()}</option>
 	</select>
-	<select name="sort" value={data.filter.sort ?? 'title'} class="input">
-		<option value="title">{m.library_sort_title()}</option>
-		<option value="rating">{m.library_sort_rating()}</option>
-		<option value="year">{m.library_sort_year()}</option>
-		<option value="runtime">{m.library_sort_runtime()}</option>
-		<option value="recent">{m.library_sort_recent()}</option>
-	</select>
-	<select name="minRating" value={data.filter.minRating?.toString() ?? ''} class="input">
+	<div class="flex items-center gap-1">
+		<select name="sort" value={data.filter.sort ?? 'title'} onchange={onSortChange} class="input">
+			<option value="title">{m.library_sort_title()}</option>
+			<option value="rating">{m.library_sort_rating()}</option>
+			<option value="year">{m.library_sort_year()}</option>
+			<option value="runtime">{m.library_sort_runtime()}</option>
+			<option value="recent">{m.library_sort_recent()}</option>
+		</select>
+		<input type="hidden" name="dir" value={dir} />
+		<button
+			type="button"
+			onclick={toggleDir}
+			title={m.library_sort_dir()}
+			aria-label={m.library_sort_dir()}
+			class="btn btn-ghost px-2"
+		>
+			{dir === 'asc' ? '↑' : '↓'}
+		</button>
+	</div>
+	<select
+		name="minRating"
+		value={data.filter.minRating?.toString() ?? ''}
+		onchange={onControlChange}
+		class="input"
+	>
 		<option value="">{m.library_any_rating()}</option>
 		<option value="6">{m.library_rating_6()}</option>
 		<option value="7">{m.library_rating_7()}</option>
@@ -84,24 +141,54 @@
 		<option value="9">{m.library_rating_9()}</option>
 	</select>
 	{#if data.genres.length}
-		<select name="genre" value={data.filter.genre ?? ''} class="input">
+		<select name="genre" value={data.filter.genre ?? ''} onchange={onControlChange} class="input">
 			<option value="">{m.library_all_genres()}</option>
 			{#each data.genres as g (g)}<option value={g}>{g}</option>{/each}
 		</select>
 	{/if}
 	<label class="flex items-center gap-1.5 text-neutral-400">
-		<input type="checkbox" name="mediux" value="1" checked={data.filter.hasMediux} />
+		<input
+			type="checkbox"
+			name="mediux"
+			value="1"
+			checked={data.filter.hasMediux}
+			onchange={onControlChange}
+		/>
 		{m.library_filter_mediux()}
 	</label>
 	<label class="flex items-center gap-1.5 text-neutral-400">
-		<input type="checkbox" name="missing" value="1" checked={data.filter.missingPoster} />
+		<input
+			type="checkbox"
+			name="missing"
+			value="1"
+			checked={data.filter.missingPoster}
+			onchange={onControlChange}
+		/>
 		{m.library_filter_missing()}
 	</label>
 	<label class="flex items-center gap-1.5 text-neutral-400">
-		<input type="checkbox" name="unchanged" value="1" checked={data.filter.unchanged} />
+		<input
+			type="checkbox"
+			name="unchanged"
+			value="1"
+			checked={data.filter.unchanged}
+			onchange={onControlChange}
+		/>
 		{m.library_filter_unchanged()}
 	</label>
-	<button class="btn btn-subtle">{m.library_apply_filters()}</button>
+	<button
+		type="button"
+		onclick={toggleAuto}
+		title={m.library_autoapply()}
+		aria-label={m.library_autoapply()}
+		aria-pressed={autoApply}
+		class="btn px-2 {autoApply ? 'btn-accent' : 'btn-ghost text-neutral-500'}"
+	>
+		⚡
+	</button>
+	{#if !autoApply}
+		<button class="btn btn-subtle">{m.library_apply_filters()}</button>
+	{/if}
 </form>
 
 {#if selected.size > 0}
