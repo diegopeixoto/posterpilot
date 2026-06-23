@@ -180,13 +180,20 @@
 					method
 				})
 			});
-			const { outcomes } = await res.json();
-			message = outcomes
-				.map(
-					(o: { method: string; status: string; error?: string }) =>
-						`${o.method}: ${o.status}${o.error ? ` (${o.error})` : ''}`
-				)
-				.join(' · ');
+			const { outcomes } = (await res.json()) as {
+				outcomes: { method: string; status: string; error?: string }[];
+			};
+			const targetLabel = (method: string) =>
+				method === 'kometa' ? 'Kometa' : m.apply_target_server();
+			const failed = outcomes.filter((o) => o.status === 'failed');
+			message =
+				failed.length === 0
+					? m.item_msg_applied()
+					: failed
+							.map((o) =>
+								m.item_msg_apply_failed({ target: targetLabel(o.method), error: o.error ?? '' })
+							)
+							.join(' · ');
 			await invalidateAll();
 		} finally {
 			busy = false;

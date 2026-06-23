@@ -245,5 +245,8 @@
 	"setup_jellyfin_choose": "Jellyfin",
 	"setup_emby_choose": "Emby",
 	"setup_plex_choose": "Plex",
-	"footer_disclaimer": "与 Plex、Jellyfin、Emby、TMDB、MediUX、Fanart.tv 或 ThePosterDB 无关联，也未获其背书。商标归各自所有者所有。"
+	"footer_disclaimer": "与 Plex、Jellyfin、Emby、TMDB、MediUX、Fanart.tv 或 ThePosterDB 无关联，也未获其背书。商标归各自所有者所有。",
+	"item_msg_applied": "封面已应用",
+	"item_msg_apply_failed": "无法应用到 {target}：{error}",
+	"apply_target_server": "媒体服务器"
 }

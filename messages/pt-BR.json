@@ -245,5 +245,8 @@
 	"setup_jellyfin_choose": "Jellyfin",
 	"setup_emby_choose": "Emby",
 	"setup_plex_choose": "Plex",
-	"footer_disclaimer": "Sem afiliação ou endosso de Plex, Jellyfin, Emby, TMDB, MediUX, Fanart.tv ou ThePosterDB. As marcas pertencem aos seus donos."
+	"footer_disclaimer": "Sem afiliação ou endosso de Plex, Jellyfin, Emby, TMDB, MediUX, Fanart.tv ou ThePosterDB. As marcas pertencem aos seus donos.",
+	"item_msg_applied": "Capa aplicada",
+	"item_msg_apply_failed": "Não foi possível aplicar em {target}: {error}",
+	"apply_target_server": "o servidor de mídia"
 }

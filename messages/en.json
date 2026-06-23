@@ -245,5 +245,8 @@
 	"setup_jellyfin_choose": "Jellyfin",
 	"setup_emby_choose": "Emby",
 	"setup_plex_choose": "Plex",
-	"footer_disclaimer": "Not affiliated with or endorsed by Plex, Jellyfin, Emby, TMDB, MediUX, Fanart.tv, or ThePosterDB. Trademarks belong to their owners."
+	"footer_disclaimer": "Not affiliated with or endorsed by Plex, Jellyfin, Emby, TMDB, MediUX, Fanart.tv, or ThePosterDB. Trademarks belong to their owners.",
+	"item_msg_applied": "Cover applied",
+	"item_msg_apply_failed": "Couldn't apply to {target}: {error}",
+	"apply_target_server": "the media server"
 }

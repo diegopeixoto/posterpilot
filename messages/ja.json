@@ -245,5 +245,8 @@
 	"setup_jellyfin_choose": "Jellyfin",
 	"setup_emby_choose": "Emby",
 	"setup_plex_choose": "Plex",
-	"footer_disclaimer": "Plex、Jellyfin、Emby、TMDB、MediUX、Fanart.tv、ThePosterDB とは提携・公認関係にありません。商標は各所有者に帰属します。"
+	"footer_disclaimer": "Plex、Jellyfin、Emby、TMDB、MediUX、Fanart.tv、ThePosterDB とは提携・公認関係にありません。商標は各所有者に帰属します。",
+	"item_msg_applied": "カバーを適用しました",
+	"item_msg_apply_failed": "{target} に適用できませんでした: {error}",
+	"apply_target_server": "メディアサーバー"
 }
