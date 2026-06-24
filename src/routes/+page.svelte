@@ -71,11 +71,19 @@
 	</section>
 {/if}
 
+<!-- "Items" leads as the headline total (accent); the rest are supporting figures
+     in neutral so the violet stays meaningful rather than decorating every number. -->
 <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-	{#each cards as card (card.label)}
-		<div class="surface p-4">
-			<p class="text-2xl font-semibold text-accent-300">{card.value}</p>
-			<p class="text-xs text-neutral-500">{card.label}</p>
+	{#each cards as card, i (card.label)}
+		<div class="surface p-4 {i === 0 ? 'col-span-2 sm:col-span-3 lg:col-span-2' : ''}">
+			<p
+				class="font-semibold tabular-nums {i === 0
+					? 'text-4xl text-accent-300'
+					: 'text-2xl text-neutral-100'}"
+			>
+				{card.value}
+			</p>
+			<p class="text-xs text-neutral-400">{card.label}</p>
 		</div>
 	{/each}
 </div>
@@ -88,13 +96,21 @@
 </div>
 <div class="surface overflow-hidden">
 	{#if data.jobs.length === 0}
-		<p class="p-4 text-sm text-neutral-500">{m.dashboard_no_jobs()}</p>
+		<p class="p-4 text-sm text-neutral-400">{m.dashboard_no_jobs()}</p>
 	{:else}
 		<table class="w-full text-sm">
+			<thead class="text-left text-xs text-neutral-400">
+				<tr class="border-b border-neutral-800">
+					<th class="px-4 py-2 font-medium">{m.jobs_col_id()}</th>
+					<th class="px-4 py-2 font-medium">{m.jobs_col_type()}</th>
+					<th class="px-4 py-2 font-medium">{m.jobs_col_progress()}</th>
+					<th class="px-4 py-2 font-medium">{m.jobs_col_status()}</th>
+				</tr>
+			</thead>
 			<tbody>
 				{#each data.jobs as job (job.id)}
 					<tr class="border-b border-neutral-800/60 last:border-0">
-						<td class="px-4 py-2 text-neutral-500">#{job.id}</td>
+						<td class="px-4 py-2 text-neutral-400">#{job.id}</td>
 						<td class="px-4 py-2">{job.type}</td>
 						<td class="px-4 py-2 text-neutral-400">{job.processed}/{job.total}</td>
 						<td class="px-4 py-2">

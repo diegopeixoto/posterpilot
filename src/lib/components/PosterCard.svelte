@@ -28,7 +28,7 @@
 					class="h-full w-full object-cover transition group-hover:scale-[1.03]"
 				/>
 			{:else}
-				<div class="flex h-full items-center justify-center text-xs text-neutral-600">
+				<div class="flex h-full items-center justify-center text-xs text-neutral-400">
 					{m.poster_no_poster()}
 				</div>
 			{/if}
@@ -64,7 +64,7 @@
 			type="button"
 			onclick={onToggle}
 			aria-label={selected ? m.poster_deselect() : m.poster_select()}
-			class="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded border text-xs font-bold transition {selected
+			class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded border text-sm font-bold transition {selected
 				? 'border-accent-400 bg-accent-500 text-white'
 				: 'border-neutral-600 bg-neutral-900/80 text-transparent opacity-0 group-hover:opacity-100 hover:border-neutral-400'}"
 		>

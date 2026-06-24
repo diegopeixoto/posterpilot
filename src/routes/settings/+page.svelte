@@ -124,8 +124,15 @@
 	}
 
 	let clearingEvents = $state(false);
+	// Inline confirm: first click arms (button turns destructive + asks to confirm),
+	// second click clears. Replaces the blocking native confirm() dialog.
+	let confirmingClear = $state(false);
 	async function clearEvents() {
-		if (!confirm(m.events_clear_confirm())) return;
+		if (!confirmingClear) {
+			confirmingClear = true;
+			return;
+		}
+		confirmingClear = false;
 		clearingEvents = true;
 		try {
 			await fetch('/api/events', { method: 'DELETE' });
@@ -396,9 +403,9 @@
 				</p>
 			{/if}
 			{#if sections.length === 0}
-				<p class="text-xs text-neutral-500">{m.settings_libraries_connect_first()}</p>
+				<p class="text-xs text-neutral-400">{m.settings_libraries_connect_first()}</p>
 			{:else}
-				<p class="mb-2 text-xs text-neutral-500">{m.settings_libraries_hint()}</p>
+				<p class="mb-2 text-xs text-neutral-400">{m.settings_libraries_hint()}</p>
 				<div class="space-y-1">
 					{#each sections as section (section.key)}
 						<label class="flex items-center gap-2 text-sm text-neutral-300">
@@ -408,7 +415,7 @@
 								onchange={() => toggleSection(section.key)}
 							/>
 							{section.title}
-							<span class="text-xs text-neutral-500">({section.type})</span>
+							<span class="text-xs text-neutral-400">({section.type})</span>
 						</label>
 					{/each}
 				</div>
@@ -432,7 +439,7 @@
 
 		<div>
 			<span class="mb-1 block text-sm font-medium">{m.settings_providers()}</span>
-			<p class="mb-2 text-xs text-neutral-500">{m.settings_providers_hint()}</p>
+			<p class="mb-2 text-xs text-neutral-400">{m.settings_providers_hint()}</p>
 			<div class="space-y-1">
 				<label class="flex items-center gap-2 text-sm text-neutral-300">
 					<input
@@ -465,7 +472,7 @@
 						disabled={data.config.envManaged.providerThePosterDb}
 					/>
 					{m.settings_provider_theposterdb()}
-					<span class="text-xs text-neutral-500">{m.settings_experimental()}</span>
+					<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
 				</label>
 			</div>
 			<div class="mt-3">
@@ -498,7 +505,7 @@
 				disabled={env.kometaAssetsDir}
 				class="input w-full disabled:opacity-50"
 			/>
-			<p class="mt-1 text-xs text-neutral-500">{m.settings_kometa_dir_hint()}</p>
+			<p class="mt-1 text-xs text-neutral-400">{m.settings_kometa_dir_hint()}</p>
 		</div>
 
 		<div class="grid grid-cols-3 gap-3">
@@ -550,19 +557,23 @@
 				<button
 					type="button"
 					onclick={clearEvents}
+					onblur={() => (confirmingClear = false)}
 					disabled={clearingEvents || events.length === 0}
-					class="btn btn-ghost ml-auto"
+					title={confirmingClear ? m.events_clear_confirm() : undefined}
+					class="btn ml-auto {confirmingClear
+						? 'bg-red-900/50 text-red-300 hover:bg-red-900/70'
+						: 'btn-ghost'}"
 				>
-					{m.events_clear()}
+					{confirmingClear ? m.events_clear_confirm_action() : m.events_clear()}
 				</button>
 			</div>
 
 			<div class="surface mt-4 overflow-hidden">
 				{#if events.length === 0}
-					<p class="p-4 text-sm text-neutral-500">{m.events_empty()}</p>
+					<p class="p-4 text-sm text-neutral-400">{m.events_empty()}</p>
 				{:else}
 					<table class="w-full text-sm">
-						<thead class="text-left text-xs text-neutral-500">
+						<thead class="text-left text-xs text-neutral-400">
 							<tr class="border-b border-neutral-800">
 								<th class="px-4 py-2 font-medium">{m.events_col_level()}</th>
 								<th class="px-4 py-2 font-medium">{m.events_col_type()}</th>
@@ -580,7 +591,7 @@
 									</td>
 									<td class="px-4 py-2 text-neutral-400">{event.type}</td>
 									<td class="px-4 py-2 text-neutral-200">{event.message}</td>
-									<td class="px-4 py-2 whitespace-nowrap text-neutral-500"
+									<td class="px-4 py-2 whitespace-nowrap text-neutral-400"
 										>{fmtTime(event.createdAt)}</td
 									>
 								</tr>

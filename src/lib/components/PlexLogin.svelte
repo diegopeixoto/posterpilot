@@ -112,7 +112,7 @@
 				{m.settings_plex_account()}
 				<span class="badge badge-changed ml-1">{m.settings_plex_recommended()}</span>
 			</p>
-			<p class="text-xs text-neutral-500">
+			<p class="text-xs text-neutral-400">
 				{plexTokenSet ? m.settings_plex_token_set() : m.settings_plex_login_hint()}
 			</p>
 		</div>
@@ -123,7 +123,7 @@
 
 	{#if login}
 		{#if login.status === 'pending'}
-			<div class="rounded-md border border-neutral-700 bg-black/40 p-3 text-sm">
+			<div class="rounded-md border border-neutral-800 bg-black/40 p-3 text-sm">
 				<p>
 					{m.settings_plex_open_link_pre()}
 					<a href={login.linkUrl} target="_blank" rel="noopener" class="text-accent-300 underline">
@@ -132,7 +132,7 @@
 					{m.settings_plex_open_link_post()}
 				</p>
 				<p class="mt-2 font-mono text-2xl tracking-widest text-accent-200">{login.code}</p>
-				<p class="mt-2 text-xs text-neutral-500">
+				<p class="mt-2 text-xs text-neutral-400">
 					{m.settings_plex_or_authorize_pre()}
 					<a href={login.authUrl} target="_blank" rel="noopener" class="text-accent-300 underline"
 						>{m.settings_plex_authorize_directly()}</a
@@ -177,7 +177,7 @@
 					>
 						<span class="truncate">
 							<span class="text-neutral-200">{conn.serverName}</span>
-							<span class="ml-1 text-neutral-500">{conn.uri}</span>
+							<span class="ml-1 text-neutral-400">{conn.uri}</span>
 						</span>
 						<span class="ml-2 flex shrink-0 gap-1">
 							<span class="badge {conn.local ? 'badge-changed' : 'badge-muted'}">

@@ -31,6 +31,29 @@ body {
 	-webkit-font-smoothing: antialiased;
 }
 
+/* A single, consistent keyboard-focus indicator for every interactive element.
+   Components must not strip this (no bare `outline-none`); pair it with a ring. */
+@layer base {
+	:focus-visible {
+		outline: 2px solid var(--color-accent-500);
+		outline-offset: 2px;
+		border-radius: 2px;
+	}
+}
+
+/* Motion is a constraint, not decoration: honor the OS reduced-motion preference
+   everywhere (poster hover, progress bars, View Transitions, etc.). */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
 /* Shared building blocks used across pages. */
 @layer components {
 	.surface {
@@ -42,7 +65,7 @@ body {
 	}
 
 	.chip {
-		@apply inline-flex items-center rounded-full border border-neutral-700 px-2.5 py-0.5 text-xs text-neutral-300 transition;
+		@apply inline-flex items-center rounded-full border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 transition-colors;
 	}
 	.chip:hover {
 		@apply border-neutral-500;
@@ -74,7 +97,7 @@ body {
 	}
 
 	.btn {
-		@apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-50;
+		@apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
 	}
 	.btn-accent {
 		@apply bg-accent-600 text-white hover:bg-accent-500;
@@ -87,6 +110,6 @@ body {
 	}
 
 	.input {
-		@apply rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-accent-500;
+		@apply rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm transition-colors focus:border-accent-500;
 	}
 }

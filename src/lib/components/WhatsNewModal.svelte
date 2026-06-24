@@ -21,23 +21,58 @@
 	} = $props();
 
 	let closeButton = $state<HTMLButtonElement | null>(null);
+	let dialog = $state<HTMLElement | null>(null);
+	let lastFocused: HTMLElement | null = null;
 
 	function close() {
 		open = false;
+	}
+
+	/** Focusable elements inside the dialog, in DOM order. */
+	function focusable(): HTMLElement[] {
+		if (!dialog) return [];
+		return [
+			...dialog.querySelectorAll<HTMLElement>(
+				'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			)
+		];
 	}
 
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			close();
+			return;
+		}
+		// Trap Tab focus within the dialog so it never lands on background content.
+		if (event.key === 'Tab') {
+			const items = focusable();
+			if (items.length === 0) return;
+			const first = items[0];
+			const last = items[items.length - 1];
+			const active = document.activeElement as HTMLElement | null;
+			if (event.shiftKey && active === first) {
+				event.preventDefault();
+				last.focus();
+			} else if (!event.shiftKey && active === last) {
+				event.preventDefault();
+				first.focus();
+			}
 		}
 	}
 
 	const title = $derived(name ?? (version ? `v${version}` : m.whats_new_title()));
 
-	// Focus the close button whenever the modal opens.
+	// On open: remember what had focus, then focus the close button. On close:
+	// restore focus to where the user was so they aren't dropped at the top.
 	$effect(() => {
-		if (open) closeButton?.focus();
+		if (open) {
+			lastFocused = document.activeElement as HTMLElement | null;
+			closeButton?.focus();
+		} else if (lastFocused) {
+			lastFocused.focus();
+			lastFocused = null;
+		}
 	});
 </script>
 
@@ -56,6 +91,7 @@
 
 		<!-- Dialog -->
 		<div
+			bind:this={dialog}
 			class="surface relative flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden"
 			role="dialog"
 			aria-modal="true"
@@ -79,7 +115,7 @@
 				{#if body}
 					<p class="text-sm whitespace-pre-wrap text-neutral-300">{body}</p>
 				{:else}
-					<p class="text-sm text-neutral-500">{m.whats_new_empty()}</p>
+					<p class="text-sm text-neutral-400">{m.whats_new_empty()}</p>
 				{/if}
 			</div>
 

@@ -219,12 +219,12 @@
 			<div class="h-1.5 flex-1 rounded-full {i <= step ? 'bg-accent-500' : 'bg-neutral-800'}"></div>
 		{/each}
 	</div>
-	<p class="mt-2 text-xs text-neutral-500">{m.setup_step({ current: step + 1, total })}</p>
+	<p class="mt-2 text-xs text-neutral-400">{m.setup_step({ current: step + 1, total })}</p>
 
 	<div class="surface mt-4 space-y-4 p-5">
 		<div>
 			<h2 class="text-lg font-medium">{steps[step].title()}</h2>
-			<p class="mt-0.5 text-sm text-neutral-500">{steps[step].desc()}</p>
+			<p class="mt-0.5 text-sm text-neutral-400">{steps[step].desc()}</p>
 		</div>
 
 		{#if step === 0}
@@ -329,7 +329,7 @@
 						: m.settings_tmdb_key_placeholder_unset()}
 					class="input w-full"
 				/>
-				<p class="mt-1 text-xs text-neutral-500">
+				<p class="mt-1 text-xs text-neutral-400">
 					{m.setup_tmdb_get_key_pre()}
 					<a
 						href="https://www.themoviedb.org/settings/api"
@@ -356,7 +356,7 @@
 				<label class="flex items-center gap-2 text-sm text-neutral-300">
 					<input type="checkbox" bind:checked={providerThePosterDb} />
 					{m.settings_provider_theposterdb()}
-					<span class="text-xs text-neutral-500">{m.settings_experimental()}</span>
+					<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
 				</label>
 			</div>
 			<div>
@@ -383,7 +383,7 @@
 				{:else if connectionOk === false}
 					<span class="text-red-400">{m.setup_libraries_not_connected()}</span>
 				{:else}
-					<span class="text-neutral-500">{m.setup_libraries_check_hint()}</span>
+					<span class="text-neutral-400">{m.setup_libraries_check_hint()}</span>
 				{/if}
 			</div>
 
@@ -406,9 +406,9 @@
 					</p>
 				{/if}
 				{#if sections.length === 0}
-					<p class="text-xs text-neutral-500">{m.settings_libraries_connect_first()}</p>
+					<p class="text-xs text-neutral-400">{m.settings_libraries_connect_first()}</p>
 				{:else}
-					<p class="mb-2 text-xs text-neutral-500">{m.settings_libraries_hint()}</p>
+					<p class="mb-2 text-xs text-neutral-400">{m.settings_libraries_hint()}</p>
 					<div class="space-y-1">
 						{#each sections as section (section.key)}
 							<label class="flex items-center gap-2 text-sm text-neutral-300">
@@ -418,7 +418,7 @@
 									onchange={() => toggleSection(section.key)}
 								/>
 								{section.title}
-								<span class="text-xs text-neutral-500">({section.type})</span>
+								<span class="text-xs text-neutral-400">({section.type})</span>
 							</label>
 						{/each}
 					</div>

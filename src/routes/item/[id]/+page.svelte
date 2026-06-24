@@ -248,7 +248,7 @@
 			{#if data.item.currentPosterUrl}
 				<img src={data.item.currentPosterUrl} alt={data.item.title} class="w-full" />
 			{:else}
-				<div class="flex aspect-[2/3] items-center justify-center text-neutral-600">
+				<div class="flex aspect-[2/3] items-center justify-center text-neutral-400">
 					{m.item_no_poster()}
 				</div>
 			{/if}
@@ -267,7 +267,7 @@
 
 			{#if metaBits.length}
 				<p class="mt-2 text-sm text-neutral-300">
-					{#each metaBits as bit, i (bit)}{#if i > 0}<span class="text-neutral-600">
+					{#each metaBits as bit, i (bit)}{#if i > 0}<span class="text-neutral-400">
 								·
 							</span>{/if}<span class={bit.startsWith('★') ? 'font-semibold text-amber-300' : ''}
 							>{bit}</span
@@ -298,7 +298,7 @@
 			</div>
 
 			{#if !enriched}
-				<p class="mt-3 text-xs text-neutral-500">
+				<p class="mt-3 text-xs text-neutral-400">
 					{m.item_no_metadata()}
 				</p>
 			{/if}
@@ -328,7 +328,7 @@
 						{person.name}
 					</p>
 					{#if person.character}<p
-							class="truncate text-[10px] text-neutral-500"
+							class="truncate text-[10px] text-neutral-400"
 							title={person.character}
 						>
 							{person.character}
@@ -361,7 +361,7 @@
 						<p class="text-sm text-neutral-300">
 							{#if set.author}{m.item_set_by()}
 								<span class="font-semibold text-neutral-100">{set.author}</span>{:else}<span
-									class="text-neutral-500">{m.item_set_unattributed()}</span
+									class="text-neutral-400">{m.item_set_unattributed()}</span
 								>{/if}
 						</p>
 						{#if posters.length || backdrops.length}
@@ -374,7 +374,7 @@
 					<div class="flex flex-col gap-4 sm:flex-row">
 						{#if posters.length}
 							<div class="min-w-0 flex-1">
-								<p class="mb-1 text-[11px] text-neutral-500">
+								<p class="mb-1 text-[11px] text-neutral-400">
 									{posters.length > 1 ? m.item_posters() : m.item_poster()}
 								</p>
 								<div class="flex gap-2 overflow-x-auto pb-2">
@@ -386,7 +386,7 @@
 						{/if}
 						{#if backdrops.length}
 							<div class="min-w-0 flex-1">
-								<p class="mb-1 text-[11px] text-neutral-500">
+								<p class="mb-1 text-[11px] text-neutral-400">
 									{backdrops.length > 1 ? m.item_backdrops() : m.item_backdrop()}
 								</p>
 								<div class="grid grid-cols-2 gap-2">
@@ -398,7 +398,7 @@
 
 					{#if isShow && seasons.length}
 						<div class="mt-4">
-							<p class="mb-1 text-[11px] text-neutral-500">
+							<p class="mb-1 text-[11px] text-neutral-400">
 								{m.item_season_posters({ count: seasons.length })}
 							</p>
 							<div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
@@ -408,7 +408,7 @@
 					{/if}
 					{#if isShow && cards.length}
 						<div class="mt-4">
-							<p class="mb-1 text-[11px] text-neutral-500">
+							<p class="mb-1 text-[11px] text-neutral-400">
 								{m.item_title_cards({ count: cards.length })}
 							</p>
 							<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -421,7 +421,7 @@
 		{/each}
 	</section>
 {:else}
-	<p class="mt-8 pb-32 text-sm text-neutral-500">
+	<p class="mt-8 pb-32 text-sm text-neutral-400">
 		{data.item.resolved ? m.item_no_candidates_resolved() : m.item_no_candidates_unresolved()}
 	</p>
 {/if}
@@ -489,6 +489,7 @@
 					<input
 						type="file"
 						accept="image/*"
+						aria-label={m.item_upload_file_label()}
 						onchange={(e) => (posterFile = e.currentTarget.files?.[0] ?? null)}
 						class="max-w-[180px] text-[11px] text-neutral-400"
 					/>
@@ -498,7 +499,7 @@
 						class="btn btn-subtle px-2 py-1 text-xs">{m.item_upload_poster()}</button
 					>
 				</div>
-				<p class="text-[10px] text-neutral-500">
+				<p class="text-[10px] text-neutral-400">
 					{m.item_upload_hint()}
 				</p>
 			</div>
@@ -508,7 +509,11 @@
 			{#if message}<span class="hidden max-w-xs truncate text-xs text-neutral-400 sm:inline"
 					>{message}</span
 				>{/if}
-			<select bind:value={method} class="input py-1 text-xs">
+			<select
+				bind:value={method}
+				aria-label={m.library_apply_method_label()}
+				class="input py-1 text-xs"
+			>
 				<option value="both">{m.library_method_both()}</option>
 				<option value="plex">{m.library_method_plex()}</option>
 				<option value="kometa">{m.library_method_kometa()}</option>

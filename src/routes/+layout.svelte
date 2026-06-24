@@ -29,8 +29,10 @@
 	}
 
 	// Cross-fade between pages using the View Transitions API where supported.
+	// Skipped when the user prefers reduced motion (navigation stays instant).
 	onNavigate((navigation) => {
 		if (!document.startViewTransition) return;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		return new Promise((resolve) => {
 			document.startViewTransition(async () => {
 				resolve();
@@ -172,17 +174,17 @@
 		{@render children()}
 	</main>
 
-	<footer class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-neutral-600">
+	<footer class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-neutral-400">
 		<a
 			href="https://github.com/diegopeixoto/posterpilot"
 			target="_blank"
 			rel="noopener"
-			class="hover:text-neutral-400"
+			class="hover:text-neutral-200"
 		>
 			{m.app_name()}
 		</a>
-		<span class="text-neutral-700">·</span> v{data.version}
-		<p class="mx-auto mt-1 max-w-2xl text-neutral-700">{m.footer_disclaimer()}</p>
+		<span class="text-neutral-600">·</span> v{data.version}
+		<p class="mx-auto mt-1 max-w-2xl text-neutral-400">{m.footer_disclaimer()}</p>
 	</footer>
 </div>
 

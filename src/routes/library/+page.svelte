@@ -175,7 +175,7 @@
 
 <div class="flex items-center justify-between">
 	<h1 class="text-2xl font-semibold tracking-tight">{m.library_title()}</h1>
-	<span class="text-sm text-neutral-500">{m.library_item_count({ count: data.items.length })}</span>
+	<span class="text-sm text-neutral-400">{m.library_item_count({ count: data.items.length })}</span>
 </div>
 
 <!-- Spotlight -->
@@ -203,8 +203,10 @@
 	<form onsubmit={onSearchSubmit}>
 		<input
 			name="q"
+			type="search"
 			value={data.filter.q ?? ''}
 			placeholder={m.library_search_placeholder()}
+			aria-label={m.library_search_placeholder()}
 			oninput={onSearchInput}
 			class="input w-44"
 		/>
@@ -345,9 +347,20 @@
 		title={m.library_autoapply()}
 		aria-label={m.library_autoapply()}
 		aria-pressed={autoApply}
-		class="btn px-2 py-1.5 {autoApply ? 'btn-accent' : 'btn-ghost text-neutral-500'}"
+		class="btn px-2.5 py-2 {autoApply ? 'btn-accent' : 'btn-ghost text-neutral-400'}"
 	>
-		⚡
+		<svg
+			class="size-4"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" />
+		</svg>
 	</button>
 
 	{#if hasAnyFilter || hasSort}
@@ -418,7 +431,7 @@
 		<button onclick={() => bulk('/api/discover')} class="btn btn-subtle px-3 py-1"
 			>{m.library_find_covers()}</button
 		>
-		<select bind:value={method} class="input py-1">
+		<select bind:value={method} aria-label={m.library_apply_method_label()} class="input py-1">
 			<option value="both">{m.library_method_both()}</option>
 			<option value="plex">{m.library_method_plex()}</option>
 			<option value="kometa">{m.library_method_kometa()}</option>
@@ -438,7 +451,7 @@
 {/if}
 
 {#if data.items.length === 0}
-	<div class="surface mt-10 p-10 text-center text-neutral-500">
+	<div class="surface mt-10 p-10 text-center text-neutral-400">
 		{m.library_empty()}
 	</div>
 {:else}
