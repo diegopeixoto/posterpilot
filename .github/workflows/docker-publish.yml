@@ -68,7 +68,7 @@ jobs:
 
       # Drop-in for docker/build-push-action; layer caching is handled by
       # Blacksmith's sticky disk, so no cache-from/cache-to is needed.
-      - uses: useblacksmith/build-push-action@v1
+      - uses: useblacksmith/build-push-action@39d1b1a90b3dd4f04cd9e61ee11e097b9028e9ae # v1.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
