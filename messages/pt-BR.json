@@ -257,5 +257,12 @@
 	"library_apply_confirm": "Aplicar capas escolhidas automaticamente a {count} itens? Isso altera sua biblioteca.",
 	"library_apply_confirm_yes": "Sim, aplicar",
 	"library_action_failed": "Algo deu errado. Sua seleção foi mantida — tente novamente.",
-	"library_empty_title": "Nenhum item ainda."
+	"library_empty_title": "Nenhum item ainda.",
+	"item_apply_confirm": "Aplicar a capa preparada em {target}? Isso substitui a capa atual.",
+	"item_error_network": "erro de rede",
+	"settings_invalid_number": "{field} deve ser um número inteiro ≥ {min}.",
+	"settings_save_failed": "Não foi possível salvar as configurações. Tente novamente.",
+	"settings_test_failed": "Não foi possível executar o teste de conexão. Tente novamente.",
+	"setup_need_server": "Conecte seu servidor de mídia antes de continuar.",
+	"setup_need_tmdb": "Insira sua chave do TMDB antes de continuar."
 }

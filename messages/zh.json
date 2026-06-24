@@ -257,5 +257,12 @@
 	"library_apply_confirm": "将自动挑选的封面应用到 {count} 个项目？这会写入你的媒体库。",
 	"library_apply_confirm_yes": "确认应用",
 	"library_action_failed": "出错了。已保留你的选择，请重试。",
-	"library_empty_title": "暂无项目。"
+	"library_empty_title": "暂无项目。",
+	"item_apply_confirm": "将准备好的封面应用到 {target}？这会覆盖当前封面。",
+	"item_error_network": "网络错误",
+	"settings_invalid_number": "{field} 必须是 ≥ {min} 的整数。",
+	"settings_save_failed": "无法保存设置，请重试。",
+	"settings_test_failed": "无法运行连接测试，请重试。",
+	"setup_need_server": "请先连接媒体服务器再继续。",
+	"setup_need_tmdb": "请先输入 TMDB 密钥再继续。"
 }

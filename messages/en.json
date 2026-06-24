@@ -257,5 +257,12 @@
 	"library_apply_confirm": "Apply auto-picked covers to {count} items? This writes to your library.",
 	"library_apply_confirm_yes": "Yes, apply",
 	"library_action_failed": "Something went wrong. Your selection was kept — try again.",
-	"library_empty_title": "No items yet."
+	"library_empty_title": "No items yet.",
+	"item_apply_confirm": "Apply the staged artwork to {target}? This overwrites the current artwork.",
+	"item_error_network": "network error",
+	"settings_invalid_number": "{field} must be a whole number ≥ {min}.",
+	"settings_save_failed": "Couldn't save settings. Please try again.",
+	"settings_test_failed": "Couldn't run the connection test. Please try again.",
+	"setup_need_server": "Connect your media server before continuing.",
+	"setup_need_tmdb": "Enter your TMDB key before continuing."
 }

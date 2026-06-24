@@ -175,6 +175,8 @@
 	let saving = $state(false);
 	let testing = $state(false);
 	let saved = $state(false);
+	let saveError = $state<string | null>(null);
+	let testError = $state<string | null>(null);
 	let manualOpen = $state(false);
 	let testResult = $state<{
 		serverType?: string;
@@ -182,9 +184,33 @@
 		tmdb: { ok: boolean; error?: string };
 	} | null>(null);
 
+	// Validate the integer fields before saving; returns an error string or null.
+	function validateNumbers(): string | null {
+		const checks: [string, string, number][] = [
+			[mediuxDelayMs, m.settings_delay(), 0],
+			[mediuxConcurrency, m.settings_concurrency(), 1],
+			[httpCacheTtlDays, m.settings_cache_days(), 0]
+		];
+		for (const [raw, label, min] of checks) {
+			const n = Number(raw);
+			if (raw.trim() === '' || !Number.isInteger(n) || n < min) {
+				return m.settings_invalid_number({ field: label, min });
+			}
+		}
+		return null;
+	}
+
 	async function save() {
+		if (saving) return;
+		const invalid = validateNumbers();
+		if (invalid) {
+			saveError = invalid;
+			saved = false;
+			return;
+		}
 		saving = true;
 		saved = false;
+		saveError = null;
 		try {
 			const payload: Record<string, unknown> = {
 				serverType,
@@ -210,11 +236,14 @@
 			// All known sections selected → [] (sync everything, incl. future libraries).
 			payload.includedSections = allSelected ? [] : [...selectedSections];
 
-			await fetch('/api/settings', {
+			const res = await fetch('/api/settings', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify(payload)
 			});
+			if (!res.ok) throw new Error(String(res.status));
+			// Only clear the secret fields and confirm once the write actually succeeded,
+			// so a failed save never looks successful and never drops re-entered secrets.
 			plexToken = '';
 			jellyfinApiKey = '';
 			embyApiKey = '';
@@ -222,17 +251,24 @@
 			fanartKey = '';
 			saved = true;
 			await invalidateAll();
+		} catch {
+			saveError = m.settings_save_failed();
 		} finally {
 			saving = false;
 		}
 	}
 
 	async function test() {
+		if (testing) return;
 		testing = true;
 		testResult = null;
+		testError = null;
 		try {
 			const res = await fetch('/api/settings/test', { method: 'POST' });
+			if (!res.ok) throw new Error(String(res.status));
 			testResult = await res.json();
+		} catch {
+			testError = m.settings_test_failed();
 		} finally {
 			testing = false;
 		}
@@ -518,15 +554,39 @@
 		<div class="grid grid-cols-3 gap-3">
 			<div>
 				<label for="delay" class="mb-1 block text-sm font-medium">{m.settings_delay()}</label>
-				<input id="delay" bind:value={mediuxDelayMs} class="input w-full" />
+				<input
+					id="delay"
+					type="number"
+					inputmode="numeric"
+					min="0"
+					step="1"
+					bind:value={mediuxDelayMs}
+					class="input w-full"
+				/>
 			</div>
 			<div>
 				<label for="conc" class="mb-1 block text-sm font-medium">{m.settings_concurrency()}</label>
-				<input id="conc" bind:value={mediuxConcurrency} class="input w-full" />
+				<input
+					id="conc"
+					type="number"
+					inputmode="numeric"
+					min="1"
+					step="1"
+					bind:value={mediuxConcurrency}
+					class="input w-full"
+				/>
 			</div>
 			<div>
 				<label for="ttl" class="mb-1 block text-sm font-medium">{m.settings_cache_days()}</label>
-				<input id="ttl" bind:value={httpCacheTtlDays} class="input w-full" />
+				<input
+					id="ttl"
+					type="number"
+					inputmode="numeric"
+					min="0"
+					step="1"
+					bind:value={httpCacheTtlDays}
+					class="input w-full"
+				/>
 			</div>
 		</div>
 
@@ -661,8 +721,14 @@
 			<button onclick={test} disabled={testing} class="btn btn-subtle px-4 py-2"
 				>{testing ? m.settings_testing() : m.settings_test_connections()}</button
 			>
-			{#if saved}<span class="text-sm text-emerald-400">{m.settings_saved()}</span>{/if}
+			{#if saved}<span class="text-sm text-emerald-400" role="status">{m.settings_saved()}</span
+				>{/if}
+			{#if saveError}<span class="text-sm text-red-300" role="alert">{saveError}</span>{/if}
 		</div>
+
+		{#if testError}
+			<div class="surface p-3 text-sm text-red-300" role="alert">{testError}</div>
+		{/if}
 
 		{#if testResult}
 			<div class="surface space-y-1 p-3 text-sm">
