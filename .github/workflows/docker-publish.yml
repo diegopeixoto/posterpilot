@@ -38,9 +38,11 @@ jobs:
   publish:
     # Blacksmith runner: faster CPU/NVMe + sticky-disk Docker layer cache. Buildx
     # is provisioned by the runner, so no setup-buildx step is needed; QEMU stays
-    # for the emulated arm64 leg of the multi-arch build. `blacksmith` is the
-    # default 4 vCPU tier — bump to e.g. `blacksmith-8vcpu-ubuntu-2404` if needed.
-    runs-on: blacksmith
+    # for the emulated arm64 leg of the multi-arch build. Bump the tier
+    # (e.g. blacksmith-8vcpu-ubuntu-2404) if the build needs more cores.
+    # NOTE: Blacksmith only runs on GitHub *organizations*; this job will have no
+    # runner until the repo lives under an org with the Blacksmith app installed.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
         with:
