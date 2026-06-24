@@ -52,21 +52,24 @@
 		{/if}
 	</div>
 
-	<!-- Rating -->
+	<!-- Rating. A near-opaque scrim keeps amber legible over bright posters (AA). -->
 	{#if item.rating}
-		<span class="badge badge-muted absolute bottom-2 left-2 text-amber-300"
+		<span class="badge absolute bottom-2 left-2 bg-black/70 text-amber-300"
 			>★ {item.rating.toFixed(1)}</span
 		>
 	{/if}
 
 	{#if selectable}
+		<!-- The checkbox reveals on hover (fine pointers) but stays visible on touch
+		     devices and when focused, so bulk selection is reachable without hover. -->
 		<button
 			type="button"
 			onclick={onToggle}
 			aria-label={selected ? m.poster_deselect() : m.poster_select()}
+			aria-pressed={selected}
 			class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded border text-sm font-bold transition {selected
 				? 'border-accent-400 bg-accent-500 text-white'
-				: 'border-neutral-600 bg-neutral-900/80 text-transparent opacity-0 group-hover:opacity-100 hover:border-neutral-400'}"
+				: 'border-neutral-600 bg-neutral-900/80 text-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-neutral-400 pointer-coarse:opacity-100'}"
 		>
 			✓
 		</button>

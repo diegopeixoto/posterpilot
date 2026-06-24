@@ -253,5 +253,16 @@
 	"footer_disclaimer": "Sin afiliación ni respaldo de Plex, Jellyfin, Emby, TMDB, MediUX, Fanart.tv o ThePosterDB. Las marcas pertenecen a sus dueños.",
 	"item_msg_applied": "Carátula aplicada",
 	"item_msg_apply_failed": "No se pudo aplicar a {target}: {error}",
-	"apply_target_server": "el servidor de medios"
+	"apply_target_server": "el servidor de medios",
+	"library_apply_confirm": "¿Aplicar carátulas elegidas automáticamente a {count} elementos? Esto modifica tu biblioteca.",
+	"library_apply_confirm_yes": "Sí, aplicar",
+	"library_action_failed": "Algo salió mal. Se mantuvo tu selección; inténtalo de nuevo.",
+	"library_empty_title": "Aún no hay elementos.",
+	"item_apply_confirm": "¿Aplicar la carátula preparada a {target}? Esto sobrescribe la carátula actual.",
+	"item_error_network": "error de red",
+	"settings_invalid_number": "{field} debe ser un número entero ≥ {min}.",
+	"settings_save_failed": "No se pudo guardar la configuración. Inténtalo de nuevo.",
+	"settings_test_failed": "No se pudo ejecutar la prueba de conexión. Inténtalo de nuevo.",
+	"setup_need_server": "Conecta tu servidor de medios antes de continuar.",
+	"setup_need_tmdb": "Introduce tu clave de TMDB antes de continuar."
 }

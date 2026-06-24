@@ -95,6 +95,29 @@
 	let testMsg = $state<{ ok: boolean; text: string } | null>(null);
 	let syncing = $state(false);
 	let synced = $state(false);
+	let stepError = $state<string | null>(null);
+
+	/**
+	 * Block advancing past a step that isn't configured, so a first-timer can't
+	 * click straight through to a sync that silently does nothing. Presence-based
+	 * (not a live test) so the Plex flow — which has no Test button — isn't trapped.
+	 */
+	function validateStep(): string | null {
+		if (step === 1) {
+			if (serverType === 'plex') {
+				// Plex needs both a URL and a token, so block if either is missing.
+				if (!plexUrl.trim() || !plexTokenSet) return m.setup_need_server();
+			} else if (serverType === 'jellyfin') {
+				if (!jellyfinUrl.trim() || !(jellyfinApiKey.trim() || data.config.jellyfinApiKeySet))
+					return m.setup_need_server();
+			} else if (!embyUrl.trim() || !(embyApiKey.trim() || data.config.embyApiKeySet)) {
+				return m.setup_need_server();
+			}
+		} else if (step === 2) {
+			if (!tmdbKey.trim() && !data.config.tmdbKeySet) return m.setup_need_tmdb();
+		}
+		return null;
+	}
 
 	async function postSettings(payload: Record<string, unknown>) {
 		await fetch('/api/settings', {
@@ -113,7 +136,14 @@
 
 	/** Persist the current step's values, then advance. */
 	async function next() {
+		if (busy) return;
+		const invalid = validateStep();
+		if (invalid) {
+			stepError = invalid;
+			return;
+		}
 		busy = true;
+		stepError = null;
 		testMsg = null;
 		try {
 			if (step === 1) {
@@ -158,6 +188,7 @@
 
 	function back() {
 		testMsg = null;
+		stepError = null;
 		if (step > 0) step -= 1;
 	}
 
@@ -438,6 +469,10 @@
 					</button>
 				</div>
 			</div>
+		{/if}
+
+		{#if stepError}
+			<p class="mt-4 text-sm text-red-300" role="alert">{stepError}</p>
 		{/if}
 
 		{#if step < total - 1}

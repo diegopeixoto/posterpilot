@@ -253,5 +253,16 @@
 	"footer_disclaimer": "Plex、Jellyfin、Emby、TMDB、MediUX、Fanart.tv、ThePosterDB とは提携・公認関係にありません。商標は各所有者に帰属します。",
 	"item_msg_applied": "カバーを適用しました",
 	"item_msg_apply_failed": "{target} に適用できませんでした: {error}",
-	"apply_target_server": "メディアサーバー"
+	"apply_target_server": "メディアサーバー",
+	"library_apply_confirm": "自動選択したカバーを {count} 件に適用しますか？ライブラリに書き込まれます。",
+	"library_apply_confirm_yes": "適用する",
+	"library_action_failed": "問題が発生しました。選択は保持されています。もう一度お試しください。",
+	"library_empty_title": "まだ項目がありません。",
+	"item_apply_confirm": "準備したアートワークを {target} に適用しますか？現在のアートワークを上書きします。",
+	"item_error_network": "ネットワークエラー",
+	"settings_invalid_number": "{field} は {min} 以上の整数で入力してください。",
+	"settings_save_failed": "設定を保存できませんでした。もう一度お試しください。",
+	"settings_test_failed": "接続テストを実行できませんでした。もう一度お試しください。",
+	"setup_need_server": "続行する前にメディアサーバーを接続してください。",
+	"setup_need_tmdb": "続行する前に TMDB キーを入力してください。"
 }

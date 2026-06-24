@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { page } from '$app/state';
+	import { page, navigating } from '$app/state';
 	import PosterCard from '$lib/components/PosterCard.svelte';
 	import JobProgress from '$lib/components/JobProgress.svelte';
 	import Popover from '$lib/components/Popover.svelte';
@@ -12,6 +12,16 @@
 	const selected = new SvelteSet<number>();
 	let method = $state<'plex' | 'kometa' | 'both'>('both');
 	let jobId = $state<number | null>(null);
+
+	// Bulk-action state: in-flight guard, last error, and a confirm gate for the
+	// destructive auto-apply (it writes covers straight to the live server).
+	let busy = $state(false);
+	let errorMsg = $state<string | null>(null);
+	let confirmApply = $state(false);
+
+	// Dim the grid while a library filter/sort round-trip is in flight, so the user
+	// gets honest feedback that their change registered. Other navigations don't dim.
+	const libraryNavigating = $derived(!!navigating.to && navigating.to.url.pathname === '/library');
 
 	// Filters apply on change by default; the user can toggle this off (persisted).
 	// All controls drive the SAME query params; when autoApply is on, a change navigates
@@ -154,20 +164,39 @@
 	function toggle(id: number) {
 		if (selected.has(id)) selected.delete(id);
 		else selected.add(id);
+		// The selection changed, so a pending confirm/error no longer matches it.
+		confirmApply = false;
+		errorMsg = null;
 	}
 	function clearSelection() {
 		selected.clear();
+		confirmApply = false;
+		errorMsg = null;
 	}
 
+	/**
+	 * Fire a bulk action. Guards against double-submit, keeps the selection on
+	 * failure (so the user can retry), and only clears it once a job is queued.
+	 */
 	async function bulk(path: string, extra: Record<string, unknown> = {}) {
-		const res = await fetch(path, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ itemIds: [...selected], ...extra })
-		});
-		const { jobId: id } = await res.json();
-		jobId = id;
-		clearSelection();
+		if (busy) return;
+		busy = true;
+		errorMsg = null;
+		try {
+			const res = await fetch(path, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ itemIds: [...selected], ...extra })
+			});
+			if (!res.ok) throw new Error(String(res.status));
+			const { jobId: id } = await res.json();
+			jobId = id;
+			clearSelection();
+		} catch {
+			errorMsg = m.library_action_failed();
+		} finally {
+			busy = false;
+		}
 	}
 </script>
 
@@ -426,24 +455,51 @@
 {#if selected.size > 0}
 	<div
 		class="surface sticky top-16 z-10 mt-4 flex flex-wrap items-center gap-3 border-accent-800 bg-accent-950/40 px-4 py-2 text-sm backdrop-blur"
+		aria-busy={busy}
 	>
 		<span class="font-medium">{m.library_selected_count({ count: selected.size })}</span>
-		<button onclick={() => bulk('/api/discover')} class="btn btn-subtle px-3 py-1"
-			>{m.library_find_covers()}</button
-		>
+		<button disabled={busy} onclick={() => bulk('/api/discover')} class="btn btn-subtle px-3 py-1">
+			{busy ? m.item_working() : m.library_find_covers()}
+		</button>
 		<select bind:value={method} aria-label={m.library_apply_method_label()} class="input py-1">
 			<option value="both">{m.library_method_both()}</option>
 			<option value="plex">{m.library_method_plex()}</option>
 			<option value="kometa">{m.library_method_kometa()}</option>
 		</select>
-		<button
-			onclick={() => bulk('/api/apply', { method, selection: 'auto' })}
-			class="btn btn-accent px-3 py-1">{m.library_apply_auto()}</button
-		>
+		{#if confirmApply}
+			<!-- Two-step confirm: auto-apply writes to the live server and is hard to undo. -->
+			<span class="text-neutral-200">{m.library_apply_confirm({ count: selected.size })}</span>
+			<button
+				disabled={busy}
+				onclick={() => bulk('/api/apply', { method, selection: 'auto' })}
+				class="btn btn-accent px-3 py-1"
+			>
+				{busy ? m.item_working() : m.library_apply_confirm_yes()}
+			</button>
+			<button
+				disabled={busy}
+				onclick={() => (confirmApply = false)}
+				class="btn btn-ghost px-3 py-1"
+			>
+				{m.jobs_cancel()}
+			</button>
+		{:else}
+			<button disabled={busy} onclick={() => (confirmApply = true)} class="btn btn-accent px-3 py-1"
+				>{m.library_apply_auto()}</button
+			>
+		{/if}
 		<button onclick={clearSelection} class="ml-auto text-neutral-400 hover:text-neutral-200"
 			>{m.library_clear()}</button
 		>
 	</div>
+	{#if errorMsg}
+		<div
+			role="alert"
+			class="mt-2 rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+		>
+			{errorMsg}
+		</div>
+	{/if}
 {/if}
 
 {#if jobId}
@@ -451,12 +507,20 @@
 {/if}
 
 {#if data.items.length === 0}
-	<div class="surface mt-10 p-10 text-center text-neutral-400">
-		{m.library_empty()}
+	<div class="surface mt-10 p-10 text-center">
+		<p class="font-medium text-neutral-200">{m.library_empty_title()}</p>
+		<p class="mx-auto mt-1 max-w-md text-sm text-neutral-400">{m.library_empty()}</p>
+		<div class="mt-5 flex flex-wrap items-center justify-center gap-2">
+			<a href="/settings" class="btn btn-subtle px-3 py-1.5">{m.nav_settings()}</a>
+			<a href="/" class="btn btn-ghost px-3 py-1.5">{m.nav_dashboard()}</a>
+		</div>
 	</div>
 {:else}
 	<div
-		class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
+		class="mt-4 grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 {libraryNavigating
+			? 'opacity-50'
+			: ''}"
+		aria-busy={libraryNavigating}
 	>
 		{#each data.items as item (item.id)}
 			<PosterCard

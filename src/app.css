@@ -127,7 +127,7 @@ body {
 		@apply my-2 list-disc space-y-1 pl-5;
 	}
 	.release-notes :where(li) {
-		@apply text-neutral-300 marker:text-neutral-600;
+		@apply text-neutral-300 marker:text-neutral-500;
 	}
 	.release-notes :where(a) {
 		@apply text-accent-300 underline underline-offset-2 hover:text-accent-200;

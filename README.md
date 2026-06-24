@@ -141,7 +141,7 @@ for the complete reference:
 | `PROVIDER_MEDIUX` / `_TMDB` / `_FANART` / `_THEPOSTERDB` | per-provider on/off toggles                                      |
 | `DEFAULT_APPLY_METHOD`                                   | default apply method: `plex`, `kometa`, or `both` (default)      |
 | `INCLUDED_SECTIONS`                                      | library section keys to sync (empty = all movie/show libraries)  |
-| `LANGUAGE`                                               | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`             |
+| `APP_LANGUAGE`                                           | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`             |
 | `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)        |
 | `LOG_DIR`                                                | rotating log file folder (default `/data/logs` in Docker)        |
 | `EVENT_RETENTION`                                        | max activity-log rows kept in the db (default `2000`)            |

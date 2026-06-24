@@ -11,6 +11,20 @@
 	let method = $state<'plex' | 'kometa' | 'both'>('both');
 	let busy = $state(false);
 	let message = $state<string | null>(null);
+	// Whether the current message is an error (drives role="alert" + red styling).
+	let messageError = $state(false);
+	function setMessage(text: string, isError = false) {
+		message = text;
+		messageError = isError;
+	}
+
+	// Confirm gate for applying artwork to the live server (plex/both write to the
+	// real media server and are hard to undo; kometa-only writes a re-runnable file).
+	let confirmApply = $state(false);
+	const needsConfirm = $derived(method === 'plex' || method === 'both');
+	const confirmTarget = $derived(
+		method === 'both' ? `${m.apply_target_server()} + Kometa` : m.apply_target_server()
+	);
 
 	let posterUrlInput = $state('');
 	let backgroundUrlInput = $state('');
@@ -26,6 +40,8 @@
 			selectedPoster = data.item.selectedPosterUrl;
 			selectedBackground = data.item.selectedBackgroundUrl;
 			message = null;
+			messageError = false;
+			confirmApply = false;
 		}
 	});
 
@@ -99,7 +115,7 @@
 		if (poster) selectedPoster = poster.url;
 		if (backdrop) selectedBackground = backdrop.url;
 		await persistSelection();
-		message = m.item_msg_set_staged();
+		setMessage(m.item_msg_set_staged());
 	}
 
 	async function useCustomUrl(which: 'poster' | 'background') {
@@ -111,65 +127,87 @@
 	}
 
 	async function discover() {
+		if (busy) return;
 		busy = true;
-		message = null;
+		setMessage('');
 		try {
 			const res = await fetch(`/api/items/${data.item.id}/discover`, { method: 'POST' });
-			const result = await res.json();
-			message =
-				!res.ok || result.error
-					? m.item_msg_discovery_failed({ error: result.error ?? res.status })
-					: result.count === 1
+			const result = await res.json().catch(() => ({}));
+			if (!res.ok || result.error) {
+				setMessage(m.item_msg_discovery_failed({ error: result.error ?? res.status }), true);
+			} else {
+				setMessage(
+					result.count === 1
 						? m.item_msg_found_cover_one({ count: result.count })
-						: m.item_msg_found_covers({ count: result.count });
+						: m.item_msg_found_covers({ count: result.count })
+				);
+			}
 			await invalidateAll();
+		} catch {
+			setMessage(m.item_msg_discovery_failed({ error: m.item_error_network() }), true);
 		} finally {
 			busy = false;
 		}
 	}
 
 	async function uploadPoster() {
-		if (!posterFile) return;
+		if (!posterFile || busy) return;
 		busy = true;
-		message = null;
+		setMessage('');
 		try {
 			const fd = new FormData();
 			fd.append('file', posterFile);
 			const res = await fetch(`/api/items/${data.item.id}/upload`, { method: 'POST', body: fd });
-			const result = await res.json();
-			message = result.ok
-				? m.item_msg_uploaded()
-				: m.item_msg_upload_failed({ error: result.error ?? res.status });
+			const result = await res.json().catch(() => ({}));
+			if (res.ok && result.ok) setMessage(m.item_msg_uploaded());
+			else setMessage(m.item_msg_upload_failed({ error: result.error ?? res.status }), true);
 			await invalidateAll();
+		} catch {
+			setMessage(m.item_msg_upload_failed({ error: m.item_error_network() }), true);
 		} finally {
 			busy = false;
 		}
 	}
 
 	async function revert() {
+		if (busy) return;
 		busy = true;
-		message = null;
+		setMessage('');
 		try {
 			const res = await fetch(`/api/items/${data.item.id}/revert`, { method: 'POST' });
-			const result = await res.json();
-			message = result.ok
-				? m.item_msg_reverted()
-				: m.item_msg_revert_failed({ error: result.error ?? res.status });
-			selectedPoster = null;
-			selectedBackground = null;
+			const result = await res.json().catch(() => ({}));
+			if (res.ok && result.ok) {
+				setMessage(m.item_msg_reverted());
+				selectedPoster = null;
+				selectedBackground = null;
+			} else {
+				setMessage(m.item_msg_revert_failed({ error: result.error ?? res.status }), true);
+			}
 			await invalidateAll();
+		} catch {
+			setMessage(m.item_msg_revert_failed({ error: m.item_error_network() }), true);
 		} finally {
 			busy = false;
 		}
 	}
 
-	async function apply() {
+	/** Apply button: validate, then gate live-server writes behind a confirm. */
+	function requestApply() {
 		if (!selectedPoster) {
-			message = m.item_msg_stage_first();
+			setMessage(m.item_msg_stage_first(), true);
 			return;
 		}
+		if (needsConfirm) {
+			confirmApply = true;
+			return;
+		}
+		apply();
+	}
+
+	async function apply() {
+		if (!selectedPoster || busy) return;
 		busy = true;
-		message = null;
+		setMessage('');
 		try {
 			const res = await fetch(`/api/items/${data.item.id}/apply`, {
 				method: 'POST',
@@ -180,21 +218,33 @@
 					method
 				})
 			});
-			const { outcomes } = (await res.json()) as {
+			const { outcomes } = (await res.json().catch(() => ({ outcomes: [] }))) as {
 				outcomes: { method: string; status: string; error?: string }[];
 			};
 			const targetLabel = (method: string) =>
 				method === 'kometa' ? 'Kometa' : m.apply_target_server();
 			const failed = outcomes.filter((o) => o.status === 'failed');
-			message =
-				failed.length === 0
-					? m.item_msg_applied()
-					: failed
-							.map((o) =>
-								m.item_msg_apply_failed({ target: targetLabel(o.method), error: o.error ?? '' })
-							)
-							.join(' · ');
+			if (!res.ok && !outcomes.length) {
+				setMessage(m.item_msg_apply_failed({ target: confirmTarget, error: res.status }), true);
+			} else if (failed.length === 0) {
+				setMessage(m.item_msg_applied());
+				confirmApply = false;
+			} else {
+				setMessage(
+					failed
+						.map((o) =>
+							m.item_msg_apply_failed({ target: targetLabel(o.method), error: o.error ?? '' })
+						)
+						.join(' · '),
+					true
+				);
+			}
 			await invalidateAll();
+		} catch {
+			setMessage(
+				m.item_msg_apply_failed({ target: confirmTarget, error: m.item_error_network() }),
+				true
+			);
 		} finally {
 			busy = false;
 		}
@@ -431,6 +481,15 @@
 	class="fixed inset-x-0 bottom-0 z-30 border-t border-accent-900/40 bg-neutral-950/95 backdrop-blur"
 >
 	<div class="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-2.5">
+		{#if message}
+			<p
+				role={messageError ? 'alert' : 'status'}
+				aria-live={messageError ? 'assertive' : 'polite'}
+				class="basis-full text-xs {messageError ? 'text-red-300' : 'text-neutral-300'}"
+			>
+				{message}
+			</p>
+		{/if}
 		<div class="flex items-center gap-2">
 			<div
 				class="h-[51px] w-[34px] flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
@@ -506,11 +565,9 @@
 		</details>
 
 		<div class="ml-auto flex items-center gap-2">
-			{#if message}<span class="hidden max-w-xs truncate text-xs text-neutral-400 sm:inline"
-					>{message}</span
-				>{/if}
 			<select
 				bind:value={method}
+				onchange={() => (confirmApply = false)}
 				aria-label={m.library_apply_method_label()}
 				class="input py-1 text-xs"
 			>
@@ -518,9 +575,22 @@
 				<option value="plex">{m.library_method_plex()}</option>
 				<option value="kometa">{m.library_method_kometa()}</option>
 			</select>
-			<button onclick={apply} disabled={busy || !selectedPoster} class="btn btn-accent"
-				>{m.item_apply()}</button
-			>
+			{#if confirmApply}
+				<!-- Confirm before writing to the live server (hard to undo). -->
+				<span class="hidden text-xs text-neutral-200 sm:inline"
+					>{m.item_apply_confirm({ target: confirmTarget })}</span
+				>
+				<button onclick={apply} disabled={busy} class="btn btn-accent">
+					{busy ? m.item_working() : m.library_apply_confirm_yes()}
+				</button>
+				<button onclick={() => (confirmApply = false)} disabled={busy} class="btn btn-ghost">
+					{m.jobs_cancel()}
+				</button>
+			{:else}
+				<button onclick={requestApply} disabled={busy || !selectedPoster} class="btn btn-accent"
+					>{busy ? m.item_working() : m.item_apply()}</button
+				>
+			{/if}
 		</div>
 	</div>
 </div>

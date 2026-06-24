@@ -71,7 +71,7 @@
 			role="dialog"
 			aria-label={label}
 			tabindex="-1"
-			class="surface absolute z-20 mt-2 w-64 bg-neutral-900 p-3 shadow-xl shadow-black/40 {align ===
+			class="surface absolute z-20 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-neutral-900 p-3 shadow-xl shadow-black/40 {align ===
 			'right'
 				? 'right-0'
 				: 'left-0'}"

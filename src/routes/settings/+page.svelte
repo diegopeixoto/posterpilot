@@ -175,6 +175,8 @@
 	let saving = $state(false);
 	let testing = $state(false);
 	let saved = $state(false);
+	let saveError = $state<string | null>(null);
+	let testError = $state<string | null>(null);
 	let manualOpen = $state(false);
 	let testResult = $state<{
 		serverType?: string;
@@ -182,9 +184,35 @@
 		tmdb: { ok: boolean; error?: string };
 	} | null>(null);
 
+	// Validate the integer fields before saving; returns an error string or null.
+	// A type=number bind yields number | null (empty), so coerce through String.
+	function validateNumbers(): string | null {
+		const checks: [unknown, string, number][] = [
+			[mediuxDelayMs, m.settings_delay(), 0],
+			[mediuxConcurrency, m.settings_concurrency(), 1],
+			[httpCacheTtlDays, m.settings_cache_days(), 0]
+		];
+		for (const [raw, label, min] of checks) {
+			const s = String(raw ?? '').trim();
+			const n = Number(s);
+			if (s === '' || !Number.isInteger(n) || n < min) {
+				return m.settings_invalid_number({ field: label, min });
+			}
+		}
+		return null;
+	}
+
 	async function save() {
+		if (saving) return;
+		const invalid = validateNumbers();
+		if (invalid) {
+			saveError = invalid;
+			saved = false;
+			return;
+		}
 		saving = true;
 		saved = false;
+		saveError = null;
 		try {
 			const payload: Record<string, unknown> = {
 				serverType,
@@ -192,9 +220,11 @@
 				jellyfinUrl,
 				embyUrl,
 				kometaAssetsDir,
-				mediuxDelayMs,
-				mediuxConcurrency,
-				httpCacheTtlDays,
+				// type=number binds yield numbers; the settings API only persists string
+				// values, so stringify these before sending.
+				mediuxDelayMs: String(mediuxDelayMs),
+				mediuxConcurrency: String(mediuxConcurrency),
+				httpCacheTtlDays: String(httpCacheTtlDays),
 				defaultApplyMethod
 			};
 			// Only send secrets when (re)entered, so a blank field keeps the stored value.
@@ -210,11 +240,14 @@
 			// All known sections selected → [] (sync everything, incl. future libraries).
 			payload.includedSections = allSelected ? [] : [...selectedSections];
 
-			await fetch('/api/settings', {
+			const res = await fetch('/api/settings', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify(payload)
 			});
+			if (!res.ok) throw new Error(String(res.status));
+			// Only clear the secret fields and confirm once the write actually succeeded,
+			// so a failed save never looks successful and never drops re-entered secrets.
 			plexToken = '';
 			jellyfinApiKey = '';
 			embyApiKey = '';
@@ -222,17 +255,24 @@
 			fanartKey = '';
 			saved = true;
 			await invalidateAll();
+		} catch {
+			saveError = m.settings_save_failed();
 		} finally {
 			saving = false;
 		}
 	}
 
 	async function test() {
+		if (testing) return;
 		testing = true;
 		testResult = null;
+		testError = null;
 		try {
 			const res = await fetch('/api/settings/test', { method: 'POST' });
+			if (!res.ok) throw new Error(String(res.status));
 			testResult = await res.json();
+		} catch {
+			testError = m.settings_test_failed();
 		} finally {
 			testing = false;
 		}
@@ -244,10 +284,17 @@
 
 	// Persist the preferred language through the same path as the header switcher
 	// (writes the `language` setting, then reloads so SSR re-renders in the locale).
+	// Show a pending state immediately: the persist + reload takes a beat, and
+	// without feedback the switch looks like it did nothing.
+	let switchingLocale = $state(false);
 	function changeLanguage(event: Event) {
 		const value = (event.currentTarget as HTMLSelectElement).value;
+		if (value === language) return;
 		language = value as typeof language;
-		setLocale(value as Parameters<typeof setLocale>[0]);
+		switchingLocale = true;
+		Promise.resolve(setLocale(value as Parameters<typeof setLocale>[0])).catch(() => {
+			switchingLocale = false;
+		});
 	}
 </script>
 
@@ -511,15 +558,39 @@
 		<div class="grid grid-cols-3 gap-3">
 			<div>
 				<label for="delay" class="mb-1 block text-sm font-medium">{m.settings_delay()}</label>
-				<input id="delay" bind:value={mediuxDelayMs} class="input w-full" />
+				<input
+					id="delay"
+					type="number"
+					inputmode="numeric"
+					min="0"
+					step="1"
+					bind:value={mediuxDelayMs}
+					class="input w-full"
+				/>
 			</div>
 			<div>
 				<label for="conc" class="mb-1 block text-sm font-medium">{m.settings_concurrency()}</label>
-				<input id="conc" bind:value={mediuxConcurrency} class="input w-full" />
+				<input
+					id="conc"
+					type="number"
+					inputmode="numeric"
+					min="1"
+					step="1"
+					bind:value={mediuxConcurrency}
+					class="input w-full"
+				/>
 			</div>
 			<div>
 				<label for="ttl" class="mb-1 block text-sm font-medium">{m.settings_cache_days()}</label>
-				<input id="ttl" bind:value={httpCacheTtlDays} class="input w-full" />
+				<input
+					id="ttl"
+					type="number"
+					inputmode="numeric"
+					min="0"
+					step="1"
+					bind:value={httpCacheTtlDays}
+					class="input w-full"
+				/>
 			</div>
 		</div>
 
@@ -536,11 +607,41 @@
 	{:else if tab === 'language'}
 		<div>
 			<label for="language" class="mb-1 block text-sm font-medium">{m.settings_language()}</label>
-			<select id="language" value={language} onchange={changeLanguage} class="input">
-				{#each data.availableLocales as loc (loc.code)}
-					<option value={loc.code}>{loc.name}</option>
-				{/each}
-			</select>
+			<div class="flex items-center gap-2">
+				<select
+					id="language"
+					value={language}
+					onchange={changeLanguage}
+					disabled={switchingLocale}
+					class="input disabled:opacity-60"
+				>
+					{#each data.availableLocales as loc (loc.code)}
+						<option value={loc.code}>{loc.name}</option>
+					{/each}
+				</select>
+				{#if switchingLocale}
+					<svg
+						class="size-4 animate-spin text-accent-400"
+						viewBox="0 0 24 24"
+						fill="none"
+						aria-hidden="true"
+					>
+						<circle
+							class="opacity-25"
+							cx="12"
+							cy="12"
+							r="10"
+							stroke="currentColor"
+							stroke-width="3"
+						/>
+						<path
+							class="opacity-90"
+							fill="currentColor"
+							d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7V2z"
+						/>
+					</svg>
+				{/if}
+			</div>
 		</div>
 	{:else}
 		<div>
@@ -624,8 +725,14 @@
 			<button onclick={test} disabled={testing} class="btn btn-subtle px-4 py-2"
 				>{testing ? m.settings_testing() : m.settings_test_connections()}</button
 			>
-			{#if saved}<span class="text-sm text-emerald-400">{m.settings_saved()}</span>{/if}
+			{#if saved}<span class="text-sm text-emerald-400" role="status">{m.settings_saved()}</span
+				>{/if}
+			{#if saveError}<span class="text-sm text-red-300" role="alert">{saveError}</span>{/if}
 		</div>
+
+		{#if testError}
+			<div class="surface p-3 text-sm text-red-300" role="alert">{testError}</div>
+		{/if}
 
 		{#if testResult}
 			<div class="surface space-y-1 p-3 text-sm">

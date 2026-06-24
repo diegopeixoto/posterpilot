@@ -98,10 +98,19 @@
 	});
 
 	// Selecting a language persists it (via the custom strategy's settings write)
-	// and reloads so the next SSR pass renders in the new locale.
+	// and reloads so the next SSR pass renders in the new locale. The persist +
+	// reload takes a beat, so we show a pending state immediately — without it the
+	// switch looks like it did nothing until the reload lands.
+	let switchingLocale = $state(false);
 	function onLanguageChange(event: Event) {
 		const value = (event.currentTarget as HTMLSelectElement).value;
-		setLocale(value as Parameters<typeof setLocale>[0]);
+		if (value === data.locale) return;
+		switchingLocale = true;
+		// setLocale persists then reloads. If it rejects (e.g. the settings write
+		// fails) clear the pending state so the control isn't stuck disabled.
+		Promise.resolve(setLocale(value as Parameters<typeof setLocale>[0])).catch(() => {
+			switchingLocale = false;
+		});
 	}
 </script>
 
@@ -128,13 +137,39 @@
 					</a>
 				{/each}
 			</nav>
-			<label class="ml-auto flex items-center gap-1.5 text-sm text-neutral-400">
+			<label
+				class="ml-auto flex items-center gap-1.5 text-sm text-neutral-400"
+				aria-busy={switchingLocale}
+			>
 				<span class="sr-only">{m.language_label()}</span>
+				{#if switchingLocale}
+					<svg
+						class="size-3.5 animate-spin text-accent-400"
+						viewBox="0 0 24 24"
+						fill="none"
+						aria-hidden="true"
+					>
+						<circle
+							class="opacity-25"
+							cx="12"
+							cy="12"
+							r="10"
+							stroke="currentColor"
+							stroke-width="3"
+						/>
+						<path
+							class="opacity-90"
+							fill="currentColor"
+							d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7V2z"
+						/>
+					</svg>
+				{/if}
 				<select
 					value={data.locale}
 					onchange={onLanguageChange}
 					aria-label={m.language_label()}
-					class="input py-1 text-sm"
+					disabled={switchingLocale}
+					class="input py-1 text-sm disabled:opacity-60"
 				>
 					{#each data.availableLocales as loc (loc.code)}
 						<option value={loc.code}>{loc.name}</option>

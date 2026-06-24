@@ -112,7 +112,7 @@ consumed.
 
 The UI language is resolved per request: (1) the preferred-language setting when
 it names a supported locale, then (2) the request's `Accept-Language` header, then
-(3) English. Set a preferred language with `LANGUAGE`, via the Settings page, or
+(3) English. Set a preferred language with `APP_LANGUAGE`, via the Settings page, or
 with the header language switcher. Supported locales are English (`en`), Spanish
 (`es`), Simplified Chinese (`zh`), Japanese (`ja`), and Brazilian Portuguese
 (`pt-BR`). An unset or unsupported value falls through to `Accept-Language`, then
@@ -161,7 +161,7 @@ and are locked in the UI.
 | `MEDIUX_REQUEST_DELAY_MS` | MediUX request delay      | `2000`                                | Delay between MediUX requests, in milliseconds (throttling).                                  |
 | `MEDIUX_CONCURRENCY`      | MediUX concurrency        | `5`                                   | Max concurrent MediUX requests.                                                               |
 | `HTTP_CACHE_TTL_DAYS`     | HTTP cache TTL            | `7`                                   | How long cached HTTP responses (scrapes) are reused, in days.                                 |
-| `LANGUAGE`                | Language                  | — (auto)                              | Preferred UI locale: `en`, `es`, `zh`, `ja`, or `pt-BR`.                                      |
+| `APP_LANGUAGE`                | Language                  | — (auto)                              | Preferred UI locale: `en`, `es`, `zh`, `ja`, or `pt-BR`.                                      |
 | `LOG_DIR`                 | —                         | `/data/logs` (Docker)                 | Folder for the rotating `posterpilot.log` file (~5 MB × 5 files).                             |
 | `EVENT_RETENTION`         | —                         | `2000`                                | Max number of activity-log rows kept in the database (older rows are pruned).                 |
 | `DATABASE_URL`            | —                         | `file:/data/posterpilot.db` (Docker)  | libsql file URL for the SQLite database.                                                      |

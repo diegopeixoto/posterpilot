@@ -111,7 +111,7 @@ consumida.
 
 O idioma da interface é resolvido por requisição: (1) a configuração de idioma preferido quando
 ela nomeia uma localidade suportada, depois (2) o cabeçalho `Accept-Language` da requisição, depois
-(3) inglês. Defina um idioma preferido com `LANGUAGE`, pela página de Configurações ou
+(3) inglês. Defina um idioma preferido com `APP_LANGUAGE`, pela página de Configurações ou
 com o seletor de idioma do cabeçalho. As localidades suportadas são inglês (`en`), espanhol
 (`es`), chinês simplificado (`zh`), japonês (`ja`) e português do Brasil
 (`pt-BR`). Um valor não definido ou não suportado recai para `Accept-Language`, depois
@@ -158,7 +158,7 @@ e ficam bloqueadas na interface.
 | `MEDIUX_REQUEST_DELAY_MS` | Atraso de requisição do MediUX | `2000`                           | Atraso entre requisições ao MediUX, em milissegundos (throttling).                            |
 | `MEDIUX_CONCURRENCY`      | Concorrência do MediUX    | `5`                                   | Máximo de requisições concorrentes ao MediUX.                                                  |
 | `HTTP_CACHE_TTL_DAYS`     | TTL do cache HTTP         | `7`                                   | Por quanto tempo as respostas HTTP em cache (scrapes) são reutilizadas, em dias.              |
-| `LANGUAGE`                | Idioma                    | — (auto)                              | Localidade de interface preferida: `en`, `es`, `zh`, `ja` ou `pt-BR`.                          |
+| `APP_LANGUAGE`                | Idioma                    | — (auto)                              | Localidade de interface preferida: `en`, `es`, `zh`, `ja` ou `pt-BR`.                          |
 | `LOG_DIR`                 | —                         | `/data/logs` (Docker)                 | Pasta para o arquivo de log rotativo `posterpilot.log` (~5 MB × 5 arquivos).                  |
 | `EVENT_RETENTION`         | —                         | `2000`                                | Número máximo de linhas do log de atividade mantidas no banco de dados (linhas mais antigas são removidas). |
 | `DATABASE_URL`            | —                         | `file:/data/posterpilot.db` (Docker)  | URL de arquivo libsql para o banco de dados SQLite.                                            |
