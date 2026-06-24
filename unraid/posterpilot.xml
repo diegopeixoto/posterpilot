@@ -7,7 +7,7 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/diegopeixoto/posterpilot/issues</Support>
+  <Support>https://forums.unraid.net/topic/199615-support-posterpilot-posterartwork-manager-for-plexjellyfinemby/</Support>
   <Project>https://github.com/diegopeixoto/posterpilot</Project>
   <Overview>PosterPilot is a self-hosted artwork manager for Plex, Jellyfin and Emby. Browse your library, find covers across MediUX, Fanart.tv, TMDB and ThePosterDB, and apply them directly to your media server and/or by exporting Kometa/PMM-compatible YAML. Credentials can be set here or in the in-app Settings page (including Plex login). Point the /kometa volume at your existing Kometa config to have exported YAML picked up on its next run.</Overview>
   <Category>MediaApp:Video MediaServer:Video Tools:Utilities:</Category>

@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>
+**PosterPilot** — a self-hosted poster and artwork manager for **Plex**, **Jellyfin** and **Emby**.
+
+Browse one media server, resolve titles to TMDB, and find covers across multiple
+providers — **MediUX**, **Fanart.tv**, **TMDB** and **ThePosterDB**. Apply artwork
+directly to your media server and/or export **Kometa/PMM**-compatible YAML so your
+existing Kometa run picks it up.
+
+Multi-language UI (English, Spanish, Chinese, Japanese, Brazilian Portuguese).
+Configure credentials via Docker variables or the in-app Settings page (including
+Plex login). Point the `/kometa` volume at your existing Kometa config directory to
+have exported YAML land where Kometa reads it.
+
+For support, post in the Unraid support thread; for bug reports, open a GitHub issue:
+https://forums.unraid.net/topic/199615-support-posterpilot-posterartwork-manager-for-plexjellyfinemby/
+https://github.com/diegopeixoto/posterpilot/issues
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/diegopeixoto/posterpilot/main/artwork/icon-posterpilot.png</Icon>
+  <WebPage>https://github.com/diegopeixoto/posterpilot</WebPage>
+  <Forum>https://forums.unraid.net/topic/199615-support-posterpilot-posterartwork-manager-for-plexjellyfinemby/</Forum>
+  <!-- Optional — uncomment and fill if/when a sponsorship link exists:
+  <DonateLink>https://github.com/sponsors/diegopeixoto</DonateLink>
+  <DonateText>Support PosterPilot development</DonateText>
+  -->
+</CommunityApplications>
