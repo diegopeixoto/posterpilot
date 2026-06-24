@@ -41,8 +41,9 @@ interface GhRelease {
 	body?: string;
 }
 
-/** Fetch a single release by tag. Notes for a published tag are immutable, so
- *  cache them for a long time. Returns null on any failure. */
+/** Fetch a single release by tag. Notes for an existing tag rarely change
+ *  (they can be edited, but seldom are), so cache them for a long time. Returns
+ *  null on any failure. */
 async function fetchReleaseByTag(tag: string): Promise<GhRelease | null> {
 	try {
 		return await fetchJson<GhRelease>(RELEASE_BY_TAG(tag), {

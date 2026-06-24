@@ -105,8 +105,31 @@
 		}
 	}
 
+	// One-time-after-update: show the modal once when the running version is newer
+	// than the last version the user saw. Called AFTER the update check resolves so
+	// the modal has the running version's notes, and the "seen" marker is only
+	// written once the check completed — a failed/slow check leaves the marker so
+	// it retries on the next load instead of silently burning the prompt.
+	function maybeShowWhatsNew() {
+		try {
+			const lastSeen = localStorage.getItem(LAST_SEEN_KEY);
+			if (lastSeen === null) {
+				localStorage.setItem(LAST_SEEN_KEY, data.version); // first run: seed silently
+				return;
+			}
+			if (!isNewerVersion(data.version, lastSeen)) return;
+			if (!update) return; // check failed — leave the marker so we retry next load
+			whatsNewMode = 'current';
+			whatsNewOpen = true;
+			localStorage.setItem(LAST_SEEN_KEY, data.version);
+		} catch {
+			// Ignore — localStorage may be unavailable (private mode, etc.).
+		}
+	}
+
 	onMount(() => {
-		refreshUpdate();
+		// Decide whether to show the "What's new" modal only once the check resolves.
+		void refreshUpdate().then(maybeShowWhatsNew);
 
 		// Re-check periodically and when the tab regains focus, so a long-open
 		// dashboard notices a new release without a full restart/reload.
@@ -116,22 +139,6 @@
 			if (document.visibilityState === 'visible') refreshUpdate();
 		};
 		document.addEventListener('visibilitychange', onVisible);
-
-		// One-time-after-update: show the modal once when the running version is
-		// newer than the last version the user saw. The modal shows the RUNNING
-		// version's notes ('current' mode). On first ever run, seed silently.
-		try {
-			const lastSeen = localStorage.getItem(LAST_SEEN_KEY);
-			if (lastSeen === null) {
-				localStorage.setItem(LAST_SEEN_KEY, data.version);
-			} else if (isNewerVersion(data.version, lastSeen)) {
-				whatsNewMode = 'current';
-				whatsNewOpen = true;
-				localStorage.setItem(LAST_SEEN_KEY, data.version);
-			}
-		} catch {
-			// Ignore — localStorage may be unavailable (private mode, etc.).
-		}
 
 		return () => {
 			clearInterval(interval);
