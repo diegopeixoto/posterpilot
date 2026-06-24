@@ -95,7 +95,7 @@
 
 	const LAST_SEEN_KEY = 'pp_lastSeenVersion';
 
-	// Re-check for updates; safe to call repeatedly (server-side cached ~6h).
+	// Re-check for updates; safe to call repeatedly (server-side cached ~1h; SWR-enabled).
 	async function refreshUpdate() {
 		try {
 			const res = await fetch('/api/update');
