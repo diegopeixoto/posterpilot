@@ -65,36 +65,89 @@
 		url: string;
 		name: string | null;
 		body: string | null;
+		currentName: string | null;
+		currentBody: string | null;
+		currentUrl: string;
+		currentResolved: boolean;
 	};
 	let update = $state<Update | null>(null);
 
-	// "What's new" modal, fed by the latest release notes from /api/update.
+	// "What's new" modal. Two intents share it: 'current' shows the notes for the
+	// version you're running (post-upgrade), 'latest' previews the available
+	// release (the update banner's link). Content is picked from `update` by mode.
 	let whatsNewOpen = $state(false);
+	let whatsNewMode = $state<'current' | 'latest'>('current');
+
+	const whatsNew = $derived(
+		whatsNewMode === 'latest'
+			? {
+					version: update?.latest ?? data.version,
+					name: update?.name ?? null,
+					body: update?.body ?? null,
+					url: update?.url ?? 'https://github.com/diegopeixoto/posterpilot/releases'
+				}
+			: {
+					version: data.version,
+					name: update?.currentName ?? null,
+					body: update?.currentBody ?? null,
+					url: update?.currentUrl ?? 'https://github.com/diegopeixoto/posterpilot/releases'
+				}
+	);
 
 	const LAST_SEEN_KEY = 'pp_lastSeenVersion';
 
-	onMount(async () => {
+	// Re-check for updates; safe to call repeatedly (server-side cached ~1h; SWR-enabled).
+	async function refreshUpdate() {
 		try {
 			const res = await fetch('/api/update');
 			if (res.ok) update = await res.json();
 		} catch {
 			// Ignore — the update check is optional.
 		}
+	}
 
-		// One-time-after-update: show the modal once when the running version is
-		// newer than the last version the user saw. On first ever run, seed the
-		// marker silently (no modal).
+	// One-time-after-update: show the modal once when the running version is newer
+	// than the last version the user saw. Shown only after the running version's
+	// release notes actually resolved from GitHub, and the "seen" marker is written
+	// only then — so a failed/slow check (or a GitHub tag lookup that hasn't
+	// recovered yet) retries on the next load instead of flashing an empty modal
+	// and burning the prompt.
+	function maybeShowWhatsNew() {
 		try {
 			const lastSeen = localStorage.getItem(LAST_SEEN_KEY);
 			if (lastSeen === null) {
-				localStorage.setItem(LAST_SEEN_KEY, data.version);
-			} else if (isNewerVersion(data.version, lastSeen)) {
-				whatsNewOpen = true;
-				localStorage.setItem(LAST_SEEN_KEY, data.version);
+				localStorage.setItem(LAST_SEEN_KEY, data.version); // first run: seed silently
+				return;
 			}
+			if (!isNewerVersion(data.version, lastSeen)) return;
+			// Wait until the running version's own notes are available, not just until
+			// /api/update returned (it returns a non-null object even if the tag lookup failed).
+			if (!update?.currentResolved) return;
+			whatsNewMode = 'current';
+			whatsNewOpen = true;
+			localStorage.setItem(LAST_SEEN_KEY, data.version);
 		} catch {
 			// Ignore — localStorage may be unavailable (private mode, etc.).
 		}
+	}
+
+	onMount(() => {
+		// Decide whether to show the "What's new" modal only once the check resolves.
+		void refreshUpdate().then(maybeShowWhatsNew);
+
+		// Re-check periodically and when the tab regains focus, so a long-open
+		// dashboard notices a new release without a full restart/reload.
+		const SIX_HOURS = 6 * 60 * 60 * 1000;
+		const interval = setInterval(refreshUpdate, SIX_HOURS);
+		const onVisible = () => {
+			if (document.visibilityState === 'visible') refreshUpdate();
+		};
+		document.addEventListener('visibilitychange', onVisible);
+
+		return () => {
+			clearInterval(interval);
+			document.removeEventListener('visibilitychange', onVisible);
+		};
 	});
 
 	// Selecting a language persists it (via the custom strategy's settings write)
@@ -195,7 +248,14 @@
 			class="border-b border-accent-900/50 bg-accent-950/40 px-4 py-2 text-center text-sm text-accent-200"
 		>
 			{m.update_available({ version: update.latest ?? '' })}
-			<button type="button" onclick={() => (whatsNewOpen = true)} class="font-semibold underline">
+			<button
+				type="button"
+				onclick={() => {
+					whatsNewMode = 'latest';
+					whatsNewOpen = true;
+				}}
+				class="font-semibold underline"
+			>
 				{m.update_whats_new()}
 			</button>
 			<span class="text-accent-500/60">·</span>
@@ -225,8 +285,8 @@
 
 <WhatsNewModal
 	bind:open={whatsNewOpen}
-	version={update?.latest ?? data.version}
-	name={update?.name ?? null}
-	body={update?.body ?? null}
-	url={update?.url ?? 'https://github.com/diegopeixoto/posterpilot/releases'}
+	version={whatsNew.version}
+	name={whatsNew.name}
+	body={whatsNew.body}
+	url={whatsNew.url}
 />

@@ -12,18 +12,23 @@ export interface FetchOptions {
 	cacheTtlDays?: number;
 	/** Bypass the cache read (a fresh response is still written back). */
 	forceRefresh?: boolean;
+	/**
+	 * Serve a stale cached value immediately and refresh it in the background,
+	 * so the call never blocks on the network past the first fetch and the next
+	 * call sees fresh data. Use for non-critical, frequently-polled endpoints
+	 * (e.g. the update check) where a slightly stale answer is fine.
+	 */
+	staleWhileRevalidate?: boolean;
 	/** Retry attempts for transient failures (429 / 5xx / network). */
 	retries?: number;
 	/** Per-attempt timeout in milliseconds. */
 	timeoutMs?: number;
 }
 
-async function readCache(url: string, ttlDays: number): Promise<string | null> {
+async function readCacheRow(url: string): Promise<{ body: string; ageMs: number } | null> {
 	const row = (await db.select().from(httpCache).where(eq(httpCache.url, url)).limit(1))[0];
 	if (!row) return null;
-	const age = Date.now() - row.fetchedAt.getTime();
-	if (age > ttlDays * DAY_MS) return null;
-	return row.body;
+	return { body: row.body, ageMs: Date.now() - row.fetchedAt.getTime() };
 }
 
 async function writeCache(url: string, body: string): Promise<void> {
@@ -34,19 +39,14 @@ async function writeCache(url: string, body: string): Promise<void> {
 		.onConflictDoUpdate({ target: httpCache.url, set: { body, fetchedAt: now } });
 }
 
-/**
- * Fetch a URL as text with retry-with-backoff and optional SQLite response caching.
- * Retries on 429/5xx and network errors; fails fast (no retry) on other 4xx.
- */
-export async function fetchText(url: string, opts: FetchOptions = {}): Promise<string> {
-	const { cacheTtlDays = 0, forceRefresh = false, headers, retries = 3, timeoutMs = 20_000 } = opts;
-
-	if (cacheTtlDays > 0 && !forceRefresh) {
-		const cached = await readCache(url, cacheTtlDays);
-		if (cached !== null) return cached;
-	}
-
-	const body = await pRetry(
+/** Run the network fetch with retry/backoff. Retries 429/5xx + network; fails fast on other 4xx. */
+function fetchFresh(
+	url: string,
+	headers: Record<string, string> | undefined,
+	retries: number,
+	timeoutMs: number
+): Promise<string> {
+	return pRetry(
 		async () => {
 			const ac = new AbortController();
 			const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -66,7 +66,52 @@ export async function fetchText(url: string, opts: FetchOptions = {}): Promise<s
 		},
 		{ retries, minTimeout: 500, factor: 2 }
 	);
+}
 
+// URLs currently being revalidated in the background, to avoid duplicate refreshes.
+const revalidating = new Set<string>();
+
+/** Refresh a URL's cached body in the background. Never throws. */
+function revalidate(
+	url: string,
+	headers: Record<string, string> | undefined,
+	retries: number,
+	timeoutMs: number
+): void {
+	if (revalidating.has(url)) return;
+	revalidating.add(url);
+	void fetchFresh(url, headers, retries, timeoutMs)
+		.then((body) => writeCache(url, body))
+		.catch(() => {})
+		.finally(() => revalidating.delete(url));
+}
+
+/**
+ * Fetch a URL as text with retry-with-backoff and optional SQLite response caching.
+ * Retries on 429/5xx and network errors; fails fast (no retry) on other 4xx.
+ */
+export async function fetchText(url: string, opts: FetchOptions = {}): Promise<string> {
+	const {
+		cacheTtlDays = 0,
+		forceRefresh = false,
+		staleWhileRevalidate = false,
+		headers,
+		retries = 3,
+		timeoutMs = 20_000
+	} = opts;
+
+	if (cacheTtlDays > 0 && !forceRefresh) {
+		const row = await readCacheRow(url);
+		if (row) {
+			if (row.ageMs <= cacheTtlDays * DAY_MS) return row.body; // fresh
+			if (staleWhileRevalidate) {
+				revalidate(url, headers, retries, timeoutMs); // refresh for next time
+				return row.body; // serve stale now, never blocking
+			}
+		}
+	}
+
+	const body = await fetchFresh(url, headers, retries, timeoutMs);
 	if (cacheTtlDays > 0) await writeCache(url, body);
 	return body;
 }
