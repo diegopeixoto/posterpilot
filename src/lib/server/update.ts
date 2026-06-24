@@ -74,7 +74,8 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
 	const [latestRes, currentRes] = await Promise.all([
 		fetchJson<GhRelease>(RELEASES_URL, {
 			headers: GH_HEADERS,
-			cacheTtlDays: 0.25, // ~6 hours
+			cacheTtlDays: 1 / 24, // ~1 hour
+			staleWhileRevalidate: true, // serve cached instantly; refresh in the background
 			retries: 1,
 			timeoutMs: 6000
 		}).catch(() => null),
