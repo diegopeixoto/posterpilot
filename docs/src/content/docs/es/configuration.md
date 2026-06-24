@@ -124,7 +124,7 @@ exportación.
 El idioma de la interfaz se resuelve por petición: (1) el ajuste de idioma
 preferido cuando nombra un locale soportado, luego (2) la cabecera
 `Accept-Language` de la petición y luego (3) el inglés. Define un idioma preferido
-con `LANGUAGE`, mediante la página de Ajustes o con el selector de idioma de la
+con `APP_LANGUAGE`, mediante la página de Ajustes o con el selector de idioma de la
 cabecera. Los locales soportados son inglés (`en`), español (`es`), chino
 simplificado (`zh`), japonés (`ja`) y portugués de Brasil (`pt-BR`). Un valor sin
 definir o no soportado pasa a `Accept-Language`, luego al inglés; nunca un error y
@@ -173,7 +173,7 @@ el entorno tienen prioridad y quedan bloqueados en la interfaz.
 | `MEDIUX_REQUEST_DELAY_MS` | Retardo de petición de MediUX   | `2000`                                 | Retardo entre peticiones a MediUX, en milisegundos (limitación).                                     |
 | `MEDIUX_CONCURRENCY`      | Concurrencia de MediUX          | `5`                                    | Máximo de peticiones concurrentes a MediUX.                                                            |
 | `HTTP_CACHE_TTL_DAYS`     | TTL de caché HTTP               | `7`                                    | Cuánto tiempo se reutilizan las respuestas HTTP en caché (scrapes), en días.                         |
-| `LANGUAGE`                | Idioma                          | — (automático)                         | Locale de interfaz preferido: `en`, `es`, `zh`, `ja` o `pt-BR`.                                      |
+| `APP_LANGUAGE`                | Idioma                          | — (automático)                         | Locale de interfaz preferido: `en`, `es`, `zh`, `ja` o `pt-BR`.                                      |
 | `LOG_DIR`                 | —                               | `/data/logs` (Docker)                  | Carpeta del archivo rotativo `posterpilot.log` (~5 MB × 5 archivos).                                 |
 | `EVENT_RETENTION`         | —                               | `2000`                                 | Número máximo de filas del registro de actividad conservadas en la base de datos (las más antiguas se podan). |
 | `DATABASE_URL`            | —                               | `file:/data/posterpilot.db` (Docker)   | URL de archivo libsql para la base de datos SQLite.                                                   |

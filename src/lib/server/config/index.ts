@@ -80,7 +80,10 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	providerFanart: 'PROVIDER_FANART',
 	providerThePosterDb: 'PROVIDER_THEPOSTERDB',
 	fanartKey: 'FANART_KEY',
-	language: 'LANGUAGE',
+	// APP_LANGUAGE, not LANGUAGE: the bare `LANGUAGE` var is a standard POSIX locale
+	// setting commonly present on Linux/Docker hosts, which would silently lock the
+	// UI language. Namespacing it avoids that collision.
+	language: 'APP_LANGUAGE',
 	logDir: 'LOG_DIR',
 	eventRetention: 'EVENT_RETENTION'
 };

@@ -108,7 +108,7 @@ Kometa/PMM 兼容的 YAML（`url_poster` / `url_background`，以 TMDB id 为键
 
 界面语言按请求解析：(1) 当首选语言设置命名了
 受支持的区域设置时使用它，然后 (2) 请求的 `Accept-Language` 标头，然后
-(3) 英语。可通过 `LANGUAGE`、通过设置页面，或
+(3) 英语。可通过 `APP_LANGUAGE`、通过设置页面，或
 通过页眉中的语言切换器设置首选语言。受支持的区域设置为英语（`en`）、西班牙语
 （`es`）、简体中文（`zh`）、日语（`ja`）和巴西葡萄牙语
 （`pt-BR`）。未设置或不受支持的值会回退到 `Accept-Language`，然后
@@ -156,7 +156,7 @@ Kometa/PMM 兼容的 YAML（`url_poster` / `url_background`，以 TMDB id 为键
 | `MEDIUX_REQUEST_DELAY_MS` | MediUX 请求延迟           | `2000`                                | MediUX 请求之间的延迟，单位为毫秒（限速）。                                                    |
 | `MEDIUX_CONCURRENCY`      | MediUX 并发数             | `5`                                   | 最大并发 MediUX 请求数。                                                                       |
 | `HTTP_CACHE_TTL_DAYS`     | HTTP 缓存 TTL             | `7`                                   | 缓存的 HTTP 响应（抓取）被复用的时长，单位为天。                                               |
-| `LANGUAGE`                | 语言                      | —（自动）                             | 首选界面区域设置：`en`、`es`、`zh`、`ja` 或 `pt-BR`。                                         |
+| `APP_LANGUAGE`                | 语言                      | —（自动）                             | 首选界面区域设置：`en`、`es`、`zh`、`ja` 或 `pt-BR`。                                         |
 | `LOG_DIR`                 | —                         | `/data/logs`（Docker）                | 滚动的 `posterpilot.log` 文件所在的文件夹（约 5 MB × 5 个文件）。                             |
 | `EVENT_RETENTION`         | —                         | `2000`                                | 数据库中保留的活动日志行数上限（更早的行会被修剪）。                                          |
 | `DATABASE_URL`            | —                         | `file:/data/posterpilot.db`（Docker） | SQLite 数据库的 libsql 文件 URL。                                                             |
