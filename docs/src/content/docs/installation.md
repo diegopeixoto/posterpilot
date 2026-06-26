@@ -29,9 +29,10 @@ The volumes that matter:
 - **`/kometa`** — mount your Kometa assets/config directory here so the exported
   YAML lands where Kometa reads it. Only needed if you use the Kometa export.
 - **Kometa's config dir** _(optional)_ — to manage Kometa's own `config.yml` with
-  [Kometa config sync](/posterpilot/kometa-config-sync/), mount that directory
+  the [Kometa manager](/posterpilot/kometa-config-sync/), mount that directory
   **read/write** and point `KOMETA_CONFIG_PATH` at the `config.yml` inside it
-  (e.g. `/config/config.yml`). See
+  (e.g. `/config/config.yml`). PosterPilot writes `posterpilot.yml` into that same
+  directory, so this one mount is all the manager needs. See
   [Mount Kometa's config for config sync](#mount-kometas-config-for-config-sync).
 
 The container listens on port **3000** by default (configurable via the `PORT`
@@ -39,28 +40,30 @@ environment variable). Publish it to a host port to reach the UI.
 
 ## Mount Kometa's config for config sync
 
-[Kometa config sync](/posterpilot/kometa-config-sync/) lets PosterPilot manage
+The [Kometa manager](/posterpilot/kometa-config-sync/) lets PosterPilot manage
 Kometa's own `config.yml`. To use it, that file has to be reachable and writable
 from inside the PosterPilot container:
 
 1. **Mount Kometa's config directory read/write.** Bind-mount the host directory
    that holds Kometa's `config.yml` into the container — for example at `/config`.
-   Bind mounts are read/write by default; do not mark it `:ro`, because config
-   sync writes the file and leaves a timestamped backup beside it.
+   Bind mounts are read/write by default; do not mark it `:ro`, because the
+   manager writes the file and leaves a timestamped backup beside it.
 2. **Point `KOMETA_CONFIG_PATH` at the mounted file** — e.g. `/config/config.yml`.
-   Leaving it unset keeps config sync off.
+   Leaving it unset keeps the Kometa manager off.
 
-This is in addition to the existing `/data` volume and the `/kometa` Kometa
-assets mount. If your Kometa install keeps `config.yml` and the assets folder in
-the same directory, you can mount that one directory and point both
-`KOMETA_ASSETS_DIR` and `KOMETA_CONFIG_PATH` at it.
+That single directory is all the manager needs: PosterPilot writes
+`posterpilot.yml` into the **same directory as `config.yml`** (co-located) and
+wires it into `config.yml` by its bare basename, so there is no separate metadata
+path or mount to configure. This is in addition to the existing `/data` volume and
+the `/kometa` Kometa assets mount. If your Kometa install keeps `config.yml` and
+the assets folder in the same directory, you can mount that one directory and point
+both `KOMETA_ASSETS_DIR` and `KOMETA_CONFIG_PATH` at it.
 
 :::caution
-Kometa reads the Plex token and TMDB key from `config.yml` in plaintext, so config
-sync writes those secrets into the file (and its backups) on the mounted volume.
+Kometa reads the Plex token and TMDB key from `config.yml` in plaintext, so the
+manager writes those secrets into the file (and its backups) on the mounted volume.
 Keep that storage trusted and permissioned. See
-[Kometa config sync](/posterpilot/kometa-config-sync/#safety) for the full
-behavior.
+[Kometa manager](/posterpilot/kometa-config-sync/#safety) for the full behavior.
 :::
 
 ## Docker Compose (macOS)
@@ -94,14 +97,14 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
-      # Optional — manage Kometa's own config.yml (Kometa config sync):
+      # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
     volumes:
       # Persistent app state (SQLite db + settings + history).
       - ./data:/data
       # Mount your Kometa assets/config dir here so exported YAML is picked up.
       - ./data/kometa:/kometa
-      # Optional — Kometa's config dir (read/write) for Kometa config sync.
+      # Optional — Kometa's config dir (read/write) for the Kometa manager.
       # - ./data/kometa/config:/config
     restart: unless-stopped
 ```
@@ -134,7 +137,7 @@ It pre-fills the GHCR image, the WebUI port, the `/data` and `/kometa` volumes, 
 optional credential fields (Plex / Jellyfin / Emby, TMDB, Fanart.tv, language) —
 all of which you can also configure later in the Settings page.
 
-To also use [Kometa config sync](/posterpilot/kometa-config-sync/), add a path
+To also use the [Kometa manager](/posterpilot/kometa-config-sync/), add a path
 mapping for Kometa's config directory (read/write) and set `KOMETA_CONFIG_PATH` to
 the mounted `config.yml` — the same extra mount shown in the Compose examples
 below.
@@ -160,12 +163,12 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
-      # Optional — manage Kometa's own config.yml (Kometa config sync):
+      # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
     volumes:
       - /mnt/user/appdata/posterpilot:/data
       - /mnt/user/appdata/kometa/config:/kometa
-      # Optional — Kometa's config dir (read/write) for Kometa config sync.
+      # Optional — Kometa's config dir (read/write) for the Kometa manager.
       # - /mnt/user/appdata/kometa/config:/config
     restart: unless-stopped
 ```

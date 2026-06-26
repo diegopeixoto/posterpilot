@@ -10,8 +10,9 @@ PosterPilot is configured two ways, and they work together:
 - **The in-app Settings page** — entered in the UI and persisted to the SQLite
   database under `/data` so they survive restarts. Settings is organized into
   tabs: **Media server**, **Metadata & providers**, **Kometa & advanced**,
-  **Kometa config** (managing Kometa's own `config.yml`), **Language**, and
-  **Activity** (the in-app event log). A guided
+  **Language**, and **Activity** (the in-app event log). Managing Kometa's own
+  `config.yml` lives on its own [Kometa manager page](/posterpilot/kometa-config-sync/)
+  (the **Kometa** item in the main nav), not in Settings. A guided
   [first-install wizard](/posterpilot/installation/#first-run) at `/setup` covers
   the same ground in order for a fresh install.
 
@@ -110,9 +111,10 @@ its next run. See [Usage](/posterpilot/usage/#apply-a-cover) for how the export 
 consumed.
 
 That export is a _metadata_ file. PosterPilot can also surgically manage Kometa's
-**own `config.yml`** — its Plex/TMDB connections, libraries, default collection
-sets, and a bounded set of settings — and wire `posterpilot.yml` into it for you.
-See [Kometa config sync](/posterpilot/kometa-config-sync/).
+**own `config.yml`** — every service connector, per-library collections, overlays
+and operations, global settings and webhooks, plus a raw editor for anything else
+— and wire `posterpilot.yml` into it for you (co-located in the same directory as
+`config.yml`). This lives on its own [Kometa manager page](/posterpilot/kometa-config-sync/).
 
 ## Language
 
@@ -157,8 +159,8 @@ and are locked in the UI.
 | `EMBY_API_KEY`            | Emby API key (secret)     | —                                     | Emby API key.                                                                                 |
 | `TMDB_KEY`                | TMDB key (secret)         | —                                     | TMDB v3 API key **or** v4 bearer/JWT (auto-detected).                                         |
 | `KOMETA_ASSETS_DIR`       | Kometa assets dir         | `./data/kometa` (`/kometa` in Docker) | Directory the exported Kometa YAML is written to.                                             |
-| `KOMETA_CONFIG_PATH`      | Kometa config path        | —                                     | Path to Kometa's own `config.yml` to manage. Empty/unset = config sync off.                   |
-| `KOMETA_METADATA_PATH`    | Kometa metadata path      | Kometa assets dir                     | Path at which Kometa sees PosterPilot's `posterpilot.yml`; override when the two mount it differently. |
+| `KOMETA_CONFIG_PATH`      | Kometa config path        | —                                     | Path to Kometa's own `config.yml` to manage. Empty/unset = Kometa manager off.                |
+| `KOMETA_CONFIG_MODE`      | Kometa config mode        | `merge`                               | `merge` (surgical — preserves your other keys and comments) or `own` (regenerate the whole file). |
 | `DEFAULT_APPLY_METHOD`    | Default apply method      | `both`                                | Default apply method: `plex`, `kometa`, or `both`.                                            |
 | `INCLUDED_SECTIONS`       | Included sections         | all movie/show                        | Library section keys to sync; comma-separated (env) or a JSON array (persisted). Empty = all. |
 | `PROVIDER_MEDIUX`         | MediUX provider           | on                                    | Enable the MediUX provider.                                                                   |

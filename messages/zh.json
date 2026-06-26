@@ -158,7 +158,6 @@
 	"settings_kometa_dir": "Kometa 资源目录",
 	"settings_kometa_dir_hint": "Kometa 素材的写入位置。",
 	"settings_kometa_manager_pointer": "如需管理 Kometa 自身的 config.yml，请前往",
-	"settings_kometa_manager_pointer": "在以下位置管理 Kometa 自己的 config.yml：",
 	"settings_delay": "延迟（毫秒）",
 	"settings_concurrency": "并发数",
 	"settings_cache_days": "缓存（天）",

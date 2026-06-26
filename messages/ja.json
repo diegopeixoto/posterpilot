@@ -158,7 +158,6 @@
 	"settings_kometa_dir": "Kometa アセットディレクトリ",
 	"settings_kometa_dir_hint": "Kometa のアセットを書き出す場所。",
 	"settings_kometa_manager_pointer": "Kometa 自身の config.yml を管理するには",
-	"settings_kometa_manager_pointer": "Kometa 自身の config.yml の管理はこちら：",
 	"settings_delay": "遅延（ミリ秒）",
 	"settings_concurrency": "同時実行数",
 	"settings_cache_days": "キャッシュ（日）",

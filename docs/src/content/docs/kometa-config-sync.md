@@ -1,98 +1,131 @@
 ---
-title: Kometa config sync
-description: Let PosterPilot surgically manage Kometa's own config.yml — Plex/TMDB connections, libraries, default collection sets, and a bounded set of settings and webhooks — with a preview diff, atomic writes, and timestamped backups.
+title: Kometa manager
+description: A dedicated /kometa page that manages Kometa's own config.yml end to end — every service connector, per-library collections, overlays and operations, global settings and webhooks, plus a raw config.yml editor — with a preview diff, atomic writes, timestamped backups, and one-click restore.
 ---
 
 Beyond [exporting artwork as a metadata file](/posterpilot/usage/#how-kometa-consumes-the-export),
-PosterPilot can manage **Kometa's own `config.yml`** for you. It reads your
-existing config, updates only the sections it owns, and writes the file back —
-preserving every other key and comment untouched.
+PosterPilot can manage **Kometa's own `config.yml`** for you — not just a couple of
+sections, but the whole file. It reads your existing config, updates only the
+parts it owns, and writes the file back, preserving every other key and comment
+untouched.
 
-This is opt-in and off by default: until you point PosterPilot at a `config.yml`,
-nothing about your Kometa config is read or written.
+This lives on its own top-level page, **`/kometa`** (the **Kometa** item in the
+main nav), not in Settings. It is opt-in and off by default: until you point
+PosterPilot at a `config.yml`, nothing about your Kometa config is read or written.
 
 :::note[Two Kometa files, two jobs]
 PosterPilot touches two different files, and they are easy to confuse:
 
-- **`posterpilot.yml`** — the _metadata_ file PosterPilot already writes when you
-  apply a cover with the Kometa method. It holds `url_poster` / `url_background`
-  entries keyed by TMDB id. See [Apply a cover](/posterpilot/usage/#apply-a-cover).
+- **`posterpilot.yml`** — the _metadata_ file PosterPilot writes when you apply a
+  cover with the Kometa method. It holds `url_poster` / `url_background` entries
+  keyed by TMDB id. See [Apply a cover](/posterpilot/usage/#apply-a-cover).
 - **`config.yml`** — Kometa's _own_ top-level configuration: connections,
-  libraries, collection files, and settings. This is the file the **Kometa config
-  sync** feature on this page manages.
+  libraries, collection files, overlays, operations, and settings. This is the
+  file the **Kometa manager** on this page manages.
 
-Config sync wires the first file _into_ the second, so Kometa knows to read
-`posterpilot.yml`.
+The manager wires the first file _into_ the second, so Kometa knows to read
+`posterpilot.yml`. PosterPilot writes `posterpilot.yml` into the **same directory
+as `config.yml`**, and the `metadata_files` entry references it by its bare
+basename (`posterpilot.yml`) — so there is exactly one file and the wiring always
+matches. No separate metadata path or mount is involved.
 :::
 
 ## Turn it on
 
-Config sync is controlled by two settings, both of which follow the same
+The Kometa manager is controlled by two settings, both of which follow the same
 [environment-overrides-UI precedence](/posterpilot/configuration/#environment-vs-the-settings-ui)
 as the rest of PosterPilot:
 
-| Variable               | Setting             | Default                                  | Meaning                                                                                                                          |
-| ---------------------- | ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `KOMETA_CONFIG_PATH`   | Kometa config path  | —                                        | Absolute path to Kometa's `config.yml`. **Empty or unset turns config sync off.**                                              |
-| `KOMETA_METADATA_PATH` | Kometa metadata path | the Kometa assets dir (`KOMETA_ASSETS_DIR`) | The path at which **Kometa** sees PosterPilot's `posterpilot.yml`. Override it only when PosterPilot and Kometa mount that folder at different paths. |
+| Variable             | Setting            | Default | Meaning                                                                                                                |
+| -------------------- | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `KOMETA_CONFIG_PATH` | Kometa config path | —       | Absolute path to Kometa's `config.yml`. **Empty or unset turns the Kometa manager off.**                              |
+| `KOMETA_CONFIG_MODE` | Kometa config mode | `merge` | `merge` (surgical — preserves your other keys and comments) or `own` (PosterPilot regenerates and fully owns the file). |
 
-`KOMETA_METADATA_PATH` exists because PosterPilot and Kometa can mount the same
-shared folder at different locations. PosterPilot writes `posterpilot.yml` into
-`KOMETA_ASSETS_DIR`; the value wired into `config.yml` has to be the path _Kometa_
-uses to reach that same file. When both see the folder at the same path, the
-default is correct and you can leave it blank.
-
-To use config sync, Kometa's config directory must also be mounted into the
+To use the manager, Kometa's config directory must also be mounted into the
 PosterPilot container with read/write access — see
-[Mount Kometa's config for config sync](/posterpilot/installation/#mount-kometas-config-for-config-sync).
+[Mount Kometa's config](/posterpilot/installation/#mount-kometas-config-for-config-sync).
+Because `posterpilot.yml` is co-located with `config.yml`, that one directory is
+all you need; there is no separate metadata mount.
 
-## The Kometa config tab
+## The /kometa page
 
-The workflow lives under **Settings → Kometa config**:
+The manager opens on a **cinematic spotlight hero** — an image-forward backdrop
+banner with the manager title and live status (config path, mode, last sync,
+managed-library count) overlaid — so a config-heavy surface still carries the
+app's "artwork is the hero" identity. The config-path and mode controls, plus the
+**Preview** and **Sync** actions, live in the header beneath it.
 
-1. **Set the path.** Enter the path to Kometa's `config.yml` (or set
-   `KOMETA_CONFIG_PATH`). PosterPilot reads the existing file so the rest of the
-   tab reflects what is already there.
-2. **Pick managed libraries.** Choose which of your libraries PosterPilot should
-   own in `config.yml`. Libraries you do not select are left exactly as they are.
-3. **Toggle default collection sets.** For each managed library, enable or disable
-   Kometa's built-in default collection sets (its _categories_) — these become the
-   library's `collection_files`.
-4. **Optionally manage global settings and webhooks.** Flip on a small, bounded
-   set of `settings:` and `webhooks:` keys if you want PosterPilot to keep them in
-   sync too.
-5. **Preview the diff.** PosterPilot shows you exactly what it would change before
-   touching the file.
-6. **Sync.** Approve the diff to write `config.yml`.
+Below the hero, the page is organized into sub-sections:
 
-## What gets synced
+1. **Connections** — structured forms for every Kometa service connector (see
+   [What gets managed](#what-gets-managed)). Secrets are masked, and a connection
+   test is offered where it makes sense.
+2. **Libraries** — for each library you choose to manage: its collection files,
+   overlay defaults, operations, per-library settings overrides, and the
+   `posterpilot.yml` metadata wiring. Libraries you do not select are left exactly
+   as they are.
+3. **Settings & webhooks** — a bounded set of global `settings:` and `webhooks:`
+   keys you can opt to keep in sync.
+4. **Raw config.yml** — a full-file editor for anything not covered by a form, with
+   the same safety as the structured path (parse-validate → diff → save).
+5. **Backups** — list the timestamped backups PosterPilot writes on each save and
+   **restore** any one of them.
 
-PosterPilot only ever writes the sections it owns:
+The usual flow is: set the path, fill in the sections you want PosterPilot to own,
+**Preview** the diff to see exactly what would change, then **Sync** to write
+`config.yml`.
 
-- **`plex:` and `tmdb:` connections** — built from PosterPilot's stored Plex base
-  URL and token and your TMDB key. Kometa is Plex-only, so config sync targets a
-  Plex server.
+## What gets managed
+
+PosterPilot only ever writes the sections it owns; everything else in `config.yml`
+is left alone.
+
+- **Service connectors** — structured forms for `plex`, `tmdb`, `tautulli`,
+  `trakt`, `mdblist`, `omdb`, `github`, `radarr`, `sonarr`, `notifiarr`, `gotify`,
+  `ntfy`, `anidb`, and `mal`. The `plex` and `tmdb` blocks are pre-filled from
+  PosterPilot's stored Plex base URL and token and your TMDB key. Kometa is
+  Plex-only, so the manager targets a Plex server.
 - **The `libraries:` section** — each managed library, with `posterpilot.yml`
-  wired in under its `metadata_files` so Kometa applies the covers you exported.
-- **Per-library `collection_files`** — the default collection sets you toggled for
+  wired in under its `metadata_files` (as the co-located basename) so Kometa
+  applies the covers you exported.
+- **Per-library `collection_files`** — the default collection sets you toggle for
   each library.
-- **A bounded set of `settings:` and `webhooks:` keys** — only the specific keys
-  PosterPilot manages, never the whole block.
+- **Per-library `overlay_files`** — overlay defaults such as `mediastinger`,
+  `resolution`, `ribbon`, `audio_codec`, `network`, and `ratings`.
+- **Per-library `operations`** — toggles such as `mass_*`, `remove_overlays`,
+  `delete_collections`, and `assets_for_all`.
+- **Per-library `settings` overrides** — the small set of overrides PosterPilot
+  surfaces for a managed library.
+- **Global `settings:` and `webhooks:` keys** — only the specific keys PosterPilot
+  manages, never the whole block.
+- **Anything else, via the raw editor** — the [raw `config.yml` editor](#the-kometa-page)
+  is the backstop, so nothing in your config is unmanageable.
 
-Everything else in `config.yml` is left alone.
+### Consistency check
+
+Before it writes, PosterPilot runs a **consistency check** and warns when an
+enabled chart or overlay needs a connector you have not configured — for example a
+`trakt` or `tautulli` chart, or a ratings overlay, with no matching `trakt:` /
+`tautulli:` block. The warning is non-blocking (it lists the missing connector
+alongside any anchor/alias warnings in the preview); fix the connector or proceed
+as you see fit.
 
 ## Safety
 
-Config sync is built to be non-destructive:
+The Kometa manager is built to be non-destructive:
 
-- **Surgical merge.** PosterPilot updates only the keys it owns and preserves all
-  other content — including your comments and unmanaged sections — leaving the
-  rest of the file untouched.
+- **Surgical merge (default).** In `merge` mode PosterPilot updates only the keys
+  it owns and preserves all other content — your comments and unmanaged sections
+  included. Deselecting a managed item removes only PosterPilot's entry, never your
+  content. (`own` mode, opt-in via `KOMETA_CONFIG_MODE=own`, lets PosterPilot
+  regenerate and fully own the file.)
 - **Preview before write.** A diff is always shown first; nothing is written until
-  you approve it.
+  you approve it. Secrets are redacted in the diff.
 - **Atomic writes with a backup.** The new file is written atomically, and the
-  previous version is kept beside it as `config.yml.posterpilot-bak-<timestamp>`,
-  so you can always roll back.
+  previous version is kept beside it as `config.yml.posterpilot-bak-<timestamp>`.
+- **Backups & restore.** The **Backups** section lists those timestamped backups
+  and lets you **restore** any one of them — the restore is itself written
+  atomically and backed up first, so it is just as safe as a normal sync.
 - **Anchors and aliases are skipped.** Any section that uses YAML anchors or
   aliases (`&` / `*`) is left untouched and flagged with a warning, because a
   surgical merge cannot safely rewrite them.
@@ -100,8 +133,9 @@ Config sync is built to be non-destructive:
 :::caution[Kometa needs your secrets in plaintext]
 Kometa reads the Plex token and TMDB key from `config.yml` in plaintext, so
 PosterPilot **writes them into `config.yml` — and into every
-`config.yml.posterpilot-bak-<timestamp>` backup — on disk.** Make sure that file
-and its backups live on storage you trust, with appropriate filesystem
-permissions. This is a property of how Kometa is configured, not something
-PosterPilot can work around.
+`config.yml.posterpilot-bak-<timestamp>` backup — on disk.** PosterPilot masks
+them in the UI and redacts them from the preview diff, but they still land on the
+mounted volume. Make sure that file and its backups live on storage you trust,
+with appropriate filesystem permissions. This is a property of how Kometa is
+configured, not something PosterPilot can work around.
 :::

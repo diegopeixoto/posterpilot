@@ -158,7 +158,6 @@
 	"settings_kometa_dir": "Diretório de assets do Kometa",
 	"settings_kometa_dir_hint": "Onde os assets do Kometa são gravados.",
 	"settings_kometa_manager_pointer": "Gerencie o próprio config.yml do Kometa no",
-	"settings_kometa_manager_pointer": "Gerencie o config.yml do próprio Kometa no",
 	"settings_delay": "Atraso (ms)",
 	"settings_concurrency": "Concorrência",
 	"settings_cache_days": "Cache (dias)",

@@ -53,14 +53,14 @@
 
 ## 8. Documentation
 
-- [ ] 8.1 Update the Kometa config-sync docs page: dedicated manager, connectors/overlays/operations, raw editor, backups/restore, co-located metadata (no `KOMETA_METADATA_PATH`)
-- [ ] 8.2 Update deployment docs: single mounted config dir (no separate metadata mount); remove `KOMETA_METADATA_PATH` from `.env.example`/compose/README/unraid template
+- [x] 8.1 Update the Kometa config-sync docs page: dedicated manager, connectors/overlays/operations, raw editor, backups/restore, co-located metadata (no `KOMETA_METADATA_PATH`)
+- [x] 8.2 Update deployment docs: single mounted config dir (no separate metadata mount); remove `KOMETA_METADATA_PATH` from `.env.example`/compose/README/unraid template
 
 ## 9. Quality gates & verification
 
-- [ ] 9.1 `bun run check` (0 errors)
-- [ ] 9.2 `bun run test`
-- [ ] 9.3 `bun run build`
-- [ ] 9.4 `bun run lint`
+- [x] 9.1 `bun run check` (0 errors)
+- [x] 9.2 `bun run test`
+- [x] 9.3 `bun run build`
+- [x] 9.4 `bun run lint`
 - [ ] 9.5 Manual verify in a rebuilt container against the real sample config: connectors/overlays/operations round-trip, raw edit + restore, co-located `posterpilot.yml`, unmanaged content preserved, spotlight renders
 - [ ] 9.6 Self-review the diff; PR on the feature branch (no direct push to `main`, no Claude trailers)
