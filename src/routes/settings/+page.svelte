@@ -60,14 +60,15 @@
 		refreshLibraries();
 	});
 
-	type Tab = 'server' | 'providers' | 'advanced' | 'language' | 'activity';
-	const TABS: Tab[] = ['server', 'providers', 'advanced', 'language', 'activity'];
+	type Tab = 'server' | 'providers' | 'advanced' | 'kometa' | 'language' | 'activity';
+	const TABS: Tab[] = ['server', 'providers', 'advanced', 'kometa', 'language', 'activity'];
 	const initialTab = page.url.searchParams.get('tab');
 	let tab = $state<Tab>(TABS.includes(initialTab as Tab) ? (initialTab as Tab) : 'server');
 	const tabs: { key: Tab; label: () => string }[] = [
 		{ key: 'server', label: m.settings_tab_server },
 		{ key: 'providers', label: m.settings_tab_providers },
 		{ key: 'advanced', label: m.settings_tab_advanced },
+		{ key: 'kometa', label: m.settings_tab_kometa },
 		{ key: 'language', label: m.settings_tab_language },
 		{ key: 'activity', label: m.settings_tab_activity }
 	];
@@ -172,6 +173,136 @@
 	let providerThePosterDb = $state(data.config.providerThePosterDb);
 	let fanartKey = $state('');
 
+	// ── Kometa config-sync tab ─────────────────────────────────────────────────
+	let kometaConfigPath = $state(data.config.kometaConfigPath);
+	let kometaMetadataPath = $state(data.config.kometaMetadataPath);
+	let kometaMode = $state<'merge' | 'own'>(data.config.kometaConfigMode);
+	const kometaLibs = new SvelteSet<string>(data.kometa.managedLibraries);
+	// Per-library enabled default sets, keyed by section key.
+	const kometaDefaults = $state<Record<string, SvelteSet<string>>>(
+		Object.fromEntries(
+			Object.entries(data.kometa.defaultCollections).map(([k, v]) => [k, new SvelteSet(v)])
+		)
+	);
+	// Pre-seed every managed-setting key so `bind:value` has a reactive slot.
+	let kometaSettings = $state<Record<string, string>>(
+		Object.fromEntries(
+			data.kometa.managedSettingDefs.map((d) => [d.id, data.kometa.managedSettings[d.id] ?? ''])
+		)
+	);
+
+	// i18n label lookups keyed by the catalog/def ids (m.* is a static object).
+	const kometaGroupLabel: Record<string, () => string> = {
+		content: m.kometa_group_content,
+		production: m.kometa_group_production,
+		location: m.kometa_group_location,
+		time: m.kometa_group_time,
+		media: m.kometa_group_media,
+		content_rating: m.kometa_group_content_rating,
+		people: m.kometa_group_people,
+		award: m.kometa_group_award,
+		chart: m.kometa_group_chart
+	};
+	const kometaSettingLabel: Record<string, () => string> = {
+		asset_directory: m.kometa_setting_asset_directory,
+		webhook_error: m.kometa_setting_webhook_error,
+		webhook_run_start: m.kometa_setting_webhook_run_start,
+		webhook_run_end: m.kometa_setting_webhook_run_end
+	};
+
+	function kometaToggleLib(key: string) {
+		if (kometaLibs.has(key)) kometaLibs.delete(key);
+		else kometaLibs.add(key);
+	}
+	function kometaDefaultsFor(key: string): SvelteSet<string> {
+		if (!kometaDefaults[key]) kometaDefaults[key] = new SvelteSet<string>();
+		return kometaDefaults[key];
+	}
+	function kometaToggleDefault(key: string, name: string) {
+		const set = kometaDefaultsFor(key);
+		if (set.has(name)) set.delete(name);
+		else set.add(name);
+	}
+
+	type KometaChange = { op: string; path: string; before?: string | null; after?: string | null };
+	type KometaResult = {
+		active: boolean;
+		mode: 'merge' | 'own';
+		exists: boolean;
+		willScaffold: boolean;
+		parseError: string | null;
+		changes: KometaChange[];
+		warnings: string[];
+		dropped: string[];
+		backup?: boolean;
+		scaffolded?: boolean;
+	};
+
+	let kometaBusy = $state(false);
+	let kometaPreview = $state<KometaResult | null>(null);
+	let kometaError = $state<string | null>(null);
+	let kometaDone = $state<'synced' | 'created' | null>(null);
+
+	function kometaSelection() {
+		const libraries = [...kometaLibs];
+		const defaults: Record<string, string[]> = {};
+		for (const key of libraries) {
+			const set = kometaDefaults[key];
+			if (set && set.size) defaults[key] = [...set];
+		}
+		const settings: Record<string, string> = {};
+		for (const def of data.kometa.managedSettingDefs) {
+			const v = (kometaSettings[def.id] ?? '').trim();
+			if (v) settings[def.id] = v;
+		}
+		return { libraries, defaults, settings };
+	}
+
+	async function kometaPost(path: string): Promise<KometaResult> {
+		const res = await fetch(path, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(kometaSelection())
+		});
+		if (!res.ok) throw new Error(String(res.status));
+		return (await res.json()) as KometaResult;
+	}
+
+	async function kometaDoPreview() {
+		if (kometaBusy) return;
+		kometaBusy = true;
+		kometaError = null;
+		kometaDone = null;
+		try {
+			kometaPreview = await kometaPost('/api/kometa/config/preview');
+			if (kometaPreview.parseError) kometaError = kometaPreview.parseError;
+		} catch {
+			kometaError = m.kometa_request_failed();
+		} finally {
+			kometaBusy = false;
+		}
+	}
+
+	async function kometaDoSync() {
+		if (kometaBusy) return;
+		kometaBusy = true;
+		kometaError = null;
+		try {
+			const result = await kometaPost('/api/kometa/config/sync');
+			if (result.parseError) {
+				kometaError = result.parseError;
+			} else {
+				kometaDone = result.scaffolded ? 'created' : 'synced';
+				kometaPreview = null;
+				await invalidateAll();
+			}
+		} catch {
+			kometaError = m.kometa_request_failed();
+		} finally {
+			kometaBusy = false;
+		}
+	}
+
 	let saving = $state(false);
 	let testing = $state(false);
 	let saved = $state(false);
@@ -220,6 +351,11 @@
 				jellyfinUrl,
 				embyUrl,
 				kometaAssetsDir,
+				// Kometa config-sync paths (saved through the shared Save; the preview/sync
+				// actions below use these but do not persist them themselves).
+				kometaConfigPath,
+				kometaMetadataPath,
+				kometaConfigMode: kometaMode,
 				// type=number binds yield numbers; the settings API only persists string
 				// values, so stringify these before sending.
 				mediuxDelayMs: String(mediuxDelayMs),
@@ -604,6 +740,226 @@
 				<option value="kometa">{m.settings_method_kometa_only()}</option>
 			</select>
 		</div>
+	{:else if tab === 'kometa'}
+		<div>
+			<label for="kometaConfigPath" class="mb-1 block text-sm font-medium"
+				>{m.kometa_config_path()}</label
+			>
+			<input
+				id="kometaConfigPath"
+				bind:value={kometaConfigPath}
+				disabled={env.kometaConfigPath}
+				placeholder="/config/config.yml"
+				class="input w-full disabled:opacity-50"
+			/>
+			<p class="mt-1 text-xs text-neutral-400">{m.kometa_config_path_hint()}</p>
+			{#if env.kometaConfigPath}<p class="mt-1 text-xs text-amber-400">
+					{m.settings_set_from_env()}
+				</p>{/if}
+			{#if data.kometa.active}
+				<p class="mt-1 text-xs text-neutral-500">
+					{m.kometa_config_resolved({ path: data.kometa.resolvedConfigPath })}
+				</p>
+				{#if data.kometa.configPathRelative}
+					<p class="mt-1 text-xs text-amber-400">{m.kometa_config_relative_warning()}</p>
+				{/if}
+			{:else}
+				<p class="mt-2 text-xs text-neutral-400">{m.kometa_setup_hint()}</p>
+			{/if}
+		</div>
+
+		<div>
+			<label for="kometaMetadataPath" class="mb-1 block text-sm font-medium"
+				>{m.kometa_metadata_path()}</label
+			>
+			<input
+				id="kometaMetadataPath"
+				bind:value={kometaMetadataPath}
+				disabled={env.kometaMetadataPath}
+				class="input w-full disabled:opacity-50"
+			/>
+			<p class="mt-1 text-xs text-neutral-400">{m.kometa_metadata_path_hint()}</p>
+			<p class="mt-1 text-xs text-neutral-500">
+				{m.kometa_metadata_resolved({ path: data.kometa.metadataFile })}
+			</p>
+			{#if env.kometaMetadataPath}<p class="mt-1 text-xs text-amber-400">
+					{m.settings_set_from_env()}
+				</p>{/if}
+		</div>
+
+		<div>
+			<label for="kometaMode" class="mb-1 block text-sm font-medium">{m.kometa_mode()}</label>
+			<select
+				id="kometaMode"
+				bind:value={kometaMode}
+				disabled={env.kometaConfigMode}
+				class="input disabled:opacity-50"
+			>
+				<option value="merge">{m.kometa_mode_merge()}</option>
+				<option value="own">{m.kometa_mode_own()}</option>
+			</select>
+			<p class="mt-1 text-xs text-neutral-400">
+				{kometaMode === 'own' ? m.kometa_mode_own_hint() : m.kometa_mode_merge_hint()}
+			</p>
+			{#if env.kometaConfigMode}<p class="mt-1 text-xs text-amber-400">
+					{m.settings_set_from_env()}
+				</p>{/if}
+			{#if kometaMode === 'own'}<p class="mt-2 text-xs text-amber-400">
+					{m.kometa_mode_own_warning()}
+				</p>{/if}
+		</div>
+
+		<p class="text-xs text-neutral-400">{m.kometa_plex_only_note()}</p>
+
+		{#if data.kometa.active}
+			{#if data.kometa.parseError}
+				<div class="surface p-3 text-sm text-red-300" role="alert">
+					{m.kometa_parse_error({ error: data.kometa.parseError })}
+				</div>
+			{:else if !data.kometa.exists}
+				<p class="text-xs text-amber-400">{m.kometa_will_scaffold()}</p>
+			{/if}
+
+			{#if !data.config.plexUrl || !data.config.plexTokenSet}
+				<p class="text-xs text-amber-400">{m.kometa_missing_plex_creds()}</p>
+			{/if}
+
+			<div>
+				<span class="mb-1 block text-sm font-medium">{m.kometa_libraries()}</span>
+				<p class="mb-2 text-xs text-neutral-400">{m.kometa_libraries_hint()}</p>
+				{#if sections.length === 0}
+					<p class="text-xs text-neutral-400">{m.kometa_no_libraries()}</p>
+				{:else}
+					<div class="space-y-1">
+						{#each sections as section (section.key)}
+							<label class="flex items-center gap-2 text-sm text-neutral-300">
+								<input
+									type="checkbox"
+									checked={kometaLibs.has(section.key)}
+									onchange={() => kometaToggleLib(section.key)}
+								/>
+								{section.title}
+								<span class="text-xs text-neutral-400">({section.type})</span>
+							</label>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			{#each sections.filter((s) => kometaLibs.has(s.key)) as section (section.key)}
+				<div class="surface space-y-3 p-4">
+					<p class="text-sm font-medium">
+						{m.kometa_defaults_for({ library: section.title })}
+					</p>
+					<p class="text-xs text-neutral-400">{m.kometa_defaults_hint()}</p>
+					{#each data.kometa.catalog as group (group.id)}
+						<div>
+							<p class="mb-1 text-xs font-medium text-neutral-400">
+								{kometaGroupLabel[group.id]?.() ?? group.id}
+							</p>
+							<div class="flex flex-wrap gap-x-4 gap-y-1">
+								{#each group.collections as c (c.name)}
+									<label class="flex items-center gap-2 text-sm text-neutral-300">
+										<input
+											type="checkbox"
+											checked={kometaDefaultsFor(section.key).has(c.name)}
+											onchange={() => kometaToggleDefault(section.key, c.name)}
+										/>
+										{c.name}
+									</label>
+								{/each}
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/each}
+
+			<div>
+				<span class="mb-1 block text-sm font-medium">{m.kometa_settings_heading()}</span>
+				<p class="mb-2 text-xs text-neutral-400">{m.kometa_settings_hint()}</p>
+				<div class="space-y-3">
+					{#each data.kometa.managedSettingDefs as def (def.id)}
+						<div>
+							<label for="kometa-set-{def.id}" class="mb-1 block text-sm text-neutral-300">
+								{kometaSettingLabel[def.id]?.() ?? def.id}
+							</label>
+							<input
+								id="kometa-set-{def.id}"
+								bind:value={kometaSettings[def.id]}
+								placeholder={def.placeholder ?? ''}
+								class="input w-full"
+							/>
+						</div>
+					{/each}
+				</div>
+			</div>
+
+			<p class="text-xs text-amber-400">{m.kometa_secrets_note()}</p>
+
+			<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
+				<button
+					type="button"
+					onclick={kometaDoPreview}
+					disabled={kometaBusy}
+					class="btn btn-subtle px-4 py-2"
+				>
+					{kometaBusy ? m.kometa_previewing() : m.kometa_preview()}
+				</button>
+				<button
+					type="button"
+					onclick={kometaDoSync}
+					disabled={kometaBusy || !!data.kometa.parseError}
+					class="btn btn-accent px-4 py-2"
+				>
+					{kometaBusy ? m.kometa_syncing() : m.kometa_sync()}
+				</button>
+				{#if kometaDone === 'synced'}<span class="text-sm text-emerald-400" role="status"
+						>{m.kometa_synced()}</span
+					>{/if}
+				{#if kometaDone === 'created'}<span class="text-sm text-emerald-400" role="status"
+						>{m.kometa_created()}</span
+					>{/if}
+			</div>
+
+			{#if kometaError}
+				<div class="surface p-3 text-sm text-red-300" role="alert">{kometaError}</div>
+			{/if}
+
+			{#if kometaPreview}
+				<div class="surface space-y-2 p-3 text-sm">
+					{#if kometaPreview.warnings.length}
+						<p class="text-amber-400">
+							{m.kometa_warnings({ sections: kometaPreview.warnings.join(', ') })}
+						</p>
+					{/if}
+					{#if kometaPreview.dropped.length}
+						<p class="text-red-300">
+							{m.kometa_dropped({ keys: kometaPreview.dropped.join(', ') })}
+						</p>
+					{/if}
+					{#if kometaPreview.changes.length === 0}
+						<p class="text-neutral-400">{m.kometa_preview_none()}</p>
+					{:else}
+						<ul class="space-y-1">
+							{#each kometaPreview.changes as change, i (i)}
+								<li class="flex items-baseline gap-2 font-mono text-xs">
+									<span
+										class={change.op === 'remove'
+											? 'text-red-300'
+											: change.op === 'add'
+												? 'text-emerald-300'
+												: 'text-amber-300'}>{change.op}</span
+									>
+									<span class="text-neutral-300">{change.path}</span>
+									{#if change.after != null}<span class="text-neutral-500">→ {change.after}</span
+										>{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
+		{/if}
 	{:else if tab === 'language'}
 		<div>
 			<label for="language" class="mb-1 block text-sm font-medium">{m.settings_language()}</label>

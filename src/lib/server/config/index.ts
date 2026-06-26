@@ -3,8 +3,18 @@ import { env } from '$env/dynamic/private';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { normalizeLocale } from '$lib/i18n/resolve';
+import type { KometaSnapshot } from '$lib/server/kometa/config';
+
+export type { KometaSnapshot };
 
 export type ApplyMethod = 'plex' | 'kometa' | 'both';
+
+/**
+ * How PosterPilot relates to Kometa's `config.yml`:
+ * - `merge`: surgically update only the sections it owns, preserving everything else.
+ * - `own`: regenerate the whole file from PosterPilot's settings (unmanaged keys dropped).
+ */
+export type KometaConfigMode = 'merge' | 'own';
 
 /** The active media-server backend. */
 export type ServerType = 'plex' | 'jellyfin' | 'emby';
@@ -23,6 +33,20 @@ export interface AppConfig {
 	embyApiKey: string | null;
 	tmdbKey: string | null;
 	kometaAssetsDir: string;
+	/**
+	 * Path to Kometa's own `config.yml` that PosterPilot surgically syncs (distinct
+	 * from the assets dir, which is where `posterpilot.yml` is written). Empty string
+	 * means the config-sync feature is off.
+	 */
+	kometaConfigPath: string;
+	/**
+	 * Base path at which **Kometa** sees PosterPilot's `posterpilot.yml` metadata file,
+	 * used for the `metadata_files` wiring written into `config.yml`. Defaults to
+	 * `kometaAssetsDir`; override when PosterPilot and Kometa mount the dir differently.
+	 */
+	kometaMetadataPath: string;
+	/** Whether PosterPilot surgically merges (`merge`) or fully owns (`own`) config.yml. */
+	kometaConfigMode: KometaConfigMode;
 	mediuxDelayMs: number;
 	mediuxConcurrency: number;
 	httpCacheTtlDays: number;
@@ -70,6 +94,9 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	embyApiKey: 'EMBY_API_KEY',
 	tmdbKey: 'TMDB_KEY',
 	kometaAssetsDir: 'KOMETA_ASSETS_DIR',
+	kometaConfigPath: 'KOMETA_CONFIG_PATH',
+	kometaMetadataPath: 'KOMETA_METADATA_PATH',
+	kometaConfigMode: 'KOMETA_CONFIG_MODE',
 	mediuxDelayMs: 'MEDIUX_REQUEST_DELAY_MS',
 	mediuxConcurrency: 'MEDIUX_CONCURRENCY',
 	httpCacheTtlDays: 'HTTP_CACHE_TTL_DAYS',
@@ -95,6 +122,7 @@ const DEFAULTS = {
 	mediuxConcurrency: 5,
 	httpCacheTtlDays: 7,
 	defaultApplyMethod: 'both' as ApplyMethod,
+	kometaConfigMode: 'merge' as KometaConfigMode,
 	// MediUX + TMDB artwork on by default (no key / key already present); the keyed/
 	// scrape providers are opt-in.
 	providerMediux: true,
@@ -119,6 +147,9 @@ export const WRITABLE_KEYS: ConfigKey[] = [
 	'embyApiKey',
 	'tmdbKey',
 	'kometaAssetsDir',
+	'kometaConfigPath',
+	'kometaMetadataPath',
+	'kometaConfigMode',
 	'mediuxDelayMs',
 	'mediuxConcurrency',
 	'httpCacheTtlDays',
@@ -185,6 +216,7 @@ function parseServerType(value: string | undefined): ServerType {
 export async function resolveConfig(): Promise<AppConfig> {
 	const persisted = await loadSettings();
 	const method = rawValue('defaultApplyMethod', persisted) as ApplyMethod | undefined;
+	const kometaAssetsDir = rawValue('kometaAssetsDir', persisted) ?? DEFAULTS.kometaAssetsDir;
 	return {
 		serverType: parseServerType(rawValue('serverType', persisted)),
 		plexUrl: rawValue('plexUrl', persisted) ?? null,
@@ -195,7 +227,12 @@ export async function resolveConfig(): Promise<AppConfig> {
 		embyUrl: rawValue('embyUrl', persisted) ?? null,
 		embyApiKey: rawValue('embyApiKey', persisted) ?? null,
 		tmdbKey: rawValue('tmdbKey', persisted) ?? null,
-		kometaAssetsDir: rawValue('kometaAssetsDir', persisted) ?? DEFAULTS.kometaAssetsDir,
+		kometaAssetsDir,
+		kometaConfigPath: rawValue('kometaConfigPath', persisted) ?? '',
+		// Defaults to the assets dir so the common single-mount case is zero-config; an
+		// explicit value covers split PosterPilot/Kometa mounts.
+		kometaMetadataPath: rawValue('kometaMetadataPath', persisted) ?? kometaAssetsDir,
+		kometaConfigMode: rawValue('kometaConfigMode', persisted) === 'own' ? 'own' : 'merge',
 		mediuxDelayMs: toInt(rawValue('mediuxDelayMs', persisted), DEFAULTS.mediuxDelayMs),
 		mediuxConcurrency: toInt(rawValue('mediuxConcurrency', persisted), DEFAULTS.mediuxConcurrency),
 		httpCacheTtlDays: toInt(rawValue('httpCacheTtlDays', persisted), DEFAULTS.httpCacheTtlDays),
@@ -318,6 +355,105 @@ export async function setCachedLibraries(libraries: CachedLibrary[]): Promise<vo
 		.onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
+// ── Kometa config-sync selections (internal KV, not WRITABLE_KEYS) ─────────────
+//
+// These ride the same settings KV table as `cachedLibraries` but are internal,
+// non-env, non-string state — so they deliberately bypass AppConfig/ENV_MAP/
+// WRITABLE_KEYS. `ENV_MAP` is exhaustive over AppConfig, so adding these there
+// would force spurious env vars; `kometaDefaultCollections` is a map, which the
+// string-only saveSettings path can't represent.
+
+const KOMETA_MANAGED_LIBRARIES_KEY = 'kometaManagedLibraries';
+const KOMETA_DEFAULT_COLLECTIONS_KEY = 'kometaDefaultCollections';
+const KOMETA_MANAGED_SETTINGS_KEY = 'kometaManagedSettings';
+const KOMETA_LAST_APPLIED_KEY = 'kometaLastApplied';
+
+async function readKv(key: string): Promise<string | null> {
+	const row = (await db.select().from(settings).where(eq(settings.key, key)).limit(1))[0];
+	return row?.value ?? null;
+}
+
+async function writeKv(key: string, value: string): Promise<void> {
+	await db
+		.insert(settings)
+		.values({ key, value })
+		.onConflictDoUpdate({ target: settings.key, set: { value } });
+}
+
+function parseStringArray(raw: string | null): string[] {
+	if (!raw) return [];
+	try {
+		const arr = JSON.parse(raw);
+		return Array.isArray(arr) ? arr.map(String) : [];
+	} catch {
+		return [];
+	}
+}
+
+/** Section keys the user has marked as managed in Kometa's config. */
+export async function getKometaManagedLibraries(): Promise<string[]> {
+	return parseStringArray(await readKv(KOMETA_MANAGED_LIBRARIES_KEY));
+}
+
+export async function setKometaManagedLibraries(sectionKeys: string[]): Promise<void> {
+	await writeKv(KOMETA_MANAGED_LIBRARIES_KEY, JSON.stringify(sectionKeys.map(String)));
+}
+
+/** Enabled Kometa default collection sets per section key (sectionKey → names). */
+export async function getKometaDefaultCollections(): Promise<Record<string, string[]>> {
+	const raw = await readKv(KOMETA_DEFAULT_COLLECTIONS_KEY);
+	if (!raw) return {};
+	try {
+		const obj = JSON.parse(raw);
+		if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+		const out: Record<string, string[]> = {};
+		for (const [k, v] of Object.entries(obj)) if (Array.isArray(v)) out[k] = v.map(String);
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+export async function setKometaDefaultCollections(map: Record<string, string[]>): Promise<void> {
+	await writeKv(KOMETA_DEFAULT_COLLECTIONS_KEY, JSON.stringify(map));
+}
+
+/** Bounded global settings/webhooks values the user manages (id → value). */
+export async function getKometaManagedSettings(): Promise<Record<string, string>> {
+	const raw = await readKv(KOMETA_MANAGED_SETTINGS_KEY);
+	if (!raw) return {};
+	try {
+		const obj = JSON.parse(raw);
+		if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(obj)) if (typeof v === 'string') out[k] = v;
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+export async function setKometaManagedSettings(values: Record<string, string>): Promise<void> {
+	await writeKv(KOMETA_MANAGED_SETTINGS_KEY, JSON.stringify(values));
+}
+
+/** The last-applied snapshot used to compute removals on the next sync. */
+export async function getKometaLastApplied(): Promise<KometaSnapshot | null> {
+	const raw = await readKv(KOMETA_LAST_APPLIED_KEY);
+	if (!raw) return null;
+	try {
+		const obj = JSON.parse(raw);
+		if (!obj || typeof obj !== 'object') return null;
+		return obj as KometaSnapshot;
+	} catch {
+		return null;
+	}
+}
+
+export async function setKometaLastApplied(snapshot: KometaSnapshot): Promise<void> {
+	await writeKv(KOMETA_LAST_APPLIED_KEY, JSON.stringify(snapshot));
+}
+
 /** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
 export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
 	const entries = Object.entries(values).filter(([k]) => WRITABLE_KEYS.includes(k as ConfigKey));
@@ -347,6 +483,9 @@ export interface PublicConfig {
 	embyApiKeySet: boolean;
 	tmdbKeySet: boolean;
 	kometaAssetsDir: string;
+	kometaConfigPath: string;
+	kometaMetadataPath: string;
+	kometaConfigMode: KometaConfigMode;
 	mediuxDelayMs: number;
 	mediuxConcurrency: number;
 	httpCacheTtlDays: number;
@@ -380,6 +519,9 @@ export async function publicConfig(): Promise<PublicConfig> {
 		embyApiKeySet: c.embyApiKey !== null,
 		tmdbKeySet: c.tmdbKey !== null,
 		kometaAssetsDir: c.kometaAssetsDir,
+		kometaConfigPath: c.kometaConfigPath,
+		kometaMetadataPath: c.kometaMetadataPath,
+		kometaConfigMode: c.kometaConfigMode,
 		mediuxDelayMs: c.mediuxDelayMs,
 		mediuxConcurrency: c.mediuxConcurrency,
 		httpCacheTtlDays: c.httpCacheTtlDays,

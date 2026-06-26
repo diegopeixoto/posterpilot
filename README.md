@@ -129,24 +129,27 @@ Configuration is via environment variables (or the in-app **Settings** page).
 Core variables — see the [Configuration docs](https://diegopeixoto.github.io/posterpilot/configuration/)
 for the complete reference:
 
-| var                                                      | meaning                                                          |
-| -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `SERVER_TYPE`                                            | active media server: `plex` (default), `jellyfin`, or `emby`     |
-| `PLEX_URL` / `PLEX_TOKEN`                                | Plex base URL and `X-Plex-Token` (or acquire via in-app login)   |
-| `PLEX_CLIENT_ID`                                         | stable per-install id for Plex PIN login / discovery (generated) |
-| `JELLYFIN_URL` / `JELLYFIN_API_KEY`                      | Jellyfin server URL and API key                                  |
-| `EMBY_URL` / `EMBY_API_KEY`                              | Emby server URL and API key                                      |
-| `TMDB_KEY`                                               | TMDB v3 API key **or** v4 bearer/JWT (auto-detected)             |
-| `FANART_KEY`                                             | Fanart.tv API key (enables the Fanart.tv provider)               |
-| `PROVIDER_MEDIUX` / `_TMDB` / `_FANART` / `_THEPOSTERDB` | per-provider on/off toggles                                      |
-| `DEFAULT_APPLY_METHOD`                                   | default apply method: `plex`, `kometa`, or `both` (default)      |
-| `INCLUDED_SECTIONS`                                      | library section keys to sync (empty = all movie/show libraries)  |
-| `APP_LANGUAGE`                                           | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`             |
-| `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)        |
-| `LOG_DIR`                                                | rotating log file folder (default `/data/logs` in Docker)        |
-| `EVENT_RETENTION`                                        | max activity-log rows kept in the db (default `2000`)            |
-| `DATABASE_URL`                                           | libsql file URL (default `file:/data/posterpilot.db` in Docker)  |
-| `PORT`                                                   | listen port (default `3000`)                                     |
+| var                                                      | meaning                                                              |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| `SERVER_TYPE`                                            | active media server: `plex` (default), `jellyfin`, or `emby`         |
+| `PLEX_URL` / `PLEX_TOKEN`                                | Plex base URL and `X-Plex-Token` (or acquire via in-app login)       |
+| `PLEX_CLIENT_ID`                                         | stable per-install id for Plex PIN login / discovery (generated)     |
+| `JELLYFIN_URL` / `JELLYFIN_API_KEY`                      | Jellyfin server URL and API key                                      |
+| `EMBY_URL` / `EMBY_API_KEY`                              | Emby server URL and API key                                          |
+| `TMDB_KEY`                                               | TMDB v3 API key **or** v4 bearer/JWT (auto-detected)                 |
+| `FANART_KEY`                                             | Fanart.tv API key (enables the Fanart.tv provider)                   |
+| `PROVIDER_MEDIUX` / `_TMDB` / `_FANART` / `_THEPOSTERDB` | per-provider on/off toggles                                          |
+| `DEFAULT_APPLY_METHOD`                                   | default apply method: `plex`, `kometa`, or `both` (default)          |
+| `INCLUDED_SECTIONS`                                      | library section keys to sync (empty = all movie/show libraries)      |
+| `APP_LANGUAGE`                                           | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`                 |
+| `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)            |
+| `KOMETA_CONFIG_PATH`                                     | path to Kometa's own `config.yml` to sync (empty = feature off)      |
+| `KOMETA_METADATA_PATH`                                   | path Kometa sees for `posterpilot.yml` (default `KOMETA_ASSETS_DIR`) |
+| `KOMETA_CONFIG_MODE`                                     | `merge` (default, surgical) or `own` (regenerate the whole file)     |
+| `LOG_DIR`                                                | rotating log file folder (default `/data/logs` in Docker)            |
+| `EVENT_RETENTION`                                        | max activity-log rows kept in the db (default `2000`)                |
+| `DATABASE_URL`                                           | libsql file URL (default `file:/data/posterpilot.db` in Docker)      |
+| `PORT`                                                   | listen port (default `3000`)                                         |
 
 Two volumes matter:
 
@@ -156,6 +159,9 @@ Two volumes matter:
   covers it too — no extra log mount is needed.
 - **`/kometa`** — mount your Kometa assets/config directory here so the exported
   YAML lands where Kometa reads it.
+- _(optional)_ a **Kometa config dir** (read/write) if you want PosterPilot to
+  sync Kometa's own `config.yml` — then set `KOMETA_CONFIG_PATH` to the mounted
+  file, e.g. `/kometa-config/config.yml`.
 
 ### Unraid
 
@@ -191,6 +197,17 @@ posterpilot writes a single metadata file (default `posterpilot.yml`) into
 entries — the same shape the legacy scraper produced. Add that file to your
 Kometa library config (e.g. under `metadata_path`/`metadata_files`) so Kometa
 applies the covers on its next run. Re-applying updates entries in place.
+
+Optionally, PosterPilot can also **manage Kometa's own `config.yml`** for you —
+syncing the `plex`/`tmdb` connections, the `libraries` section (with
+`posterpilot.yml` wired in automatically), default collection sets, and a few
+global settings. Set `KOMETA_CONFIG_PATH` (and mount Kometa's config dir), then
+use **Settings → Kometa config**. It defaults to a surgical `merge` that preserves
+your hand-written keys and comments; an `own` mode (`KOMETA_CONFIG_MODE=own`) lets
+PosterPilot regenerate and fully own the file. Every write is previewed first and
+leaves a timestamped backup. See the
+[Kometa config sync](https://diegopeixoto.github.io/posterpilot/kometa-config-sync/)
+docs for details.
 
 ## Health check
 

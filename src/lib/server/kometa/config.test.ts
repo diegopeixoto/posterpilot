@@ -1,0 +1,183 @@
+import { describe, it, expect } from 'vitest';
+import {
+	applyPlan,
+	buildOwnedDoc,
+	buildPlan,
+	loadDoc,
+	redactSecrets,
+	scaffoldDoc,
+	serialize,
+	topLevelKeys,
+	type ConfigPlan,
+	type KometaSnapshot
+} from './config';
+
+const CREDS = { plexUrl: 'http://new:32400', plexToken: 'newtoken', tmdbKey: 'newkey' };
+const META = '/data/kometa/posterpilot.yml';
+
+function plan(overrides: Partial<Parameters<typeof buildPlan>[0]> = {}): ConfigPlan {
+	return buildPlan({
+		creds: CREDS,
+		metadataFile: META,
+		libraries: [{ name: 'Movies', defaults: ['genre', 'studio'], metadata: true }],
+		...overrides
+	});
+}
+
+const SAMPLE = `# My Kometa config
+plex:
+  url: http://old:32400
+  token: oldtoken
+  timeout: 60 # keep this
+tmdb:
+  apikey: oldkey
+  language: en
+libraries:
+  Movies:
+    collection_files:
+      - default: genre # user already had genre
+      - file: /my/custom.yml
+settings:
+  asset_directory: /assets
+`;
+
+describe('applyPlan — preservation', () => {
+	it('preserves unmanaged keys and comments', () => {
+		const doc = loadDoc(SAMPLE);
+		const out = serialize(applyPlan(doc, plan(), null).doc);
+		expect(out).toContain('# My Kometa config');
+		expect(out).toContain('timeout: 60');
+		expect(out).toContain('# keep this');
+		expect(out).toContain('language: en');
+		expect(out).toContain('asset_directory: /assets');
+		expect(out).toContain('/my/custom.yml'); // user's own collection file entry
+	});
+
+	it('writes plex/tmdb connections', () => {
+		const doc = loadDoc(SAMPLE);
+		const { doc: out } = applyPlan(doc, plan(), null);
+		expect(out.getIn(['plex', 'url'])).toBe('http://new:32400');
+		expect(out.getIn(['plex', 'token'])).toBe('newtoken');
+		expect(out.getIn(['tmdb', 'apikey'])).toBe('newkey');
+		// untouched neighbor keys survive
+		expect(out.getIn(['plex', 'timeout'])).toBe(60);
+	});
+});
+
+describe('applyPlan — libraries & defaults', () => {
+	it('adds the metadata_files entry and does not duplicate the user genre', () => {
+		const doc = loadDoc(SAMPLE);
+		const out = serialize(applyPlan(doc, plan(), null).doc);
+		expect(out).toContain('metadata_files');
+		expect(out).toContain(`file: ${META}`);
+		expect(out).toContain('default: studio');
+		// genre appears exactly once (user's original, not re-added)
+		expect(out.match(/default: genre/g)?.length).toBe(1);
+	});
+
+	it('creates a brand-new managed library', () => {
+		const doc = loadDoc(SAMPLE);
+		const p = plan({
+			libraries: [
+				{ name: 'Movies', defaults: ['genre', 'studio'], metadata: true },
+				{ name: 'TV Shows', defaults: ['network'], metadata: true }
+			]
+		});
+		const out = serialize(applyPlan(doc, p, null).doc);
+		expect(out).toContain('TV Shows:');
+		expect(out).toContain('default: network');
+	});
+
+	it('is idempotent on re-sync (no new changes, no duplicates)', () => {
+		const doc = loadDoc(SAMPLE);
+		const first = applyPlan(doc, plan(), null);
+		const second = applyPlan(loadDoc(serialize(first.doc)), plan(), first.nextSnapshot);
+		expect(second.changes).toHaveLength(0);
+		const out = serialize(second.doc);
+		expect(out.match(new RegExp(`file: ${META.replace(/\//g, '\\/')}`, 'g'))?.length).toBe(1);
+	});
+
+	it('removes only our managed default on disable, never the user-authored genre', () => {
+		const doc = loadDoc(SAMPLE);
+		const first = applyPlan(doc, plan(), null); // owns ['studio'] (genre was the user's)
+		expect(first.nextSnapshot.libraries['Movies'].defaults).toEqual(['studio']);
+		// Now disable studio (and genre) → only studio (ours) should go; genre stays.
+		const disabled = plan({ libraries: [{ name: 'Movies', defaults: [], metadata: true }] });
+		const out = serialize(
+			applyPlan(loadDoc(serialize(first.doc)), disabled, first.nextSnapshot).doc
+		);
+		expect(out).not.toContain('default: studio');
+		expect(out).toContain('default: genre'); // user's entry preserved
+	});
+
+	it('removes managed entries when a library is deselected', () => {
+		const doc = loadDoc(SAMPLE);
+		const first = applyPlan(doc, plan(), null);
+		const none = plan({ libraries: [] });
+		const out = serialize(applyPlan(loadDoc(serialize(first.doc)), none, first.nextSnapshot).doc);
+		expect(out).not.toContain(`file: ${META}`);
+		expect(out).toContain('default: genre'); // user's content stays, library block intact
+	});
+});
+
+describe('applyPlan — settings & secrets', () => {
+	it('manages bounded settings and removes them when un-managed', () => {
+		const doc = loadDoc(SAMPLE);
+		const withSetting = plan({
+			settings: [{ section: 'webhooks', key: 'error', value: 'https://hook' }]
+		});
+		const first = applyPlan(doc, withSetting, null);
+		expect(serialize(first.doc)).toContain('error: https://hook');
+		const out = serialize(applyPlan(loadDoc(serialize(first.doc)), plan(), first.nextSnapshot).doc);
+		expect(out).not.toContain('https://hook');
+	});
+
+	it('redacts secret values in the diff', () => {
+		const doc = loadDoc(SAMPLE);
+		const { changes } = applyPlan(doc, plan(), null);
+		const redacted = redactSecrets(changes);
+		const token = redacted.find((c) => c.path === 'plex.token');
+		expect(token?.after).toBe('***');
+		const url = redacted.find((c) => c.path === 'plex.url');
+		expect(url?.after).toBe('http://new:32400'); // non-secret untouched
+	});
+});
+
+describe('scaffoldDoc & anchors', () => {
+	it('scaffolds a valid minimal config', () => {
+		const out = serialize(scaffoldDoc(plan()));
+		const reparsed = loadDoc(out);
+		expect(reparsed.getIn(['plex', 'url'])).toBe('http://new:32400');
+		expect(reparsed.getIn(['tmdb', 'apikey'])).toBe('newkey');
+		expect(out).toContain('Movies:');
+		expect(out).toContain('PosterPilot');
+	});
+
+	it('builds a fully-owned doc and reports dropped keys vs an existing file', () => {
+		const owned = buildOwnedDoc(plan());
+		const ownedYaml = serialize(owned.doc);
+		expect(ownedYaml).toContain('own mode');
+		expect(owned.doc.getIn(['plex', 'url'])).toBe('http://new:32400');
+		// A user's hand-written `radarr:` is NOT carried into an owned doc.
+		expect(ownedYaml).not.toContain('radarr');
+
+		const existing = loadDoc(SAMPLE + 'radarr:\n  url: http://r\n');
+		const ownedKeys = new Set(topLevelKeys(owned.doc));
+		const dropped = topLevelKeys(existing).filter((k) => !ownedKeys.has(k));
+		expect(dropped).toContain('radarr');
+		expect(dropped).toContain('settings'); // SAMPLE's asset_directory block is not managed here
+	});
+
+	it('skips a section that uses anchors/aliases and warns', () => {
+		const anchored = `plex: &p
+  url: http://x:32400
+  token: t
+tmdb:
+  apikey: k
+`;
+		const { warnings, changes } = applyPlan(loadDoc(anchored), plan(), null);
+		expect(warnings).toContain('plex');
+		// plex edits skipped; tmdb still managed
+		expect(changes.some((c) => c.path.startsWith('plex.'))).toBe(false);
+	});
+});

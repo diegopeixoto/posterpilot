@@ -26,6 +26,13 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # Optional — Kometa config.yml sync (OFF unless KOMETA_CONFIG_PATH is set).
+      # Point it at Kometa's own config.yml (mount its config dir below).
+      # KOMETA_METADATA_PATH = the path Kometa sees for posterpilot.yml (defaults to
+      # KOMETA_ASSETS_DIR). KOMETA_CONFIG_MODE = merge (default) or own.
+      KOMETA_CONFIG_PATH: ${KOMETA_CONFIG_PATH:-}
+      KOMETA_METADATA_PATH: ${KOMETA_METADATA_PATH:-}
+      KOMETA_CONFIG_MODE: ${KOMETA_CONFIG_MODE:-}
     volumes:
       # Persistent app state (SQLite db + settings + history). The rotating log
       # file lives at /data/logs (LOG_DIR), so this one volume covers it too.
@@ -33,4 +40,7 @@ services:
       # Mount your Kometa assets/config dir here so exported YAML is picked up.
       # Unraid example: /mnt/user/appdata/kometa/config:/kometa
       - ./data/kometa:/kometa
+      # Optional — to sync Kometa's own config.yml, mount its config dir (rw) and
+      # set KOMETA_CONFIG_PATH above, e.g. KOMETA_CONFIG_PATH=/kometa-config/config.yml
+      # - /mnt/user/appdata/kometa/config:/kometa-config
     restart: unless-stopped
