@@ -51,6 +51,7 @@
 	const links = $derived([
 		{ href: '/', label: m.nav_dashboard() },
 		{ href: '/library', label: m.nav_library() },
+		{ href: '/kometa', label: m.nav_kometa() },
 		{ href: '/settings', label: m.nav_settings() }
 	]);
 
