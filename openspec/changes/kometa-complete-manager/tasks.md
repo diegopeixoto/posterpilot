@@ -63,4 +63,4 @@
 - [x] 9.3 `bun run build`
 - [x] 9.4 `bun run lint`
 - [ ] 9.5 Manual verify in a rebuilt container against the real sample config: connectors/overlays/operations round-trip, raw edit + restore, co-located `posterpilot.yml`, unmanaged content preserved, spotlight renders
-- [ ] 9.6 Self-review the diff; PR on the feature branch (no direct push to `main`, no Claude trailers)
+- [x] 9.6 Self-review the diff; PR opened (#16) from feature branch (no direct push to `main`, no Claude trailers in commits)
