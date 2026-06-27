@@ -174,6 +174,61 @@ describe('applyPlan — generalized sections', () => {
 		expect(out2).not.toContain('apikey: k');
 	});
 
+	it('preserves a blank (kept) connector secret on resync', () => {
+		const p1 = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { tautulli: { url: 'http://tt', apikey: 'k' } }
+		});
+		const first = applyPlan(loadDoc(''), p1, null);
+		expect(serialize(first.doc)).toContain('apikey: k');
+		// Resync: the user left apikey blank → kept via connectionKeep, not deleted.
+		const p2 = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { tautulli: { url: 'http://tt' } },
+			connectionKeep: { tautulli: ['apikey'] }
+		});
+		const out = serialize(applyPlan(loadDoc(serialize(first.doc)), p2, first.nextSnapshot).doc);
+		expect(out).toContain('apikey: k');
+		expect(out).toContain('url: http://tt');
+	});
+
+	it('preserves a kept secret in a secret-only connector (github.token)', () => {
+		const p1 = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { github: { token: 'ghp_x' } }
+		});
+		const first = applyPlan(loadDoc(''), p1, null);
+		expect(serialize(first.doc)).toContain('token: ghp_x');
+		// Resync with the only field (a secret) left blank → kept, section not removed.
+		const p2 = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { github: {} },
+			connectionKeep: { github: ['token'] }
+		});
+		const out = serialize(applyPlan(loadDoc(serialize(first.doc)), p2, first.nextSnapshot).doc);
+		expect(out).toContain('token: ghp_x');
+	});
+
+	it('redacts connector secrets in the diff, not just plex/tmdb', () => {
+		const p = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { tautulli: { url: 'http://tt', apikey: 'supersecret' } }
+		});
+		const redacted = redactSecrets(applyPlan(loadDoc(''), p, null).changes);
+		expect(redacted.find((c) => c.path === 'tautulli.apikey')?.after).toBe('***');
+		expect(redacted.find((c) => c.path === 'tautulli.url')?.after).toBe('http://tt');
+	});
+
 	it('manages per-library overlays, leaving the user overlay alone', () => {
 		const base = loadDoc(
 			'libraries:\n  Movies:\n    overlay_files:\n      - default: ribbon # mine\n'

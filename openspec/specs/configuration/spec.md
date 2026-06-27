@@ -6,7 +6,7 @@ TBD - created by archiving change add-poster-manager. Update Purpose after archi
 ## Requirements
 ### Requirement: Provide and persist runtime configuration
 
-The system SHALL accept runtime configuration — Plex base URL, Plex token, TMDB credential, Kometa assets directory, default apply method, and preferred UI language — from environment variables and from the settings UI, and SHALL persist UI-entered values so they survive restarts. The preferred UI language SHALL be one of the supported locales; when set, it is the highest-precedence input to UI locale resolution.
+The system SHALL accept runtime configuration — Plex base URL, Plex token, TMDB credential, Kometa assets directory, Kometa config-file path, Kometa config-management mode, default apply method, and preferred UI language — from environment variables and from the settings UI, and SHALL persist UI-entered values so they survive restarts. The Kometa config-file path locates Kometa's own `config.yml`; the `posterpilot.yml` metadata file is written into that file's directory (co-located), so there is **no separate metadata-path input**. The Kometa config-management mode SHALL be one of `merge` (default) or `own`. The preferred UI language SHALL be one of the supported locales; when set, it is the highest-precedence input to UI locale resolution.
 
 #### Scenario: Configuration from environment
 
@@ -22,6 +22,11 @@ The system SHALL accept runtime configuration — Plex base URL, Plex token, TMD
 
 - **WHEN** a value is set both in the environment and in persisted settings
 - **THEN** the environment value takes precedence and the UI indicates the value is environment-managed
+
+#### Scenario: Kometa config-file path configured
+
+- **WHEN** a Kometa config-file path is supplied via its environment variable (`KOMETA_CONFIG_PATH`) or saved in the UI
+- **THEN** the system uses it to locate Kometa's `config.yml`, applies the same environment-overrides-persisted precedence, and derives the `posterpilot.yml` location from that file's directory without a separate metadata-path setting
 
 #### Scenario: Preferred language persisted
 

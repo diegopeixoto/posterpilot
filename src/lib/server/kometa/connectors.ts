@@ -209,6 +209,17 @@ export function secretFieldKeys(section: string): Set<string> {
 }
 
 /**
+ * Every connector secret field as a `section.key` path (e.g. `plex.token`,
+ * `tautulli.apikey`, `trakt.client_secret`) — for redacting diff before/after
+ * values shown in the browser.
+ */
+export const SECRET_PATHS: ReadonlySet<string> = new Set(
+	CONNECTORS.flatMap((c) =>
+		c.fields.filter((f) => f.type === 'secret').map((f) => `${c.section}.${f.key}`)
+	)
+);
+
+/**
  * Default collection/overlay/chart names that REQUIRE a connector section to be
  * configured. Used by the consistency checker. Verified against kometa.wiki.
  */

@@ -64,6 +64,11 @@ The system SHALL, during preview, warn (without blocking) when an enabled chart 
 - **WHEN** a library enables a `tautulli` chart but no `tautulli` connector is configured
 - **THEN** the preview warns that the `tautulli` connector is required, and the user can still proceed
 
+## RENAMED Requirements
+
+- FROM: `### Requirement: Kometa configuration tab`
+- TO: `### Requirement: Kometa management surface`
+
 ## MODIFIED Requirements
 
 ### Requirement: Sync libraries and wire the metadata file
