@@ -4,7 +4,9 @@
 	import { m } from '$lib/paraglide/messages';
 
 	let { data } = $props();
-	const km = data.kometa;
+	// Derived (not a one-time alias) so status/path/backups reflect reloaded data
+	// after invalidateAll() — e.g. enabling the manager from the inactive state.
+	const km = $derived(data.kometa);
 
 	type Section = 'connections' | 'libraries' | 'settings' | 'raw' | 'backups';
 	let section = $state<Section>('connections');
@@ -21,18 +23,23 @@
 	let mode = $state<'merge' | 'own'>(km.mode);
 	let savingHeader = $state(false);
 	let headerSaved = $state(false);
+	let headerError = $state<string | null>(null);
 
 	async function saveHeader() {
 		savingHeader = true;
 		headerSaved = false;
+		headerError = null;
 		try {
-			await fetch('/api/settings', {
+			const res = await fetch('/api/settings', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ kometaConfigPath: configPath, kometaConfigMode: mode })
 			});
+			if (!res.ok) throw new Error(String(res.status));
 			headerSaved = true;
 			await invalidateAll();
+		} catch {
+			headerError = m.settings_save_failed();
 		} finally {
 			savingHeader = false;
 		}
@@ -310,6 +317,7 @@
 	</button>
 	{#if headerSaved}<span class="text-sm text-emerald-400" role="status">{m.settings_saved()}</span
 		>{/if}
+	{#if headerError}<span class="text-sm text-red-300" role="alert">{headerError}</span>{/if}
 </div>
 
 {#if !km.active}

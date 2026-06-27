@@ -145,22 +145,6 @@ export function kometaOutputDir(config: AppConfig): string {
 	return config.kometaConfigPath ? posix.dirname(config.kometaConfigPath) : config.kometaAssetsDir;
 }
 
-/** Strip blank secret fields (keep existing) from a connector's submitted values. */
-function cleanConnectorFields(
-	section: string,
-	fields: Record<string, string>
-): Record<string, string> {
-	const secrets = secretFieldKeys(section);
-	const out: Record<string, string> = {};
-	for (const [k, v] of Object.entries(fields)) {
-		// A blank secret means "leave the stored value alone"; a blank non-secret
-		// means "remove it". So only drop blank secrets here.
-		if (v === '' && secrets.has(k)) continue;
-		out[k] = v;
-	}
-	return out;
-}
-
 /** Build the desired-state plan from the user's selections + resolved config. */
 async function planFromSelections(config: AppConfig, sel: SyncSelectionInput): Promise<ConfigPlan> {
 	const cached = await getCachedLibraries();
@@ -176,10 +160,21 @@ async function planFromSelections(config: AppConfig, sel: SyncSelectionInput): P
 		}))
 		.filter((l) => l.name !== '');
 
+	// A blank secret means "leave the stored value alone" → carry it forward via
+	// connectionKeep so it is not deleted on resync. A blank non-secret means
+	// "remove it" (handled by applyManagedMap's removal pass).
 	const connections: Record<string, Record<string, string>> = {};
+	const connectionKeep: Record<string, string[]> = {};
 	for (const [section, fields] of Object.entries(sel.connections)) {
-		const cleaned = cleanConnectorFields(section, fields);
-		if (Object.keys(cleaned).length) connections[section] = cleaned;
+		const secrets = secretFieldKeys(section);
+		const values: Record<string, string> = {};
+		const keep: string[] = [];
+		for (const [k, v] of Object.entries(fields)) {
+			if (v === '' && secrets.has(k)) keep.push(k);
+			else values[k] = v;
+		}
+		connections[section] = values;
+		if (keep.length) connectionKeep[section] = keep;
 	}
 
 	const settings = MANAGED_SETTINGS.flatMap((def) => {
@@ -192,7 +187,8 @@ async function planFromSelections(config: AppConfig, sel: SyncSelectionInput): P
 		metadataFile: metadataFilePath(config),
 		libraries,
 		settings,
-		connections
+		connections,
+		connectionKeep
 	});
 }
 

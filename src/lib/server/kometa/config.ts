@@ -17,7 +17,7 @@
 import { Document, isAlias, isMap, isScalar, isSeq, parseDocument, YAMLMap, YAMLSeq } from 'yaml';
 import { DEFAULT_FILENAME } from './yaml';
 import { knownDefaults } from './defaults-catalog';
-import { CONNECTOR_DEPENDENCIES } from './connectors';
+import { CONNECTOR_DEPENDENCIES, SECRET_PATHS } from './connectors';
 
 /** Plex/TMDB credentials PosterPilot writes into the connection sections. */
 export interface KometaCreds {
@@ -71,6 +71,12 @@ export interface ConfigPlan {
 	 * Empty-string values mean "unmanage" (remove if previously set).
 	 */
 	connections?: Record<string, Record<string, string>>;
+	/**
+	 * Per connector section, keys to carry forward untouched (not set, not removed) —
+	 * blank secrets the user left alone. Without this, a resync would drop a secret
+	 * the user already saved (e.g. tautulli.apikey, radarr.token).
+	 */
+	connectionKeep?: Record<string, string[]>;
 }
 
 /** What PosterPilot last wrote, used to compute safe removals on the next sync. */
@@ -122,6 +128,7 @@ export function buildPlan(input: {
 	}[];
 	settings?: ManagedSetting[];
 	connections?: Record<string, Record<string, string>>;
+	connectionKeep?: Record<string, string[]>;
 }): ConfigPlan {
 	return {
 		creds: input.creds,
@@ -135,7 +142,8 @@ export function buildPlan(input: {
 			settingsOverrides: l.settingsOverrides
 		})),
 		settings: input.settings ?? [],
-		connections: input.connections
+		connections: input.connections,
+		connectionKeep: input.connectionKeep
 	};
 }
 
@@ -233,6 +241,7 @@ export function applyPlan(
 	const managedConn: Record<string, string[]> = {};
 	const prevConn = snapshot?.connections ?? {};
 	for (const [section, values] of Object.entries(plan.connections ?? {})) {
+		const keep = new Set(plan.connectionKeep?.[section] ?? []);
 		managedConn[section] = applyManagedMap(
 			doc,
 			[section],
@@ -240,7 +249,8 @@ export function applyPlan(
 			prevConn[section] ?? [],
 			changes,
 			warnings,
-			section
+			section,
+			keep
 		);
 	}
 	// Connector sections dropped entirely from the plan: remove their managed keys.
@@ -388,11 +398,17 @@ function splitComposite(composite: string): ['settings' | 'webhooks', string] {
 	return [section, composite.slice(idx + 1)];
 }
 
+const EMPTY_KEEP: ReadonlySet<string> = new Set();
+
 /**
  * Set/remove a managed scalar map at `basePath` (a connector section, or a
  * library's `operations`/`settings`). Writes each non-empty value, removes any
  * previously-managed key no longer present, and returns the keys now owned.
  * Skips with a warning if the target node uses anchors/aliases.
+ *
+ * `keep` lists keys to carry forward untouched when they already exist on disk —
+ * used for connector secrets the user left blank (meaning "leave the stored value
+ * alone"), so they stay owned and are not deleted.
  */
 function applyManagedMap(
 	doc: Document,
@@ -401,7 +417,8 @@ function applyManagedMap(
 	prevKeys: string[],
 	changes: ChangeEntry[],
 	warnings: string[],
-	warnLabel: string
+	warnLabel: string,
+	keep: ReadonlySet<string> = EMPTY_KEEP
 ): string[] {
 	const node = nodeAt(doc, basePath);
 	if (node !== undefined && node !== null && hasAliasOrAnchor(node)) {
@@ -413,6 +430,13 @@ function applyManagedMap(
 		if (value === '') continue; // empty = unmanage
 		setScalar(doc, [...basePath, key], value, changes);
 		managed.push(key);
+	}
+	// Carry forward kept keys (e.g. blank secrets) that already exist on disk, so
+	// they remain owned and the removal pass below does not delete them.
+	for (const key of keep) {
+		if (!managed.includes(key) && scalarAt(doc, [...basePath, key]) !== undefined) {
+			managed.push(key);
+		}
 	}
 	for (const key of prevKeys) {
 		if (managed.includes(key)) continue;
@@ -648,8 +672,6 @@ export function checkConsistency(plan: ConfigPlan, doc: Document): ConsistencyWa
 	}
 	return out;
 }
-
-const SECRET_PATHS = new Set(['plex.token', 'tmdb.apikey']);
 
 /** Mask secret values in a change list for safe display in the browser. */
 export function redactSecrets(changes: ChangeEntry[]): ChangeEntry[] {

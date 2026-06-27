@@ -55,8 +55,9 @@ describe('overlay catalog', () => {
 	it('knownOverlays filters', () => {
 		expect(knownOverlays(['mediastinger', 'nope', 'ribbon'])).toEqual(['mediastinger', 'ribbon']);
 	});
-	it('has no duplicates', () => {
-		expect(new Set(OVERLAY_DEFAULTS).size).toBe(OVERLAY_DEFAULTS.length);
+	it('has no duplicate names', () => {
+		const names = OVERLAY_DEFAULTS.map((o) => o.name);
+		expect(new Set(names).size).toBe(names.length);
 	});
 });
 
