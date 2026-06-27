@@ -22,12 +22,10 @@
 	let configPath = $state(data.config?.kometaConfigPath ?? km.configPath);
 	let mode = $state<'merge' | 'own'>(km.mode);
 	let savingHeader = $state(false);
-	let headerSaved = $state(false);
 	let headerError = $state<string | null>(null);
 
 	async function saveHeader() {
 		savingHeader = true;
-		headerSaved = false;
 		headerError = null;
 		try {
 			const res = await fetch('/api/settings', {
@@ -36,11 +34,13 @@
 				body: JSON.stringify({ kometaConfigPath: configPath, kometaConfigMode: mode })
 			});
 			if (!res.ok) throw new Error(String(res.status));
-			headerSaved = true;
-			await invalidateAll();
+			// Changing the config path/mode points the manager at a different file, so
+			// recreate the page: a full reload re-initializes all form state from the
+			// new file. Otherwise connValues/libs/etc. stay seeded from the old file and
+			// a subsequent sync could write stale selections into the new config.
+			location.reload();
 		} catch {
 			headerError = m.settings_save_failed();
-		} finally {
 			savingHeader = false;
 		}
 	}
@@ -226,7 +226,9 @@
 	});
 
 	// ── Backups ────────────────────────────────────────────────────────────────
-	let backups = $state(km.backups);
+	// Read from the derived `km` so the list refreshes after a sync (new backup)
+	// or reload, rather than freezing at the initial load.
+	const backups = $derived(km.backups);
 	let confirmRestore = $state<string | null>(null);
 	async function restore(name: string) {
 		if (confirmRestore !== name) {
@@ -239,9 +241,9 @@
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ name })
 		});
-		await invalidateAll();
-		backups = data.kometa.backups;
-		rawLoaded = false;
+		// The file content changed under us — recreate the page so all form state
+		// re-initializes from the restored config rather than the pre-restore one.
+		location.reload();
 	}
 	function fmtStamp(stamp: string): string {
 		return stamp.replace(/-/g, ':').replace('T', ' ').replace('Z', '');
@@ -315,8 +317,6 @@
 	<button onclick={saveHeader} disabled={savingHeader} class="btn btn-subtle px-4 py-2">
 		{savingHeader ? m.settings_saving() : m.settings_save()}
 	</button>
-	{#if headerSaved}<span class="text-sm text-emerald-400" role="status">{m.settings_saved()}</span
-		>{/if}
 	{#if headerError}<span class="text-sm text-red-300" role="alert">{headerError}</span>{/if}
 </div>
 

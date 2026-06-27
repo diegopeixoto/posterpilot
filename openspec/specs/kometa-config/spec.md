@@ -1,7 +1,14 @@
 # kometa-config Specification
 
 ## Purpose
-TBD - created by archiving change kometa-config-sync. Update Purpose after archive.
+
+Manage the user's own Kometa `config.yml` from PosterPilot: surgically read, edit,
+and write it from a dedicated manager — connections, libraries (collections,
+overlays, operations, metadata, settings), and global settings/webhooks — plus a
+raw editor for anything unmodeled. Default `merge` mode preserves all unmanaged
+content and comments; `own` mode regenerates the file. Every write is previewed
+(secrets redacted), atomic, and backed up. Inactive until a config path is set.
+
 ## Requirements
 ### Requirement: Locate and load the Kometa config file
 

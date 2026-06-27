@@ -196,6 +196,27 @@ describe('applyPlan — generalized sections', () => {
 		expect(out).toContain('url: http://tt');
 	});
 
+	it('preserves a kept secret in a secret-only connector (github.token)', () => {
+		const p1 = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { github: { token: 'ghp_x' } }
+		});
+		const first = applyPlan(loadDoc(''), p1, null);
+		expect(serialize(first.doc)).toContain('token: ghp_x');
+		// Resync with the only field (a secret) left blank → kept, section not removed.
+		const p2 = buildPlan({
+			creds: NO_CREDS,
+			metadataFile: META,
+			libraries: [],
+			connections: { github: {} },
+			connectionKeep: { github: ['token'] }
+		});
+		const out = serialize(applyPlan(loadDoc(serialize(first.doc)), p2, first.nextSnapshot).doc);
+		expect(out).toContain('token: ghp_x');
+	});
+
 	it('redacts connector secrets in the diff, not just plex/tmdb', () => {
 		const p = buildPlan({
 			creds: NO_CREDS,
