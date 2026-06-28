@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/diegopeixoto/posterpilot/compare/v0.5.0...v0.6.0) (2026-06-28)
+
+
+### Features
+
+* media-server login, encrypted secrets, and scored artwork suggestions ([71a6430](https://github.com/diegopeixoto/posterpilot/commit/71a64301771e627f44f9c4a04951c1571f0d0480))
+* media-server login, encrypted secrets, and scored artwork suggestions ([1184420](https://github.com/diegopeixoto/posterpilot/commit/1184420a91185eacd82aab5491ecb994227aa1e0))
+
+
+### Bug Fixes
+
+* address PR review findings (encryption key persistence, sync watermark, SSRF) ([e0e6422](https://github.com/diegopeixoto/posterpilot/commit/e0e6422330a727c982319e4b46aeb7fbec7ef2c0))
+* address second review pass (clock-skew sync, persistent thumb cache, validation) ([0d5adb4](https://github.com/diegopeixoto/posterpilot/commit/0d5adb4f813b7f6d1eacd1e0838291711a85ee9f))
+* address third review pass (strict dryRun, guarded suggestion persist, 401 login) ([2cb443d](https://github.com/diegopeixoto/posterpilot/commit/2cb443dbd46c1917856d44bd047a3806de116723))
+
 ## [0.5.0](https://github.com/diegopeixoto/posterpilot/compare/v0.4.1...v0.5.0) (2026-06-28)
 
 
