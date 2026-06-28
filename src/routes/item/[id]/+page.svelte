@@ -149,14 +149,22 @@
 		}
 		if (showChanged) await persistSelection();
 		if (children.length) {
-			const add: Record<string, string> = {};
-			for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
-			childSel = { ...childSel, ...add };
-			await fetch(`/api/items/${data.item.id}/select`, {
-				method: 'POST',
-				headers: jsonHeaders,
-				body: JSON.stringify({ children })
-			});
+			// Suggestions are best-effort: only reflect them locally once the server has
+			// persisted them, and never let a failure surface as an unhandled rejection.
+			try {
+				const res = await fetch(`/api/items/${data.item.id}/select`, {
+					method: 'POST',
+					headers: jsonHeaders,
+					body: JSON.stringify({ children })
+				});
+				if (res.ok) {
+					const add: Record<string, string> = {};
+					for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
+					childSel = { ...childSel, ...add };
+				}
+			} catch {
+				// ignore — the user can still pick artwork manually
+			}
 		}
 	}
 

@@ -20,19 +20,26 @@ export interface ReprocessOptions {
 /**
  * Decide whether a media item's expensive sync work should run this pass.
  *
- * The bias is toward reprocessing whenever we can't be sure the item is
- * unchanged — skipping is only safe when we have a server timestamp, a prior
- * sync timestamp, and the server's copy is no newer than what we last saw.
+ * Change detection compares the server's current modified time to the one we
+ * *previously stored* — both are the media server's own clock, so the decision is
+ * immune to clock skew between the server and the PosterPilot host (comparing a
+ * server timestamp to our local `lastSyncedAt` would not be). `lastSyncedAt` is
+ * used only as a "was this ever processed successfully?" watermark for retries:
+ * when it's null (never synced, or a prior transient failure), we always reprocess.
  *
- * @param serverUpdatedAt The media server's own last-modified time, or null
- *   when the server doesn't report one for this item.
- * @param lastSyncedAt When this item was last processed by a sync, or null
- *   when it has never been synced.
+ * The bias is toward reprocessing whenever we can't be sure the item is unchanged.
+ *
+ * @param serverUpdatedAt The server's current last-modified time, or null when it
+ *   reports none for this item.
+ * @param previousServerUpdatedAt The server last-modified time we stored on the
+ *   prior sync, or null when we have no baseline.
+ * @param lastSyncedAt When this item was last *successfully* processed, or null.
  * @param opts Sync mode flags (full / incremental).
  * @returns `true` to run the expensive resolution + enrichment, `false` to skip.
  */
 export function shouldReprocessItem(
 	serverUpdatedAt: Date | null,
+	previousServerUpdatedAt: Date | null,
 	lastSyncedAt: Date | null,
 	opts: ReprocessOptions
 ): boolean {
@@ -42,13 +49,15 @@ export function shouldReprocessItem(
 	// Incremental disabled → behave like a full sync (always reprocess).
 	if (!opts.incremental) return true;
 
-	// No server timestamp → we can't tell whether it changed, so reprocess.
-	if (serverUpdatedAt === null) return true;
-
-	// Never synced before → there's nothing to compare against, so reprocess.
+	// Never successfully synced (new item, or a prior transient failure) → reprocess.
 	if (lastSyncedAt === null) return true;
 
-	// Otherwise reprocess only when the server's copy is strictly newer than
-	// the last time we processed it.
-	return serverUpdatedAt.getTime() > lastSyncedAt.getTime();
+	// No current server timestamp → we can't tell whether it changed, so reprocess.
+	if (serverUpdatedAt === null) return true;
+
+	// No stored baseline to compare against → reprocess.
+	if (previousServerUpdatedAt === null) return true;
+
+	// Reprocess only when the server's modified time changed since we last stored it.
+	return serverUpdatedAt.getTime() !== previousServerUpdatedAt.getTime();
 }

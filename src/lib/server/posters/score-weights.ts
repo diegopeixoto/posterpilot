@@ -38,14 +38,14 @@ export async function getScoreWeights(): Promise<ScoreWeights> {
 		}
 		return {
 			providerWeights,
-			resolutionWeight:
-				typeof stored.resolutionWeight === 'number'
-					? stored.resolutionWeight
-					: DEFAULT_SCORE_WEIGHTS.resolutionWeight,
-			aspectWeight:
-				typeof stored.aspectWeight === 'number'
-					? stored.aspectWeight
-					: DEFAULT_SCORE_WEIGHTS.aspectWeight
+			// Gate scalars on Number.isFinite so a stored NaN/Infinity/string can't
+			// propagate into scorePoster() and produce NaN scores that break ranking.
+			resolutionWeight: Number.isFinite(stored.resolutionWeight as number)
+				? (stored.resolutionWeight as number)
+				: DEFAULT_SCORE_WEIGHTS.resolutionWeight,
+			aspectWeight: Number.isFinite(stored.aspectWeight as number)
+				? (stored.aspectWeight as number)
+				: DEFAULT_SCORE_WEIGHTS.aspectWeight
 		};
 	} catch {
 		return DEFAULT_SCORE_WEIGHTS;

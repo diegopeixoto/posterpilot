@@ -100,10 +100,12 @@ export async function runSyncJob(
 		// Skip the expensive TMDB resolution + enrichment when the item is unchanged
 		// since the last sync. The row above is still upserted (kept/unpruned) with a
 		// refreshed serverUpdatedAt; we only avoid the network work.
-		const reprocess = shouldReprocessItem(item.serverUpdatedAt, existing?.lastSyncedAt ?? null, {
-			full,
-			incremental: config.incrementalSync
-		});
+		const reprocess = shouldReprocessItem(
+			item.serverUpdatedAt,
+			existing?.serverUpdatedAt ?? null,
+			existing?.lastSyncedAt ?? null,
+			{ full, incremental: config.incrementalSync }
+		);
 		// Only advance lastSyncedAt once the item is fully processed this pass. An
 		// unchanged item is already considered synced; a transient resolve/enrich
 		// failure leaves it unsynced so the next sync retries it.

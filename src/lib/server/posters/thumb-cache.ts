@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { thumbnailCache } from '$lib/server/db/schema';
@@ -25,10 +25,20 @@ export const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 
 /**
- * Directory holding the cached image bytes (one file per `urlHash`). Follows the
- * `./data` convention used elsewhere (`./data/kometa`, `./data/logs`).
+ * Directory holding the cached image bytes (one file per `urlHash`), placed next to
+ * the SQLite DB (derived from `DATABASE_URL`) so it lands on the same persistent
+ * volume as the rest of the app state. Falls back to `./data/thumb-cache` for the
+ * dev default. Reads `process.env` (not `$env`) so the pure-helper tests, which
+ * import this module, stay free of `$env` resolution.
  */
-const THUMB_CACHE_DIR = './data/thumb-cache';
+function thumbCacheDir(): string {
+	const dbUrl = process.env.DATABASE_URL;
+	if (dbUrl && dbUrl.startsWith('file:')) {
+		const dir = dirname(dbUrl.slice('file:'.length));
+		if (dir && dir !== '.') return join(dir, 'thumb-cache');
+	}
+	return './data/thumb-cache';
+}
 
 // ── Pure helpers (no db / fs / $env) ───────────────────────────────────────────
 
@@ -74,7 +84,7 @@ export interface ThumbBytes {
 
 /** Absolute-from-cwd path of the on-disk file for a given URL hash. */
 function filePathFor(urlHash: string): string {
-	return join(THUMB_CACHE_DIR, urlHash);
+	return join(thumbCacheDir(), urlHash);
 }
 
 /**
@@ -150,7 +160,7 @@ export async function fetchAndCache(
 	const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
 	const bytes = Buffer.from(await res.arrayBuffer());
 
-	await mkdir(THUMB_CACHE_DIR, { recursive: true });
+	await mkdir(thumbCacheDir(), { recursive: true });
 	await writeFile(filePathFor(urlHash), bytes);
 
 	const now = new Date();

@@ -46,11 +46,15 @@ export const GET: RequestHandler = async (event) => {
 			ttlMs: config.thumbCacheTtlDays * 24 * 60 * 60 * 1000,
 			maxBytes: config.thumbCacheMaxMb * 1024 * 1024
 		});
+		// Align the browser cache lifetime with the server-side TTL so a lowered TTL
+		// isn't undermined by stale client caches. Bytes for a URL never change, so
+		// mark immutable within that window.
+		const maxAge = Math.max(0, Math.floor(config.thumbCacheTtlDays * 24 * 60 * 60));
 		// Buffer is a Uint8Array, but typed as Node Buffer; wrap so it satisfies BodyInit.
 		return new Response(new Uint8Array(bytes), {
 			headers: {
 				'Content-Type': contentType,
-				'Cache-Control': 'public, max-age=604800, immutable'
+				'Cache-Control': `public, max-age=${maxAge}, immutable`
 			}
 		});
 	} catch {
