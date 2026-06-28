@@ -51,6 +51,20 @@ export function parseGuids(guidArray: PlexRawGuid[] | undefined | null): PlexGui
 }
 
 /**
+ * Convert a Plex `updatedAt` value (epoch seconds) to a `Date`.
+ *
+ * Plex reports an item's last-modified time as integer seconds since the Unix
+ * epoch. Returns null when the field is absent, non-numeric, or zero.
+ *
+ * @param updatedAt The `updatedAt` value from a Plex `Metadata` object.
+ * @returns The corresponding `Date`, or null when no usable timestamp is present.
+ */
+export function parseUpdatedAt(updatedAt: number | undefined | null): Date | null {
+	if (typeof updatedAt !== 'number' || updatedAt <= 0) return null;
+	return new Date(updatedAt * 1000);
+}
+
+/**
  * Build an absolute, token-authenticated URL for a Plex `thumb` path.
  *
  * Plex returns relative thumb paths (e.g. `/library/metadata/42/thumb/16800`)

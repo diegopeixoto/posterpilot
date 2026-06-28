@@ -1,5 +1,5 @@
 import { dirname as posixDirname } from 'node:path/posix';
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	appliedPosters,
@@ -14,7 +14,9 @@ import type { MediaServer, ServerChild } from '$lib/server/media-server';
 import { writeKometaYaml, type KometaSeasonInput } from '$lib/server/kometa/yaml';
 import { logEvent } from '$lib/server/events';
 import { resolveChildOps, seasonsNeedingEpisodes, type StagedChildSlot } from './child-apply';
-import { availableProviders, PROVIDER_ORDER, type ProviderId } from './providers';
+import { availableProviders, type ProviderId } from './providers';
+import { scorePoster } from './score';
+import { getScoreWeights } from './score-weights';
 
 /**
  * Where posterpilot.yml is written: co-located with config.yml when Kometa
@@ -62,6 +64,9 @@ export async function discoverForItem(
 		}
 	}
 
+	// Scoring weights are read once per discovery; each candidate gets a score so the
+	// UI can pre-select the best one and auto-select can rank across providers.
+	const weights = await getScoreWeights();
 	const rows = settled
 		.filter(
 			(
@@ -73,16 +78,23 @@ export async function discoverForItem(
 		)
 		.flatMap((r) =>
 			r.value.sets.flatMap((set) =>
-				set.candidates.map((c) => ({
-					mediaItemId: item.id,
-					provider: r.value.provider,
-					setId: c.setId,
-					setAuthor: c.setAuthor,
-					url: c.url,
-					kind: c.kind,
-					season: c.season,
-					episode: c.episode
-				}))
+				set.candidates.map((c) => {
+					const width = c.width ?? null;
+					const height = c.height ?? null;
+					return {
+						mediaItemId: item.id,
+						provider: r.value.provider,
+						setId: c.setId,
+						setAuthor: c.setAuthor,
+						url: c.url,
+						kind: c.kind,
+						season: c.season,
+						episode: c.episode,
+						width,
+						height,
+						score: scorePoster({ provider: r.value.provider, width, height, kind: c.kind }, weights)
+					};
+				})
 			)
 		);
 
@@ -105,23 +117,18 @@ export async function discoverForItem(
 }
 
 /**
- * Auto-select a primary poster across providers: the first poster candidate from the
- * most-preferred available provider (by PROVIDER_ORDER), then earliest insertion.
+ * Auto-select a primary poster across providers by the configurable scoring model:
+ * the highest-scored poster candidate wins. SQLite orders NULL scores last under
+ * DESC, so legacy candidates without a score fall back to earliest-inserted.
  */
 export async function autoSelectPoster(itemId: number): Promise<string | null> {
 	const rows = await db
 		.select()
 		.from(posterCandidates)
 		.where(and(eq(posterCandidates.mediaItemId, itemId), eq(posterCandidates.kind, 'poster')))
-		.orderBy(asc(posterCandidates.id));
-	if (!rows.length) return null;
-	const rank = (p: string) => {
-		const i = PROVIDER_ORDER.indexOf(p as ProviderId);
-		return i < 0 ? PROVIDER_ORDER.length : i;
-	};
-	// Stable sort keeps insertion order within a provider.
-	const sorted = [...rows].sort((a, b) => rank(a.provider) - rank(b.provider));
-	return sorted[0].url;
+		.orderBy(desc(posterCandidates.score), asc(posterCandidates.id))
+		.limit(1);
+	return rows[0]?.url ?? null;
 }
 
 /** Record a user's pending cover selection for an item. */
@@ -236,6 +243,10 @@ export interface ApplyOutcome {
 	error?: string;
 	/** Per-child results when season/episode slots were part of this apply. */
 	children?: ChildApplySummary;
+	/** True when this outcome is a dry-run plan (nothing was written). */
+	dryRun?: boolean;
+	/** In a dry-run, what would be written at the show level (and season count for Kometa). */
+	planned?: { poster: boolean; background: boolean; seasons?: number };
 }
 
 /**
@@ -250,14 +261,57 @@ export async function applyToItem(
 		backgroundUrl?: string | null;
 		method: ApplyMethod;
 		config: AppConfig;
+		/** When true, compute and return the plan without writing to the server, files, or DB. */
+		dryRun?: boolean;
 	}
 ): Promise<ApplyOutcome[]> {
-	const { posterUrl, backgroundUrl, method, config } = params;
+	const { posterUrl, backgroundUrl, method, config, dryRun } = params;
 	const outcomes: ApplyOutcome[] = [];
 	const doServer = method === 'plex' || method === 'both';
 	const doKometa = method === 'kometa' || method === 'both';
 	// Staged season/episode slots are applied alongside the show-level cover.
 	const childSlots = item.type === 'show' ? await getChildSelections(item.id) : [];
+
+	// Dry-run: resolve what *would* happen (child matching is a read, allowed) but
+	// perform no server upload, Kometa write, applied-record insert, or lock change.
+	if (dryRun) {
+		const planned = { poster: !!posterUrl, background: !!backgroundUrl };
+		if (doServer) {
+			let children: ChildApplySummary | undefined;
+			if (childSlots.length && item.type === 'show') {
+				try {
+					const server = requireActiveServerOrThrow(config);
+					const { ops, skipped } = await resolveChildrenForServer(
+						server,
+						item.ratingKey,
+						childSlots
+					);
+					children = { applied: ops.length, failed: 0, skipped: skipped.length };
+				} catch (e) {
+					outcomes.push({
+						method: 'plex',
+						status: 'failed',
+						error: errorMessage(e),
+						dryRun: true,
+						planned
+					});
+				}
+			}
+			if (!outcomes.some((o) => o.method === 'plex')) {
+				outcomes.push({ method: 'plex', status: 'success', dryRun: true, planned, children });
+			}
+		}
+		if (doKometa) {
+			const seasons = buildKometaSeasons(childSlots);
+			outcomes.push({
+				method: 'kometa',
+				status: 'success',
+				dryRun: true,
+				planned: { ...planned, seasons: seasons.length }
+			});
+		}
+		return outcomes;
+	}
 
 	if (doServer) {
 		// Persisted as 'plex' (the direct-server method) for schema compatibility,

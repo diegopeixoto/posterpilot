@@ -15,8 +15,11 @@ por seis passos em ordem, persistindo cada um conforme você avança:
 1. **Idioma** — escolha a localidade da interface.
 2. **Servidor de mídia** — escolha Plex, Jellyfin ou Emby. Para o Plex você pode entrar com
    um PIN (o PosterPilot mostra um código e um link de autorização, depois armazena o token
-   obtido para você) e escolher uma conexão local/remota descoberta; Jellyfin e Emby recebem
-   uma URL e uma chave de API. Um botão **Testar** verifica a conexão.
+   obtido para você) e escolher uma conexão local/remota descoberta. Jellyfin e Emby recebem
+   uma URL de servidor e permitem que você **entre com seu nome de usuário e senha** — o
+   PosterPilot os troca por um token de acesso, de modo que você nunca precisa caçar uma chave
+   de API (a senha é usada apenas para essa única requisição e nunca é armazenada; colar uma
+   chave manualmente permanece disponível como alternativa). Um botão **Testar** verifica a conexão.
 3. **TMDB** — cole uma chave de API do TMDB (um link para as configurações de API do TMDB é fornecido).
 4. **Provedores** — alterne os provedores de artwork (MediUX, TMDB, Fanart.tv,
    ThePosterDB) e informe uma chave do Fanart.tv se você a usar.
@@ -48,6 +51,13 @@ Cada item retorna com seu título, ano, tipo, GUIDs externos (tmdb/imdb/tvdb
 quando presentes) e pôster atual. Um item sem GUID externo ainda é listado,
 mas sinalizado como não resolvível para busca em provedores em vez de descartado.
 
+Sincronizações repetidas são **incrementais** por padrão: o PosterPilot compara cada item com
+o timestamp de última modificação do servidor de mídia e só re-resolve e reenriquece os que
+mudaram desde a sincronização anterior, de modo que um rescan de rotina é muito mais rápido
+que o primeiro. Uma **varredura completa** que reprocessa tudo permanece disponível, e você
+pode desligar a sincronização incremental por completo (veja
+[Configuração → Desempenho e ajustes](/posterpilot/pt-br/configuration/#desempenho-e-ajustes)).
+
 ## O mural da biblioteca
 
 A biblioteca sincronizada é renderizada como uma grade de pôsteres com uma barra de ferramentas
@@ -55,9 +65,9 @@ no estilo do Notion. Você pode:
 
 - **Buscar** por título.
 - **Filtrar** a partir do popover **Filtrar**: tipo de mídia (filme / série), classificação
-  mínima, gênero, pôster ausente, disponibilidade no MediUX (tem candidatos) e estado de
-  alteração (não alterado / ainda com o pôster padrão). O botão Filtrar mostra um selo com o
-  número de facetas ativas.
+  mínima, gênero, pôster ausente, disponibilidade no MediUX (tem candidatos), estado de
+  alteração (não alterado / ainda com o pôster padrão) e estado ignorado. O botão Filtrar
+  mostra um selo com o número de facetas ativas.
 - **Ordenar** a partir do popover **Ordenar** por título, ano de lançamento, classificação,
   duração ou alterado mais recentemente, com um alternador de crescente/decrescente independente.
 - Cada filtro ativo e a ordenação aparecem como **chips removíveis** abaixo da barra de
@@ -65,6 +75,10 @@ no estilo do Notion. Você pode:
   redefinir tudo.
 - Alterne a **aplicação automática** (o botão ⚡): ligada, cada alteração navega imediatamente;
   desligada, as alterações ficam preparadas até você clicar em **Aplicar**. A escolha é lembrada.
+- **Ignorar** um item que você quer deixar intocado — itens ignorados são pulados pela
+  descoberta, pela aplicação e pela seleção automática, são marcados visualmente no mural e
+  podem ser incluídos ou excluídos pelo popover Filtrar. Desative isso novamente a qualquer
+  momento para trazer o item de volta ao fluxo.
 - Ver um **banner de destaque** — um backdrop de um item alterado recentemente acima do
   mural assim que ao menos uma capa tiver sido aplicada.
 
@@ -84,9 +98,38 @@ séries), gêneros e sinopse, além do elenco principal.
 - Os candidatos são agrupados **primeiro por provedor, depois por conjunto**. Cada conjunto mostra sua
   atribuição ao uploader com o pôster e o backdrop juntos. Para séries, a visão
   também apresenta conjuntos de pôsteres de temporada e conjuntos de title cards.
+- Seções de provedor, cards de conjunto individuais e (para séries) grupos de temporada são
+  **recolhíveis**. No primeiro carregamento, o primeiro provedor e seu primeiro conjunto ficam
+  expandidos e todo o resto fica recolhido; suas escolhas de recolhido/expandido persistem no
+  navegador entre recarregamentos e conforme você navega entre itens.
+- Quando o **artwork sugerido** está habilitado, o candidato com a maior pontuação para cada slot
+  é pré-selecionado como uma sugestão claramente marcada que você pode aceitar ou substituir.
+  Os candidatos são pontuados por qualidade do provedor, resolução e ajuste de proporção; ajuste
+  os pesos — ou desligue a pré-seleção — em Configurações (veja
+  [Configuração → Desempenho e ajustes](/posterpilot/pt-br/configuration/#desempenho-e-ajustes)).
 
 Você pode preparar um conjunto inteiro ("usar este conjunto"), ou pegar um pôster individual de um
 conjunto e um fundo de outro — os dois slots são independentes.
+
+## Artwork de temporada e episódio
+
+Para uma série, o artwork é preparado por slot, de modo que a capa da série, o pôster de cada
+temporada e o title card de cada episódio são independentes entre si:
+
+- O artwork de um conjunto é organizado em um **grupo da série** (pôster e fundo) e um
+  **grupo por temporada**. Cada grupo de temporada contém o pôster daquela temporada e os
+  title cards de seus episódios. (Existe um slot de fundo de temporada no modelo, mas ele não é
+  exibido, porque nenhum provedor atualmente fornece fundos de temporada.)
+- Selecionar um candidato dentro de um slot de temporada ou episódio prepara apenas aquele slot,
+  sem tocar no nível da série nem em nenhum outro slot. Reselecionar o candidato já preparado em
+  um slot o limpa novamente.
+- **Usar este conjunto** preenche de uma vez todos os slots que o conjunto cobre — série, cada
+  temporada e cada episódio — combinados por número de temporada e episódio. Você pode então
+  substituir qualquer slot individual e manter o resto do conjunto preparado.
+
+O construtor fixo resume tudo o que está preparado no momento — o pôster/fundo da série mais as
+contagens de temporadas e episódios preparados — e um único **Aplicar** grava tudo em uma única
+ação (veja [Aplicar uma capa](#aplicar-uma-capa)).
 
 ## Aplicar uma capa
 
@@ -105,6 +148,16 @@ com um padrão configurável (`DEFAULT_APPLY_METHOD`, padrão `both`):
 - **Ambos.** Realiza o envio direto _e_ grava o YAML do Kometa, registrando cada
   resultado de forma independente para que uma falha parcial fique visível.
 
+Uma única aplicação grava **cada slot preparado** — série, temporadas e episódios — com o(s)
+método(s) escolhido(s). Para o envio direto, o PosterPilot resolve cada filho de temporada e
+episódio no servidor de mídia por número e envia para ele; um slot preparado cuja temporada ou
+episódio não tem um filho correspondente no servidor é pulado e reportado em vez de falhar a
+aplicação inteira, e a falha de um filho nunca aborta os demais. A exportação do Kometa aninha
+os pôsteres de temporada preparados sob `seasons:` (indexados pelo número da temporada) e os
+title cards de episódio preparados sob `episodes:` (indexados pelo número do episódio), ao lado
+dos `url_poster` / `url_background` do nível da série. Um **fundo** de temporada é aplicado
+apenas pelo método direto — ele é omitido do YAML.
+
 Toda aplicação — sucesso ou falha — é registrada com o item, a URL do asset, o(s)
 método(s), o resultado e o timestamp, de modo que o histórico é consultável e a reaplicação é
 detectável.
@@ -115,6 +168,20 @@ O PosterPilot grava um único arquivo de metadados (padrão `posterpilot.yml`) e
 `KOMETA_ASSETS_DIR`, indexado pelo id do TMDB com entradas `url_poster` / `url_background`.
 Adicione esse arquivo à config de biblioteca do seu Kometa (por exemplo, sob
 `metadata_path` / `metadata_files`) para que o Kometa aplique as capas na próxima execução.
+
+## Reverter
+
+Toda capa aplicada é reversível a partir da visão de detalhes do item:
+
+- **Reverter para o original** reverte o artwork no nível da série **e cada temporada e episódio
+  aplicados** em uma única ação, restaurando o que o servidor de mídia tinha antes de o
+  PosterPilot alterá-lo.
+- Cada grupo de temporada tem seu próprio controle **Reverter temporada** que reverte apenas o
+  pôster/fundo daquela temporada e os title cards de seus episódios, deixando o artwork do nível
+  da série e das outras temporadas no lugar.
+
+As reversões re-resolvem os filhos de temporada e episódio por número, da mesma forma que a
+aplicação faz.
 
 ## Conjuntos personalizados
 
@@ -140,9 +207,16 @@ Selecione vários itens e rode a descoberta e/ou a aplicação na seleção como
 único job em segundo plano. A aplicação em massa com seleção automática descobre (se necessário),
 seleciona automaticamente e aplica capas para cada item selecionado, com progresso ao vivo.
 
-A seleção automática funciona entre os candidatos de todos os provedores habilitados — ela escolhe um
-pôster primário (e um fundo quando disponível) usando uma ordem determinística de preferência de
-provedor, recorrendo ao próximo provedor quando o mais preferido não tem pôster para o item.
+A seleção automática pontua cada candidato entre todos os provedores habilitados — combinando
+qualidade do provedor, resolução e ajuste de proporção — e escolhe o pôster com a maior pontuação
+(e um fundo quando disponível) para cada item, a mesma pontuação que orienta a pré-seleção
+sugerida na visão do item. Itens ignorados ficam de fora da seleção.
+
+Antes de uma aplicação em massa rodar, uma **prévia de simulação** (dry-run) resume exatamente o
+que aconteceria — os envios planejados, as exportações do Kometa e quaisquer itens ou slots que
+seriam pulados — para que você confirme antes que algo seja gravado. A aplicação em massa então
+processa os itens **concorrentemente** (limitada pela configuração de concorrência de aplicação),
+de modo que lotes grandes terminam mais rápido, com o mesmo progresso ao vivo e cancelamento.
 
 ## Dashboard e jobs
 

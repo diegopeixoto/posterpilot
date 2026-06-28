@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPosterUrl, parseGuids, type PlexRawGuid } from './parse';
+import { buildPosterUrl, parseGuids, parseUpdatedAt, type PlexRawGuid } from './parse';
 
 describe('parseGuids', () => {
 	it('extracts tmdb, imdb, and tvdb ids', () => {
@@ -51,6 +51,22 @@ describe('parseGuids', () => {
 			{ id: 'tvdb://777' }
 		] as PlexRawGuid[];
 		expect(parseGuids(guids)).toEqual({ tvdb: '777' });
+	});
+});
+
+describe('parseUpdatedAt', () => {
+	it('converts epoch seconds to a Date', () => {
+		expect(parseUpdatedAt(1700000000)).toEqual(new Date(1700000000 * 1000));
+	});
+
+	it('returns null when the value is absent', () => {
+		expect(parseUpdatedAt(undefined)).toBeNull();
+		expect(parseUpdatedAt(null)).toBeNull();
+	});
+
+	it('returns null for zero or negative values', () => {
+		expect(parseUpdatedAt(0)).toBeNull();
+		expect(parseUpdatedAt(-5)).toBeNull();
 	});
 });
 

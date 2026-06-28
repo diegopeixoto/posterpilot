@@ -26,6 +26,14 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # Optional — encryption key for secrets stored at rest. When unset, a key is
+      # auto-generated and persisted to /data/.app-key (no setup needed). Set it to
+      # keep secrets portable across container recreation or multiple replicas.
+      # APP_SECRET: ${APP_SECRET:-}
+      # Other tuning (apply concurrency, suggestion pre-select, incremental sync,
+      # thumbnail cache TTL/size) is configurable in the Settings UI, or via the
+      # APPLY_CONCURRENCY / SUGGEST_PRESELECT / INCREMENTAL_SYNC /
+      # THUMB_CACHE_TTL_DAYS / THUMB_CACHE_MAX_MB env vars (all optional).
       # Optional — Kometa manager (OFF unless KOMETA_CONFIG_PATH is set).
       # Point it at Kometa's own config.yml (mount its config dir below).
       # posterpilot.yml is co-located in that same dir automatically — no separate

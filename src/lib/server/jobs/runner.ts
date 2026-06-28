@@ -77,7 +77,7 @@ async function runEntry(entry: QueueEntry): Promise<void> {
 	};
 
 	try {
-		if (payload.kind === 'sync') await runSyncJob(ctx);
+		if (payload.kind === 'sync') await runSyncJob(ctx, payload);
 		else if (payload.kind === 'discover') await runDiscoverJob(ctx, payload);
 		else await runApplyJob(ctx, payload);
 		await finish(jobId, cancelled.has(jobId) ? 'cancelled' : 'completed');

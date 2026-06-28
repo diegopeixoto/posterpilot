@@ -46,6 +46,7 @@
 	// Register the client locale strategy and seed it with the locale the server
 	// resolved for this page so hydration matches SSR.
 	registerClientLocaleStrategy();
+	// svelte-ignore state_referenced_locally
 	seedClientLocale(data.locale);
 
 	const links = $derived([

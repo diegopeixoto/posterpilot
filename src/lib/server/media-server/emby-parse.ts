@@ -31,11 +31,40 @@ export interface RawEmbyItem {
 	ProviderIds?: RawProviderIds;
 	ImageTags?: { Primary?: string; [k: string]: string | undefined };
 	BackdropImageTags?: string[];
+	/** Server's last-modified time as an ISO-8601 string. */
+	DateLastModified?: string | null;
 }
 
 /** Shape of the `/Items` (and `/Library/MediaFolders`) response envelope. */
 export interface RawEmbyItemsResponse {
 	Items?: RawEmbyItem[];
+}
+
+/** Minimal shape of a Jellyfin/Emby `/Users/AuthenticateByName` response. */
+export interface RawAuthResult {
+	AccessToken?: string | null;
+	User?: { Id?: string | null; Name?: string | null } | null;
+}
+
+/** A successful login: the access token plus the authenticated user's id/name. */
+export interface AuthResult {
+	accessToken: string;
+	userId: string;
+	userName: string | null;
+}
+
+/**
+ * Extract the access token + user from an `AuthenticateByName` response. Returns
+ * null when no usable access token is present (treated as an auth failure).
+ */
+export function parseAuthResult(json: RawAuthResult | undefined | null): AuthResult | null {
+	const accessToken = json?.AccessToken;
+	if (!accessToken) return null;
+	return {
+		accessToken,
+		userId: json?.User?.Id ? String(json.User.Id) : '',
+		userName: json?.User?.Name ? String(json.User.Name) : null
+	};
 }
 
 /** Map a Jellyfin/Emby `CollectionType` to our movie/show library type, or null. */
@@ -151,6 +180,8 @@ export function mapItems(
 		const type = itemTypeToMediaType(item.Type);
 		if (!type || !item.Id) continue;
 		const backdropTag = item.BackdropImageTags?.[0];
+		// Guard against an unparseable DateLastModified → null rather than Invalid Date.
+		const lastModified = item.DateLastModified ? new Date(item.DateLastModified) : null;
 		result.push({
 			id: item.Id,
 			title: item.Name ?? item.Id,
@@ -164,7 +195,8 @@ export function mapItems(
 				item.ImageTags?.Primary,
 				apiKey
 			),
-			currentBackgroundUrl: buildEmbyImageUrl(baseUrl, item.Id, 'Backdrop', backdropTag, apiKey)
+			currentBackgroundUrl: buildEmbyImageUrl(baseUrl, item.Id, 'Backdrop', backdropTag, apiKey),
+			serverUpdatedAt: lastModified && !Number.isNaN(lastModified.getTime()) ? lastModified : null
 		});
 	}
 	return result;

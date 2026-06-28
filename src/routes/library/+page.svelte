@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page, navigating } from '$app/state';
 	import PosterCard from '$lib/components/PosterCard.svelte';
@@ -18,6 +18,14 @@
 	let busy = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let confirmApply = $state(false);
+	// Dry-run preview of the pending bulk apply (computed when the confirm gate opens).
+	let applyPreview = $state<{
+		serverUploads: number;
+		childUploads: number;
+		kometaExports: number;
+		skipped: number;
+	} | null>(null);
+	let previewing = $state(false);
 
 	// Dim the grid while a library filter/sort round-trip is in flight, so the user
 	// gets honest feedback that their change registered. Other navigations don't dim.
@@ -37,10 +45,66 @@
 		localStorage.setItem('pp_autoapply', autoApply ? '1' : '0');
 	}
 
+	// --- Ignore: per-item toggle + client-side filter ---------------------------
+	// Each row carries a server `ignored` flag; we keep optimistic overrides locally
+	// so a toggle reflects instantly without a round-trip. An override always agrees
+	// with the DB once its request resolves, so it stays valid across filter/sort
+	// navigations (the reloaded rows carry the same value).
+	const ignoreOverrides = new SvelteMap<number, boolean>();
+	let ignoreError = $state<string | null>(null);
+
+	function isIgnored(item: (typeof data.items)[number]): boolean {
+		return ignoreOverrides.get(item.id) ?? !!item.ignored;
+	}
+
+	async function toggleIgnore(item: (typeof data.items)[number]) {
+		const id = item.id;
+		const prev = isIgnored(item);
+		const next = !prev;
+		ignoreOverrides.set(id, next); // optimistic
+		ignoreError = null;
+		try {
+			const res = await fetch(`/api/items/${id}/ignore`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ ignored: next })
+			});
+			if (!res.ok) throw new Error(String(res.status));
+		} catch {
+			ignoreOverrides.set(id, prev); // roll back to the last known state
+			ignoreError = m.library_action_failed();
+		}
+	}
+
+	// Client-side "All / Active / Ignored" view over the loaded rows (persisted).
+	type IgnoreView = 'all' | 'active' | 'ignored';
+	const ignoreViews = [
+		{ value: 'all', label: m.library_ignore_all },
+		{ value: 'active', label: m.library_ignore_active },
+		{ value: 'ignored', label: m.library_ignore_ignored }
+	] as const;
+	let ignoreView = $state<IgnoreView>('all');
+	$effect(() => {
+		const saved = localStorage.getItem('pp_ignoreview');
+		if (saved === 'all' || saved === 'active' || saved === 'ignored') ignoreView = saved;
+	});
+	function setIgnoreView(view: IgnoreView) {
+		ignoreView = view;
+		localStorage.setItem('pp_ignoreview', view);
+	}
+
+	const visibleItems = $derived(
+		data.items.filter((item) => {
+			if (ignoreView === 'all') return true;
+			return ignoreView === 'ignored' ? isIgnored(item) : !isIgnored(item);
+		})
+	);
+
 	// Sort field + direction. Title ascends by default; other fields descend.
 	function defaultDir(sort: string | undefined): 'asc' | 'desc' {
 		return sort === 'title' || sort === undefined ? 'asc' : 'desc';
 	}
+	// svelte-ignore state_referenced_locally
 	let dir = $state<'asc' | 'desc'>(data.filter.dir ?? defaultDir(data.filter.sort));
 
 	// Popover open state.
@@ -158,6 +222,7 @@
 	function clearAll() {
 		dir = defaultDir(undefined);
 		staged = {};
+		setIgnoreView('all');
 		goto('/library', { keepFocus: true, noScroll: true });
 	}
 
@@ -166,12 +231,37 @@
 		else selected.add(id);
 		// The selection changed, so a pending confirm/error no longer matches it.
 		confirmApply = false;
+		applyPreview = null;
 		errorMsg = null;
 	}
 	function clearSelection() {
 		selected.clear();
 		confirmApply = false;
+		applyPreview = null;
 		errorMsg = null;
+	}
+
+	/**
+	 * Open the apply confirm gate and fetch a dry-run preview of what would be written
+	 * (server uploads, Kometa exports, skipped child slots) so the user confirms with
+	 * full knowledge. The preview is best-effort: if it fails, the confirm still works.
+	 */
+	async function startApplyPreview() {
+		confirmApply = true;
+		applyPreview = null;
+		previewing = true;
+		try {
+			const res = await fetch('/api/apply/preview', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ itemIds: [...selected], method, selection: 'auto' })
+			});
+			if (res.ok) applyPreview = (await res.json()).plan ?? null;
+		} catch {
+			// best-effort preview; ignore and let the user confirm without it
+		} finally {
+			previewing = false;
+		}
 	}
 
 	/**
@@ -204,7 +294,9 @@
 
 <div class="flex items-center justify-between">
 	<h1 class="text-2xl font-semibold tracking-tight">{m.library_title()}</h1>
-	<span class="text-sm text-neutral-400">{m.library_item_count({ count: data.items.length })}</span>
+	<span class="text-sm text-neutral-400"
+		>{m.library_item_count({ count: visibleItems.length })}</span
+	>
 </div>
 
 <!-- Spotlight -->
@@ -370,6 +462,26 @@
 		</div>
 	</Popover>
 
+	<!-- Ignored view: client-side All / Active / Ignored over the loaded rows. -->
+	<div
+		role="group"
+		aria-label={m.library_ignore_filter_label()}
+		class="inline-flex divide-x divide-neutral-800 overflow-hidden rounded-md border border-neutral-700"
+	>
+		{#each ignoreViews as view (view.value)}
+			<button
+				type="button"
+				onclick={() => setIgnoreView(view.value)}
+				aria-pressed={ignoreView === view.value}
+				class="px-2.5 py-2 text-xs font-medium transition-colors {ignoreView === view.value
+					? 'bg-accent-600 text-white'
+					: 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+			>
+				{view.label()}
+			</button>
+		{/each}
+	</div>
+
 	<button
 		type="button"
 		onclick={toggleAuto}
@@ -452,6 +564,15 @@
 	</div>
 {/if}
 
+{#if ignoreError}
+	<div
+		role="alert"
+		class="mt-3 rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+	>
+		{ignoreError}
+	</div>
+{/if}
+
 {#if selected.size > 0}
 	<div
 		class="surface sticky top-16 z-10 mt-4 flex flex-wrap items-center gap-3 border-accent-800 bg-accent-950/40 px-4 py-2 text-sm backdrop-blur"
@@ -469,6 +590,18 @@
 		{#if confirmApply}
 			<!-- Two-step confirm: auto-apply writes to the live server and is hard to undo. -->
 			<span class="text-neutral-200">{m.library_apply_confirm({ count: selected.size })}</span>
+			<!-- Dry-run preview of what this apply would write, so the confirm is informed. -->
+			<span class="text-xs text-neutral-400">
+				{#if previewing}
+					{m.library_preview_calculating()}
+				{:else if applyPreview}
+					{m.library_preview_summary({
+						uploads: applyPreview.serverUploads + applyPreview.childUploads,
+						exports: applyPreview.kometaExports,
+						skipped: applyPreview.skipped
+					})}
+				{/if}
+			</span>
 			<button
 				disabled={busy}
 				onclick={() => bulk('/api/apply', { method, selection: 'auto' })}
@@ -478,13 +611,16 @@
 			</button>
 			<button
 				disabled={busy}
-				onclick={() => (confirmApply = false)}
+				onclick={() => {
+					confirmApply = false;
+					applyPreview = null;
+				}}
 				class="btn btn-ghost px-3 py-1"
 			>
 				{m.jobs_cancel()}
 			</button>
 		{:else}
-			<button disabled={busy} onclick={() => (confirmApply = true)} class="btn btn-accent px-3 py-1"
+			<button disabled={busy} onclick={startApplyPreview} class="btn btn-accent px-3 py-1"
 				>{m.library_apply_auto()}</button
 			>
 		{/if}
@@ -515,6 +651,17 @@
 			<a href="/" class="btn btn-ghost px-3 py-1.5">{m.nav_dashboard()}</a>
 		</div>
 	</div>
+{:else if visibleItems.length === 0}
+	<div class="surface mt-10 p-10 text-center">
+		<p class="text-sm text-neutral-400">{m.library_no_match()}</p>
+		<button
+			type="button"
+			onclick={() => setIgnoreView('all')}
+			class="btn btn-ghost mt-4 px-3 py-1.5"
+		>
+			{m.library_ignore_all()}
+		</button>
+	</div>
 {:else}
 	<div
 		class="mt-4 grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 {libraryNavigating
@@ -522,13 +669,71 @@
 			: ''}"
 		aria-busy={libraryNavigating}
 	>
-		{#each data.items as item (item.id)}
-			<PosterCard
-				{item}
-				selectable
-				selected={selected.has(item.id)}
-				onToggle={() => toggle(item.id)}
-			/>
+		{#each visibleItems as item (item.id)}
+			{@const ignored = isIgnored(item)}
+			<div class="group/wrap relative">
+				<!-- Dim only the card; the badge + toggle live outside this layer so they stay crisp. -->
+				<div class="transition-[opacity,filter] {ignored ? 'opacity-40 saturate-50' : ''}">
+					<PosterCard
+						{item}
+						selectable
+						selected={selected.has(item.id)}
+						onToggle={() => toggle(item.id)}
+					/>
+				</div>
+
+				{#if ignored}
+					<!-- State is shown three ways (dim + label + icon), never on color alone. -->
+					<span
+						class="badge badge-muted pointer-events-none absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 backdrop-blur-sm"
+					>
+						<svg
+							class="size-3"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path
+								d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+							/>
+							<line x1="1" y1="1" x2="23" y2="23" />
+						</svg>
+						{m.poster_badge_ignored()}
+					</span>
+				{/if}
+
+				<!-- Ignore toggle (bottom-right, clear of the select checkbox + rating). -->
+				<button
+					type="button"
+					onclick={() => toggleIgnore(item)}
+					aria-pressed={ignored}
+					aria-label={ignored ? m.poster_unignore() : m.poster_ignore()}
+					title={ignored ? m.poster_unignore() : m.poster_ignore()}
+					class="absolute right-2 bottom-2 flex h-8 w-8 items-center justify-center rounded border transition {ignored
+						? 'border-accent-400 bg-accent-600 text-white'
+						: 'border-neutral-600 bg-neutral-900/80 text-neutral-300 opacity-0 group-focus-within/wrap:opacity-100 group-hover/wrap:opacity-100 hover:border-neutral-400 focus-visible:opacity-100 pointer-coarse:opacity-100'}"
+				>
+					<svg
+						class="size-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path
+							d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+						/>
+						<line x1="1" y1="1" x2="23" y2="23" />
+					</svg>
+				</button>
+			</div>
 		{/each}
 	</div>
 {/if}

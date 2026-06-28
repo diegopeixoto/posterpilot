@@ -11,7 +11,14 @@
  * `emby-parse.ts` and is unit-tested; this module only does the network calls.
  */
 
-import { mapChildren, mapItems, mapLibraries, type RawEmbyItemsResponse } from './emby-parse';
+import {
+	mapChildren,
+	mapItems,
+	mapLibraries,
+	parseAuthResult,
+	type AuthResult,
+	type RawEmbyItemsResponse
+} from './emby-parse';
 import type {
 	ConnectionResult,
 	LockField,
@@ -20,8 +27,77 @@ import type {
 	ServerItem,
 	ServerLibrary
 } from './types';
+import { version } from '$lib/version';
 
 export type EmbyFlavor = 'jellyfin' | 'emby';
+
+/**
+ * A login failure that carries the HTTP status the API route should return, so
+ * invalid credentials (401) are distinguishable from upstream/network errors (502).
+ */
+export class MediaServerLoginError extends Error {
+	constructor(
+		message: string,
+		readonly status: number
+	) {
+		super(message);
+		this.name = 'MediaServerLoginError';
+	}
+}
+
+/**
+ * Exchange a username + password for an access token via `/Users/AuthenticateByName`,
+ * so users don't have to hunt for an API key. The pre-token request still needs a
+ * client-identification header: Jellyfin reads `Authorization: MediaBrowser ...`,
+ * Emby reads `X-Emby-Authorization` — we send both for resilience. The returned
+ * access token is then stored (encrypted) as the server's API key.
+ */
+export async function loginByName(
+	baseUrl: string,
+	username: string,
+	password: string,
+	flavor: EmbyFlavor
+): Promise<AuthResult> {
+	const base = normalizeBase(baseUrl);
+	const label = flavor === 'jellyfin' ? 'Jellyfin' : 'Emby';
+	const authValue = `MediaBrowser Client="PosterPilot", Device="PosterPilot", DeviceId="posterpilot", Version="${version}"`;
+	let res: Response;
+	try {
+		res = await fetch(`${base}/Users/AuthenticateByName`, {
+			method: 'POST',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				Authorization: authValue,
+				'X-Emby-Authorization': authValue
+			},
+			body: JSON.stringify({ Username: username, Pw: password }),
+			// A login endpoint should never redirect; refuse to follow one (SSRF hardening).
+			redirect: 'error',
+			signal: AbortSignal.timeout(8000)
+		});
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		throw new MediaServerLoginError(`Unreachable: could not connect to ${label} (${reason}).`, 502);
+	}
+	if (res.status === 401 || res.status === 403) {
+		throw new MediaServerLoginError(
+			`Unauthorized: ${label} rejected the username or password.`,
+			401
+		);
+	}
+	if (!res.ok) {
+		throw new MediaServerLoginError(
+			`${label} returned HTTP ${res.status} ${res.statusText} during login.`,
+			502
+		);
+	}
+	const result = parseAuthResult((await res.json()) as Parameters<typeof parseAuthResult>[0]);
+	if (!result) {
+		throw new MediaServerLoginError(`${label} login did not return an access token.`, 502);
+	}
+	return result;
+}
 
 /** Strip a single trailing slash so paths concatenate cleanly. */
 function normalizeBase(baseUrl: string): string {
@@ -147,7 +223,7 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 				ParentId: libraryKey,
 				Recursive: 'true',
 				IncludeItemTypes: 'Movie,Series',
-				Fields: 'ProviderIds,ProductionYear',
+				Fields: 'ProviderIds,ProductionYear,DateLastModified',
 				EnableImageTypes: 'Primary,Backdrop'
 			});
 			const res = await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`);

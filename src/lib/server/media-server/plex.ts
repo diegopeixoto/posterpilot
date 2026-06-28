@@ -72,7 +72,8 @@ export function plexProvider(baseUrl: string, token: string): MediaServer {
 				currentPosterUrl: i.currentPosterUrl,
 				// Plex backgrounds are not surfaced by listItems today; left null so the
 				// app's TMDB-derived backdrop drives backgrounds, as it does now.
-				currentBackgroundUrl: null
+				currentBackgroundUrl: null,
+				serverUpdatedAt: i.serverUpdatedAt
 			}));
 		},
 

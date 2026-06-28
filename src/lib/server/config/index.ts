@@ -3,6 +3,8 @@ import { env } from '$env/dynamic/private';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { normalizeLocale } from '$lib/i18n/resolve';
+import { getEncryptionKey } from '$lib/server/secrets/key';
+import { decryptSecret, encryptSecret } from '$lib/server/secrets/crypto';
 import type { KometaSnapshot } from '$lib/server/kometa/config';
 
 export type { KometaSnapshot };
@@ -64,6 +66,16 @@ export interface AppConfig {
 	logDir: string;
 	/** Max number of activity-log rows kept; older rows are pruned past this cap. */
 	eventRetention: number;
+	/** How many items a bulk apply processes at once. */
+	applyConcurrency: number;
+	/** Whether the UI pre-selects the top-scored candidate as a suggestion. */
+	suggestPreselect: boolean;
+	/** Whether library sync skips unchanged items by default. */
+	incrementalSync: boolean;
+	/** Days a cached thumbnail stays fresh before it is re-fetched. */
+	thumbCacheTtlDays: number;
+	/** Max on-disk size (MB) of the thumbnail cache before older entries are evicted. */
+	thumbCacheMaxMb: number;
 }
 
 /** Config keys that are secrets — never returned to the client, redacted in logs. */
@@ -105,7 +117,12 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	// UI language. Namespacing it avoids that collision.
 	language: 'APP_LANGUAGE',
 	logDir: 'LOG_DIR',
-	eventRetention: 'EVENT_RETENTION'
+	eventRetention: 'EVENT_RETENTION',
+	applyConcurrency: 'APPLY_CONCURRENCY',
+	suggestPreselect: 'SUGGEST_PRESELECT',
+	incrementalSync: 'INCREMENTAL_SYNC',
+	thumbCacheTtlDays: 'THUMB_CACHE_TTL_DAYS',
+	thumbCacheMaxMb: 'THUMB_CACHE_MAX_MB'
 };
 
 const DEFAULTS = {
@@ -123,7 +140,12 @@ const DEFAULTS = {
 	providerFanart: false,
 	providerThePosterDb: false,
 	logDir: './data/logs',
-	eventRetention: 2000
+	eventRetention: 2000,
+	applyConcurrency: 4,
+	suggestPreselect: true,
+	incrementalSync: true,
+	thumbCacheTtlDays: 30,
+	thumbCacheMaxMb: 512
 	// `language` has no default: when unset the UI locale resolver falls through
 	// to the request's Accept-Language header, then English.
 };
@@ -152,12 +174,36 @@ export const WRITABLE_KEYS: ConfigKey[] = [
 	'providerFanart',
 	'providerThePosterDb',
 	'fanartKey',
-	'language'
+	'language',
+	'applyConcurrency',
+	'suggestPreselect',
+	'incrementalSync',
+	'thumbCacheTtlDays',
+	'thumbCacheMaxMb'
 ];
+
+/** True when a settings key holds a secret value (encrypted at rest). */
+function isSecretKey(key: string): key is (typeof SECRET_KEYS)[number] {
+	return (SECRET_KEYS as readonly string[]).includes(key);
+}
 
 async function loadSettings(): Promise<Record<string, string>> {
 	const rows = await db.select().from(settings);
-	return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+	const key = getEncryptionKey();
+	const out: Record<string, string> = {};
+	for (const row of rows) {
+		if (isSecretKey(row.key)) {
+			try {
+				out[row.key] = decryptSecret(row.value, key);
+			} catch {
+				// Undecryptable (key lost/changed) → treat the secret as unset, never crash.
+				continue;
+			}
+		} else {
+			out[row.key] = row.value;
+		}
+	}
+	return out;
 }
 
 /** Read a single raw value: env wins, else persisted setting, else undefined. */
@@ -242,7 +288,12 @@ export async function resolveConfig(): Promise<AppConfig> {
 		// treated as unset (null) so resolution falls through to Accept-Language.
 		language: normalizeLocale(rawValue('language', persisted)),
 		logDir: rawValue('logDir', persisted) ?? DEFAULTS.logDir,
-		eventRetention: toInt(rawValue('eventRetention', persisted), DEFAULTS.eventRetention)
+		eventRetention: toInt(rawValue('eventRetention', persisted), DEFAULTS.eventRetention),
+		applyConcurrency: toInt(rawValue('applyConcurrency', persisted), DEFAULTS.applyConcurrency),
+		suggestPreselect: toBool(rawValue('suggestPreselect', persisted), DEFAULTS.suggestPreselect),
+		incrementalSync: toBool(rawValue('incrementalSync', persisted), DEFAULTS.incrementalSync),
+		thumbCacheTtlDays: toInt(rawValue('thumbCacheTtlDays', persisted), DEFAULTS.thumbCacheTtlDays),
+		thumbCacheMaxMb: toInt(rawValue('thumbCacheMaxMb', persisted), DEFAULTS.thumbCacheMaxMb)
 	};
 }
 
@@ -443,17 +494,25 @@ export async function setKometaLastApplied(snapshot: KometaSnapshot): Promise<vo
 	await writeKv(KOMETA_LAST_APPLIED_KEY, JSON.stringify(snapshot));
 }
 
+// Poster-scoring weights live in `$lib/server/posters/score-weights` (an $env-free
+// module so service.ts can import them without pulling in $env); re-exported here for
+// callers that already depend on config (e.g. the settings route).
+export { getScoreWeights, setScoreWeights } from '$lib/server/posters/score-weights';
+
 /** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
 export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
 	const entries = Object.entries(values).filter(([k]) => WRITABLE_KEYS.includes(k as ConfigKey));
+	const encKey = getEncryptionKey();
 	for (const [key, value] of entries) {
 		if (value === '' || value === undefined) {
 			await db.delete(settings).where(eq(settings.key, key));
 		} else {
+			// Secrets are encrypted at rest; everything else is stored verbatim.
+			const stored = isSecretKey(key) ? encryptSecret(value, encKey) : value;
 			await db
 				.insert(settings)
-				.values({ key, value })
-				.onConflictDoUpdate({ target: settings.key, set: { value } });
+				.values({ key, value: stored })
+				.onConflictDoUpdate({ target: settings.key, set: { value: stored } });
 		}
 	}
 }
@@ -490,6 +549,16 @@ export interface PublicConfig {
 	logDir: string;
 	/** Activity-log row cap used when pruning (read-only; env/default). */
 	eventRetention: number;
+	/** How many items a bulk apply processes at once. */
+	applyConcurrency: number;
+	/** Whether the UI pre-selects the top-scored candidate as a suggestion. */
+	suggestPreselect: boolean;
+	/** Whether library sync skips unchanged items by default. */
+	incrementalSync: boolean;
+	/** Days a cached thumbnail stays fresh before it is re-fetched. */
+	thumbCacheTtlDays: number;
+	/** Max on-disk size (MB) of the thumbnail cache before older entries are evicted. */
+	thumbCacheMaxMb: number;
 	envManaged: Partial<Record<ConfigKey, boolean>>;
 }
 
@@ -522,6 +591,11 @@ export async function publicConfig(): Promise<PublicConfig> {
 		language: c.language,
 		logDir: c.logDir,
 		eventRetention: c.eventRetention,
+		applyConcurrency: c.applyConcurrency,
+		suggestPreselect: c.suggestPreselect,
+		incrementalSync: c.incrementalSync,
+		thumbCacheTtlDays: c.thumbCacheTtlDays,
+		thumbCacheMaxMb: c.thumbCacheMaxMb,
 		envManaged
 	};
 }

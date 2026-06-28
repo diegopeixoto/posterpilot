@@ -13,6 +13,9 @@ function cand(p: Partial<PosterCandidate>): PosterCandidate {
 		kind: 'poster',
 		season: null,
 		episode: null,
+		width: null,
+		height: null,
+		score: null,
 		createdAt: new Date(0),
 		...p
 	};

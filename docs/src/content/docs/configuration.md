@@ -30,6 +30,38 @@ Secrets (the Plex token, the Jellyfin/Emby API keys, the TMDB credential, and th
 Fanart.tv key) are never echoed back to the browser after they are saved and are
 redacted from logs — the Settings page only indicates that a secret _is set_.
 
+## Secrets and encryption
+
+Those same secrets — the Plex token, the Jellyfin and Emby API keys / access
+tokens, the TMDB credential, and the Fanart.tv key — are **encrypted at rest** with
+AES-256-GCM before they are written to the SQLite database. Each stored value is
+self-describing (it carries an `enc:v1:` prefix), so PosterPilot can tell encrypted
+values from legacy plaintext.
+
+- **Zero setup by default.** On first run PosterPilot generates a random 32-byte
+  instance key and persists it — owner-readable only — at `data/.app-key`. Nothing
+  to configure: secrets are encrypted automatically. (Override the path with
+  `APP_KEY_FILE` if you need to.)
+- **Portable key for shared deployments.** Set the optional `APP_SECRET`
+  environment variable to derive the key from a value you control (deterministically
+  via scrypt). Use it when you run multiple replicas sharing one database, or when
+  you want the same key to survive recreating the container without carrying the key
+  file across. When `APP_SECRET` is set it takes precedence over the generated
+  `data/.app-key`.
+- **Existing installs are not broken.** Secrets saved by an older version as
+  plaintext are read transparently and re-encrypted the next time that setting is
+  saved — no manual re-entry needed.
+- **Safe failure.** If a secret cannot be decrypted (for example the key was lost
+  or changed), PosterPilot treats it as unset and prompts you to re-enter it rather
+  than crashing.
+
+:::caution
+If you rely on the auto-generated `data/.app-key` (no `APP_SECRET` set), **back up
+the `/data` volume** — losing the key file means the encrypted secrets can no longer
+be decrypted and must be re-entered. Setting `APP_SECRET` (and keeping it safe)
+avoids this and keeps secrets portable across container recreation and replicas.
+:::
+
 ## Media server
 
 PosterPilot talks to one active media server at a time, chosen by `SERVER_TYPE`
@@ -55,11 +87,16 @@ Plex needs a base URL and an `X-Plex-Token`. You can supply them three ways:
 
 ### Jellyfin
 
-Jellyfin needs a base URL (`JELLYFIN_URL`) and an API key (`JELLYFIN_API_KEY`).
-Set `SERVER_TYPE=jellyfin` to make it the active server. Posters and backgrounds
-are uploaded to the Jellyfin image API (`Primary` for poster, `Backdrop` for
-background). There is no PIN login or connection discovery for Jellyfin — supply
-the URL and API key directly.
+Jellyfin needs a base URL (`JELLYFIN_URL`) and an access token, stored as the API
+key (`JELLYFIN_API_KEY`). Set `SERVER_TYPE=jellyfin` to make it the active server.
+The simplest way to connect is to **sign in with your Jellyfin username and
+password** in Settings — PosterPilot authenticates against the server and stores
+the returned access token for you (encrypted at rest), so you never have to
+generate an API key by hand; the password is used only for that one request and is
+never persisted. Pasting an API key directly stays available as a fallback.
+Posters and backgrounds are uploaded to the Jellyfin image API (`Primary` for
+poster, `Backdrop` for background). There is no PIN login or connection discovery
+as there is for Plex.
 
 :::note
 The Plex path is the most battle-tested; the Jellyfin and Emby integrations are
@@ -70,9 +107,12 @@ issue.
 
 ### Emby
 
-Emby needs a base URL (`EMBY_URL`) and an API key (`EMBY_API_KEY`). Set
-`SERVER_TYPE=emby` to make it the active server. Like Jellyfin, Emby uses a URL +
-API key directly (no PIN login or connection discovery).
+Emby needs a base URL (`EMBY_URL`) and an access token, stored as the API key
+(`EMBY_API_KEY`). Set `SERVER_TYPE=emby` to make it the active server. Like
+Jellyfin, Emby lets you **sign in with your username and password** — PosterPilot
+exchanges them for an access token and stores it (encrypted) so you do not have to
+find an API key, with manual API-key entry as a fallback. There is no PIN login or
+connection discovery.
 
 ## TMDB key
 
@@ -100,6 +140,34 @@ Fanart.tv is the only keyed provider: if it is enabled but no `FANART_KEY` is
 configured, discovery skips it and surfaces the missing-credential condition
 rather than failing the whole run. A failure, timeout, or unparseable response
 from one provider never prevents the others from returning candidates.
+
+## Performance and tuning
+
+A handful of advanced settings (in the **Kometa & advanced** Settings tab, or via
+the environment) tune how PosterPilot scores, syncs, applies, and caches. They
+follow the usual precedence — an environment variable overrides the persisted value
+and locks the control in the UI.
+
+- **Suggested-artwork pre-selection** (`SUGGEST_PRESELECT`, default on). When on,
+  the item view pre-selects the highest-scored candidate per slot as an overridable
+  suggestion. Turn it off to leave every slot unselected until you choose.
+- **Scoring weights.** PosterPilot ranks candidates on three terms — a per-provider
+  base weight (MediUX, ThePosterDB, Fanart.tv, TMDB), a resolution score, and an
+  aspect-fit score (2:3 for posters, 16:9 for backdrops and title cards). The
+  defaults favor MediUX while still letting a much sharper or better-shaped image
+  from another provider win. Adjust the weights in Settings; they are stored in the
+  database and have no environment variable.
+- **Incremental sync** (`INCREMENTAL_SYNC`, default on). Repeat syncs skip items
+  whose media-server last-modified timestamp has not changed since the last sync. A
+  full rescan stays available on demand.
+- **Apply concurrency** (`APPLY_CONCURRENCY`, default `4`). How many items a bulk
+  apply processes at once. Raise it to finish large batches faster; lower it to be
+  gentler on your server and the providers.
+- **Thumbnail cache** (`THUMB_CACHE_TTL_DAYS`, default `30`; `THUMB_CACHE_MAX_MB`,
+  default `512`). Provider preview images are cached on disk under `/data` to speed
+  up the grid and cut provider bandwidth. Entries are reused until the TTL (in days)
+  expires, and the cache is bounded by a maximum size (in MB) — once it is exceeded,
+  the least-recently-used entries are evicted.
 
 ## Kometa export
 
@@ -171,17 +239,24 @@ and are locked in the UI.
 | `MEDIUX_REQUEST_DELAY_MS` | MediUX request delay      | `2000`                                | Delay between MediUX requests, in milliseconds (throttling).                                  |
 | `MEDIUX_CONCURRENCY`      | MediUX concurrency        | `5`                                   | Max concurrent MediUX requests.                                                               |
 | `HTTP_CACHE_TTL_DAYS`     | HTTP cache TTL            | `7`                                   | How long cached HTTP responses (scrapes) are reused, in days.                                 |
+| `APPLY_CONCURRENCY`       | Apply concurrency         | `4`                                   | How many items a bulk apply processes concurrently.                                           |
+| `SUGGEST_PRESELECT`       | Suggested pre-select      | on                                    | Pre-select the top-scored candidate per slot as an overridable suggestion.                    |
+| `INCREMENTAL_SYNC`        | Incremental sync          | on                                    | Skip unchanged items on repeat syncs (a full rescan stays available).                         |
+| `THUMB_CACHE_TTL_DAYS`    | Thumbnail cache TTL       | `30`                                  | Days a cached provider preview image stays fresh before it is re-fetched.                     |
+| `THUMB_CACHE_MAX_MB`      | Thumbnail cache size      | `512`                                 | Max on-disk size of the thumbnail cache (MB) before least-recently-used eviction.             |
 | `APP_LANGUAGE`                | Language                  | — (auto)                              | Preferred UI locale: `en`, `es`, `zh`, `ja`, or `pt-BR`.                                      |
 | `LOG_DIR`                 | —                         | `/data/logs` (Docker)                 | Folder for the rotating `posterpilot.log` file (~5 MB × 5 files).                             |
 | `EVENT_RETENTION`         | —                         | `2000`                                | Max number of activity-log rows kept in the database (older rows are pruned).                 |
 | `DATABASE_URL`            | —                         | `file:/data/posterpilot.db` (Docker)  | libsql file URL for the SQLite database.                                                      |
 | `PORT`                    | —                         | `3000`                                | Listen port.                                                                                  |
+| `APP_SECRET`              | —                         | — (auto key)                          | Derives the at-rest encryption key (scrypt); overrides the generated `data/.app-key`.         |
+| `APP_KEY_FILE`            | —                         | `./data/.app-key`                     | Path to the auto-generated instance encryption key file (used when `APP_SECRET` is unset).    |
 
 Boolean flags accept `1` / `true` / `on` / `yes` (case-insensitive) for _enabled_;
 anything else (or unset) leaves the documented default.
 
 :::note
-`DATABASE_URL`, `PORT`, `LOG_DIR`, and `EVENT_RETENTION` are deployment-level
-settings — they are read from the environment only and are not part of the in-app
-Settings page.
+`DATABASE_URL`, `PORT`, `LOG_DIR`, `EVENT_RETENTION`, `APP_SECRET`, and
+`APP_KEY_FILE` are deployment-level settings — they are read from the environment
+only and are not part of the in-app Settings page.
 :::

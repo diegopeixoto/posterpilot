@@ -11,7 +11,7 @@
 
 import { fetchJson } from '$lib/server/http';
 import type { PlexItem, PlexSection } from '$lib/server/types';
-import { buildPosterUrl, parseGuids, type PlexRawGuid } from './parse';
+import { buildPosterUrl, parseGuids, parseUpdatedAt, type PlexRawGuid } from './parse';
 
 /** Shape of a Plex API JSON response: everything lives under `MediaContainer`. */
 interface PlexResponse<T> {
@@ -47,6 +47,8 @@ interface MetadataEntry {
 	thumb?: string;
 	/** Season/episode ordinal on `/children` responses. */
 	index?: number;
+	/** Last-modified time as epoch seconds. */
+	updatedAt?: number;
 	Guid?: PlexRawGuid[];
 }
 
@@ -200,7 +202,8 @@ export async function listItems(
 		year: typeof entry.year === 'number' ? entry.year : null,
 		type: entry.type === 'show' ? 'show' : 'movie',
 		guids: parseGuids(entry.Guid),
-		currentPosterUrl: buildPosterUrl(baseUrl, entry.thumb, token)
+		currentPosterUrl: buildPosterUrl(baseUrl, entry.thumb, token),
+		serverUpdatedAt: parseUpdatedAt(entry.updatedAt)
 	}));
 }
 

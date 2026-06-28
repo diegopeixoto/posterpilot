@@ -16,8 +16,12 @@ por seis pasos en orden, persistiendo cada uno a medida que avanzas:
 2. **Servidor multimedia** — elige Plex, Jellyfin o Emby. Para Plex puedes iniciar
    sesión con un PIN (PosterPilot muestra un código y un enlace de autorización, y
    luego almacena el token obtenido por ti) y elegir una conexión local/remota
-   descubierta; Jellyfin y Emby toman una URL y una clave de API. Un botón de
-   **Probar** verifica la conexión.
+   descubierta. Jellyfin y Emby toman una URL de servidor y te permiten **iniciar
+   sesión con tu nombre de usuario y contraseña** — PosterPilot los intercambia por
+   un token de acceso, así que nunca tienes que buscar una clave de API (la
+   contraseña se usa solo para esa única petición y nunca se almacena; pegar una
+   clave a mano sigue disponible como alternativa). Un botón de **Probar** verifica
+   la conexión.
 3. **TMDB** — pega una clave de API de TMDB (se proporciona un enlace a los ajustes
    de la API de TMDB).
 4. **Proveedores** — activa los proveedores de carátulas (MediUX, TMDB, Fanart.tv,
@@ -54,6 +58,14 @@ están presentes) y póster actual. Un elemento sin GUID externo sigue aparecien
 la lista, pero se marca como irresoluble para la búsqueda en proveedores en lugar
 de descartarse.
 
+Las sincronizaciones repetidas son **incrementales** por defecto: PosterPilot
+compara cada elemento con la marca de tiempo de última modificación del servidor
+multimedia y solo vuelve a resolver y reenriquecer los que cambiaron desde la
+sincronización anterior, de modo que un reanálisis rutinario es mucho más rápido
+que el primero. Sigue disponible un **reanálisis completo** que reprocesa todo, y
+puedes desactivar por completo la sincronización incremental (consulta
+[Configuración → Rendimiento y ajuste](/posterpilot/es/configuration/#rendimiento-y-ajuste)).
+
 ## El muro de la biblioteca
 
 La biblioteca sincronizada se muestra como una cuadrícula de pósters con una barra
@@ -62,9 +74,9 @@ de herramientas al estilo de Notion. Puedes:
 - **Buscar** por título.
 - **Filtrar** desde el menú emergente **Filtrar**: tipo de medio (película /
   serie), valoración mínima, género, póster faltante, disponibilidad en MediUX
-  (tiene candidatas) y estado de cambio (sin cambios / aún con el póster
-  predeterminado). El botón Filtrar muestra una insignia con el número de facetas
-  activas.
+  (tiene candidatas), estado de cambio (sin cambios / aún con el póster
+  predeterminado) y estado de ignorado. El botón Filtrar muestra una insignia con
+  el número de facetas activas.
 - **Ordenar** desde el menú emergente **Ordenar** por título, año de estreno,
   valoración, duración o más recientemente cambiados, con un selector ascendente/
   descendente independiente.
@@ -74,6 +86,11 @@ de herramientas al estilo de Notion. Puedes:
 - Alterna la **aplicación automática** (el botón ⚡): activada, cada cambio navega
   de inmediato; desactivada, los cambios se preparan hasta que pulsas **Aplicar**.
   La elección se recuerda.
+- **Ignorar** un elemento que quieres dejar intacto: los elementos ignorados se
+  omiten en el descubrimiento, la aplicación y la selección automática, se marcan
+  visualmente en el muro y pueden incluirse o excluirse desde el menú emergente
+  Filtrar. Desactívalo de nuevo en cualquier momento para devolver el elemento al
+  flujo de trabajo.
 - Ver un **banner destacado** — un fondo de un elemento cambiado recientemente
   sobre el muro una vez que se ha aplicado al menos una carátula.
 
@@ -96,9 +113,44 @@ además del reparto principal.
   conjunto muestra su atribución de autor con el póster y el fondo juntos. Para las
   series, la vista también presenta conjuntos de pósters de temporada y de tarjetas
   de título.
+- Las secciones de proveedor, las tarjetas de conjunto individuales y (para las
+  series) los grupos de temporada son **plegables**. En la primera carga, el primer
+  proveedor y su primer conjunto están expandidos y todo lo demás está plegado; tus
+  elecciones de plegado/expansión persisten en el navegador entre recargas y a
+  medida que te mueves entre elementos.
+- Cuando la **carátula sugerida** está habilitada, la candidata con mayor
+  puntuación para cada ranura se preselecciona como una sugerencia claramente
+  marcada que puedes aceptar o anular. Las candidatas se puntúan según la calidad
+  del proveedor, la resolución y el ajuste de proporción; ajusta los pesos —o
+  desactiva la preselección— en Ajustes (consulta
+  [Configuración → Rendimiento y ajuste](/posterpilot/es/configuration/#rendimiento-y-ajuste)).
 
 Puedes preparar un conjunto entero ("usar este conjunto") o tomar un póster
 individual de un conjunto y un fondo de otro; las dos ranuras son independientes.
+
+## Carátulas de temporada y episodio
+
+Para una serie, la carátula se prepara por ranura, de modo que la portada de la
+serie, el póster de cada temporada y la tarjeta de título de cada episodio son
+independientes entre sí:
+
+- La carátula de un conjunto se organiza en un **grupo de serie** (póster y fondo)
+  y un **grupo por temporada**. Cada grupo de temporada contiene el póster de esa
+  temporada y las tarjetas de título de sus episodios. (En el modelo existe una
+  ranura de fondo de temporada, pero no se muestra, porque actualmente ningún
+  proveedor ofrece fondos de temporada.)
+- Seleccionar una candidata dentro de la ranura de una temporada o un episodio
+  prepara solo esa ranura, sin tocar el nivel de serie ni ninguna otra ranura.
+  Volver a seleccionar la candidata ya preparada en una ranura la limpia de nuevo.
+- **Usar este conjunto** rellena de una vez todas las ranuras que el conjunto
+  cubre —serie, cada temporada y cada episodio— emparejadas por número de temporada
+  y episodio. Después puedes anular cualquier ranura individual y mantener el resto
+  del conjunto preparado.
+
+El constructor fijo resume todo lo que está preparado actualmente —el póster/fondo
+de la serie más los recuentos de temporadas y episodios preparados— y un único
+**Aplicar** lo escribe todo en una sola acción (consulta
+[Aplicar una carátula](#aplicar-una-carátula)).
 
 ## Aplicar una carátula
 
@@ -120,6 +172,18 @@ defecto `both`):
 - **Ambos.** Realiza la subida directa _y_ escribe el YAML de Kometa, registrando
   cada resultado de forma independiente para que un fallo parcial sea visible.
 
+Una sola aplicación escribe **todas las ranuras preparadas** —serie, temporadas y
+episodios— con el método o los métodos elegidos. Para la subida directa, PosterPilot
+resuelve por número cada hijo de temporada y episodio en el servidor multimedia y
+sube a él; una ranura preparada cuya temporada o episodio no tenga un hijo
+coincidente en el servidor se omite y se informa, en lugar de hacer fallar toda la
+aplicación, y el fallo de un hijo nunca aborta el resto. La exportación de Kometa
+anida los pósters de temporada preparados bajo `seasons:` (indexados por número de
+temporada) y las tarjetas de título de episodio preparadas bajo `episodes:`
+(indexadas por número de episodio), junto a los `url_poster` / `url_background` a
+nivel de serie. Un **fondo** de temporada se aplica solo mediante el método directo;
+se omite del YAML.
+
 Cada aplicación —con éxito o con fallo— se registra con el elemento, la URL del
 asset, los métodos, el resultado y la marca de tiempo, de modo que el historial sea
 consultable y la reaplicación detectable.
@@ -131,6 +195,21 @@ en `KOMETA_ASSETS_DIR`, indexado por id de TMDB con entradas `url_poster` /
 `url_background`. Añade ese archivo a la configuración de tu biblioteca de Kometa
 (p. ej. bajo `metadata_path` / `metadata_files`) para que Kometa aplique las
 carátulas en su próxima ejecución.
+
+## Revertir
+
+Cada carátula aplicada es reversible desde la vista de detalle del elemento:
+
+- **Revertir al original** revierte la carátula a nivel de serie **y cada temporada
+  y episodio aplicados** en una sola acción, restaurando lo que el servidor
+  multimedia tenía antes de que PosterPilot lo cambiara.
+- Cada grupo de temporada tiene su propio control **Revertir temporada** que
+  revierte únicamente el póster/fondo de esa temporada y las tarjetas de título de
+  sus episodios, dejando en su sitio la carátula a nivel de serie y la de las demás
+  temporadas.
+
+Las reversiones vuelven a resolver por número los hijos de temporada y episodio, de
+la misma manera que lo hace la aplicación.
 
 ## Conjuntos personalizados
 
@@ -161,10 +240,18 @@ selección como una única tarea en segundo plano. La aplicación en lote con
 selección automática descubre (si es necesario), autoselecciona y aplica carátulas
 para cada elemento seleccionado, con progreso en vivo.
 
-La selección automática funciona sobre las candidatas de todos los proveedores
-habilitados: elige un póster principal (y un fondo donde esté disponible) usando un
-orden de preferencia de proveedor determinista, recurriendo al siguiente proveedor
-cuando el más preferido no tiene póster para el elemento.
+La selección automática puntúa cada candidata de todos los proveedores habilitados
+—combinando la calidad del proveedor, la resolución y el ajuste de proporción— y
+elige el póster con mayor puntuación (y un fondo donde esté disponible) para cada
+elemento, la misma puntuación que impulsa la preselección sugerida en la vista del
+elemento. Los elementos ignorados quedan fuera de la selección.
+
+Antes de ejecutar una aplicación en lote, una **vista previa de simulación** resume
+exactamente lo que ocurriría —las subidas planeadas, las exportaciones de Kometa y
+cualquier elemento o ranura que se omitiría— para que puedas confirmar antes de que
+se escriba nada. La aplicación en lote procesa entonces los elementos de forma
+**concurrente** (limitada por el ajuste de concurrencia de aplicación), de modo que
+los lotes grandes terminan más rápido, con el mismo progreso en vivo y cancelación.
 
 ## Panel y tareas
 

@@ -30,6 +30,21 @@ docker pull ghcr.io/diegopeixoto/posterpilot:latest
 コンテナはデフォルトでポート **3000** をリッスンします（`PORT` 環境変数で設定可能）。UI に
 アクセスするには、ホストのポートに公開してください。
 
+## 保存されるシークレットの暗号化キー
+
+PosterPilot はシークレット設定（メディアサーバーのトークンとプロバイダーの API キー）を保存時に
+暗号化します。デフォルトでは初回実行時に `data/.app-key` にインスタンスキーを自動生成します —
+**セットアップは不要** です。そのキーは `/data` ボリューム内にあるため、`/data` を永続的で
+バックアップされたストレージに保持しておけば、コンテナの更新をまたいでシークレットを復号可能な
+状態に保てます。
+
+任意で **`APP_SECRET`** 環境変数を設定すると、代わりにあなたが管理する値からキーを導出します。
+**1 つのデータベースを共有する複数のレプリカ** を実行する場合や、コンテナ（とその
+`data/.app-key`）が再作成されてもシークレットをポータブルに保ちたい場合に設定します。
+`APP_SECRET` を設定しない場合は、`data/.app-key` をバックアップの一部として扱ってください —
+それを失うと、保存したすべての認証情報を再入力することになります。完全な動作については
+[設定 → シークレットと暗号化](/posterpilot/ja/configuration/)を参照してください。
+
 ## Docker Compose（macOS）
 
 `docker-compose.yml` を作成します：
@@ -61,6 +76,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # 任意 — シークレット暗号化キーを導出します（未設定の場合は data/.app-key に自動生成）:
+      # APP_SECRET: ${APP_SECRET:-}
     volumes:
       # 永続的なアプリの状態（SQLite db + 設定 + 履歴）。
       - ./data:/data
@@ -120,6 +137,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # 任意 — シークレット暗号化キーを導出します（未設定の場合は data/.app-key に自動生成）:
+      # APP_SECRET: ${APP_SECRET:-}
     volumes:
       - /mnt/user/appdata/posterpilot:/data
       - /mnt/user/appdata/kometa/config:/kometa

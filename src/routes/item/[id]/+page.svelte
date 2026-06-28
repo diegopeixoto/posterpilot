@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import type { PosterCandidate } from '$lib/server/db/schema';
 	import type { CandidateSet } from '$lib/server/posters/sets';
@@ -8,7 +9,9 @@
 
 	let { data } = $props();
 
+	// svelte-ignore state_referenced_locally
 	let selectedPoster = $state<string | null>(data.item.selectedPosterUrl);
+	// svelte-ignore state_referenced_locally
 	let selectedBackground = $state<string | null>(data.item.selectedBackgroundUrl);
 	let method = $state<'plex' | 'kometa' | 'both'>('both');
 	let busy = $state(false);
@@ -44,6 +47,7 @@
 		for (const r of rows) out[childKey(r.kind, r.season, r.episode)] = r.url;
 		return out;
 	}
+	// svelte-ignore state_referenced_locally
 	let childSel = $state<Record<string, string>>(hydrateChildren(data.childSelections));
 	function isChildStaged(kind: string, season: number, episode: number | null, url: string) {
 		return childSel[childKey(kind, season, episode)] === url;
@@ -62,8 +66,112 @@
 			stagedEpisodes > 0
 	);
 
+	// ---- Scored suggestions ---------------------------------------------------
+	// The highest-`score` candidate per slot (show poster/background, each season
+	// poster, each episode title card), computed across ALL providers/sets since a
+	// slot maps to exactly one applied artwork. Unscored candidates are ignored;
+	// when `suggestPreselect` is off this stays empty (no chips, no pre-select).
+	interface SlotSuggestions {
+		ids: Set<number>;
+		poster: PosterCandidate | null;
+		background: PosterCandidate | null;
+		seasonPosters: Map<number, PosterCandidate>;
+		titleCards: Map<string, PosterCandidate>;
+	}
+	function computeSuggestions(cands: PosterCandidate[], enabled: boolean): SlotSuggestions {
+		const out: SlotSuggestions = {
+			ids: new Set(),
+			poster: null,
+			background: null,
+			seasonPosters: new Map(),
+			titleCards: new Map()
+		};
+		if (!enabled) return out;
+		// Strictly-greater keeps the first-seen candidate on a score tie (stable).
+		const better = (a: PosterCandidate | null | undefined, b: PosterCandidate) =>
+			a == null || (b.score as number) > (a.score as number);
+		for (const c of cands) {
+			if (c.score == null) continue;
+			if (c.kind === 'poster') {
+				if (better(out.poster, c)) out.poster = c;
+			} else if (c.kind === 'background') {
+				if (better(out.background, c)) out.background = c;
+			} else if (c.kind === 'season' && c.season != null) {
+				if (better(out.seasonPosters.get(c.season), c)) out.seasonPosters.set(c.season, c);
+			} else if (c.kind === 'title_card' && c.season != null && c.episode != null) {
+				const k = childKey('title_card', c.season, c.episode);
+				if (better(out.titleCards.get(k), c)) out.titleCards.set(k, c);
+			}
+		}
+		for (const c of [
+			out.poster,
+			out.background,
+			...out.seasonPosters.values(),
+			...out.titleCards.values()
+		]) {
+			if (c) out.ids.add(c.id);
+		}
+		return out;
+	}
+	// Reactive (recomputes after discovery refreshes the candidate list).
+	const suggestions = $derived(computeSuggestions(data.candidates, data.suggestPreselect));
+
+	/**
+	 * Pre-stage the suggested pick for every slot the user hasn't already chosen,
+	 * persisting exactly like a manual pick (children must be persisted for apply
+	 * to read them). Only fills EMPTY slots, so it never overrides a real choice.
+	 * Runs at discrete moments (mount / after discovery / on item change) rather
+	 * than reactively, so an in-session de-selection isn't immediately undone.
+	 */
+	async function applySuggestions() {
+		if (!data.suggestPreselect) return;
+		const s = suggestions;
+		let showChanged = false;
+		if (!selectedPoster && s.poster) {
+			selectedPoster = s.poster.url;
+			showChanged = true;
+		}
+		if (!selectedBackground && s.background) {
+			selectedBackground = s.background.url;
+			showChanged = true;
+		}
+		const children: { kind: string; season: number; episode: number | null; url: string }[] = [];
+		for (const [season, c] of s.seasonPosters) {
+			if (!childSel[childKey('poster', season, null)]) {
+				children.push({ kind: 'poster', season, episode: null, url: c.url });
+			}
+		}
+		for (const c of s.titleCards.values()) {
+			if (c.season == null || c.episode == null) continue;
+			if (!childSel[childKey('title_card', c.season, c.episode)]) {
+				children.push({ kind: 'title_card', season: c.season, episode: c.episode, url: c.url });
+			}
+		}
+		// Suggestions are best-effort: persist is fire-and-forget and must never surface
+		// as an unhandled rejection (callers invoke this via `void applySuggestions()`).
+		try {
+			if (showChanged) await persistSelection();
+			if (children.length) {
+				const res = await fetch(`/api/items/${data.item.id}/select`, {
+					method: 'POST',
+					headers: jsonHeaders,
+					body: JSON.stringify({ children })
+				});
+				// Only reflect the children locally once the server has persisted them.
+				if (res.ok) {
+					const add: Record<string, string> = {};
+					for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
+					childSel = { ...childSel, ...add };
+				}
+			}
+		} catch {
+			// ignore — the user can still pick artwork manually
+		}
+	}
+
 	// ---- Collapse state (provider / set / season) -----------------------------
 	const COLLAPSE_NS = 'pp:collapse:';
+	// svelte-ignore state_referenced_locally
 	let expanded = $state<Set<string>>(defaultExpanded(data.providerGroups));
 	function isExpanded(key: string) {
 		return expanded.has(key);
@@ -92,6 +200,7 @@
 	});
 
 	// Re-sync local selection when navigating to a different item.
+	// svelte-ignore state_referenced_locally
 	let loadedId = data.item.id;
 	$effect(() => {
 		if (data.item.id !== loadedId) {
@@ -102,7 +211,14 @@
 			message = null;
 			messageError = false;
 			confirmApply = false;
+			void applySuggestions();
 		}
+	});
+
+	// Initial load: pre-stage suggestions once the page is interactive (mount only;
+	// later item navigations are handled by the resync effect above).
+	onMount(() => {
+		void applySuggestions();
 	});
 
 	function formatRuntime(min: number | null): string | null {
@@ -144,6 +260,12 @@
 	};
 	function providerLabel(id: string): string {
 		return PROVIDER_LABELS[id] ?? id;
+	}
+
+	// Route REMOTE provider preview images through the on-disk thumbnail cache.
+	// Leaves local/relative URLs untouched (the proxy only accepts http/https).
+	function thumb(url: string): string {
+		return /^https?:\/\//i.test(url) ? `/api/thumb?url=${encodeURIComponent(url)}` : url;
 	}
 
 	const jsonHeaders = { 'content-type': 'application/json' };
@@ -243,6 +365,8 @@
 				);
 			}
 			await invalidateAll();
+			// Newly discovered covers are now scored — pre-stage the top picks.
+			await applySuggestions();
 		} catch {
 			setMessage(m.item_msg_discovery_failed({ error: m.item_error_network() }), true);
 		} finally {
@@ -402,11 +526,12 @@
 	<button
 		type="button"
 		onclick={() => pickPoster(c.url)}
-		class="overflow-hidden rounded-lg border-2 transition {selectedPoster === c.url
+		class="relative overflow-hidden rounded-lg border-2 transition {selectedPoster === c.url
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
-		<img src={c.url} alt="poster" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		<img src={thumb(c.url)} alt="poster" loading="lazy" class="aspect-[2/3] w-full object-cover" />
 	</button>
 {/snippet}
 
@@ -414,11 +539,17 @@
 	<button
 		type="button"
 		onclick={() => pickBackground(c.url)}
-		class="overflow-hidden rounded-lg border-2 transition {selectedBackground === c.url
+		class="relative overflow-hidden rounded-lg border-2 transition {selectedBackground === c.url
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
-		<img src={c.url} alt="backdrop" loading="lazy" class="aspect-video w-full object-cover" />
+		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		<img
+			src={thumb(c.url)}
+			alt="backdrop"
+			loading="lazy"
+			class="aspect-video w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
@@ -426,7 +557,7 @@
 	<button
 		type="button"
 		onclick={() => pickChild('poster', season, null, c.url)}
-		class="overflow-hidden rounded-lg border-2 transition {isChildStaged(
+		class="relative overflow-hidden rounded-lg border-2 transition {isChildStaged(
 			'poster',
 			season,
 			null,
@@ -435,7 +566,13 @@
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
-		<img src={c.url} alt="season poster" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		<img
+			src={thumb(c.url)}
+			alt="season poster"
+			loading="lazy"
+			class="aspect-[2/3] w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
@@ -443,7 +580,7 @@
 	<button
 		type="button"
 		onclick={() => pickChild('title_card', season, c.episode, c.url)}
-		class="overflow-hidden rounded-lg border-2 transition {isChildStaged(
+		class="relative overflow-hidden rounded-lg border-2 transition {isChildStaged(
 			'title_card',
 			season,
 			c.episode,
@@ -452,8 +589,23 @@
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
-		<img src={c.url} alt="title card" loading="lazy" class="aspect-video w-full object-cover" />
+		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		<img
+			src={thumb(c.url)}
+			alt="title card"
+			loading="lazy"
+			class="aspect-video w-full object-cover"
+		/>
 	</button>
+{/snippet}
+
+{#snippet suggestedChip()}
+	<!-- Top-scored pick for this slot. Icon + label (never color alone); overridable. -->
+	<span
+		class="pointer-events-none absolute top-1.5 left-1.5 z-10 inline-flex items-center gap-1 rounded-full bg-accent-500/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm ring-1 ring-black/30"
+	>
+		<span aria-hidden="true">✦</span>{m.item_suggested()}
+	</span>
 {/snippet}
 
 {#snippet chevron(open: boolean)}

@@ -38,6 +38,8 @@ export interface ServerItem {
 	currentPosterUrl: string | null;
 	/** Absolute URL of the item's current background/art, or null when unsupported. */
 	currentBackgroundUrl: string | null;
+	/** The media server's own last-modified time for this item; null when the server doesn't report one. */
+	serverUpdatedAt: Date | null;
 }
 
 /**

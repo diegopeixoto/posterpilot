@@ -32,6 +32,20 @@ docker pull ghcr.io/diegopeixoto/posterpilot:latest
 容器默认监听 **3000** 端口（可通过 `PORT`
 环境变量配置）。将其发布到主机端口即可访问界面。
 
+## 已存储密钥的加密密钥
+
+PosterPilot 会对密钥设置（媒体服务器 token 和提供方 API 密钥）进行
+静态加密。默认情况下，它会在首次运行时于 `data/.app-key` 自动生成一个
+实例密钥——**无需任何设置**。由于该密钥位于 `/data` 卷内部，将 `/data`
+保存在持久、有备份的存储上，可使你的密钥在容器更新后仍能被解密。
+
+你也可以选择设置 **`APP_SECRET`** 环境变量，以改为从你掌控的某个值
+派生密钥。当你运行 **多个共享同一数据库的副本** 时，或当你希望在容器
+（及其 `data/.app-key`）被重建时密钥仍保持可移植时，请设置它。如果你不
+设置 `APP_SECRET`，请将 `data/.app-key` 视为备份的一部分——丢失它意味着
+要重新输入每一个已保存的凭据。关于完整行为，参见
+[配置 → 密钥与加密](/posterpilot/zh/configuration/#密钥与加密)。
+
 ## Docker Compose（macOS）
 
 创建一个 `docker-compose.yml`：
@@ -63,6 +77,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # 可选——派生静态加密密钥（否则会在 data/.app-key 自动生成）：
+      # APP_SECRET: ${APP_SECRET:-}
     volumes:
       # 持久化应用状态（SQLite 数据库 + 设置 + 历史）。
       - ./data:/data
@@ -123,6 +139,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # 可选——派生静态加密密钥（否则会在 data/.app-key 自动生成）：
+      # APP_SECRET: ${APP_SECRET:-}
     volumes:
       - /mnt/user/appdata/posterpilot:/data
       - /mnt/user/appdata/kometa/config:/kometa

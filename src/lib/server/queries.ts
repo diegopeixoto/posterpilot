@@ -112,6 +112,20 @@ export async function getSpotlightItem(): Promise<MediaItem | null> {
 	return rows[0] ?? null;
 }
 
+/**
+ * Random library poster URLs for a decorative montage backdrop (e.g. the Kometa
+ * hero). Uses the media server's own current posters; empty when the library is empty.
+ */
+export async function getMontagePosters(limit = 14): Promise<string[]> {
+	const rows = await db
+		.select({ url: mediaItems.currentPosterUrl })
+		.from(mediaItems)
+		.where(sql`${mediaItems.currentPosterUrl} is not null`)
+		.orderBy(sql`random()`)
+		.limit(limit);
+	return rows.map((r) => r.url).filter((u): u is string => Boolean(u));
+}
+
 async function count(where?: SQL): Promise<number> {
 	const [row] = await db
 		.select({ c: sql<number>`count(*)` })
@@ -146,6 +160,11 @@ export async function getStats(): Promise<LibraryStats> {
 
 export async function getMediaItem(id: number) {
 	return (await db.select().from(mediaItems).where(eq(mediaItems.id, id)).limit(1))[0] ?? null;
+}
+
+/** Mark an item as ignored (excluded from sync/auto-apply) or restore it. */
+export async function setItemIgnored(id: number, ignored: boolean): Promise<void> {
+	await db.update(mediaItems).set({ ignored }).where(eq(mediaItems.id, id));
 }
 
 export async function getItemDetail(id: number) {

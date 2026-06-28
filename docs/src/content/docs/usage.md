@@ -15,8 +15,12 @@ through six steps in order, persisting each as you go:
 1. **Language** — pick the UI locale.
 2. **Media server** — choose Plex, Jellyfin, or Emby. For Plex you can sign in
    with a PIN (PosterPilot shows a code and an authorization link, then stores the
-   acquired token for you) and pick a discovered local/remote connection; Jellyfin
-   and Emby take a URL and API key. A **Test** button verifies the connection.
+   acquired token for you) and pick a discovered local/remote connection. Jellyfin
+   and Emby take a server URL and let you **sign in with your username and
+   password** — PosterPilot exchanges them for an access token, so you never have
+   to hunt down an API key (the password is used only for that one request and is
+   never stored; pasting a key by hand stays available as a fallback). A **Test**
+   button verifies the connection.
 3. **TMDB** — paste a TMDB API key (a link to TMDB's API settings is provided).
 4. **Providers** — toggle the artwork providers (MediUX, TMDB, Fanart.tv,
    ThePosterDB) and enter a Fanart.tv key if you use it.
@@ -48,21 +52,32 @@ Each item comes back with its title, year, type, external GUIDs (tmdb/imdb/tvdb
 when present), and current poster. An item with no external GUID is still listed
 but flagged as unresolvable for provider lookup rather than dropped.
 
+Repeat syncs are **incremental** by default: PosterPilot compares each item against
+the media server's last-modified timestamp and only re-resolves and re-enriches the
+ones that changed since the previous sync, so a routine rescan is much faster than
+the first. A **full rescan** that re-processes everything stays available, and you
+can turn incremental syncing off entirely (see
+[Configuration → Performance and tuning](/posterpilot/configuration/#performance-and-tuning)).
+
 ## The library wall
 
 The synced library renders as a poster grid with a Notion-style toolbar. You can:
 
 - **Search** by title.
 - **Filter** from the **Filter** popover: media type (movie / show), minimum
-  rating, genre, missing poster, MediUX availability (has candidates), and change
-  state (unchanged / still on the default poster). The Filter button shows a badge
-  with the number of active facets.
+  rating, genre, missing poster, MediUX availability (has candidates), change
+  state (unchanged / still on the default poster), and ignored state. The Filter
+  button shows a badge with the number of active facets.
 - **Sort** from the **Sort** popover by title, release year, rating, runtime, or
   most-recently-changed, with an independent ascending/descending toggle.
 - Each active filter and the sort show up as **removable chips** below the toolbar
   — click a chip's ✕ to drop just that one, or **Clear all** to reset everything.
 - Toggle **auto-apply** (the ⚡ button): on, each change navigates immediately; off,
   changes are staged until you hit **Apply**. The choice is remembered.
+- **Ignore** an item you want left untouched — ignored items are skipped by
+  discovery, apply, and automatic selection, are visually marked on the wall, and
+  can be filtered in or out from the Filter popover. Toggle it off again at any
+  time to bring the item back into the workflow.
 - See a **spotlight banner** — a backdrop for a recently-changed item above the
   wall once at least one cover has been applied.
 
@@ -82,9 +97,38 @@ shows), genres, and overview, plus the top-billed cast.
 - Candidates are grouped **first by provider, then by set**. Each set shows its
   uploader attribution with the poster and backdrop together. For shows, the view
   also presents season-poster sets and title-card sets.
+- Provider sections, individual set cards, and (for shows) season groups are
+  **collapsible**. On first load the first provider and its first set are expanded
+  and everything else is collapsed; your collapsed/expanded choices persist in the
+  browser across reloads and as you move between items.
+- When **suggested artwork** is enabled, the highest-scored candidate for each slot
+  is pre-selected as a clearly marked suggestion you can accept or override.
+  Candidates are scored on provider quality, resolution, and aspect-fit; tune the
+  weights — or turn the pre-selection off — in Settings (see
+  [Configuration → Performance and tuning](/posterpilot/configuration/#performance-and-tuning)).
 
 You can stage a whole set ("use this set"), or take an individual poster from one
 set and a background from another — the two slots are independent.
+
+## Season and episode artwork
+
+For a show, artwork is staged per slot, so the show cover, each season's poster,
+and each episode's title card are independent of one another:
+
+- A set's artwork is organized into a **show group** (poster and background) and
+  one **group per season**. Each season group holds that season's poster and its
+  episodes' title cards. (A season background slot exists in the model but is not
+  shown, because no provider currently sources season backgrounds.)
+- Selecting a candidate inside a season or episode slot stages just that slot,
+  without touching the show-level or any other slot. Re-selecting the candidate
+  already staged in a slot clears it again.
+- **Use this set** fills every slot the set covers at once — show, each season,
+  and each episode — matched by season and episode number. You can then override
+  any single slot and keep the rest of the set staged.
+
+The sticky builder summarizes everything currently staged — the show
+poster/background plus counts of staged seasons and episodes — and a single
+**Apply** writes all of it in one action (see [Apply a cover](#apply-a-cover)).
 
 ## Apply a cover
 
@@ -103,6 +147,16 @@ with a configurable default (`DEFAULT_APPLY_METHOD`, default `both`):
 - **Both.** Performs the direct upload _and_ writes the Kometa YAML, recording each
   outcome independently so a partial failure is visible.
 
+A single apply writes **every staged slot** — show, seasons, and episodes — with
+the chosen method(s). For direct upload, PosterPilot resolves each season and
+episode child on the media server by number and uploads to it; a staged slot whose
+season or episode has no matching child on the server is skipped and reported
+rather than failing the whole apply, and one child's failure never aborts the rest.
+The Kometa export nests staged season posters under `seasons:` (keyed by season
+number) and staged episode title cards under `episodes:` (keyed by episode number),
+alongside the show-level `url_poster` / `url_background`. A season **background** is
+applied via the direct method only — it is omitted from the YAML.
+
 Every apply — success or failure — is recorded with the item, asset URL,
 method(s), outcome, and timestamp, so history is queryable and re-application is
 detectable.
@@ -113,6 +167,19 @@ PosterPilot writes a single metadata file (default `posterpilot.yml`) into
 `KOMETA_ASSETS_DIR`, keyed by TMDB id with `url_poster` / `url_background`
 entries. Add that file to your Kometa library config (e.g. under
 `metadata_path` / `metadata_files`) so Kometa applies the covers on its next run.
+
+## Revert
+
+Every applied cover is reversible from the item detail view:
+
+- **Revert to original** reverts the show-level artwork **and every applied season
+  and episode** in one action, restoring what the media server had before
+  PosterPilot changed it.
+- Each season group has its own **Revert season** control that reverts only that
+  season's poster/background and its episodes' title cards, leaving the show-level
+  and other seasons' artwork in place.
+
+Reverts re-resolve season and episode children by number, the same way apply does.
 
 ## Custom sets
 
@@ -139,10 +206,17 @@ Select multiple items and run discovery and/or apply across the selection as a
 single background job. Bulk apply with automatic selection discovers (if needed),
 auto-selects, and applies covers for each selected item, with live progress.
 
-Automatic selection works across all enabled providers' candidates — it picks a
-primary poster (and a background where available) using a deterministic provider
-preference order, falling back to the next provider when the most-preferred one
-has no poster for the item.
+Automatic selection scores every candidate across all enabled providers —
+combining provider quality, resolution, and aspect-fit — and picks the
+highest-scored poster (and a background where available) for each item, the same
+scoring that drives the suggested pre-selection on the item view. Ignored items are
+left out of the selection.
+
+Before a bulk apply runs, a **dry-run preview** summarizes exactly what would
+happen — the planned uploads, the Kometa exports, and any items or slots that would
+be skipped — so you can confirm before anything is written. Bulk apply then
+processes items **concurrently** (bounded by the Apply concurrency setting), so
+large batches finish faster, with the same live progress and cancellation.
 
 ## Dashboard and jobs
 

@@ -38,6 +38,22 @@ The volumes that matter:
 The container listens on port **3000** by default (configurable via the `PORT`
 environment variable). Publish it to a host port to reach the UI.
 
+## Encryption key for stored secrets
+
+PosterPilot encrypts secret settings (media-server tokens and provider API keys)
+at rest. By default it auto-generates an instance key at `data/.app-key` on first
+run — **zero setup required**. Because that key lives inside the `/data` volume,
+keeping `/data` on persistent, backed-up storage keeps your secrets decryptable
+across container updates.
+
+Optionally set the **`APP_SECRET`** environment variable to derive the key from a
+value you control instead. Set it when you run **multiple replicas sharing one
+database**, or when you want secrets to stay portable if the container (and its
+`data/.app-key`) is recreated. If you do not set `APP_SECRET`, treat `data/.app-key`
+as part of your backups — losing it means re-entering every saved credential. See
+[Configuration → Secrets and encryption](/posterpilot/configuration/#secrets-and-encryption)
+for the full behavior.
+
 ## Mount Kometa's config for config sync
 
 The [Kometa manager](/posterpilot/kometa-config-sync/) lets PosterPilot manage
@@ -97,6 +113,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # Optional — derive the secrets encryption key (else auto-generated at data/.app-key):
+      # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
     volumes:
@@ -167,6 +185,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # Optional — derive the secrets encryption key (else auto-generated at data/.app-key):
+      # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
     volumes:

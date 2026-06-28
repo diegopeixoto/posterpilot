@@ -56,23 +56,35 @@ translating guides live at
 1. **Sync** your Plex / Jellyfin / Emby movie & show libraries, resolving each
    title to a TMDB id with rich metadata (backdrop, logo, rating, genres, cast).
 2. **Find covers** across the enabled providers (MediUX, Fanart.tv, TMDB,
-   ThePosterDB), grouped into artwork **sets** per provider — pick a whole set or
-   assemble a custom poster + backdrop set from any provider, a pasted URL, or an
-   uploaded file.
+   ThePosterDB), grouped into collapsible artwork **sets** per provider — pick a
+   whole set or assemble a custom poster + backdrop set from any provider, a pasted
+   URL, or an uploaded file. For shows you can stage **per-season posters and
+   per-episode title cards** independently of the show cover, and the best-scored
+   candidate is pre-selected per slot as an overridable **suggestion**.
 3. **Apply** a chosen cover, two ways (selectable):
    - **Media server API** — uploads the poster (and backdrop) and, on Plex, locks
      the field so agents won't overwrite it.
    - **Kometa export** — writes `url_poster`/`url_background` YAML into a mounted
      directory your existing Kometa instance consumes on its next run.
 
+   One apply writes every staged slot — show, seasons, and episodes (direct upload
+   resolves the season/episode children on the server; the Kometa export nests
+   `seasons:` / `episodes:`). A **dry-run preview** shows the planned uploads,
+   exports, and skips before a bulk apply runs, and **Revert** restores the original
+   artwork for a whole show or a single season.
+
 A guided **first-install wizard** (language → server → TMDB → providers →
 libraries → first sync) gets you running fast; for Plex it includes **PIN login**
-and **connection discovery** so you never have to hunt down a token or URL. A
-metadata-rich item page (backdrop hero, cast, artwork grouped into sets), a
-Notion-style filtered/sorted library wall, an in-app **Activity** log, and a UI
-localized into five languages round it out. Library-wide work runs as background
-jobs with live progress (SSE) right on the Dashboard, and an update checker plus
-**What's New** modal surface new releases.
+and **connection discovery**, and Jellyfin and Emby let you **sign in with
+username + password** — so you never have to hunt down a token, URL, or API key.
+Stored credentials and API keys are **encrypted at rest** (zero-setup with an
+auto-generated key, or your own `APP_SECRET`). A metadata-rich item page (backdrop
+hero, cast, artwork grouped into sets), a Notion-style filtered/sorted library wall
+with a per-item **ignore** list, an in-app **Activity** log, and a UI localized
+into five languages round it out. Library-wide work runs as background jobs with
+live progress (SSE) right on the Dashboard — repeat syncs are **incremental** and
+bulk apply runs **concurrently** — and an update checker plus **What's New** modal
+surface new releases.
 
 ## Stack
 
