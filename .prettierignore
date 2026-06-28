@@ -6,6 +6,9 @@ drizzle
 bun.lock
 # Vendored Claude Code plugin files (not project source)
 .claude
+# Impeccable design-plugin local state + hook config (not project source)
+.impeccable
+.github/hooks
 # OpenSpec docs are managed by the openspec CLI
 openspec
 # inlang/Paraglide tooling config + generated output

@@ -43,3 +43,6 @@ vite.config.ts.timestamp-*
 .vscode/
 
 .superpowers/
+
+# Impeccable design-plugin local state (machine-specific; not committed)
+.impeccable/

@@ -117,6 +117,25 @@ describe('applyToItem', () => {
 		expect(h.inserts[1]).toMatchObject({ method: 'kometa', status: 'success' });
 	});
 
+	it('dry-run returns the plan and writes nothing', async () => {
+		const outcomes = await applyToItem(item, {
+			posterUrl: 'u',
+			backgroundUrl: 'bg',
+			method: 'both',
+			config,
+			dryRun: true
+		});
+		expect(outcomes.map((o) => o.method)).toEqual(['plex', 'kometa']);
+		expect(outcomes.every((o) => o.dryRun === true)).toBe(true);
+		expect(outcomes[0].planned).toEqual({ poster: true, background: true });
+		expect(outcomes[1].planned).toMatchObject({ poster: true, background: true, seasons: 0 });
+		// Zero side effects: no server upload, no Kometa write, no applied-record insert.
+		expect(h.applyPosterUrl).not.toHaveBeenCalled();
+		expect(h.applyBackgroundUrl).not.toHaveBeenCalled();
+		expect(h.writeKometaYaml).not.toHaveBeenCalled();
+		expect(h.inserts).toHaveLength(0);
+	});
+
 	it('records a server failure when the active provider is unconfigured', async () => {
 		const outcomes = await applyToItem(item, {
 			posterUrl: 'u',

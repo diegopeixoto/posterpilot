@@ -25,6 +25,8 @@ export interface PlexItem {
 	guids: PlexGuids;
 	/** Absolute URL (including token) of the item's current poster, or null. */
 	currentPosterUrl: string | null;
+	/** Plex's own last-modified time for this item (from `updatedAt`), or null. */
+	serverUpdatedAt: Date | null;
 }
 
 // --- TMDB ---
@@ -75,6 +77,9 @@ export interface MediuxCandidate {
 	season: number | null;
 	/** Episode number for title cards; null otherwise. */
 	episode: number | null;
+	/** Image pixel dimensions when the provider reports them; used for scoring. */
+	width?: number | null;
+	height?: number | null;
 }
 
 export interface MediuxSet {

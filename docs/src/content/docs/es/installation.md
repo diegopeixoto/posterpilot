@@ -36,6 +36,24 @@ El contenedor escucha en el puerto **3000** por defecto (configurable mediante l
 variable de entorno `PORT`). Publícalo en un puerto del host para acceder a la
 interfaz.
 
+## Clave de cifrado para los secretos almacenados
+
+PosterPilot cifra los ajustes secretos (tokens del servidor multimedia y claves de
+API de los proveedores) en reposo. Por defecto, autogenera una clave de instancia
+en `data/.app-key` en la primera ejecución: **cero configuración requerida**. Como
+esa clave vive dentro del volumen `/data`, mantener `/data` en un almacenamiento
+persistente y con copia de seguridad conserva tus secretos descifrables a través de
+las actualizaciones del contenedor.
+
+Opcionalmente, define la variable de entorno **`APP_SECRET`** para derivar la clave
+a partir de un valor que tú controlas. Defínela cuando ejecutes **varias réplicas
+que comparten una base de datos**, o cuando quieras que los secretos sigan siendo
+portables si el contenedor (y su `data/.app-key`) se recrea. Si no defines
+`APP_SECRET`, trata `data/.app-key` como parte de tus copias de seguridad: perderla
+significa reintroducir cada credencial guardada. Consulta
+[Configuración → Secretos y cifrado](/posterpilot/es/configuration/#secretos-y-cifrado)
+para conocer el comportamiento completo.
+
 ## Docker Compose (macOS)
 
 Crea un `docker-compose.yml`:
@@ -67,6 +85,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # Opcional — deriva la clave de cifrado de secretos (si no, se autogenera en data/.app-key):
+      # APP_SECRET: ${APP_SECRET:-}
     volumes:
       # Estado persistente de la app (base de datos SQLite + ajustes + historial).
       - ./data:/data
@@ -129,6 +149,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       TMDB_KEY: ${TMDB_KEY:-}
+      # Opcional — deriva la clave de cifrado de secretos (si no, se autogenera en data/.app-key):
+      # APP_SECRET: ${APP_SECRET:-}
     volumes:
       - /mnt/user/appdata/posterpilot:/data
       - /mnt/user/appdata/kometa/config:/kometa

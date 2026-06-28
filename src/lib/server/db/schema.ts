@@ -32,6 +32,12 @@ export const mediaItems = sqliteTable('media_items', {
 	cast: text('cast', { mode: 'json' }).$type<TmdbCastMember[]>(),
 	hasMediux: integer('has_mediux', { mode: 'boolean' }),
 	resolved: integer('resolved', { mode: 'boolean' }).notNull().default(false),
+	/** User-marked "leave this alone": excluded from discover/apply/auto-select. */
+	ignored: integer('ignored', { mode: 'boolean' }).notNull().default(false),
+	/** The media server's own last-modified time for this item (null = unknown). */
+	serverUpdatedAt: integer('server_updated_at', { mode: 'timestamp' }),
+	/** When this item was last processed by a sync (null = never). */
+	lastSyncedAt: integer('last_synced_at', { mode: 'timestamp' }),
 	updatedAt: integer('updated_at', { mode: 'timestamp' })
 		.notNull()
 		.$defaultFn(() => new Date())
@@ -52,6 +58,11 @@ export const posterCandidates = sqliteTable('poster_candidates', {
 	kind: text('kind', { enum: ['poster', 'background', 'season', 'title_card'] }).notNull(),
 	season: integer('season'),
 	episode: integer('episode'),
+	/** Image dimensions when known, used for resolution scoring. */
+	width: integer('width'),
+	height: integer('height'),
+	/** Computed selection score (provider weight + resolution + aspect fit); null until scored. */
+	score: real('score'),
 	createdAt: integer('created_at', { mode: 'timestamp' })
 		.notNull()
 		.$defaultFn(() => new Date())
@@ -135,6 +146,24 @@ export const httpCache = sqliteTable('http_cache', {
 		.$defaultFn(() => new Date())
 });
 
+/**
+ * Index for the on-disk binary thumbnail cache. The image bytes live on disk at
+ * `data/thumb-cache/<urlHash>`; this row tracks size + access time for TTL/LRU pruning.
+ */
+export const thumbnailCache = sqliteTable('thumbnail_cache', {
+	urlHash: text('url_hash').primaryKey(),
+	url: text('url').notNull(),
+	contentType: text('content_type').notNull(),
+	sizeBytes: integer('size_bytes').notNull(),
+	fetchedAt: integer('fetched_at', { mode: 'timestamp' })
+		.notNull()
+		.$defaultFn(() => new Date()),
+	/** Last served time, bumped on cache hit for LRU eviction. */
+	accessedAt: integer('accessed_at', { mode: 'timestamp' })
+		.notNull()
+		.$defaultFn(() => new Date())
+});
+
 /** Persisted key/value settings (overridden by environment variables at runtime). */
 export const settings = sqliteTable('settings', {
 	key: text('key').primaryKey(),
@@ -162,6 +191,8 @@ export type NewPosterCandidate = typeof posterCandidates.$inferInsert;
 export type ChildSelection = typeof childSelections.$inferSelect;
 export type NewChildSelection = typeof childSelections.$inferInsert;
 export type AppliedPoster = typeof appliedPosters.$inferSelect;
+export type ThumbnailCacheEntry = typeof thumbnailCache.$inferSelect;
+export type NewThumbnailCacheEntry = typeof thumbnailCache.$inferInsert;
 export type Job = typeof jobs.$inferSelect;
 export type Event = typeof events.$inferSelect;
 export type NewEvent = typeof events.$inferInsert;

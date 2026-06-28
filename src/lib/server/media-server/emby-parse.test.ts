@@ -126,7 +126,8 @@ describe('mapItems', () => {
 					Type: 'Movie',
 					ProviderIds: { Tmdb: '603', Imdb: 'tt0133093' },
 					ImageTags: { Primary: 'ptag' },
-					BackdropImageTags: ['btag']
+					BackdropImageTags: ['btag'],
+					DateLastModified: '2023-11-14T22:13:20.000Z'
 				},
 				{
 					Id: 's1',
@@ -146,7 +147,8 @@ describe('mapItems', () => {
 				type: 'movie',
 				guids: { tmdb: '603', imdb: 'tt0133093' },
 				currentPosterUrl: `${base}/Items/m1/Images/Primary?tag=ptag&api_key=${key}`,
-				currentBackgroundUrl: `${base}/Items/m1/Images/Backdrop?tag=btag&api_key=${key}`
+				currentBackgroundUrl: `${base}/Items/m1/Images/Backdrop?tag=btag&api_key=${key}`,
+				serverUpdatedAt: new Date('2023-11-14T22:13:20.000Z')
 			},
 			{
 				id: 's1',
@@ -155,9 +157,24 @@ describe('mapItems', () => {
 				type: 'show',
 				guids: { tvdb: '81189' },
 				currentPosterUrl: `${base}/Items/s1/Images/Primary?tag=ptag2&api_key=${key}`,
-				currentBackgroundUrl: null
+				currentBackgroundUrl: null,
+				serverUpdatedAt: null
 			}
 		]);
+	});
+
+	it('maps DateLastModified to serverUpdatedAt, null when missing or invalid', () => {
+		const res: RawEmbyItemsResponse = {
+			Items: [
+				{ Id: 'a', Name: 'Dated', Type: 'Movie', DateLastModified: '2024-01-02T03:04:05.000Z' },
+				{ Id: 'b', Name: 'Missing', Type: 'Movie' },
+				{ Id: 'c', Name: 'Invalid', Type: 'Movie', DateLastModified: 'not-a-date' }
+			]
+		};
+		const items = mapItems(res, base, key);
+		expect(items[0].serverUpdatedAt).toEqual(new Date('2024-01-02T03:04:05.000Z'));
+		expect(items[1].serverUpdatedAt).toBeNull();
+		expect(items[2].serverUpdatedAt).toBeNull();
 	});
 
 	it('drops non-movie/series items but keeps guid-less items flagged unresolvable', () => {

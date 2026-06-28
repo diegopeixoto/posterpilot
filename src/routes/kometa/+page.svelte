@@ -19,7 +19,9 @@
 	];
 
 	// ── Header: path + mode (persisted via /api/settings) ──────────────────────
+	// svelte-ignore state_referenced_locally
 	let configPath = $state(data.config?.kometaConfigPath ?? km.configPath);
+	// svelte-ignore state_referenced_locally
 	let mode = $state<'merge' | 'own'>(km.mode);
 	let savingHeader = $state(false);
 	let headerError = $state<string | null>(null);
@@ -46,6 +48,7 @@
 	}
 
 	// ── Connections (skip plex/tmdb — their core creds come from PosterPilot) ──
+	// svelte-ignore state_referenced_locally
 	const connectors = km.connectorCatalog.filter((c) => !c.credsFromPosterPilot);
 	const connValues = $state<Record<string, Record<string, string>>>(
 		Object.fromEntries(
@@ -70,6 +73,7 @@
 		operations: Record<string, string>;
 		settings: Record<string, string>;
 	};
+	// svelte-ignore state_referenced_locally
 	const libs = $state<LibUI[]>(
 		km.availableLibraries.map((l) => {
 			const st = km.libraryState[l.title];
@@ -92,6 +96,7 @@
 	}
 
 	// ── Global settings (bounded) ──────────────────────────────────────────────
+	// svelte-ignore state_referenced_locally
 	const globalSettings = $state<Record<string, string>>(
 		Object.fromEntries(km.managedSettingDefs.map((d) => [d.id, km.managedSettings[d.id] ?? '']))
 	);
@@ -257,7 +262,14 @@
 
 <!-- Spotlight hero -->
 <div class="relative overflow-hidden rounded-xl border border-neutral-800">
-	{#if data.spotlight?.backdropUrl}
+	{#if data.montage?.length}
+		<!-- Decorative collage of random library posters behind the title. -->
+		<div class="absolute inset-0 flex" aria-hidden="true">
+			{#each data.montage as poster, i (i)}
+				<img src={poster} alt="" class="h-full min-w-0 flex-1 object-cover" loading="lazy" />
+			{/each}
+		</div>
+	{:else if data.spotlight?.backdropUrl}
 		<img
 			src={data.spotlight.backdropUrl}
 			alt=""
@@ -266,6 +278,8 @@
 	{:else}
 		<div class="absolute inset-0 bg-gradient-to-br from-accent-900/40 to-neutral-950"></div>
 	{/if}
+	<!-- Darken + left-weight so the title stays AA-legible over any artwork. -->
+	<div class="absolute inset-0 bg-neutral-950/70"></div>
 	<div
 		class="absolute inset-0 bg-gradient-to-r from-neutral-950/95 via-neutral-950/70 to-transparent"
 	></div>

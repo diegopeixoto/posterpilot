@@ -20,22 +20,32 @@
 	let step = $state(0);
 
 	// Step values, seeded from current config (so re-running the wizard is sane).
+	// svelte-ignore state_referenced_locally
 	let language = $state(data.locale);
+	// svelte-ignore state_referenced_locally
 	let serverType = $state<'plex' | 'jellyfin' | 'emby'>(data.config.serverType);
 
+	// svelte-ignore state_referenced_locally
 	let plexUrl = $state(data.config.plexUrl ?? '');
+	// svelte-ignore state_referenced_locally
 	let plexTokenSet = $state(data.config.plexTokenSet);
 
+	// svelte-ignore state_referenced_locally
 	let jellyfinUrl = $state(data.config.jellyfinUrl ?? '');
 	let jellyfinApiKey = $state('');
+	// svelte-ignore state_referenced_locally
 	let embyUrl = $state(data.config.embyUrl ?? '');
 	let embyApiKey = $state('');
 
 	let tmdbKey = $state('');
 
+	// svelte-ignore state_referenced_locally
 	let providerMediux = $state(data.config.providerMediux);
+	// svelte-ignore state_referenced_locally
 	let providerTmdb = $state(data.config.providerTmdb);
+	// svelte-ignore state_referenced_locally
 	let providerFanart = $state(data.config.providerFanart);
+	// svelte-ignore state_referenced_locally
 	let providerThePosterDb = $state(data.config.providerThePosterDb);
 	let fanartKey = $state('');
 
@@ -43,7 +53,9 @@
 	// Cached library list (rendered instantly), refreshable live; mirrors the
 	// Settings "Libraries to sync" UX (select-all default, Refresh, error states).
 	type Section = { key: string; title: string; type: string };
+	// svelte-ignore state_referenced_locally
 	let sections = $state<Section[]>(data.sections);
+	// svelte-ignore state_referenced_locally
 	const selectedSections = new SvelteSet<string>(
 		data.config.includedSections.length
 			? data.config.includedSections

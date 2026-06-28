@@ -14,6 +14,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		posterUrl?: string;
 		backgroundUrl?: string | null;
 		method?: 'plex' | 'kometa' | 'both';
+		/** When true, return the plan without writing anything (preview). */
+		dryRun?: boolean;
 	};
 	const posterUrl = body.posterUrl ?? item.selectedPosterUrl;
 	const backgroundUrl = body.backgroundUrl ?? item.selectedBackgroundUrl;
@@ -26,7 +28,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		posterUrl,
 		backgroundUrl,
 		method: body.method ?? config.defaultApplyMethod,
-		config
+		config,
+		dryRun: Boolean(body.dryRun)
 	});
 	return json({ outcomes });
 };

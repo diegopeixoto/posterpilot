@@ -30,6 +30,9 @@
 		error?: string;
 	} | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	/** The OAuth tab we opened. Not reactive — only its blocked state drives the UI. */
+	let authTab: Window | null = null;
+	let tabBlocked = $state(false);
 
 	function stopPolling() {
 		if (pollTimer) {
@@ -37,11 +40,31 @@
 			pollTimer = null;
 		}
 	}
-	onDestroy(stopPolling);
+
+	function closeTab() {
+		try {
+			authTab?.close();
+		} catch {
+			// A cross-origin tab can throw on close(); ignore.
+		}
+		authTab = null;
+	}
+
+	onDestroy(() => {
+		stopPolling();
+		closeTab();
+	});
 
 	export async function startPlexLogin() {
 		stopPolling();
+		closeTab();
+		tabBlocked = false;
 		login = null;
+		// Open the tab synchronously inside the click gesture so the browser doesn't
+		// block it; we navigate it to the OAuth URL once the PIN exists. (Opening after
+		// the awaited fetch would lose the gesture and get blocked.)
+		authTab = window.open('about:blank', '_blank');
+		tabBlocked = authTab === null;
 		try {
 			const res = await fetch('/api/plex/pin', { method: 'POST' });
 			const body = await res.json();
@@ -52,11 +75,21 @@
 				linkUrl: body.linkUrl,
 				status: 'pending'
 			};
+
+			if (authTab) {
+				try {
+					authTab.location.href = body.authUrl;
+				} catch {
+					tabBlocked = true;
+				}
+			}
+
 			const id = body.id as number;
 			const expiresAt = body.expiresAt ? new Date(body.expiresAt).getTime() : Date.now() + 600_000;
 			pollTimer = setInterval(async () => {
 				if (Date.now() > expiresAt) {
 					stopPolling();
+					closeTab();
 					if (login) login = { ...login, status: 'error', error: 'The PIN expired. Try again.' };
 					return;
 				}
@@ -65,6 +98,7 @@
 					const pb = await pr.json();
 					if (pb.authorized) {
 						stopPolling();
+						closeTab();
 						plexTokenSet = true;
 						if (login) login = { ...login, status: 'done' };
 						await onLogin?.();
@@ -75,6 +109,7 @@
 				}
 			}, 2000);
 		} catch (e) {
+			closeTab();
 			login = {
 				code: '',
 				authUrl: '',
@@ -116,29 +151,88 @@
 				{plexTokenSet ? m.settings_plex_token_set() : m.settings_plex_login_hint()}
 			</p>
 		</div>
-		<button onclick={startPlexLogin} class="btn btn-accent px-3 py-1.5">
-			{plexTokenSet ? m.settings_log_in_again() : m.settings_log_in()}
+		<!--
+			Brand exception to the violet-only rule: a recognizable Plex sign-in button
+			in Plex gold (#e5a00d) with near-black text for AA contrast. Keyboard focus
+			uses the shared :focus-visible ring; motion is the .btn transition only,
+			which the global reduced-motion rule already neutralizes.
+		-->
+		<button
+			onclick={startPlexLogin}
+			aria-label={plexTokenSet
+				? m.settings_plex_reconnect_button()
+				: m.settings_plex_login_button()}
+			class="btn shrink-0 gap-2 bg-[#e5a00d] font-semibold text-neutral-950 hover:bg-[#cc8f0c]"
+		>
+			<svg
+				viewBox="0 0 24 24"
+				class="h-4 w-4"
+				fill="currentColor"
+				aria-hidden="true"
+				focusable="false"
+			>
+				<path d="M9.882 0H4.235l6.353 12-6.353 12h5.647l6.353-12z" />
+			</svg>
+			<span>
+				{plexTokenSet ? m.settings_plex_reconnect_button() : m.settings_plex_login_button()}
+			</span>
 		</button>
 	</div>
 
 	{#if login}
 		{#if login.status === 'pending'}
-			<div class="rounded-md border border-neutral-800 bg-black/40 p-3 text-sm">
-				<p>
-					{m.settings_plex_open_link_pre()}
-					<a href={login.linkUrl} target="_blank" rel="noopener" class="text-accent-300 underline">
-						plex.tv/link
-					</a>
-					{m.settings_plex_open_link_post()}
-				</p>
-				<p class="mt-2 font-mono text-2xl tracking-widest text-accent-200">{login.code}</p>
-				<p class="mt-2 text-xs text-neutral-400">
-					{m.settings_plex_or_authorize_pre()}
-					<a href={login.authUrl} target="_blank" rel="noopener" class="text-accent-300 underline"
-						>{m.settings_plex_authorize_directly()}</a
-					>{m.settings_plex_waiting()}
-				</p>
-			</div>
+			{#if tabBlocked}
+				<!-- New tab blocked: show the full manual plex.tv/link fallback. -->
+				<div class="rounded-md border border-neutral-800 bg-black/40 p-3 text-sm">
+					<p class="mb-2 text-amber-300">{m.settings_plex_tab_blocked()}</p>
+					<p>
+						{m.settings_plex_open_link_pre()}
+						<a href={login.linkUrl} target="_blank" rel="noopener" class="text-accent-300 underline"
+							>plex.tv/link</a
+						>
+						{m.settings_plex_open_link_post()}
+					</p>
+					<p class="mt-2 font-mono text-2xl tracking-widest text-accent-200">{login.code}</p>
+					<p class="mt-2 text-xs text-neutral-400">
+						{m.settings_plex_or_authorize_pre()}
+						<a href={login.authUrl} target="_blank" rel="noopener" class="text-accent-300 underline"
+							>{m.settings_plex_authorize_directly()}</a
+						>{m.settings_plex_waiting()}
+					</p>
+				</div>
+			{:else}
+				<!-- Tab open: keep the manual code one disclosure away as a fallback. -->
+				<div class="rounded-md border border-neutral-800 bg-black/40 p-3 text-sm">
+					<p class="text-neutral-300">{m.settings_plex_tab_waiting()}</p>
+					<details class="mt-2 text-xs text-neutral-400">
+						<summary class="cursor-pointer select-none hover:text-neutral-200">
+							{m.settings_plex_enter_code_manually()}
+						</summary>
+						<div class="mt-2">
+							<p>
+								{m.settings_plex_open_link_pre()}
+								<a
+									href={login.linkUrl}
+									target="_blank"
+									rel="noopener"
+									class="text-accent-300 underline">plex.tv/link</a
+								>
+								{m.settings_plex_open_link_post()}
+							</p>
+							<p class="mt-1 font-mono text-xl tracking-widest text-accent-200">{login.code}</p>
+							<p class="mt-1">
+								{m.settings_plex_or_authorize_pre()}
+								<a
+									href={login.authUrl}
+									target="_blank"
+									rel="noopener"
+									class="text-accent-300 underline">{m.settings_plex_authorize_directly()}</a
+								>{m.settings_plex_waiting()}
+							</p>
+						</div>
+					</details>
+				</div>
+			{/if}
 		{:else if login.status === 'done'}
 			<p class="text-sm text-emerald-400">{m.settings_plex_logged_in()}</p>
 		{:else}

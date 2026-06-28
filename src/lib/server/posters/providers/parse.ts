@@ -10,9 +10,14 @@ import type { ArtworkSet } from './types';
 
 const MAX_PER_KIND = 20;
 
+interface TmdbImage {
+	file_path?: string;
+	width?: number;
+	height?: number;
+}
 interface TmdbImagesResponse {
-	posters?: Array<{ file_path?: string }>;
-	backdrops?: Array<{ file_path?: string }>;
+	posters?: TmdbImage[];
+	backdrops?: TmdbImage[];
 }
 
 /** Build a single TMDB set (posters + backdrops) from an images response. */
@@ -20,27 +25,43 @@ export function parseTmdbImages(json: unknown): ArtworkSet[] {
 	const data = (json ?? {}) as TmdbImagesResponse;
 	const posters = (data.posters ?? [])
 		.slice(0, MAX_PER_KIND)
-		.map((p) => tmdbImageUrl(p.file_path, 'w500'))
-		.filter((u): u is string => Boolean(u))
-		.map((url) => ({
+		.map((p) => ({
+			url: tmdbImageUrl(p.file_path, 'w500'),
+			width: p.width ?? null,
+			height: p.height ?? null
+		}))
+		.filter(
+			(p): p is { url: string; width: number | null; height: number | null } => p.url !== null
+		)
+		.map((p) => ({
 			setId: 'tmdb',
 			setAuthor: null,
-			url,
+			url: p.url,
 			kind: 'poster' as const,
 			season: null,
-			episode: null
+			episode: null,
+			width: p.width,
+			height: p.height
 		}));
 	const backdrops = (data.backdrops ?? [])
 		.slice(0, MAX_PER_KIND)
-		.map((b) => tmdbImageUrl(b.file_path, 'w1280'))
-		.filter((u): u is string => Boolean(u))
-		.map((url) => ({
+		.map((b) => ({
+			url: tmdbImageUrl(b.file_path, 'w1280'),
+			width: b.width ?? null,
+			height: b.height ?? null
+		}))
+		.filter(
+			(b): b is { url: string; width: number | null; height: number | null } => b.url !== null
+		)
+		.map((b) => ({
 			setId: 'tmdb',
 			setAuthor: null,
-			url,
+			url: b.url,
 			kind: 'background' as const,
 			season: null,
-			episode: null
+			episode: null,
+			width: b.width,
+			height: b.height
 		}));
 	const candidates = [...posters, ...backdrops];
 	return candidates.length ? [{ setId: 'tmdb', author: null, candidates }] : [];
