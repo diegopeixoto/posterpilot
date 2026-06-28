@@ -2,6 +2,8 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PosterCandidate } from '$lib/server/db/schema';
 	import type { CandidateSet } from '$lib/server/posters/sets';
+	import { groupSetArtwork } from '$lib/posters/season-groups';
+	import { defaultExpanded, providerKey, setKey, seasonKey } from '$lib/posters/collapse';
 	import { m } from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -32,6 +34,63 @@
 
 	const isShow = $derived(data.item.type === 'show');
 
+	// ---- Season/episode (child) selection state -------------------------------
+	// Keyed `kind:season:episode` (episode empty for season-level slots).
+	function childKey(kind: string, season: number, episode: number | null): string {
+		return `${kind}:${season}:${episode ?? ''}`;
+	}
+	function hydrateChildren(rows: typeof data.childSelections): Record<string, string> {
+		const out: Record<string, string> = {};
+		for (const r of rows) out[childKey(r.kind, r.season, r.episode)] = r.url;
+		return out;
+	}
+	let childSel = $state<Record<string, string>>(hydrateChildren(data.childSelections));
+	function isChildStaged(kind: string, season: number, episode: number | null, url: string) {
+		return childSel[childKey(kind, season, episode)] === url;
+	}
+	const stagedSeasons = $derived(
+		Object.keys(childSel).filter((k) => k.startsWith('poster:') || k.startsWith('background:'))
+			.length
+	);
+	const stagedEpisodes = $derived(
+		Object.keys(childSel).filter((k) => k.startsWith('title_card:')).length
+	);
+	const hasStaged = $derived(
+		Boolean(selectedPoster) ||
+			Boolean(selectedBackground) ||
+			stagedSeasons > 0 ||
+			stagedEpisodes > 0
+	);
+
+	// ---- Collapse state (provider / set / season) -----------------------------
+	const COLLAPSE_NS = 'pp:collapse:';
+	let expanded = $state<Set<string>>(defaultExpanded(data.providerGroups));
+	function isExpanded(key: string) {
+		return expanded.has(key);
+	}
+	function toggle(key: string) {
+		const next = new Set(expanded);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		expanded = next;
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem(COLLAPSE_NS + data.item.id, JSON.stringify([...next]));
+		}
+	}
+	// Load persisted collapse state on mount and whenever the item changes; falls
+	// back to the default (first provider + first set expanded). Kept out of the
+	// initial $state so SSR and first client render agree (no hydration mismatch).
+	$effect(() => {
+		const id = data.item.id;
+		if (typeof localStorage === 'undefined') return;
+		try {
+			const raw = localStorage.getItem(COLLAPSE_NS + id);
+			expanded = raw ? new Set(JSON.parse(raw) as string[]) : defaultExpanded(data.providerGroups);
+		} catch {
+			expanded = defaultExpanded(data.providerGroups);
+		}
+	});
+
 	// Re-sync local selection when navigating to a different item.
 	let loadedId = data.item.id;
 	$effect(() => {
@@ -39,6 +98,7 @@
 			loadedId = data.item.id;
 			selectedPoster = data.item.selectedPosterUrl;
 			selectedBackground = data.item.selectedBackgroundUrl;
+			childSel = hydrateChildren(data.childSelections);
 			message = null;
 			messageError = false;
 			confirmApply = false;
@@ -76,10 +136,6 @@
 		Boolean(data.item.backdropUrl || data.item.overview || (data.item.genres?.length ?? 0))
 	);
 
-	function setKinds(set: CandidateSet, kind: PosterCandidate['kind']) {
-		return set.candidates.filter((c) => c.kind === kind);
-	}
-
 	const PROVIDER_LABELS: Record<string, string> = {
 		mediux: 'MediUX',
 		tmdb: 'TMDB',
@@ -90,11 +146,13 @@
 		return PROVIDER_LABELS[id] ?? id;
 	}
 
+	const jsonHeaders = { 'content-type': 'application/json' };
+
 	/** Persist the current staged poster + background as the pending selection. */
 	async function persistSelection() {
 		await fetch(`/api/items/${data.item.id}/select`, {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: jsonHeaders,
 			body: JSON.stringify({ posterUrl: selectedPoster, backgroundUrl: selectedBackground })
 		});
 	}
@@ -108,13 +166,55 @@
 		await persistSelection();
 	}
 
-	/** Stage a whole set: its first poster and first backdrop. */
+	/** Toggle a single season/episode slot and persist it. */
+	async function pickChild(kind: string, season: number, episode: number | null, url: string) {
+		const key = childKey(kind, season, episode);
+		const next = childSel[key] === url ? null : url;
+		if (next === null) {
+			const copy = { ...childSel };
+			delete copy[key];
+			childSel = copy;
+		} else {
+			childSel = { ...childSel, [key]: url };
+		}
+		await fetch(`/api/items/${data.item.id}/select`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ child: { kind, season, episode }, url: next })
+		});
+	}
+
+	/** Stage a whole set: show poster + backdrop and every season/episode slot it covers. */
 	async function useSet(set: CandidateSet) {
-		const poster = setKinds(set, 'poster')[0];
-		const backdrop = setKinds(set, 'background')[0];
-		if (poster) selectedPoster = poster.url;
-		if (backdrop) selectedBackground = backdrop.url;
+		const g = groupSetArtwork(set.candidates);
+		if (g.posters[0]) selectedPoster = g.posters[0].url;
+		if (g.backgrounds[0]) selectedBackground = g.backgrounds[0].url;
 		await persistSelection();
+
+		const children: { kind: string; season: number; episode: number | null; url: string }[] = [];
+		const seenEpisode = new Set<string>();
+		for (const sg of g.seasons) {
+			if (sg.posters[0]) {
+				children.push({ kind: 'poster', season: sg.season, episode: null, url: sg.posters[0].url });
+			}
+			for (const tc of sg.titleCards) {
+				if (tc.episode === null) continue;
+				const epKey = `${sg.season}:${tc.episode}`;
+				if (seenEpisode.has(epKey)) continue;
+				seenEpisode.add(epKey);
+				children.push({ kind: 'title_card', season: sg.season, episode: tc.episode, url: tc.url });
+			}
+		}
+		if (children.length) {
+			await fetch(`/api/items/${data.item.id}/select`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({ children })
+			});
+			const add: Record<string, string> = {};
+			for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
+			childSel = { ...childSel, ...add };
+		}
 		setMessage(m.item_msg_set_staged());
 	}
 
@@ -180,6 +280,37 @@
 				setMessage(m.item_msg_reverted());
 				selectedPoster = null;
 				selectedBackground = null;
+				childSel = {};
+			} else {
+				setMessage(m.item_msg_revert_failed({ error: result.error ?? res.status }), true);
+			}
+			await invalidateAll();
+		} catch {
+			setMessage(m.item_msg_revert_failed({ error: m.item_error_network() }), true);
+		} finally {
+			busy = false;
+		}
+	}
+
+	/** Revert a single season (its poster + its episodes' title cards). */
+	async function revertSeason(season: number) {
+		if (busy) return;
+		busy = true;
+		setMessage('');
+		try {
+			const res = await fetch(`/api/items/${data.item.id}/revert`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({ season })
+			});
+			const result = await res.json().catch(() => ({}));
+			if (res.ok && result.ok) {
+				setMessage(m.item_msg_reverted());
+				const copy = { ...childSel };
+				for (const k of Object.keys(copy)) {
+					if (Number(k.split(':')[1]) === season) delete copy[k];
+				}
+				childSel = copy;
 			} else {
 				setMessage(m.item_msg_revert_failed({ error: result.error ?? res.status }), true);
 			}
@@ -193,7 +324,7 @@
 
 	/** Apply button: validate, then gate live-server writes behind a confirm. */
 	function requestApply() {
-		if (!selectedPoster) {
+		if (!hasStaged) {
 			setMessage(m.item_msg_stage_first(), true);
 			return;
 		}
@@ -205,13 +336,13 @@
 	}
 
 	async function apply() {
-		if (!selectedPoster || busy) return;
+		if (busy || !hasStaged) return;
 		busy = true;
 		setMessage('');
 		try {
 			const res = await fetch(`/api/items/${data.item.id}/apply`, {
 				method: 'POST',
-				headers: { 'content-type': 'application/json' },
+				headers: jsonHeaders,
 				body: JSON.stringify({
 					posterUrl: selectedPoster,
 					backgroundUrl: selectedBackground,
@@ -219,15 +350,29 @@
 				})
 			});
 			const { outcomes } = (await res.json().catch(() => ({ outcomes: [] }))) as {
-				outcomes: { method: string; status: string; error?: string }[];
+				outcomes: {
+					method: string;
+					status: string;
+					error?: string;
+					children?: { applied: number; failed: number; skipped: number };
+				}[];
 			};
-			const targetLabel = (method: string) =>
-				method === 'kometa' ? 'Kometa' : m.apply_target_server();
+			const targetLabel = (mth: string) => (mth === 'kometa' ? 'Kometa' : m.apply_target_server());
 			const failed = outcomes.filter((o) => o.status === 'failed');
+			const skipped = outcomes.reduce((n, o) => n + (o.children?.skipped ?? 0), 0);
+			// Per-child upload failures keep method status 'success' (the show-level write
+			// succeeded), so surface them here rather than reporting a clean success.
+			const childFailed = outcomes.reduce((n, o) => n + (o.children?.failed ?? 0), 0);
 			if (!res.ok && !outcomes.length) {
 				setMessage(m.item_msg_apply_failed({ target: confirmTarget, error: res.status }), true);
 			} else if (failed.length === 0) {
-				setMessage(m.item_msg_applied());
+				if (childFailed > 0) {
+					setMessage(m.item_msg_applied_partial({ count: childFailed }), true);
+				} else {
+					setMessage(
+						skipped ? m.item_msg_applied_skipped({ count: skipped }) : m.item_msg_applied()
+					);
+				}
 				confirmApply = false;
 			} else {
 				setMessage(
@@ -275,6 +420,49 @@
 	>
 		<img src={c.url} alt="backdrop" loading="lazy" class="aspect-video w-full object-cover" />
 	</button>
+{/snippet}
+
+{#snippet seasonPosterTile(c: PosterCandidate, season: number)}
+	<button
+		type="button"
+		onclick={() => pickChild('poster', season, null, c.url)}
+		class="overflow-hidden rounded-lg border-2 transition {isChildStaged(
+			'poster',
+			season,
+			null,
+			c.url
+		)
+			? 'border-accent-500'
+			: 'border-transparent hover:border-neutral-600'}"
+	>
+		<img src={c.url} alt="season poster" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+	</button>
+{/snippet}
+
+{#snippet titleCardTile(c: PosterCandidate, season: number)}
+	<button
+		type="button"
+		onclick={() => pickChild('title_card', season, c.episode, c.url)}
+		class="overflow-hidden rounded-lg border-2 transition {isChildStaged(
+			'title_card',
+			season,
+			c.episode,
+			c.url
+		)
+			? 'border-accent-500'
+			: 'border-transparent hover:border-neutral-600'}"
+	>
+		<img src={c.url} alt="title card" loading="lazy" class="aspect-video w-full object-cover" />
+	</button>
+{/snippet}
+
+{#snippet chevron(open: boolean)}
+	<span
+		class="inline-block text-neutral-500 transition-transform motion-reduce:transition-none {open
+			? 'rotate-90'
+			: ''}"
+		aria-hidden="true">▸</span
+	>
 {/snippet}
 
 <a href="/library" class="text-sm text-neutral-400 hover:text-neutral-200"
@@ -389,85 +577,142 @@
 	</section>
 {/if}
 
-<!-- Artwork sets, grouped by provider -->
+<!-- Artwork sets, grouped by provider (collapsible) -->
 {#if data.providerGroups.length}
 	<section class="mt-8 space-y-6 pb-32">
 		{#each data.providerGroups as group (group.provider)}
-			<h2 class="section-title">
-				{group.sets.length === 1
-					? m.item_set_count_one({
-							provider: providerLabel(group.provider),
-							count: group.sets.length
-						})
-					: m.item_set_count({ provider: providerLabel(group.provider), count: group.sets.length })}
-			</h2>
-			{#each group.sets as set (set.setId)}
-				{@const posters = setKinds(set, 'poster')}
-				{@const backdrops = setKinds(set, 'background')}
-				{@const seasons = setKinds(set, 'season')}
-				{@const cards = setKinds(set, 'title_card')}
-				<div class="surface p-4">
-					<div class="mb-3 flex items-center justify-between">
-						<p class="text-sm text-neutral-300">
-							{#if set.author}{m.item_set_by()}
-								<span class="font-semibold text-neutral-100">{set.author}</span>{:else}<span
-									class="text-neutral-400">{m.item_set_unattributed()}</span
-								>{/if}
-						</p>
-						{#if posters.length || backdrops.length}
-							<button onclick={() => useSet(set)} class="btn btn-accent px-3 py-1 text-xs"
-								>{m.item_use_set()}</button
-							>
-						{/if}
-					</div>
+			{@const pKey = providerKey(group.provider)}
+			<div>
+				<button
+					type="button"
+					onclick={() => toggle(pKey)}
+					aria-expanded={isExpanded(pKey)}
+					aria-label={isExpanded(pKey) ? m.item_collapse() : m.item_expand()}
+					class="section-title flex w-full items-center gap-2"
+				>
+					{@render chevron(isExpanded(pKey))}
+					<span>
+						{group.sets.length === 1
+							? m.item_set_count_one({
+									provider: providerLabel(group.provider),
+									count: group.sets.length
+								})
+							: m.item_set_count({
+									provider: providerLabel(group.provider),
+									count: group.sets.length
+								})}
+					</span>
+				</button>
 
-					<div class="flex flex-col gap-4 sm:flex-row">
-						{#if posters.length}
-							<div class="min-w-0 flex-1">
-								<p class="mb-1 text-[11px] text-neutral-400">
-									{posters.length > 1 ? m.item_posters() : m.item_poster()}
-								</p>
-								<div class="flex gap-2 overflow-x-auto pb-2">
-									{#each posters as c (c.id)}<div class="w-20 flex-none">
-											{@render posterTile(c)}
-										</div>{/each}
+				{#if isExpanded(pKey)}
+					<div class="mt-2 space-y-4">
+						{#each group.sets as set (set.setId)}
+							{@const sKey = setKey(set.setId)}
+							{@const g = groupSetArtwork(set.candidates)}
+							<div class="surface p-4">
+								<div class="flex items-center justify-between">
+									<button
+										type="button"
+										onclick={() => toggle(sKey)}
+										aria-expanded={isExpanded(sKey)}
+										class="flex items-center gap-2 text-sm text-neutral-300"
+									>
+										{@render chevron(isExpanded(sKey))}
+										{#if set.author}{m.item_set_by()}
+											<span class="font-semibold text-neutral-100">{set.author}</span>{:else}<span
+												class="text-neutral-400">{m.item_set_unattributed()}</span
+											>{/if}
+									</button>
+									{#if g.posters.length || g.backgrounds.length || g.seasons.length}
+										<button onclick={() => useSet(set)} class="btn btn-accent px-3 py-1 text-xs"
+											>{m.item_use_set()}</button
+										>
+									{/if}
 								</div>
-							</div>
-						{/if}
-						{#if backdrops.length}
-							<div class="min-w-0 flex-1">
-								<p class="mb-1 text-[11px] text-neutral-400">
-									{backdrops.length > 1 ? m.item_backdrops() : m.item_backdrop()}
-								</p>
-								<div class="grid grid-cols-2 gap-2">
-									{#each backdrops as c (c.id)}{@render backdropTile(c)}{/each}
-								</div>
-							</div>
-						{/if}
-					</div>
 
-					{#if isShow && seasons.length}
-						<div class="mt-4">
-							<p class="mb-1 text-[11px] text-neutral-400">
-								{m.item_season_posters({ count: seasons.length })}
-							</p>
-							<div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
-								{#each seasons as c (c.id)}{@render posterTile(c)}{/each}
+								{#if isExpanded(sKey)}
+									<div class="mt-3 flex flex-col gap-4 sm:flex-row">
+										{#if g.posters.length}
+											<div class="min-w-0 flex-1">
+												<p class="mb-1 text-[11px] text-neutral-400">
+													{g.posters.length > 1 ? m.item_posters() : m.item_poster()}
+												</p>
+												<div class="flex gap-2 overflow-x-auto pb-2">
+													{#each g.posters as c (c.id)}<div class="w-20 flex-none">
+															{@render posterTile(c)}
+														</div>{/each}
+												</div>
+											</div>
+										{/if}
+										{#if g.backgrounds.length}
+											<div class="min-w-0 flex-1">
+												<p class="mb-1 text-[11px] text-neutral-400">
+													{g.backgrounds.length > 1 ? m.item_backdrops() : m.item_backdrop()}
+												</p>
+												<div class="grid grid-cols-2 gap-2">
+													{#each g.backgrounds as c (c.id)}{@render backdropTile(c)}{/each}
+												</div>
+											</div>
+										{/if}
+									</div>
+
+									{#if isShow}
+										{#each g.seasons as sg (sg.season)}
+											{@const seaKey = seasonKey(set.setId, sg.season)}
+											<div class="mt-4 rounded-lg border border-neutral-800 p-3">
+												<div class="flex items-center justify-between">
+													<button
+														type="button"
+														onclick={() => toggle(seaKey)}
+														aria-expanded={isExpanded(seaKey)}
+														class="flex items-center gap-2 text-sm font-medium text-neutral-200"
+													>
+														{@render chevron(isExpanded(seaKey))}
+														{m.item_season_label({ number: sg.season })}
+													</button>
+													{#if data.history.length}
+														<button
+															onclick={() => revertSeason(sg.season)}
+															disabled={busy}
+															class="btn btn-ghost px-2 py-1 text-xs"
+															>{m.item_revert_season()}</button
+														>
+													{/if}
+												</div>
+
+												{#if isExpanded(seaKey)}
+													{#if sg.posters.length}
+														<p class="mt-2 mb-1 text-[11px] text-neutral-400">
+															{sg.posters.length > 1 ? m.item_posters() : m.item_poster()}
+														</p>
+														<div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
+															{#each sg.posters as c (c.id)}{@render seasonPosterTile(
+																	c,
+																	sg.season
+																)}{/each}
+														</div>
+													{/if}
+													{#if sg.titleCards.length}
+														<p class="mt-3 mb-1 text-[11px] text-neutral-400">
+															{m.item_title_cards({ count: sg.titleCards.length })}
+														</p>
+														<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+															{#each sg.titleCards as c (c.id)}{@render titleCardTile(
+																	c,
+																	sg.season
+																)}{/each}
+														</div>
+													{/if}
+												{/if}
+											</div>
+										{/each}
+									{/if}
+								{/if}
 							</div>
-						</div>
-					{/if}
-					{#if isShow && cards.length}
-						<div class="mt-4">
-							<p class="mb-1 text-[11px] text-neutral-400">
-								{m.item_title_cards({ count: cards.length })}
-							</p>
-							<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-								{#each cards as c (c.id)}{@render backdropTile(c)}{/each}
-							</div>
-						</div>
-					{/if}
-				</div>
-			{/each}
+						{/each}
+					</div>
+				{/if}
+			</div>
 		{/each}
 	</section>
 {:else}
@@ -513,7 +758,9 @@
 		<span class="text-xs text-neutral-400">
 			{selectedPoster ? m.item_label_poster() : m.item_label_no_poster()}{selectedBackground
 				? m.item_label_backdrop_suffix()
-				: ''}
+				: ''}{#if stagedSeasons}
+				· {m.item_staged_seasons({ count: stagedSeasons })}{/if}{#if stagedEpisodes}
+				· {m.item_staged_episodes({ count: stagedEpisodes })}{/if}
 		</span>
 
 		<details class="text-xs">
@@ -587,7 +834,7 @@
 					{m.jobs_cancel()}
 				</button>
 			{:else}
-				<button onclick={requestApply} disabled={busy || !selectedPoster} class="btn btn-accent"
+				<button onclick={requestApply} disabled={busy || !hasStaged} class="btn btn-accent"
 					>{busy ? m.item_working() : m.item_apply()}</button
 				>
 			{/if}

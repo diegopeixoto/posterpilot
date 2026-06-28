@@ -11,8 +11,15 @@
  * `emby-parse.ts` and is unit-tested; this module only does the network calls.
  */
 
-import { mapItems, mapLibraries, type RawEmbyItemsResponse } from './emby-parse';
-import type { ConnectionResult, LockField, MediaServer, ServerItem, ServerLibrary } from './types';
+import { mapChildren, mapItems, mapLibraries, type RawEmbyItemsResponse } from './emby-parse';
+import type {
+	ConnectionResult,
+	LockField,
+	MediaServer,
+	ServerChild,
+	ServerItem,
+	ServerLibrary
+} from './types';
 
 export type EmbyFlavor = 'jellyfin' | 'emby';
 
@@ -145,6 +152,16 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 			});
 			const res = await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`);
 			return mapItems(res, base, apiKey);
+		},
+
+		async listSeasons(showId: string): Promise<ServerChild[]> {
+			const params = new URLSearchParams({ ParentId: showId, IncludeItemTypes: 'Season' });
+			return mapChildren(await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`));
+		},
+
+		async listEpisodes(seasonId: string): Promise<ServerChild[]> {
+			const params = new URLSearchParams({ ParentId: seasonId, IncludeItemTypes: 'Episode' });
+			return mapChildren(await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`));
 		},
 
 		async applyPosterUrl(itemId: string, url: string): Promise<void> {

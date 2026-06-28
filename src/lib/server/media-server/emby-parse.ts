@@ -7,7 +7,7 @@
  */
 
 import type { PlexGuids } from '$lib/server/types';
-import type { ServerItem, ServerLibrary } from './types';
+import type { ServerChild, ServerItem, ServerLibrary } from './types';
 
 /** External-id sources we extract from Jellyfin/Emby `ProviderIds`, in domain order. */
 const PROVIDER_ID_MAP = {
@@ -26,6 +26,8 @@ export interface RawEmbyItem {
 	ProductionYear?: number | null;
 	Type?: string;
 	CollectionType?: string;
+	/** Season/episode ordinal for Season/Episode items. */
+	IndexNumber?: number | null;
 	ProviderIds?: RawProviderIds;
 	ImageTags?: { Primary?: string; [k: string]: string | undefined };
 	BackdropImageTags?: string[];
@@ -110,6 +112,22 @@ export function mapLibraries(response: RawEmbyItemsResponse | undefined | null):
 		}
 	}
 	return libraries;
+}
+
+/**
+ * Map a Jellyfin/Emby `/Items` response of Season or Episode children to neutral
+ * `ServerChild[]`, keyed by `IndexNumber`. Children without a numeric IndexNumber
+ * (or id) are dropped so the caller only matches numbered slots.
+ */
+export function mapChildren(response: RawEmbyItemsResponse | undefined | null): ServerChild[] {
+	const items = response?.Items ?? [];
+	const result: ServerChild[] = [];
+	for (const item of items) {
+		if (item.Id && typeof item.IndexNumber === 'number') {
+			result.push({ id: item.Id, number: item.IndexNumber });
+		}
+	}
+	return result;
 }
 
 /**

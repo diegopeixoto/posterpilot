@@ -16,6 +16,7 @@ export type {
 	MediaServer,
 	ServerType,
 	ServerItem,
+	ServerChild,
 	ServerLibrary,
 	ConnectionResult,
 	ConnectionCandidate,

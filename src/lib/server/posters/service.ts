@@ -1,16 +1,19 @@
 import { dirname as posixDirname } from 'node:path/posix';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	appliedPosters,
+	childSelections,
 	mediaItems,
 	posterCandidates,
 	type MediaItem
 } from '$lib/server/db/schema';
 import type { AppConfig, ApplyMethod } from '$lib/server/config';
 import { resolveActiveServer, serverTypeLabel } from '$lib/server/media-server';
-import { writeKometaYaml } from '$lib/server/kometa/yaml';
+import type { MediaServer, ServerChild } from '$lib/server/media-server';
+import { writeKometaYaml, type KometaSeasonInput } from '$lib/server/kometa/yaml';
 import { logEvent } from '$lib/server/events';
+import { resolveChildOps, seasonsNeedingEpisodes, type StagedChildSlot } from './child-apply';
 import { availableProviders, PROVIDER_ORDER, type ProviderId } from './providers';
 
 /**
@@ -137,10 +140,102 @@ export async function selectCandidate(
 		.where(eq(mediaItems.id, itemId));
 }
 
+/**
+ * Upsert or clear a single season/episode artwork slot. A null `url` clears the
+ * slot. Season slots pass `episode: null`; episode (title-card) slots pass the
+ * episode number. Uniqueness is per-slot, so we delete any existing row for the
+ * slot before inserting (libsql has no portable partial-index upsert target).
+ */
+export async function selectChild(
+	itemId: number,
+	slot: { kind: 'poster' | 'background' | 'title_card'; season: number; episode: number | null },
+	url: string | null
+): Promise<void> {
+	const { kind, season, episode } = slot;
+	const episodeMatch =
+		episode === null ? isNull(childSelections.episode) : eq(childSelections.episode, episode);
+	await db
+		.delete(childSelections)
+		.where(
+			and(
+				eq(childSelections.mediaItemId, itemId),
+				eq(childSelections.kind, kind),
+				eq(childSelections.season, season),
+				episodeMatch
+			)
+		);
+	if (url) {
+		await db
+			.insert(childSelections)
+			.values({ mediaItemId: itemId, kind, season, episode, url, updatedAt: new Date() });
+	}
+}
+
+/**
+ * Stage many child slots in one call (used by "use this set"). Runs every per-slot
+ * delete+insert inside a single transaction so the bulk stage commits once and is
+ * atomic, rather than issuing two statements per slot across separate commits.
+ */
+export async function selectChildrenBulk(
+	itemId: number,
+	slots: {
+		kind: 'poster' | 'background' | 'title_card';
+		season: number;
+		episode: number | null;
+		url: string;
+	}[]
+): Promise<void> {
+	if (!slots.length) return;
+	await db.transaction(async (tx) => {
+		for (const s of slots) {
+			const episodeMatch =
+				s.episode === null
+					? isNull(childSelections.episode)
+					: eq(childSelections.episode, s.episode);
+			await tx
+				.delete(childSelections)
+				.where(
+					and(
+						eq(childSelections.mediaItemId, itemId),
+						eq(childSelections.kind, s.kind),
+						eq(childSelections.season, s.season),
+						episodeMatch
+					)
+				);
+			await tx.insert(childSelections).values({
+				mediaItemId: itemId,
+				kind: s.kind,
+				season: s.season,
+				episode: s.episode,
+				url: s.url,
+				updatedAt: new Date()
+			});
+		}
+	});
+}
+
+/** Read an item's staged child selections as pure slots for apply/UI hydration. */
+export async function getChildSelections(itemId: number): Promise<StagedChildSlot[]> {
+	const rows = await db
+		.select()
+		.from(childSelections)
+		.where(eq(childSelections.mediaItemId, itemId));
+	return rows.map((r) => ({ kind: r.kind, season: r.season, episode: r.episode, url: r.url }));
+}
+
+/** Summary of how many child slots were applied, failed, or skipped in one apply. */
+export interface ChildApplySummary {
+	applied: number;
+	failed: number;
+	skipped: number;
+}
+
 export interface ApplyOutcome {
 	method: 'plex' | 'kometa';
 	status: 'success' | 'failed';
 	error?: string;
+	/** Per-child results when season/episode slots were part of this apply. */
+	children?: ChildApplySummary;
 }
 
 /**
@@ -150,7 +245,8 @@ export interface ApplyOutcome {
 export async function applyToItem(
 	item: MediaItem,
 	params: {
-		posterUrl: string;
+		/** Show-level poster URL; null/omitted applies only the background and/or children. */
+		posterUrl?: string | null;
 		backgroundUrl?: string | null;
 		method: ApplyMethod;
 		config: AppConfig;
@@ -160,39 +256,48 @@ export async function applyToItem(
 	const outcomes: ApplyOutcome[] = [];
 	const doServer = method === 'plex' || method === 'both';
 	const doKometa = method === 'kometa' || method === 'both';
+	// Staged season/episode slots are applied alongside the show-level cover.
+	const childSlots = item.type === 'show' ? await getChildSelections(item.id) : [];
 
 	if (doServer) {
 		// Persisted as 'plex' (the direct-server method) for schema compatibility,
 		// but routed through whichever provider is active.
 		const serverLabel = serverTypeLabel(config.serverType);
 		let outcome: ApplyOutcome = { method: 'plex', status: 'success' };
+		let children: ChildApplySummary = { applied: 0, failed: 0, skipped: 0 };
 		try {
 			const server = requireActiveServerOrThrow(config);
-			await server.applyPosterUrl(item.ratingKey, posterUrl);
+			if (posterUrl) await server.applyPosterUrl(item.ratingKey, posterUrl);
 			if (backgroundUrl && server.applyBackgroundUrl) {
 				await server.applyBackgroundUrl(item.ratingKey, backgroundUrl);
 			}
+			children = await applyChildrenToServer(server, item, childSlots);
 		} catch (e) {
 			outcome = { method: 'plex', status: 'failed', error: errorMessage(e) };
 		}
-		await db.insert(appliedPosters).values({
-			mediaItemId: item.id,
-			url: posterUrl,
-			method: 'plex',
-			status: outcome.status,
-			error: outcome.error ?? null
-		});
+		if (children.applied || children.failed || children.skipped) outcome.children = children;
+		// Record a show-level row only when a show poster was part of this apply.
+		if (posterUrl) {
+			await db.insert(appliedPosters).values({
+				mediaItemId: item.id,
+				url: posterUrl,
+				method: 'plex',
+				status: outcome.status,
+				error: outcome.error ?? null
+			});
+		}
 		if (outcome.status === 'success') {
-			await logEvent('info', 'apply', `Applied cover to "${item.title}" via ${serverLabel}`, {
+			await logEvent('info', 'apply', `Applied artwork to "${item.title}" via ${serverLabel}`, {
 				title: item.title,
 				method: 'plex',
-				url: posterUrl
+				url: posterUrl ?? undefined,
+				children
 			});
 		} else {
 			await logEvent(
 				'error',
 				'apply',
-				`Failed to apply cover to "${item.title}" via ${serverLabel}`,
+				`Failed to apply artwork to "${item.title}" via ${serverLabel}`,
 				{
 					title: item.title,
 					method: 'plex',
@@ -205,29 +310,39 @@ export async function applyToItem(
 
 	if (doKometa) {
 		let outcome: ApplyOutcome = { method: 'kometa', status: 'success' };
+		const seasons = buildKometaSeasons(childSlots);
 		try {
 			if (!item.tmdbId) throw new Error('Cannot export to Kometa without a TMDB id');
 			await writeKometaYaml(kometaOutDir(config), [
-				{ tmdbId: item.tmdbId, title: item.title, posterUrl, backgroundUrl }
+				{ tmdbId: item.tmdbId, title: item.title, posterUrl, backgroundUrl, seasons }
 			]);
 		} catch (e) {
 			outcome = { method: 'kometa', status: 'failed', error: errorMessage(e) };
 		}
-		await db.insert(appliedPosters).values({
-			mediaItemId: item.id,
-			url: posterUrl,
-			method: 'kometa',
-			status: outcome.status,
-			error: outcome.error ?? null
-		});
+		if (outcome.status === 'success' && seasons.length) {
+			outcome.children = {
+				applied: seasons.reduce((n, s) => n + (s.posterUrl ? 1 : 0) + (s.episodes?.length ?? 0), 0),
+				failed: 0,
+				skipped: 0
+			};
+		}
+		if (posterUrl) {
+			await db.insert(appliedPosters).values({
+				mediaItemId: item.id,
+				url: posterUrl,
+				method: 'kometa',
+				status: outcome.status,
+				error: outcome.error ?? null
+			});
+		}
 		if (outcome.status === 'success') {
-			await logEvent('info', 'apply', `Applied cover to "${item.title}" via Kometa`, {
+			await logEvent('info', 'apply', `Applied artwork to "${item.title}" via Kometa`, {
 				title: item.title,
 				method: 'kometa',
-				url: posterUrl
+				url: posterUrl ?? undefined
 			});
 		} else {
-			await logEvent('error', 'apply', `Failed to apply cover to "${item.title}" via Kometa`, {
+			await logEvent('error', 'apply', `Failed to apply artwork to "${item.title}" via Kometa`, {
 				title: item.title,
 				method: 'kometa',
 				error: outcome.error
@@ -237,6 +352,110 @@ export async function applyToItem(
 	}
 
 	return outcomes;
+}
+
+/**
+ * Fetch the show's children and resolve staged slots to concrete child apply ops,
+ * matched by number. Episodes are fetched only for seasons that have episode slots.
+ */
+async function resolveChildrenForServer(
+	server: MediaServer,
+	showId: string,
+	slots: StagedChildSlot[]
+) {
+	const seasons = await server.listSeasons(showId);
+	const seasonIdByNumber = new Map(seasons.map((s) => [s.number, s.id]));
+	const episodesBySeason: Record<number, ServerChild[]> = {};
+	for (const num of seasonsNeedingEpisodes(slots)) {
+		const id = seasonIdByNumber.get(num);
+		if (id !== undefined) episodesBySeason[num] = await server.listEpisodes(id);
+	}
+	return resolveChildOps(slots, seasons, episodesBySeason);
+}
+
+/**
+ * Apply every staged season/episode slot to its server child, isolating per-child
+ * failures and reporting slots whose number had no matching child. `applyPosterUrl`
+ * / `applyBackgroundUrl` already lock the field, so no extra lock call is needed.
+ */
+async function applyChildrenToServer(
+	server: MediaServer,
+	item: MediaItem,
+	slots: StagedChildSlot[]
+): Promise<ChildApplySummary> {
+	if (!slots.length || item.type !== 'show') return { applied: 0, failed: 0, skipped: 0 };
+
+	let resolution: Awaited<ReturnType<typeof resolveChildrenForServer>>;
+	try {
+		resolution = await resolveChildrenForServer(server, item.ratingKey, slots);
+	} catch (e) {
+		await logEvent('error', 'apply', `Could not list children for "${item.title}"`, {
+			title: item.title,
+			error: errorMessage(e)
+		});
+		return { applied: 0, failed: slots.length, skipped: 0 };
+	}
+
+	const { ops, skipped } = resolution;
+	let applied = 0;
+	let failed = 0;
+	for (const op of ops) {
+		let status: 'success' | 'failed' = 'success';
+		let error: string | undefined;
+		try {
+			if (op.field === 'background') {
+				if (!server.applyBackgroundUrl) throw new Error('Provider does not support backgrounds');
+				await server.applyBackgroundUrl(op.childId, op.url);
+			} else {
+				await server.applyPosterUrl(op.childId, op.url);
+			}
+			applied++;
+		} catch (e) {
+			status = 'failed';
+			error = errorMessage(e);
+			failed++;
+		}
+		await db.insert(appliedPosters).values({
+			mediaItemId: item.id,
+			url: op.url,
+			method: 'plex',
+			status,
+			error: error ?? null,
+			kind: op.slot.kind,
+			season: op.slot.season,
+			episode: op.slot.episode
+		});
+	}
+	return { applied, failed, skipped: skipped.length };
+}
+
+/**
+ * Build the per-season Kometa input from staged child slots: season posters become
+ * `seasons[].posterUrl` and episode title cards become `seasons[].episodes[]`.
+ * Season backgrounds are intentionally omitted (not exported to Kometa YAML).
+ */
+function buildKometaSeasons(slots: StagedChildSlot[]): KometaSeasonInput[] {
+	const bySeason = new Map<number, KometaSeasonInput>();
+	const ensure = (n: number): KometaSeasonInput => {
+		let s = bySeason.get(n);
+		if (!s) {
+			s = { season: n };
+			bySeason.set(n, s);
+		}
+		return s;
+	};
+	for (const slot of slots) {
+		if (slot.kind === 'poster' && slot.episode === null) {
+			ensure(slot.season).posterUrl = slot.url;
+		} else if (slot.kind === 'title_card' && slot.episode !== null) {
+			const s = ensure(slot.season);
+			(s.episodes ??= []).push({ episode: slot.episode, url: slot.url });
+		}
+		// season background is not exported to Kometa
+	}
+	const seasons = [...bySeason.values()].sort((a, b) => a.season - b.season);
+	for (const s of seasons) s.episodes?.sort((a, b) => a.episode - b.episode);
+	return seasons;
 }
 
 function errorMessage(e: unknown): string {
@@ -282,29 +501,110 @@ export async function applyCustomUpload(
 	);
 }
 
+/** Scope for {@link revertItem}: omit `season` to revert everything. */
+export interface RevertScope {
+	/** Revert only this season's poster/background and its episodes' title cards. */
+	season?: number;
+}
+
 /**
- * Revert an item to its original poster: re-set the poster captured at sync,
- * unlock the field so the server manages it again, and clear posterpilot's applied
- * history + pending selection so the item reads as unchanged. The Kometa YAML
- * export (if any) is left in place — remove it from your Kometa config to fully
- * undo a Kometa apply. On servers without a lock concept (Jellyfin/Emby) the
- * unlock step is a no-op.
+ * Revert applied artwork at full or per-season scope.
+ *
+ * Full scope (no season): re-set the show poster captured at sync, unlock it, and
+ * unlock every applied season/episode child so the server manages it again; then
+ * clear all applied history, pending selections, and child selections so the item
+ * reads as unchanged. Per-season scope unlocks only that season's poster/background
+ * and its episodes' title cards, leaving the show-level and other seasons intact.
+ *
+ * Children have no stored prior art, so reverting them unlocks the field rather
+ * than re-setting an image (consistent with the unlock-based show-level revert; a
+ * no-op on Jellyfin/Emby which have no lock concept). The Kometa YAML export (if
+ * any) is left in place. Returns how many children were unlocked vs skipped.
  */
-export async function revertItem(item: MediaItem, config: AppConfig): Promise<void> {
+export async function revertItem(
+	item: MediaItem,
+	config: AppConfig,
+	scope?: RevertScope
+): Promise<{ reverted: number; skipped: number }> {
 	const server = requireActiveServerOrThrow(config);
-	if (item.currentPosterUrl) {
-		await server.applyPosterUrl(item.ratingKey, item.currentPosterUrl);
+	const season = scope?.season;
+	const fullScope = season === undefined;
+
+	// Which applied children to unlock, derived from history (deduped by slot).
+	const appliedChildRows = await db
+		.select()
+		.from(appliedPosters)
+		.where(
+			and(
+				eq(appliedPosters.mediaItemId, item.id),
+				eq(appliedPosters.method, 'plex'),
+				isNotNull(appliedPosters.kind)
+			)
+		);
+	const seen = new Set<string>();
+	const childSlots: StagedChildSlot[] = [];
+	for (const r of appliedChildRows) {
+		if (!r.kind || r.season === null) continue;
+		if (!fullScope && r.season !== season) continue;
+		const key = `${r.kind}:${r.season}:${r.episode ?? ''}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		childSlots.push({ kind: r.kind, season: r.season, episode: r.episode, url: '' });
 	}
-	await server.lockField(item.ratingKey, 'poster', false);
-	await db.delete(appliedPosters).where(eq(appliedPosters.mediaItemId, item.id));
-	await db
-		.update(mediaItems)
-		.set({ selectedPosterUrl: null, selectedBackgroundUrl: null, updatedAt: new Date() })
-		.where(eq(mediaItems.id, item.id));
+
+	let reverted = 0;
+	let skipped = 0;
+	if (childSlots.length && item.type === 'show') {
+		try {
+			const { ops, skipped: sk } = await resolveChildrenForServer(
+				server,
+				item.ratingKey,
+				childSlots
+			);
+			skipped += sk.length;
+			for (const op of ops) {
+				try {
+					await server.lockField(op.childId, op.field, false);
+					reverted++;
+				} catch {
+					skipped++;
+				}
+			}
+		} catch {
+			skipped += childSlots.length;
+		}
+	}
+
+	// Show-level revert only on a full revert.
+	if (fullScope) {
+		if (item.currentPosterUrl) {
+			await server.applyPosterUrl(item.ratingKey, item.currentPosterUrl);
+		}
+		await server.lockField(item.ratingKey, 'poster', false);
+		// Apply can lock the background too (incl. background-only applies), so unlock it.
+		await server.lockField(item.ratingKey, 'background', false);
+		await db.delete(appliedPosters).where(eq(appliedPosters.mediaItemId, item.id));
+		await db.delete(childSelections).where(eq(childSelections.mediaItemId, item.id));
+		await db
+			.update(mediaItems)
+			.set({ selectedPosterUrl: null, selectedBackgroundUrl: null, updatedAt: new Date() })
+			.where(eq(mediaItems.id, item.id));
+	} else {
+		await db
+			.delete(appliedPosters)
+			.where(and(eq(appliedPosters.mediaItemId, item.id), eq(appliedPosters.season, season)));
+		await db
+			.delete(childSelections)
+			.where(and(eq(childSelections.mediaItemId, item.id), eq(childSelections.season, season)));
+	}
+
 	await logEvent(
 		'info',
 		'apply',
-		`Reverted "${item.title}" to its original cover on ${serverTypeLabel(config.serverType)}`,
-		{ title: item.title }
+		fullScope
+			? `Reverted "${item.title}" to its original cover on ${serverTypeLabel(config.serverType)}`
+			: `Reverted season ${season} of "${item.title}" on ${serverTypeLabel(config.serverType)}`,
+		{ title: item.title, season: fullScope ? undefined : season }
 	);
+	return { reverted, skipped };
 }

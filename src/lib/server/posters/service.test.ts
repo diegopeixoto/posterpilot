@@ -94,7 +94,7 @@ describe('applyToItem', () => {
 		});
 		expect(outcomes).toEqual([{ method: 'kometa', status: 'success' }]);
 		expect(h.writeKometaYaml).toHaveBeenCalledWith('/kometa', [
-			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'u', backgroundUrl: 'b' }
+			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'u', backgroundUrl: 'b', seasons: [] }
 		]);
 		expect(h.applyPosterUrl).not.toHaveBeenCalled();
 		expect(h.inserts).toHaveLength(1);

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, like, lt, sql, type SQL } from 'drizzle-orm';
 import { db } from './db';
 import {
 	appliedPosters,
+	childSelections,
 	events,
 	jobs,
 	mediaItems,
@@ -161,12 +162,17 @@ export async function getItemDetail(id: number) {
 		.where(eq(appliedPosters.mediaItemId, id))
 		.orderBy(desc(appliedPosters.appliedAt))
 		.limit(20);
+	const childSelectionRows = await db
+		.select()
+		.from(childSelections)
+		.where(eq(childSelections.mediaItemId, id));
 	return {
 		item,
 		candidates,
 		sets: groupCandidatesBySet(candidates),
 		providerGroups: groupByProvider(candidates),
-		history
+		history,
+		childSelections: childSelectionRows
 	};
 }
 

@@ -18,6 +18,20 @@ import { parse, stringify } from 'yaml';
 /** Default file name written into the Kometa assets/config directory. */
 export const DEFAULT_FILENAME = 'posterpilot.yml';
 
+/** An episode title card to export under its season. */
+export interface KometaEpisodeInput {
+	episode: number;
+	url: string;
+}
+
+/** A season's artwork to export: its poster and/or its episodes' title cards. */
+export interface KometaSeasonInput {
+	season: number;
+	/** Season poster URL. Season backgrounds are intentionally not exported. */
+	posterUrl?: string | null;
+	episodes?: KometaEpisodeInput[];
+}
+
 /** A single item to export, keyed by its TMDB id. */
 export interface KometaItemInput {
 	/** TMDB id used as the metadata mapping key Kometa matches against. */
@@ -28,24 +42,61 @@ export interface KometaItemInput {
 	posterUrl?: string | null;
 	/** Selected background asset URL, or null/undefined when none is selected. */
 	backgroundUrl?: string | null;
+	/** Per-season artwork (season posters + episode title cards), for shows. */
+	seasons?: KometaSeasonInput[];
+}
+
+/** A single Kometa episode metadata entry (title card via url_poster). */
+interface KometaEpisodeEntry {
+	url_poster?: string;
+}
+
+/** A single Kometa season metadata entry. */
+interface KometaSeasonEntry {
+	url_poster?: string;
+	episodes?: Record<number, KometaEpisodeEntry>;
 }
 
 /** A single Kometa metadata entry. */
 interface KometaEntry {
 	url_poster?: string;
 	url_background?: string;
+	seasons?: Record<number, KometaSeasonEntry>;
+}
+
+/** Build the nested `seasons:` mapping (season posters + episode title cards). */
+function buildSeasons(seasons: KometaSeasonInput[]): Record<number, KometaSeasonEntry> | undefined {
+	const out: Record<number, KometaSeasonEntry> = {};
+	for (const s of seasons) {
+		const entry: KometaSeasonEntry = {};
+		if (s.posterUrl) entry.url_poster = s.posterUrl;
+		if (s.episodes?.length) {
+			const episodes: Record<number, KometaEpisodeEntry> = {};
+			for (const e of s.episodes) {
+				if (e.url) episodes[e.episode] = { url_poster: e.url };
+			}
+			if (Object.keys(episodes).length) entry.episodes = episodes;
+		}
+		// Only emit a season that carries a poster or at least one episode title card.
+		if (entry.url_poster || entry.episodes) out[s.season] = entry;
+	}
+	return Object.keys(out).length ? out : undefined;
 }
 
 /**
- * Build the Kometa entry (url_poster / url_background) for one item.
+ * Build the Kometa entry (url_poster / url_background / seasons) for one item.
  *
- * @param item The item whose poster/background URLs to encode.
- * @returns A metadata entry containing only the URLs that are set.
+ * @param item The item whose poster/background/season URLs to encode.
+ * @returns A metadata entry containing only the parts that are set.
  */
 function buildEntry(item: KometaItemInput): KometaEntry {
 	const entry: KometaEntry = {};
 	if (item.posterUrl) entry.url_poster = item.posterUrl;
 	if (item.backgroundUrl) entry.url_background = item.backgroundUrl;
+	if (item.seasons?.length) {
+		const seasons = buildSeasons(item.seasons);
+		if (seasons) entry.seasons = seasons;
+	}
 	return entry;
 }
 
@@ -93,11 +144,39 @@ export function mergeMetadata(
 			: {};
 
 	for (const item of items) {
-		metadata[item.tmdbId] = buildEntry(item);
+		metadata[item.tmdbId] = mergeEntry(metadata[item.tmdbId] ?? {}, buildEntry(item));
 	}
 
 	merged.metadata = metadata;
 	return merged;
+}
+
+/**
+ * Merge a freshly-built entry into the existing one for the same TMDB id, field by
+ * field, so a granular-only apply (only `seasons`) does not drop a previously
+ * exported show-level `url_poster`/`url_background`, and a season re-apply does not
+ * drop previously exported episodes. A field present in `next` overwrites; a field
+ * absent from `next` is preserved from `existing`.
+ */
+function mergeEntry(existing: KometaEntry, next: KometaEntry): KometaEntry {
+	const out: KometaEntry = { ...existing };
+	if (next.url_poster !== undefined) out.url_poster = next.url_poster;
+	if (next.url_background !== undefined) out.url_background = next.url_background;
+	if (next.seasons) {
+		const seasons: Record<number, KometaSeasonEntry> = { ...(existing.seasons ?? {}) };
+		for (const [key, nextSeason] of Object.entries(next.seasons)) {
+			const season = Number(key);
+			const prev = seasons[season] ?? {};
+			const mergedSeason: KometaSeasonEntry = { ...prev };
+			if (nextSeason.url_poster !== undefined) mergedSeason.url_poster = nextSeason.url_poster;
+			if (nextSeason.episodes) {
+				mergedSeason.episodes = { ...(prev.episodes ?? {}), ...nextSeason.episodes };
+			}
+			seasons[season] = mergedSeason;
+		}
+		out.seasons = seasons;
+	}
+	return out;
 }
 
 /**

@@ -36,6 +36,13 @@
       "when": 1782243736933,
       "tag": "0004_natural_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1782608385566,
+      "tag": "0005_pretty_overlord",
+      "breakpoints": true
     }
   ]
 }

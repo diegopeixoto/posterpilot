@@ -15,6 +15,7 @@ import {
 	testConnection as plexTestConnection,
 	listSections,
 	listItems,
+	listChildren,
 	uploadPosterFromUrl,
 	uploadPosterBytes,
 	setPosterLock,
@@ -22,7 +23,23 @@ import {
 	uploadBackgroundBytes,
 	setBackgroundLock
 } from '$lib/server/plex/client';
-import type { ConnectionResult, LockField, MediaServer, ServerItem, ServerLibrary } from './types';
+import type {
+	ConnectionResult,
+	LockField,
+	MediaServer,
+	ServerChild,
+	ServerItem,
+	ServerLibrary
+} from './types';
+
+/** Map Plex children to neutral `ServerChild`, dropping any without a numeric index. */
+function toChildren(rows: { ratingKey: string; index: number | null }[]): ServerChild[] {
+	const out: ServerChild[] = [];
+	for (const r of rows) {
+		if (r.index !== null) out.push({ id: r.ratingKey, number: r.index });
+	}
+	return out;
+}
 
 /**
  * Construct a Plex `MediaServer` bound to a base URL + token. All calls delegate
@@ -57,6 +74,14 @@ export function plexProvider(baseUrl: string, token: string): MediaServer {
 				// app's TMDB-derived backdrop drives backgrounds, as it does now.
 				currentBackgroundUrl: null
 			}));
+		},
+
+		async listSeasons(showId: string): Promise<ServerChild[]> {
+			return toChildren(await listChildren(baseUrl, token, showId));
+		},
+
+		async listEpisodes(seasonId: string): Promise<ServerChild[]> {
+			return toChildren(await listChildren(baseUrl, token, seasonId));
 		},
 
 		async applyPosterUrl(itemId: string, url: string): Promise<void> {

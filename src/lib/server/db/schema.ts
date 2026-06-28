@@ -1,4 +1,5 @@
-import { sqliteTable, integer, real, text } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, real, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import type { TmdbCastMember } from '$lib/server/types';
 
 /** A Plex library item (movie or show) and its resolved metadata. */
@@ -56,6 +57,39 @@ export const posterCandidates = sqliteTable('poster_candidates', {
 		.$defaultFn(() => new Date())
 });
 
+/**
+ * User's pending selection for a single season/episode artwork slot, kept separate
+ * from the show-level poster/background on `media_items`. Season slots use
+ * `kind` poster|background with `episode` NULL; episode slots use `kind` title_card
+ * with `episode` set. Uniqueness is enforced per-slot (see partial indexes below).
+ */
+export const childSelections = sqliteTable(
+	'child_selections',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		mediaItemId: integer('media_item_id')
+			.notNull()
+			.references(() => mediaItems.id, { onDelete: 'cascade' }),
+		kind: text('kind', { enum: ['poster', 'background', 'title_card'] }).notNull(),
+		season: integer('season').notNull(),
+		episode: integer('episode'),
+		url: text('url').notNull(),
+		updatedAt: integer('updated_at', { mode: 'timestamp' })
+			.notNull()
+			.$defaultFn(() => new Date())
+	},
+	// SQLite treats NULLs as distinct in unique indexes, so season slots (episode NULL)
+	// and episode slots (episode set) each need their own partial unique index.
+	(t) => [
+		uniqueIndex('child_selections_season_slot')
+			.on(t.mediaItemId, t.kind, t.season)
+			.where(sql`${t.episode} is null`),
+		uniqueIndex('child_selections_episode_slot')
+			.on(t.mediaItemId, t.kind, t.season, t.episode)
+			.where(sql`${t.episode} is not null`)
+	]
+);
+
 /** History of cover applications (Plex upload and/or Kometa export). */
 export const appliedPosters = sqliteTable('applied_posters', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
@@ -66,6 +100,10 @@ export const appliedPosters = sqliteTable('applied_posters', {
 	method: text('method', { enum: ['plex', 'kometa'] }).notNull(),
 	status: text('status', { enum: ['success', 'failed'] }).notNull(),
 	error: text('error'),
+	/** Slot granularity: null kind = show-level; otherwise the applied child slot. */
+	kind: text('kind', { enum: ['poster', 'background', 'title_card'] }),
+	season: integer('season'),
+	episode: integer('episode'),
 	appliedAt: integer('applied_at', { mode: 'timestamp' })
 		.notNull()
 		.$defaultFn(() => new Date())
@@ -121,6 +159,8 @@ export type MediaItem = typeof mediaItems.$inferSelect;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type PosterCandidate = typeof posterCandidates.$inferSelect;
 export type NewPosterCandidate = typeof posterCandidates.$inferInsert;
+export type ChildSelection = typeof childSelections.$inferSelect;
+export type NewChildSelection = typeof childSelections.$inferInsert;
 export type AppliedPoster = typeof appliedPosters.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type Event = typeof events.$inferSelect;

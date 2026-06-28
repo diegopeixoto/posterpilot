@@ -1,7 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { resolveConfig } from '$lib/server/config';
-import { applyToItem } from '$lib/server/posters/service';
+import { applyToItem, getChildSelections } from '$lib/server/posters/service';
 import { getMediaItem } from '$lib/server/queries';
 
 export const POST: RequestHandler = async ({ params, request }) => {
@@ -16,12 +16,15 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		method?: 'plex' | 'kometa' | 'both';
 	};
 	const posterUrl = body.posterUrl ?? item.selectedPosterUrl;
-	if (!posterUrl) throw error(400, 'no poster selected');
+	const backgroundUrl = body.backgroundUrl ?? item.selectedBackgroundUrl;
+	// Allow a granular-only apply (season/episode slots staged but no show poster).
+	const childCount = item.type === 'show' ? (await getChildSelections(item.id)).length : 0;
+	if (!posterUrl && !backgroundUrl && childCount === 0) throw error(400, 'nothing to apply');
 
 	const config = await resolveConfig();
 	const outcomes = await applyToItem(item, {
 		posterUrl,
-		backgroundUrl: body.backgroundUrl ?? item.selectedBackgroundUrl,
+		backgroundUrl,
 		method: body.method ?? config.defaultApplyMethod,
 		config
 	});

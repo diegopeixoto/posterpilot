@@ -40,6 +40,17 @@ export interface ServerItem {
 	currentBackgroundUrl: string | null;
 }
 
+/**
+ * A show's season or episode child, identified provider-natively and keyed by its
+ * number, so number-keyed artwork (season N / episode N) can be mapped to it.
+ */
+export interface ServerChild {
+	/** Provider-native stable id (Plex ratingKey, Jellyfin/Emby item id). */
+	id: string;
+	/** Season number (for seasons) or episode number (for episodes). */
+	number: number;
+}
+
 /** Result of a provider connection test. Never thrown — returned as a value. */
 export interface ConnectionResult {
 	ok: boolean;
@@ -70,6 +81,12 @@ export interface MediaServer {
 
 	/** List a library's items with their resolvable metadata. */
 	listItems(libraryKey: string): Promise<ServerItem[]>;
+
+	/** List a show's seasons, each with its season number. */
+	listSeasons(showId: string): Promise<ServerChild[]>;
+
+	/** List a season's episodes, each with its episode number. */
+	listEpisodes(seasonId: string): Promise<ServerChild[]>;
 
 	/** Apply a poster to an item from an image URL, then lock the poster field. */
 	applyPosterUrl(itemId: string, url: string): Promise<void>;

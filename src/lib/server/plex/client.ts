@@ -45,11 +45,19 @@ interface MetadataEntry {
 	year?: number;
 	type: string;
 	thumb?: string;
+	/** Season/episode ordinal on `/children` responses. */
+	index?: number;
 	Guid?: PlexRawGuid[];
 }
 
 interface MetadataContainer {
 	Metadata?: MetadataEntry[];
+}
+
+/** A show's season or episode child: its rating key and its season/episode number. */
+export interface PlexChild {
+	ratingKey: string;
+	index: number | null;
 }
 
 /** Headers every Plex request must carry. */
@@ -193,6 +201,33 @@ export async function listItems(
 		type: entry.type === 'show' ? 'show' : 'movie',
 		guids: parseGuids(entry.Guid),
 		currentPosterUrl: buildPosterUrl(baseUrl, entry.thumb, token)
+	}));
+}
+
+/**
+ * List a metadata item's direct children: a show's seasons, or a season's
+ * episodes. Plex exposes both via `/library/metadata/{ratingKey}/children`, where
+ * each child's `index` is its season or episode number. Children without a numeric
+ * index are returned with `index: null` so the caller can skip them.
+ *
+ * @param baseUrl The Plex server base URL.
+ * @param token The `X-Plex-Token` to authenticate with.
+ * @param ratingKey The parent item's rating key (show for seasons, season for episodes).
+ * @returns Each child's rating key and numeric index.
+ */
+export async function listChildren(
+	baseUrl: string,
+	token: string,
+	ratingKey: string
+): Promise<PlexChild[]> {
+	const container = await getContainer<MetadataContainer>(
+		baseUrl,
+		token,
+		`/library/metadata/${encodeURIComponent(ratingKey)}/children`
+	);
+	return (container.Metadata ?? []).map((entry) => ({
+		ratingKey: entry.ratingKey,
+		index: typeof entry.index === 'number' ? entry.index : null
 	}));
 }
 
