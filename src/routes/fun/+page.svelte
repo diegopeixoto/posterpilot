@@ -48,8 +48,7 @@
 					type="number"
 					name="yearMin"
 					inputmode="numeric"
-					min="1900"
-					max="2100"
+					min="1"
 					value={data.filter.yearMin ?? ''}
 					placeholder="1990"
 					class="input w-full"
@@ -61,8 +60,7 @@
 					type="number"
 					name="yearMax"
 					inputmode="numeric"
-					min="1900"
-					max="2100"
+					min="1"
 					value={data.filter.yearMax ?? ''}
 					placeholder="2025"
 					class="input w-full"

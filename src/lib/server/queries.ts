@@ -12,11 +12,7 @@ import {
 import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 import type { PickFilter } from './fun-pick';
 
-import { defaultSortDir, type LibrarySort, type SortDir } from './library-sort';
-
-// Re-exported so existing importers keep one entry point for sort types.
-export { LIBRARY_SORTS, defaultSortDir, parseLibrarySort } from './library-sort';
-export type { LibrarySort, SortDir } from './library-sort';
+import { defaultSortDir, type LibrarySort, type SortDir } from '$lib/library-sort';
 
 export interface LibraryFilter {
 	type?: 'movie' | 'show';
@@ -38,6 +34,11 @@ const lastAppliedAt = sql`(
 	select max(ap.applied_at) from applied_posters ap
 	where ap.media_item_id = ${mediaItems.id} and ap.status = 'success'
 )`;
+
+/** Membership test for a genre inside the item's JSON `genres` array. */
+function genreCondition(genre: string): SQL {
+	return sql`exists (select 1 from json_each(${mediaItems.genres}) where json_each.value = ${genre})`;
+}
 
 /** Build the ORDER BY clause for a library sort + direction. */
 function orderFor(sort: LibrarySort | undefined, dir: SortDir | undefined): SQL {
@@ -74,10 +75,7 @@ export async function listLibrary(filter: LibraryFilter = {}) {
 		);
 	if (typeof filter.minRating === 'number' && Number.isFinite(filter.minRating))
 		conds.push(gte(mediaItems.rating, filter.minRating));
-	if (filter.genre)
-		conds.push(
-			sql`exists (select 1 from json_each(${mediaItems.genres}) where json_each.value = ${filter.genre})`
-		);
+	if (filter.genre) conds.push(genreCondition(filter.genre));
 	if (filter.q) conds.push(like(mediaItems.title, `%${filter.q}%`));
 	return db
 		.select()
@@ -135,10 +133,7 @@ export async function getMontagePosters(limit = 14): Promise<string[]> {
 export async function pickRandomItem(filter: PickFilter): Promise<MediaItem | null> {
 	const conds: SQL[] = [];
 	if (filter.type) conds.push(eq(mediaItems.type, filter.type));
-	if (filter.genre)
-		conds.push(
-			sql`exists (select 1 from json_each(${mediaItems.genres}) where json_each.value = ${filter.genre})`
-		);
+	if (filter.genre) conds.push(genreCondition(filter.genre));
 	if (filter.yearMin !== undefined) conds.push(gte(mediaItems.year, filter.yearMin));
 	if (filter.yearMax !== undefined) conds.push(lte(mediaItems.year, filter.yearMax));
 	if (filter.excludeWatched) conds.push(eq(mediaItems.watched, false));

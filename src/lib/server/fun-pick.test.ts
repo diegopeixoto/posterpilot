@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parsePickFilter } from './fun-pick';
 
-function params(entries: Record<string, string>): { get(name: string): string | null } {
+function params(entries: Record<string, string>): URLSearchParams {
 	return new URLSearchParams(entries);
 }
 

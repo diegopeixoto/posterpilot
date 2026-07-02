@@ -6,6 +6,8 @@
 	import JobProgress from '$lib/components/JobProgress.svelte';
 	import Popover from '$lib/components/Popover.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import { LIBRARY_SORTS, defaultSortDir, type LibrarySort } from '$lib/library-sort';
+	import { sortLabels } from '$lib/sort-labels';
 
 	let { data } = $props();
 
@@ -100,28 +102,10 @@
 		})
 	);
 
-	// Sort field + direction. Title ascends by default; other fields descend.
-	function defaultDir(sort: string | undefined): 'asc' | 'desc' {
-		return sort === 'title' || sort === undefined ? 'asc' : 'desc';
-	}
-	// svelte-ignore state_referenced_locally
-	let dir = $state<'asc' | 'desc'>(
-		data.filter.dir ?? defaultDir(data.filter.sort ?? data.defaultSort)
-	);
-
 	// Popover open state.
 	let filterOpen = $state(false);
 	let sortOpen = $state(false);
 
-	// Labels for the current selections, used by the toolbar triggers and chips.
-	const sortLabels: Record<string, () => string> = {
-		title: m.library_sort_title,
-		rating: m.library_sort_rating,
-		year: m.library_sort_year,
-		runtime: m.library_sort_runtime,
-		recent: m.library_sort_recent,
-		added: m.library_sort_added
-	};
 	const typeLabels: Record<string, () => string> = {
 		movie: m.library_type_movies,
 		show: m.library_type_shows
@@ -129,8 +113,8 @@
 	// The effective field falls back to the configured default; only an explicit
 	// URL sort counts as "active" (chip-worthy), so the default never shows a chip.
 	const sortField = $derived(data.filter.sort ?? data.defaultSort);
-	const sortDir = $derived(data.filter.dir ?? defaultDir(sortField));
-	const hasSort = $derived(!!data.filter.sort || sortDir !== defaultDir(sortField));
+	const sortDir = $derived(data.filter.dir ?? defaultSortDir(sortField));
+	const hasSort = $derived(!!data.filter.sort || sortDir !== defaultSortDir(sortField));
 
 	// How many filter facets (not sort) are currently active — drives the Filter badge.
 	const activeFilterCount = $derived(
@@ -203,14 +187,19 @@
 	// Sort: selecting a field resets to its natural direction; the toggle flips it.
 	// Sort always applies immediately (it's not part of the staged filter set).
 	function onSortChange(e: Event) {
-		const value = (e.currentTarget as HTMLSelectElement).value;
-		dir = defaultDir(value);
-		// Picking the configured default drops the param (no chip, same order).
-		navigate({ sort: value === data.defaultSort ? undefined : value, dir });
+		const value = (e.currentTarget as HTMLSelectElement).value as LibrarySort;
+		// Picking the configured default drops both params — back to the pristine
+		// state, so the URL stays meaningful if the configured default changes.
+		const isDefault = value === data.defaultSort;
+		navigate({
+			sort: isDefault ? undefined : value,
+			dir: isDefault ? undefined : defaultSortDir(value)
+		});
 	}
 	function toggleDir() {
-		dir = dir === 'asc' ? 'desc' : 'asc';
-		navigate({ sort: data.filter.sort, dir });
+		// Flip from the *rendered* direction so the toggle never drifts from what
+		// the user sees, regardless of how the current sort/dir was reached.
+		navigate({ sort: data.filter.sort, dir: sortDir === 'asc' ? 'desc' : 'asc' });
 	}
 
 	/** Remove a single filter param (chip ✕) and re-navigate. */
@@ -225,7 +214,6 @@
 
 	/** Reset every filter + sort back to defaults. */
 	function clearAll() {
-		dir = defaultDir(undefined);
 		staged = {};
 		setIgnoreView('all');
 		goto('/library', { keepFocus: true, noScroll: true });
@@ -447,12 +435,9 @@
 			<label class="block">
 				<span class="mb-1 block text-xs text-neutral-400">{m.library_sort_button()}</span>
 				<select value={sortField} onchange={onSortChange} class="input w-full">
-					<option value="title">{m.library_sort_title()}</option>
-					<option value="rating">{m.library_sort_rating()}</option>
-					<option value="year">{m.library_sort_year()}</option>
-					<option value="runtime">{m.library_sort_runtime()}</option>
-					<option value="recent">{m.library_sort_recent()}</option>
-					<option value="added">{m.library_sort_added()}</option>
+					{#each LIBRARY_SORTS as sort (sort)}
+						<option value={sort}>{sortLabels[sort]()}</option>
+					{/each}
 				</select>
 			</label>
 			<button

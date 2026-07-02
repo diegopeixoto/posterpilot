@@ -13,11 +13,11 @@ describe('parseLibrarySort', () => {
 		expect(parseLibrarySort('RATING')).toBe('rating');
 	});
 
-	it('falls back to title for unknown, empty, or absent values', () => {
-		expect(parseLibrarySort('popularity')).toBe('title');
-		expect(parseLibrarySort('')).toBe('title');
-		expect(parseLibrarySort(undefined)).toBe('title');
-		expect(parseLibrarySort(null)).toBe('title');
+	it('returns undefined for unknown, empty, or absent values', () => {
+		expect(parseLibrarySort('popularity')).toBeUndefined();
+		expect(parseLibrarySort('')).toBeUndefined();
+		expect(parseLibrarySort(undefined)).toBeUndefined();
+		expect(parseLibrarySort(null)).toBeUndefined();
 	});
 });
 

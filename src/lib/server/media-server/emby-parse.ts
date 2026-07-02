@@ -113,6 +113,13 @@ export function parseProviderIds(providerIds: RawProviderIds | undefined | null)
 	return guids;
 }
 
+/** Parse an ISO-8601 date string, guarding absent/unparseable values to null. */
+function parseIsoDate(value: string | null | undefined): Date | null {
+	if (!value) return null;
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /**
  * Build an absolute, API-key-authenticated URL for an item's Primary (poster)
  * image. Returns null when the item has no Primary image tag.
@@ -184,9 +191,6 @@ export function mapItems(
 		const type = itemTypeToMediaType(item.Type);
 		if (!type || !item.Id) continue;
 		const backdropTag = item.BackdropImageTags?.[0];
-		// Guard against unparseable dates → null rather than Invalid Date.
-		const lastModified = item.DateLastModified ? new Date(item.DateLastModified) : null;
-		const created = item.DateCreated ? new Date(item.DateCreated) : null;
 		result.push({
 			id: item.Id,
 			title: item.Name ?? item.Id,
@@ -201,8 +205,8 @@ export function mapItems(
 				apiKey
 			),
 			currentBackgroundUrl: buildEmbyImageUrl(baseUrl, item.Id, 'Backdrop', backdropTag, apiKey),
-			serverUpdatedAt: lastModified && !Number.isNaN(lastModified.getTime()) ? lastModified : null,
-			addedAt: created && !Number.isNaN(created.getTime()) ? created : null,
+			serverUpdatedAt: parseIsoDate(item.DateLastModified),
+			addedAt: parseIsoDate(item.DateCreated),
 			watched: item.UserData?.Played === true
 		});
 	}

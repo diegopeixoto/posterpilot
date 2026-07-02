@@ -3,7 +3,7 @@ import { env } from '$env/dynamic/private';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { normalizeLocale } from '$lib/i18n/resolve';
-import { parseLibrarySort, type LibrarySort } from '$lib/server/library-sort';
+import { parseLibrarySort, type LibrarySort } from '$lib/library-sort';
 import { getEncryptionKey } from '$lib/server/secrets/key';
 import { decryptSecret, encryptSecret } from '$lib/server/secrets/crypto';
 import type { KometaSnapshot } from '$lib/server/kometa/config';
@@ -306,7 +306,8 @@ export async function resolveConfig(): Promise<AppConfig> {
 		thumbCacheTtlDays: toInt(rawValue('thumbCacheTtlDays', persisted), DEFAULTS.thumbCacheTtlDays),
 		thumbCacheMaxMb: toInt(rawValue('thumbCacheMaxMb', persisted), DEFAULTS.thumbCacheMaxMb),
 		funEnabled: toBool(rawValue('funEnabled', persisted), DEFAULTS.funEnabled),
-		libraryDefaultSort: parseLibrarySort(rawValue('libraryDefaultSort', persisted))
+		libraryDefaultSort:
+			parseLibrarySort(rawValue('libraryDefaultSort', persisted)) ?? DEFAULTS.libraryDefaultSort
 	};
 }
 

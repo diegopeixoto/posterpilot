@@ -4,6 +4,8 @@
 	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages';
+	import { LIBRARY_SORTS } from '$lib/library-sort';
+	import { sortLabels } from '$lib/sort-labels';
 	import { setLocale } from '$lib/paraglide/runtime';
 	import PlexLogin from '$lib/components/PlexLogin.svelte';
 	import EmbyLogin from '$lib/components/EmbyLogin.svelte';
@@ -778,12 +780,9 @@
 					disabled={env.libraryDefaultSort}
 					class="input w-full disabled:opacity-50"
 				>
-					<option value="title">{m.library_sort_title()}</option>
-					<option value="rating">{m.library_sort_rating()}</option>
-					<option value="year">{m.library_sort_year()}</option>
-					<option value="runtime">{m.library_sort_runtime()}</option>
-					<option value="recent">{m.library_sort_recent()}</option>
-					<option value="added">{m.library_sort_added()}</option>
+					{#each LIBRARY_SORTS as sort (sort)}
+						<option value={sort}>{sortLabels[sort]()}</option>
+					{/each}
 				</select>
 				{#if env.libraryDefaultSort}<p class="mt-1 text-xs text-amber-400">
 						{m.settings_set_from_env()}

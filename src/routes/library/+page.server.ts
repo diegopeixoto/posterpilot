@@ -1,12 +1,6 @@
 import type { PageServerLoad } from './$types';
-import {
-	getSpotlightItem,
-	listGenres,
-	listLibrary,
-	LIBRARY_SORTS,
-	type LibraryFilter,
-	type LibrarySort
-} from '$lib/server/queries';
+import { getSpotlightItem, listGenres, listLibrary, type LibraryFilter } from '$lib/server/queries';
+import { parseLibrarySort } from '$lib/library-sort';
 import { resolveConfig } from '$lib/server/config';
 
 export const load: PageServerLoad = async ({ url }) => {
@@ -23,7 +17,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		// Ignore a missing/zero/non-numeric value rather than binding NaN (libsql throws on NaN).
 		minRating: Number.isFinite(minRatingParam) && minRatingParam > 0 ? minRatingParam : undefined,
 		genre: url.searchParams.get('genre') || undefined,
-		sort: LIBRARY_SORTS.includes(sortParam as LibrarySort) ? (sortParam as LibrarySort) : undefined,
+		sort: parseLibrarySort(sortParam),
 		dir: dirParam === 'asc' || dirParam === 'desc' ? dirParam : undefined,
 		q: url.searchParams.get('q') || undefined
 	};

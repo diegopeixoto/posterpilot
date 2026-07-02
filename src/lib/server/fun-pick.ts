@@ -28,7 +28,7 @@ function parseYear(value: string | null): number | undefined {
  * `yearMax`, `excludeWatched`). Unknown or malformed values fall back to the
  * unrestricted default rather than erroring.
  */
-export function parsePickFilter(params: { get(name: string): string | null }): PickFilter {
+export function parsePickFilter(params: URLSearchParams): PickFilter {
 	const rawType = params.get('type');
 	const genre = params.get('genre');
 	return {
