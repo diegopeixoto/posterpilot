@@ -48,4 +48,4 @@
 
 ## 9. Release (after merge)
 
-- [ ] 9.1 After release-please publishes the release, rewrite its body with `gh release edit` in the v0.6.0 "What's new" style: `## What's new in X.Y.Z`, bolded user-facing feature bullets in plain language, full-changelog compare link (not the raw commit list of the v0.5.0 style)
+- [x] 9.1 After release-please publishes the release, rewrite its body with `gh release edit` in the v0.6.0 "What's new" style: `## What's new in X.Y.Z`, bolded user-facing feature bullets in plain language, full-changelog compare link (not the raw commit list of the v0.5.0 style)
