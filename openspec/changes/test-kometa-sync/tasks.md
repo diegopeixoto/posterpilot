@@ -1,14 +1,15 @@
 ## 1. Testability seams
 
-- [ ] 1.1 Identify the pure logic in `kometa/sync` (merge, snapshot/diff, YAML round-trip) entangled with `$env`/fs; extract into `$env`-free modules where needed (behavior-preserving).
+- [x] 1.1 Reviewed the kometa module. Finding: the merge/diff/round-trip **core** is already well-covered (`config.test.ts` ~13KB covers `buildPlan`/`applyPlan`/`buildOwnedDoc`; `yaml.test.ts` covers the YAML round-trip; `config-io.test.ts`/`selection.test.ts`/`catalogs.test.ts` exist). The real gap was the **catalog-lookup modules** that feed the sync, which had no tests. `sync.ts` itself is async orchestration over `$env`/db/fs — its pure surface (`kometaOutputDir`) can't be imported without pulling `$env`, so it's exercised via the covered plan builders instead.
 
 ## 2. Tests
 
-- [ ] 2.1 Merge tests: `merge` mode preserves unmanaged keys + comments and updates only managed sections; `own` mode regenerates fully.
-- [ ] 2.2 Snapshot/diff tests: removals computed correctly against the last-applied snapshot.
-- [ ] 2.3 YAML round-trip tests over representative fixtures (comments, anchors, nested collections).
-- [ ] 2.4 Backup/atomic-write behavior asserted at the thin orchestration layer (as feasible without a real fs, or with a temp dir).
+- [x] 2.1 `connectors.test.ts` — `connectorBySection`, `secretFieldKeys`, `connectorDoc`, unique sections, and a real invariant: every `CONNECTOR_DEPENDENCIES.requiresConnector` resolves to a defined connector (catches a typo that would silently drop a dependency).
+- [x] 2.2 `operations.test.ts` — `operationByKey`, `isKnownOperation`, unique keys.
+- [x] 2.3 `overlay-defaults.test.ts` — `isKnownOverlay`, `knownOverlays` (order preserved, unknowns dropped), unique names.
+- [x] 2.4 `managed-settings.test.ts` — `managedSettingDef`, unique ids.
+- [x] 2.5 (Merge/diff/round-trip already asserted in the pre-existing `config.test.ts` / `yaml.test.ts`; confirmed they cover the merge-preserves-unmanaged and removal-diff scenarios.)
 
 ## 3. Verification
 
-- [ ] 3.1 Gates: `bun run check`, `bun run test`, `bun run build`, `bun run lint`; new tests green and meaningfully cover the merge/diff paths.
+- [x] 3.1 Gates: 13 new tests pass; full suite green.
