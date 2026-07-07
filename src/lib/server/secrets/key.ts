@@ -12,7 +12,7 @@
  * Kept out of the unit-tested crypto module because it reads `$env` and the
  * filesystem; the crypto in `./crypto.ts` stays pure over the key for testing.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scryptSync } from 'node:crypto';
 import { randomBytes } from 'node:crypto';
@@ -67,4 +67,28 @@ export function getEncryptionKey(): Buffer {
 			? scryptSync(appSecret, APP_SECRET_SALT, KEY_BYTES)
 			: loadOrCreateKeyFile();
 	return cachedKey;
+}
+
+/**
+ * Boot-time hygiene check: warn (never throw) if the key file exists with group- or
+ * world-accessible permissions. This key protects every stored secret and should be
+ * owner-only (`0600`). Advisory only — a missing file (fresh install, or an `APP_SECRET`
+ * deployment with no file) is fine and silent.
+ */
+export function warnIfKeyFileInsecure(): void {
+	// When APP_SECRET drives the key there is no file to guard.
+	if (env.APP_SECRET && env.APP_SECRET !== '') return;
+	const path = keyFilePath();
+	try {
+		const st = statSync(path);
+		if ((st.mode & 0o077) !== 0) {
+			const mode = (st.mode & 0o777).toString(8).padStart(3, '0');
+			console.warn(
+				`[warn] secrets: encryption key file ${path} is group/world-accessible (mode ${mode}); ` +
+					`it should be owner-only. Run: chmod 600 ${path}`
+			);
+		}
+	} catch {
+		// Missing or unreadable → nothing to warn about (a fresh install creates it 0600).
+	}
 }

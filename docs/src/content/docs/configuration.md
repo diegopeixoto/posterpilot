@@ -62,6 +62,54 @@ be decrypted and must be re-entered. Setting `APP_SECRET` (and keeping it safe)
 avoids this and keeps secrets portable across container recreation and replicas.
 :::
 
+## Authentication
+
+PosterPilot ships with **no login by default** — on a trusted LAN it stays out of
+your way. When you expose it, you can require a login, *arr-style (Sonarr/Radarr),
+with an optional local-network bypass. Configure it in **Settings → Security**, or
+lock the mode from the environment with `AUTH_MODE`.
+
+Three modes:
+
+- **`disabled`** (default) — no login; every route is open.
+- **`local`** — a login is required **except** for local-network addresses
+  (loopback, RFC1918, link-local, IPv6 ULA). LAN clients are never prompted;
+  everyone else must log in. Local addresses always bypass — there is no logout for
+  LAN access in this mode.
+- **`enabled`** — a login is required for every request.
+
+Set a username and password in the Security tab. The password is stored only as a
+salted **scrypt** hash (never plaintext, never recoverable), separate from the
+secrets-encryption key, so it never depends on `.app-key`. The session is a signed,
+`HttpOnly` cookie with a sliding 14-day expiry; changing the password invalidates
+all existing sessions.
+
+### Behind a reverse proxy
+
+`local` mode is **fail-closed**: if a request carries an `X-Forwarded-For` /
+`Forwarded` header but you have **not** told PosterPilot which header to trust, it is
+treated as **non-local** and must log in. Otherwise a proxy — whose socket IP is
+usually private — would make all internet traffic look local. Configure adapter-node's
+built-ins so the real client IP is used:
+
+- `ADDRESS_HEADER=x-forwarded-for`
+- `XFF_DEPTH=<number of trusted proxies in front of the app>`
+
+A direct LAN client never sends a forwarded header, so it always bypasses correctly.
+
+### Anti-lockout
+
+`AUTH_MODE` in the environment **overrides** the persisted mode and locks the control
+in the UI. Set `AUTH_MODE=disabled` to recover an instance you have locked yourself
+out of. As a further safety net, if the mode is `enabled`/`local` but no credentials
+are stored, PosterPilot falls back to `disabled` rather than lock everyone out.
+
+:::note
+Enabling authentication is a **non-breaking** upgrade: the default is `disabled`, so
+existing installs behave exactly as before until you opt in. There is no data
+migration and no change to how the container runs.
+:::
+
 ## Media server
 
 PosterPilot talks to one active media server at a time, chosen by `SERVER_TYPE`
@@ -257,6 +305,10 @@ and are locked in the UI.
 | `FUN_ENABLED`             | FUN section               | off                                   | Show the experimental FUN section (random movie/series picker).                               |
 | `THUMB_CACHE_TTL_DAYS`    | Thumbnail cache TTL       | `30`                                  | Days a cached provider preview image stays fresh before it is re-fetched.                     |
 | `THUMB_CACHE_MAX_MB`      | Thumbnail cache size      | `512`                                 | Max on-disk size of the thumbnail cache (MB) before least-recently-used eviction.             |
+| `AUTH_MODE`               | Security → mode           | `disabled`                            | Authentication mode: `disabled`, `local`, or `enabled`. Overrides the UI and locks the control. |
+| `ADDRESS_HEADER`          | —                         | —                                     | Header carrying the real client IP behind a proxy (e.g. `x-forwarded-for`) for `local` mode.  |
+| `XFF_DEPTH`               | —                         | —                                     | Number of trusted proxies in front of the app (adapter-node), paired with `ADDRESS_HEADER`.   |
+| `MAX_UPLOAD_MB`           | —                         | `15`                                  | Max size of a custom-poster upload, in MB (rejected with `413` above it).                     |
 | `APP_LANGUAGE`                | Language                  | — (auto)                              | Preferred UI locale: `en`, `es`, `zh`, `ja`, or `pt-BR`.                                      |
 | `LOG_DIR`                 | —                         | `/data/logs` (Docker)                 | Folder for the rotating `posterpilot.log` file (~5 MB × 5 files).                             |
 | `EVENT_RETENTION`         | —                         | `2000`                                | Max number of activity-log rows kept in the database (older rows are pruned).                 |
@@ -269,7 +321,8 @@ Boolean flags accept `1` / `true` / `on` / `yes` (case-insensitive) for _enabled
 anything else (or unset) leaves the documented default.
 
 :::note
-`DATABASE_URL`, `PORT`, `LOG_DIR`, `EVENT_RETENTION`, `APP_SECRET`, and
-`APP_KEY_FILE` are deployment-level settings — they are read from the environment
-only and are not part of the in-app Settings page.
+`DATABASE_URL`, `PORT`, `LOG_DIR`, `EVENT_RETENTION`, `APP_SECRET`,
+`APP_KEY_FILE`, `ADDRESS_HEADER`, `XFF_DEPTH`, and `MAX_UPLOAD_MB` are
+deployment-level settings — they are read from the environment only and are not part
+of the in-app Settings page.
 :::

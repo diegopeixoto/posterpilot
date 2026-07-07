@@ -30,6 +30,19 @@ services:
       # auto-generated and persisted to /data/.app-key (no setup needed). Set it to
       # keep secrets portable across container recreation or multiple replicas.
       # APP_SECRET: ${APP_SECRET:-}
+      # Optional — authentication (*arr-style). Off by default; configure it in the
+      # Settings → Security UI instead of here if you prefer. Setting AUTH_MODE here
+      # OVERRIDES the persisted mode and locks the UI control — use AUTH_MODE=disabled
+      # to recover a locked-out instance.
+      #   disabled = no login (default) · local = login except local addresses · enabled = always
+      # AUTH_MODE: ${AUTH_MODE:-}
+      # Behind a reverse proxy, tell adapter-node which header carries the real client
+      # IP so `local` mode is fail-closed (without this, proxied traffic is treated as
+      # NON-local and must log in). XFF_DEPTH = number of trusted proxies.
+      # ADDRESS_HEADER: x-forwarded-for
+      # XFF_DEPTH: '1'
+      # Optional — max custom-poster upload size in MB (default 15).
+      # MAX_UPLOAD_MB: '15'
       # Other tuning (apply concurrency, suggestion pre-select, incremental sync,
       # thumbnail cache TTL/size) is configurable in the Settings UI, or via the
       # APPLY_CONCURRENCY / SUGGEST_PRESELECT / INCREMENTAL_SYNC /

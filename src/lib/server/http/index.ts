@@ -3,6 +3,18 @@ import pRetry, { AbortError } from 'p-retry';
 import pLimit, { type LimitFunction } from 'p-limit';
 import { db } from '$lib/server/db';
 import { httpCache } from '$lib/server/db/schema';
+import { parseRetryAfter } from './retry-after';
+
+/** A retryable HTTP failure (429/5xx) carrying an optional server-requested delay. */
+class RetryableHttpError extends Error {
+	constructor(
+		message: string,
+		readonly retryAfterMs: number | null
+	) {
+		super(message);
+		this.name = 'RetryableHttpError';
+	}
+}
 
 const DAY_MS = 86_400_000;
 
@@ -54,7 +66,12 @@ function fetchFresh(
 				const res = await fetch(url, { headers, signal: ac.signal });
 				if (!res.ok) {
 					if (res.status === 429 || res.status >= 500) {
-						throw new Error(`HTTP ${res.status} for ${url}`);
+						// 429/503 may carry a Retry-After telling us how long to wait.
+						const retryAfterMs =
+							res.status === 429 || res.status === 503
+								? parseRetryAfter(res.headers.get('retry-after'), Date.now())
+								: null;
+						throw new RetryableHttpError(`HTTP ${res.status} for ${url}`, retryAfterMs);
 					}
 					// 4xx (other than 429) is a permanent failure — do not retry.
 					throw new AbortError(`HTTP ${res.status} for ${url}`);
@@ -64,7 +81,17 @@ function fetchFresh(
 				clearTimeout(timer);
 			}
 		},
-		{ retries, minTimeout: 500, factor: 2 }
+		{
+			retries,
+			minTimeout: 500,
+			factor: 2,
+			// Honor an upstream Retry-After before the next attempt, on top of backoff.
+			onFailedAttempt: async ({ error }) => {
+				if (error instanceof RetryableHttpError && error.retryAfterMs != null) {
+					await delay(error.retryAfterMs);
+				}
+			}
+		}
 	);
 }
 

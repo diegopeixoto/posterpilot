@@ -12,10 +12,12 @@ export const load: PageServerLoad = async () => {
 	if (!getActiveServer(config) && !config.tmdbKey) {
 		redirect(307, '/setup');
 	}
-	return {
-		stats: await getStats(),
+	// These three queries are independent — run them concurrently.
+	const [stats, activeJobsList, jobs] = await Promise.all([
+		getStats(),
 		// All pending/running jobs get live progress + cancel on the dashboard.
-		activeJobsList: await listActiveJobs(),
-		jobs: await listJobs(8)
-	};
+		listActiveJobs(),
+		listJobs(8)
+	]);
+	return { stats, activeJobsList, jobs };
 };
