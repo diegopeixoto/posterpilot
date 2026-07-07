@@ -273,21 +273,7 @@ export async function uploadPosterFromUrl(
 	ratingKey: string,
 	posterUrl: string
 ): Promise<void> {
-	const base = normalizeBase(baseUrl);
-	const key = encodeURIComponent(ratingKey);
-	const encodedUrl = encodeURIComponent(posterUrl);
-	const encodedToken = encodeURIComponent(token);
-
-	const uploadUrl = `${base}/library/metadata/${key}/posters?url=${encodedUrl}&X-Plex-Token=${encodedToken}`;
-	const uploadRes = await fetch(uploadUrl, { method: 'POST', headers: plexHeaders(token) });
-	if (!uploadRes.ok) {
-		throw new Error(
-			`Plex rejected the poster upload: HTTP ${uploadRes.status} ${uploadRes.statusText}`
-		);
-	}
-
-	// Only lock once the poster has been accepted.
-	await setPosterLock(baseUrl, token, ratingKey, true);
+	await uploadImageFromUrl(baseUrl, token, ratingKey, posterUrl, 'poster');
 }
 
 /**
@@ -308,18 +294,7 @@ export async function uploadPosterBytes(
 	data: ArrayBuffer,
 	contentType = 'image/jpeg'
 ): Promise<void> {
-	const base = normalizeBase(baseUrl);
-	const key = encodeURIComponent(ratingKey);
-	const url = `${base}/library/metadata/${key}/posters?X-Plex-Token=${encodeURIComponent(token)}`;
-	const res = await fetch(url, {
-		method: 'POST',
-		headers: { 'X-Plex-Token': token, 'Content-Type': contentType },
-		body: data
-	});
-	if (!res.ok) {
-		throw new Error(`Plex rejected the poster upload: HTTP ${res.status} ${res.statusText}`);
-	}
-	await setPosterLock(baseUrl, token, ratingKey, true);
+	await uploadImageBytes(baseUrl, token, ratingKey, data, contentType, 'poster');
 }
 
 /**
@@ -351,19 +326,7 @@ export async function uploadBackgroundFromUrl(
 	ratingKey: string,
 	backgroundUrl: string
 ): Promise<void> {
-	const base = normalizeBase(baseUrl);
-	const key = encodeURIComponent(ratingKey);
-	const encodedUrl = encodeURIComponent(backgroundUrl);
-	const encodedToken = encodeURIComponent(token);
-
-	const uploadUrl = `${base}/library/metadata/${key}/arts?url=${encodedUrl}&X-Plex-Token=${encodedToken}`;
-	const uploadRes = await fetch(uploadUrl, { method: 'POST', headers: plexHeaders(token) });
-	if (!uploadRes.ok) {
-		throw new Error(
-			`Plex rejected the background upload: HTTP ${uploadRes.status} ${uploadRes.statusText}`
-		);
-	}
-	await setBackgroundLock(baseUrl, token, ratingKey, true);
+	await uploadImageFromUrl(baseUrl, token, ratingKey, backgroundUrl, 'background');
 }
 
 /**
@@ -377,18 +340,7 @@ export async function uploadBackgroundBytes(
 	data: ArrayBuffer,
 	contentType = 'image/jpeg'
 ): Promise<void> {
-	const base = normalizeBase(baseUrl);
-	const key = encodeURIComponent(ratingKey);
-	const url = `${base}/library/metadata/${key}/arts?X-Plex-Token=${encodeURIComponent(token)}`;
-	const res = await fetch(url, {
-		method: 'POST',
-		headers: { 'X-Plex-Token': token, 'Content-Type': contentType },
-		body: data
-	});
-	if (!res.ok) {
-		throw new Error(`Plex rejected the background upload: HTTP ${res.status} ${res.statusText}`);
-	}
-	await setBackgroundLock(baseUrl, token, ratingKey, true);
+	await uploadImageBytes(baseUrl, token, ratingKey, data, contentType, 'background');
 }
 
 /** Lock or unlock an item's background/art field (`art.locked`). */
@@ -399,6 +351,58 @@ export async function setBackgroundLock(
 	locked: boolean
 ): Promise<void> {
 	await setFieldLock(baseUrl, token, ratingKey, 'art', locked, 'background');
+}
+
+// Poster vs background differ only by the Plex endpoint and the lock field; the
+// upload flow is otherwise identical, so both go through these two helpers.
+type ImageKind = 'poster' | 'background';
+const IMAGE_ENDPOINT: Record<ImageKind, string> = { poster: 'posters', background: 'arts' };
+const LOCK_FIELD: Record<ImageKind, 'thumb' | 'art'> = { poster: 'thumb', background: 'art' };
+
+/** Tell Plex to fetch `imageUrl` for the given image kind, then lock the field. */
+async function uploadImageFromUrl(
+	baseUrl: string,
+	token: string,
+	ratingKey: string,
+	imageUrl: string,
+	kind: ImageKind
+): Promise<void> {
+	const base = normalizeBase(baseUrl);
+	const key = encodeURIComponent(ratingKey);
+	const encodedUrl = encodeURIComponent(imageUrl);
+	const encodedToken = encodeURIComponent(token);
+	const uploadUrl = `${base}/library/metadata/${key}/${IMAGE_ENDPOINT[kind]}?url=${encodedUrl}&X-Plex-Token=${encodedToken}`;
+	const uploadRes = await fetch(uploadUrl, { method: 'POST', headers: plexHeaders(token) });
+	if (!uploadRes.ok) {
+		throw new Error(
+			`Plex rejected the ${kind} upload: HTTP ${uploadRes.status} ${uploadRes.statusText}`
+		);
+	}
+	// Only lock once the image has been accepted.
+	await setFieldLock(baseUrl, token, ratingKey, LOCK_FIELD[kind], true, kind);
+}
+
+/** POST raw image bytes for the given image kind, then lock the field. */
+async function uploadImageBytes(
+	baseUrl: string,
+	token: string,
+	ratingKey: string,
+	data: ArrayBuffer,
+	contentType: string,
+	kind: ImageKind
+): Promise<void> {
+	const base = normalizeBase(baseUrl);
+	const key = encodeURIComponent(ratingKey);
+	const url = `${base}/library/metadata/${key}/${IMAGE_ENDPOINT[kind]}?X-Plex-Token=${encodeURIComponent(token)}`;
+	const res = await fetch(url, {
+		method: 'POST',
+		headers: { 'X-Plex-Token': token, 'Content-Type': contentType },
+		body: data
+	});
+	if (!res.ok) {
+		throw new Error(`Plex rejected the ${kind} upload: HTTP ${res.status} ${res.statusText}`);
+	}
+	await setFieldLock(baseUrl, token, ratingKey, LOCK_FIELD[kind], true, kind);
 }
 
 /** Shared PUT that toggles a Plex metadata lock field (`thumb.locked`/`art.locked`). */
