@@ -64,7 +64,11 @@ function orderFor(sort: LibrarySort | undefined, dir: SortDir | undefined): SQL 
 }
 
 /** List library items matching the given filters, ordered per the chosen sort. */
-export async function listLibrary(filter: LibraryFilter = {}) {
+/** Default number of items in a library page. */
+export const LIBRARY_PAGE_SIZE = 60;
+
+/** Build the shared WHERE conditions for a library filter (used by list + count). */
+function libraryConds(filter: LibraryFilter): SQL[] {
 	const conds: SQL[] = [];
 	if (filter.type) conds.push(eq(mediaItems.type, filter.type));
 	if (filter.hasMediux) conds.push(eq(mediaItems.hasMediux, true));
@@ -77,11 +81,37 @@ export async function listLibrary(filter: LibraryFilter = {}) {
 		conds.push(gte(mediaItems.rating, filter.minRating));
 	if (filter.genre) conds.push(genreCondition(filter.genre));
 	if (filter.q) conds.push(like(mediaItems.title, `%${filter.q}%`));
-	return db
+	return conds;
+}
+
+/**
+ * List library items matching `filter`. When `page` is given, returns just that
+ * window (offset-based) so large libraries don't ship every row into one payload;
+ * omit `page` to get the full result (used by non-UI callers). Ordering is stable
+ * (the sort column plus an `id` tiebreaker) so paging can't skip or repeat a row.
+ */
+export async function listLibrary(
+	filter: LibraryFilter = {},
+	page?: { limit: number; offset: number }
+) {
+	const conds = libraryConds(filter);
+	const q = db
 		.select()
 		.from(mediaItems)
 		.where(conds.length ? and(...conds) : undefined)
-		.orderBy(orderFor(filter.sort, filter.dir));
+		.orderBy(orderFor(filter.sort, filter.dir), asc(mediaItems.id));
+	if (page) return q.limit(page.limit).offset(page.offset);
+	return q;
+}
+
+/** Count library items matching `filter` (for pagination totals). */
+export async function countLibrary(filter: LibraryFilter = {}): Promise<number> {
+	const conds = libraryConds(filter);
+	const rows = await db
+		.select({ c: sql<number>`count(*)` })
+		.from(mediaItems)
+		.where(conds.length ? and(...conds) : undefined);
+	return rows[0]?.c ?? 0;
 }
 
 /** Distinct genres present across the library, for the filter chips. */

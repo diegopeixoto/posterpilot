@@ -1,5 +1,12 @@
 import type { PageServerLoad } from './$types';
-import { getSpotlightItem, listGenres, listLibrary, type LibraryFilter } from '$lib/server/queries';
+import {
+	countLibrary,
+	getSpotlightItem,
+	listGenres,
+	listLibrary,
+	LIBRARY_PAGE_SIZE,
+	type LibraryFilter
+} from '$lib/server/queries';
 import { parseLibrarySort } from '$lib/library-sort';
 import { resolveConfig } from '$lib/server/config';
 
@@ -25,10 +32,14 @@ export const load: PageServerLoad = async ({ url }) => {
 	// `filter` is returned with the URL-only sort so the UI can tell an explicit
 	// user choice (chip-worthy) from the configured default.
 	const defaultSort = config.libraryDefaultSort;
-	const [items, genres, spotlight] = await Promise.all([
-		listLibrary({ ...filter, sort: filter.sort ?? defaultSort }),
+	const effectiveFilter = { ...filter, sort: filter.sort ?? defaultSort };
+	// Load only the first page (bounded payload) plus the total, so a large library
+	// no longer serializes every row into the SSR response.
+	const [items, total, genres, spotlight] = await Promise.all([
+		listLibrary(effectiveFilter, { limit: LIBRARY_PAGE_SIZE, offset: 0 }),
+		countLibrary(effectiveFilter),
 		listGenres(),
 		getSpotlightItem()
 	]);
-	return { items, filter, genres, spotlight, defaultSort };
+	return { items, total, pageSize: LIBRARY_PAGE_SIZE, filter, genres, spotlight, defaultSort };
 };
