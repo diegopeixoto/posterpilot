@@ -428,5 +428,8 @@
 	"security_password": "密码",
 	"security_password_set": "•••••••• (未更改)",
 	"security_password_hint": "留空以保留当前密码。",
-	"security_save_error": "无法保存安全设置。"
+	"security_save_error": "无法保存安全设置。",
+	"library_load_more": "加载更多",
+	"library_loading_more": "加载中…",
+	"library_load_error": "无法加载更多项目。"
 }

@@ -428,5 +428,8 @@
 	"security_password": "パスワード",
 	"security_password_set": "•••••••• (変更なし)",
 	"security_password_hint": "現在のパスワードを保持するには空欄のままにします。",
-	"security_save_error": "セキュリティ設定を保存できませんでした。"
+	"security_save_error": "セキュリティ設定を保存できませんでした。",
+	"library_load_more": "さらに読み込む",
+	"library_loading_more": "読み込み中…",
+	"library_load_error": "追加の項目を読み込めませんでした。"
 }

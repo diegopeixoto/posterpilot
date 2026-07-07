@@ -21,10 +21,15 @@
 	<a href={`/item/${item.id}`} class="block">
 		<div class="aspect-[2/3] w-full overflow-hidden bg-neutral-950">
 			{#if item.currentPosterUrl}
+				<!-- Served through the cached, grid-sized thumbnail proxy (by item id) so
+				     the browser doesn't hit the media server directly for every tile. -->
 				<img
-					src={item.currentPosterUrl}
+					src={`/api/poster-thumb/${item.id}`}
 					alt={item.title}
 					loading="lazy"
+					decoding="async"
+					width="200"
+					height="300"
 					class="h-full w-full object-cover transition group-hover:scale-[1.03]"
 				/>
 			{:else}

@@ -95,12 +95,63 @@
 		localStorage.setItem('pp_ignoreview', view);
 	}
 
+	// Accumulated server rows (first page from SSR, more appended on scroll). Re-seeded
+	// whenever a new SSR payload arrives (a filter/sort change navigates and reloads).
+	// svelte-ignore state_referenced_locally
+	let items = $state(data.items);
+	// svelte-ignore state_referenced_locally
+	let total = $state(data.total);
+	let loadingMore = $state(false);
+	let loadError = $state(false);
+	$effect(() => {
+		// Depend on the server payload; reset the accumulator when it changes.
+		items = data.items;
+		total = data.total;
+	});
+
+	// More server rows exist beyond what we've loaded (the ignore-view filter below is
+	// client-side, so paging is bounded by the raw server count, not the visible count).
+	const hasMore = $derived(items.length < total);
+
+	async function loadMore() {
+		if (loadingMore || !hasMore) return;
+		loadingMore = true;
+		loadError = false;
+		try {
+			const params = new URLSearchParams(page.url.searchParams);
+			params.set('offset', String(items.length));
+			const res = await fetch(`/api/library?${params.toString()}`);
+			if (!res.ok) throw new Error(String(res.status));
+			const body = (await res.json()) as { items: typeof data.items; total: number };
+			// Guard against a stale response landing after a filter change reset the list.
+			items = [...items, ...body.items];
+			total = body.total;
+		} catch {
+			loadError = true;
+		} finally {
+			loadingMore = false;
+		}
+	}
+
 	const visibleItems = $derived(
-		data.items.filter((item) => {
+		items.filter((item) => {
 			if (ignoreView === 'all') return true;
 			return ignoreView === 'ignored' ? isIgnored(item) : !isIgnored(item);
 		})
 	);
+
+	// Auto-load the next page when a sentinel near the end of the grid scrolls into
+	// view (prefetch margin), with the button as a no-JS / manual fallback.
+	function onVisible(node: HTMLElement, callback: () => void) {
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0]?.isIntersecting) callback();
+			},
+			{ rootMargin: '600px' }
+		);
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
+	}
 
 	// Popover open state.
 	let filterOpen = $state(false);
@@ -727,4 +778,16 @@
 			</div>
 		{/each}
 	</div>
+
+	{#if hasMore}
+		<!-- Sentinel: auto-loads the next page when it nears the viewport. -->
+		<div use:onVisible={loadMore} class="mt-6 flex justify-center">
+			<button type="button" onclick={loadMore} disabled={loadingMore} class="btn btn-ghost">
+				{loadingMore ? m.library_loading_more() : m.library_load_more()}
+			</button>
+		</div>
+	{/if}
+	{#if loadError}
+		<p class="mt-3 text-center text-sm text-red-300" role="alert">{m.library_load_error()}</p>
+	{/if}
 {/if}

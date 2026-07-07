@@ -4,14 +4,15 @@
 
 The system SHALL provide an endpoint that serves an item's poster as a grid-sized image, addressed
 by **item id** (never by a client-supplied URL). The endpoint SHALL resolve the media-server poster
-URL **server-side**, so the media-server token or API key is never exposed to the client and there is
-no server-side request-forgery surface. Served bytes SHALL carry long-lived, immutable cache headers.
+URL **server-side**, so the browser fetches posters through the id-addressed proxy rather than
+requesting the media server directly, and there is no server-side request-forgery surface. Served
+bytes SHALL carry long-lived, immutable cache headers.
 
 #### Scenario: Poster served by id
 
 - **WHEN** the grid requests the poster thumbnail for an item id
 - **THEN** the system returns the item's poster image, resolving the media-server URL server-side, and
-  the response does not expose the media-server token or API key
+  the browser does not fetch the media server directly for the tile
 
 #### Scenario: No client-supplied URL
 

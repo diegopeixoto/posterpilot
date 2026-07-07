@@ -428,5 +428,8 @@
 	"security_password": "Senha",
 	"security_password_set": "•••••••• (inalterada)",
 	"security_password_hint": "Deixe em branco para manter a senha atual.",
-	"security_save_error": "Não foi possível salvar as configurações de segurança."
+	"security_save_error": "Não foi possível salvar as configurações de segurança.",
+	"library_load_more": "Carregar mais",
+	"library_loading_more": "Carregando…",
+	"library_load_error": "Não foi possível carregar mais itens."
 }

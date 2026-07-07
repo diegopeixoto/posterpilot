@@ -428,5 +428,8 @@
 	"security_password": "Password",
 	"security_password_set": "•••••••• (unchanged)",
 	"security_password_hint": "Leave blank to keep the current password.",
-	"security_save_error": "Could not save security settings."
+	"security_save_error": "Could not save security settings.",
+	"library_load_more": "Load more",
+	"library_loading_more": "Loading…",
+	"library_load_error": "Couldn't load more items."
 }
