@@ -508,6 +508,93 @@ export async function setKometaLastApplied(snapshot: KometaSnapshot): Promise<vo
 	await writeKv(KOMETA_LAST_APPLIED_KEY, JSON.stringify(snapshot));
 }
 
+// ── Optional authentication (internal KV, not WRITABLE_KEYS) ───────────────────
+//
+// Auth state rides the same settings KV as `cachedLibraries`/`kometa*`, kept out of
+// AppConfig/ENV_MAP/WRITABLE_KEYS so it never leaks through publicConfig()/saveSettings
+// and forces no spurious env vars. The one env input is AUTH_MODE, which overrides the
+// persisted mode (anti-lockout) and locks the UI control. The password hash is stored
+// verbatim (a hash is not recoverable material — it is deliberately not AES-encrypted,
+// so login never depends on `.app-key`).
+
+/** Optional-auth mode: off, on, or on-except-local-addresses. */
+export type AuthMode = 'disabled' | 'enabled' | 'local';
+
+const AUTH_MODE_KEY = 'authMode';
+const AUTH_USERNAME_KEY = 'authUsername';
+const AUTH_PASSWORD_HASH_KEY = 'authPasswordHash';
+const AUTH_SESSION_VERSION_KEY = 'authSessionVersion';
+
+function parseAuthMode(value: string | null | undefined): AuthMode | null {
+	const t = value?.trim().toLowerCase();
+	return t === 'disabled' || t === 'enabled' || t === 'local' ? t : null;
+}
+
+/** True when `AUTH_MODE` is set in the environment (overrides persisted; locks the UI). */
+export function isAuthModeEnvManaged(): boolean {
+	return parseAuthMode(env.AUTH_MODE) !== null;
+}
+
+/** Resolved auth state: effective mode (env override + fail-open), plus stored details. */
+export interface AuthState {
+	/** Effective mode after the env override and the fail-open guard. */
+	mode: AuthMode;
+	/** Mode as persisted (before env override), for the Security UI. */
+	storedMode: AuthMode;
+	/** Whether `AUTH_MODE` env locks the mode. */
+	envManaged: boolean;
+	username: string | null;
+	passwordHash: string | null;
+	/** Bumped on credential change to invalidate all outstanding sessions. */
+	sessionVersion: number;
+}
+
+/**
+ * Read the full auth state. Applies the `AUTH_MODE` env override and a fail-open guard:
+ * if the effective mode is not `disabled` but credentials are missing, it drops to
+ * `disabled` (the pre-feature state) rather than lock everyone out.
+ */
+export async function getAuthState(): Promise<AuthState> {
+	const [rawMode, username, passwordHash, rawVersion] = await Promise.all([
+		readKv(AUTH_MODE_KEY),
+		readKv(AUTH_USERNAME_KEY),
+		readKv(AUTH_PASSWORD_HASH_KEY),
+		readKv(AUTH_SESSION_VERSION_KEY)
+	]);
+	const storedMode = parseAuthMode(rawMode) ?? 'disabled';
+	const envMode = parseAuthMode(env.AUTH_MODE);
+	const user = username && username !== '' ? username : null;
+	const hash = passwordHash && passwordHash !== '' ? passwordHash : null;
+	let mode = envMode ?? storedMode;
+	if (mode !== 'disabled' && (!user || !hash)) mode = 'disabled'; // fail-open guard
+	return {
+		mode,
+		storedMode,
+		envManaged: envMode !== null,
+		username: user,
+		passwordHash: hash,
+		sessionVersion: toInt(rawVersion ?? undefined, 0)
+	};
+}
+
+/** Persist the auth mode (ignored while `AUTH_MODE` env is set). */
+export async function setStoredAuthMode(mode: AuthMode): Promise<void> {
+	await writeKv(AUTH_MODE_KEY, mode);
+}
+
+/** Persist credentials (username + already-hashed password). */
+export async function setAuthCredentials(username: string, passwordHash: string): Promise<void> {
+	await writeKv(AUTH_USERNAME_KEY, username);
+	await writeKv(AUTH_PASSWORD_HASH_KEY, passwordHash);
+}
+
+/** Bump the session version, invalidating every outstanding session. Returns the new value. */
+export async function bumpAuthSessionVersion(): Promise<number> {
+	const next = toInt((await readKv(AUTH_SESSION_VERSION_KEY)) ?? undefined, 0) + 1;
+	await writeKv(AUTH_SESSION_VERSION_KEY, String(next));
+	return next;
+}
+
 // Poster-scoring weights live in `$lib/server/posters/score-weights` (an $env-free
 // module so service.ts can import them without pulling in $env); re-exported here for
 // callers that already depend on config (e.g. the settings route).

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
-	import { onNavigate } from '$app/navigation';
+	import { onNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { m } from '$lib/paraglide/messages';
 	import { setLocale } from '$lib/paraglide/runtime';
@@ -168,6 +168,16 @@
 			switchingLocale = false;
 		});
 	}
+
+	// Clear the session server-side, then land on the login page.
+	async function logout() {
+		try {
+			await fetch('/api/auth/logout', { method: 'POST' });
+		} catch {
+			// Even if the request fails, send the user to /login.
+		}
+		await goto('/login');
+	}
 </script>
 
 <div class="min-h-screen">
@@ -232,6 +242,15 @@
 					{/each}
 				</select>
 			</label>
+			{#if data.showLogout}
+				<button
+					type="button"
+					onclick={logout}
+					class="rounded-md px-3 py-1.5 text-sm text-neutral-400 transition hover:text-neutral-100"
+				>
+					{m.auth_logout()}
+				</button>
+			{/if}
 		</div>
 	</header>
 

@@ -17,6 +17,9 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		// Active locale (resolved per request in hooks.server.ts) plus the available
 		// locales, so the header switcher and client runtime stay in sync with SSR.
 		locale: locals.locale,
-		availableLocales: SUPPORTED_LOCALES.map((code) => ({ code, name: LOCALE_NAMES[code] }))
+		availableLocales: SUPPORTED_LOCALES.map((code) => ({ code, name: LOCALE_NAMES[code] })),
+		// Whether to show the logout control: auth is on and this request is a real
+		// authenticated session (not the `disabled`/local-bypass passthrough).
+		showLogout: locals.authMode !== 'disabled' && !!locals.authUser
 	};
 };
