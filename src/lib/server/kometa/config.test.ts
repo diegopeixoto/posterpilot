@@ -12,8 +12,7 @@ import {
 	scaffoldDoc,
 	serialize,
 	topLevelKeys,
-	type ConfigPlan,
-	type KometaSnapshot
+	type ConfigPlan
 } from './config';
 
 const CREDS = { plexUrl: 'http://new:32400', plexToken: 'newtoken', tmdbKey: 'newkey' };

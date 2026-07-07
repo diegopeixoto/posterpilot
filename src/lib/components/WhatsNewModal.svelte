@@ -115,8 +115,7 @@
 
 			<div class="overflow-y-auto p-4">
 				{#if body}
-					<!-- eslint-disable-next-line svelte/no-at-html-tags -- input is
-					     HTML-escaped and tag-whitelisted in renderReleaseNotes -->
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- release notes are HTML-escaped and tag-whitelisted in renderReleaseNotes -->
 					<div class="release-notes text-sm text-neutral-300">{@html renderedBody}</div>
 				{:else}
 					<p class="text-sm text-neutral-400">{m.whats_new_empty()}</p>

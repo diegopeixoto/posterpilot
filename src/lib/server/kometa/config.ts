@@ -15,7 +15,6 @@
  */
 
 import { Document, isAlias, isMap, isScalar, isSeq, parseDocument, YAMLMap, YAMLSeq } from 'yaml';
-import { DEFAULT_FILENAME } from './yaml';
 import { knownDefaults } from './defaults-catalog';
 import { CONNECTOR_DEPENDENCIES, SECRET_PATHS } from './connectors';
 

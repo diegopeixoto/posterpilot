@@ -52,7 +52,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 		try {
 			clientAddress = event.getClientAddress();
 		} catch {
-			clientAddress = null;
+			// getClientAddress() can throw; leave clientAddress null (treated as non-local).
 		}
 		const bypass = decideLocalBypass({
 			clientAddress,
