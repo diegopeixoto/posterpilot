@@ -217,6 +217,8 @@ container on port 3000.
 4. Once synced, start finding and applying covers (see
    [Usage](/posterpilot/usage/)).
 
+![PosterPilot first-run wizard showing the language step and six-step progress indicator](/posterpilot/screenshots/setup-wizard.webp)
+
 ## Health check
 
 The app exposes an unauthenticated `GET /api/health` that returns

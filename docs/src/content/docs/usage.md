@@ -87,6 +87,8 @@ The synced library renders as a poster grid with a Notion-style toolbar. You can
 Each tile surfaces the item's rating and a status badge (e.g. MediUX-available,
 changed), with the title and year revealed on hover.
 
+![PosterPilot library wall with search, filter, sort, status controls, and a grid of movie posters](/posterpilot/screenshots/library.webp)
+
 ## Find covers
 
 Open an item to see its detail view: a backdrop hero with the item's logo (or its
@@ -112,6 +114,8 @@ shows), genres, and overview, plus the top-billed cast.
 
 You can stage a whole set ("use this set"), or take an individual poster from one
 set and a background from another — the two slots are independent.
+
+![PosterPilot item detail view with backdrop metadata, cast, discovered artwork count, staged poster and background, and Apply button](/posterpilot/screenshots/item-detail.webp)
 
 ## Season and episode artwork
 
@@ -254,6 +258,8 @@ to Dashboard reflects how many jobs are active. Below that, a **Recent jobs** ta
 lists the latest jobs with their type, processed/total counts, and final status.
 There is no separate Jobs page — live progress and recent history both live on the
 Dashboard.
+
+![PosterPilot dashboard with library statistics, sync action, and recent background jobs](/posterpilot/screenshots/dashboard.webp)
 
 ## Activity log
 

@@ -47,8 +47,8 @@ translating guides live at
 ## Screenshots
 
 <p align="center">
-  <img src="artwork/screenshots/library.jpg" alt="Library — filter/sort bar, spotlight, and poster wall" width="49%" />
-  <img src="artwork/screenshots/item-detail.jpg" alt="Item detail — backdrop hero, cast, and artwork sets" width="49%" />
+  <img src="artwork/screenshots/library.jpg" alt="Library — filter and sort controls above the poster wall" width="49%" />
+  <img src="artwork/screenshots/item-detail.jpg" alt="Item detail — metadata hero, cast, discovered artwork, and apply bar" width="49%" />
 </p>
 
 ## What it does

@@ -84,6 +84,8 @@ secrets-encryption key, so it never depends on `.app-key`. The session is a sign
 `HttpOnly` cookie with a sliding 14-day expiry; changing the password invalidates
 all existing sessions.
 
+![PosterPilot Security settings with disabled, local-bypass, and enabled authentication modes](/posterpilot/screenshots/settings-security.webp)
+
 ### Behind a reverse proxy
 
 `local` mode is **fail-closed**: if a request carries an `X-Forwarded-For` /
@@ -242,6 +244,8 @@ That export is a _metadata_ file. PosterPilot can also surgically manage Kometa'
 and operations, global settings and webhooks, plus a raw editor for anything else
 — and wire `posterpilot.yml` into it for you (co-located in the same directory as
 `config.yml`). This lives on its own [Kometa manager page](/posterpilot/kometa-config-sync/).
+
+![PosterPilot Kometa manager showing the config path, management mode, and connection sections](/posterpilot/screenshots/kometa-manager.webp)
 
 ## Language
 
