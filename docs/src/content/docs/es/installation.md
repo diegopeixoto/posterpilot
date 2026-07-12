@@ -23,8 +23,8 @@ concreta.
 
 Importan dos volúmenes:
 
-- **`/data`** — estado persistente de la app: la base de datos SQLite, tus ajustes
-  guardados, el historial de aplicaciones y el archivo de registro rotativo
+- **`/data`** — estado persistente: SQLite, ajustes, clave de cifrado, instantáneas
+  y revisiones de ilustración, copias de la aplicación, caché y registro rotativo
   (`/data/logs/posterpilot.log`). Mantenlo en un volumen montado para que el estado
   sobreviva a las actualizaciones del contenedor; el archivo de registro vive dentro
   de `/data`, así que no necesita un volumen adicional.
@@ -46,13 +46,30 @@ persistente y con copia de seguridad conserva tus secretos descifrables a travé
 las actualizaciones del contenedor.
 
 Opcionalmente, define la variable de entorno **`APP_SECRET`** para derivar la clave
-a partir de un valor que tú controlas. Defínela cuando ejecutes **varias réplicas
-que comparten una base de datos**, o cuando quieras que los secretos sigan siendo
+a partir de un valor que tú controlas cuando quieras que los secretos sigan siendo
 portables si el contenedor (y su `data/.app-key`) se recrea. Si no defines
 `APP_SECRET`, trata `data/.app-key` como parte de tus copias de seguridad: perderla
 significa reintroducir cada credencial guardada. Consulta
-[Configuración → Secretos y cifrado](/posterpilot/es/configuration/#secretos-y-cifrado)
+[Configuración](../configuration/)
 para conocer el comportamiento completo.
+
+## Copia antes de actualizar
+
+Deja terminar los trabajos mutantes y copia el volumen `/data` completo. Si la
+versión instalada incluye **Ajustes → Copias y restauración**, crea y valida además
+una copia manual. Conserva el mismo `APP_SECRET` o `.app-key`.
+
+Las actualizaciones ejecutan migraciones aditivas. Una instalación de un servidor
+se convierte en un **Servidor predeterminado** nombrado y protegido, sin descartar
+elementos ni historial. Sigue la [lista de migración multiservidor](../multi-server-migration/).
+
+## Montar la configuración de Kometa
+
+Para usar el [Gestor de Kometa](../kometa-config-sync/), monta con lectura/escritura
+el directorio que contiene `config.yml` y define, por ejemplo,
+`KOMETA_CONFIG_PATH=/config/config.yml`. `posterpilot.yml` se escribe junto a ese
+archivo; no hace falta otra ruta de metadatos. El volumen contiene secretos Kometa
+en texto plano, así que protege sus permisos.
 
 ## Docker Compose (macOS)
 
@@ -172,11 +189,21 @@ contenedor en el puerto 3000.
    la primera sincronización. Para Plex, el asistente incluye un inicio de sesión con
    PIN y el descubrimiento de conexiones, así que nunca tienes que pegar un token o
    una URL. El asistente se puede omitir: puedes configurarlo todo en **Ajustes**.
+   Cada paso avanza solo tras una respuesta válida, y el último sigue el primer
+   trabajo hasta un estado terminal, mostrando fallo y reintento cuando corresponda.
 3. Si defines las credenciales mediante variables de entorno, aparecen ya
    configuradas y bloqueadas para su edición tanto en el asistente como en Ajustes
    (consulta [Configuración](/posterpilot/es/configuration/)).
 4. Una vez sincronizado, empieza a encontrar y aplicar carátulas (consulta
    [Uso](/posterpilot/es/usage/)).
+
+## Restaurar una copia de la aplicación
+
+Usa **Ajustes → Copias y restauración**; no sustituyas SQLite en vivo. La vista
+previa valida checksums, integridad, esquema, espacio, rutas y clave. Confirmar entra
+en mantenimiento, drena mutaciones, crea una copia de seguridad y prepara el marcador.
+Reinicia el contenedor para aplicar el reemplazo antes de abrir libsql y revisa el
+informe de preparación. Consulta [Automatización y recuperación](../automation-recovery/).
 
 ## Comprobación de estado
 
@@ -187,4 +214,3 @@ del contenedor (el `docker-compose.yml` incluido ya lo hace):
 ```sh
 curl -s http://localhost:3000/api/health
 ```
-</content>

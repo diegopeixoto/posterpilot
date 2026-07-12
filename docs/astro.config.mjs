@@ -53,32 +53,122 @@ export default defineConfig({
 			},
 			sidebar: [
 				{
-					label: 'Overview',
-					link: '/'
+					label: 'Start here',
+					translations: {
+						es: 'Primeros pasos',
+						zh: '从这里开始',
+						ja: 'はじめに',
+						'pt-BR': 'Comece aqui'
+					},
+					items: [
+						{
+							label: 'Overview',
+							translations: { es: 'Resumen', zh: '概览', ja: '概要', 'pt-BR': 'Visão geral' },
+							link: '/'
+						},
+						{
+							label: 'Installation',
+							translations: {
+								es: 'Instalación',
+								zh: '安装',
+								ja: 'インストール',
+								'pt-BR': 'Instalação'
+							},
+							link: '/installation/'
+						},
+						{
+							label: 'Configuration',
+							translations: {
+								es: 'Configuración',
+								zh: '配置',
+								ja: '設定',
+								'pt-BR': 'Configuração'
+							},
+							link: '/configuration/'
+						},
+						{
+							label: 'Usage',
+							translations: { es: 'Uso', zh: '使用', ja: '使い方', 'pt-BR': 'Uso' },
+							link: '/usage/'
+						}
+					]
 				},
 				{
-					label: 'Installation',
-					link: '/installation/'
+					label: 'Guides',
+					translations: { es: 'Guías', zh: '指南', ja: 'ガイド', 'pt-BR': 'Guias' },
+					items: [
+						{
+							label: 'Safety and undo',
+							translations: {
+								es: 'Seguridad y deshacer',
+								zh: '安全与撤销',
+								ja: '安全性と元に戻す',
+								'pt-BR': 'Segurança e desfazer'
+							},
+							link: '/safety/'
+						},
+						{
+							label: 'Automation and recovery',
+							translations: {
+								es: 'Automatización y recuperación',
+								zh: '自动化与恢复',
+								ja: '自動化と復旧',
+								'pt-BR': 'Automação e recuperação'
+							},
+							link: '/automation-recovery/'
+						},
+						{
+							label: 'FUN and collections',
+							translations: {
+								es: 'FUN y colecciones',
+								zh: 'FUN 与合集',
+								ja: 'FUN とコレクション',
+								'pt-BR': 'FUN e coleções'
+							},
+							link: '/fun-collections/'
+						},
+						{
+							label: 'Multi-server migration',
+							translations: {
+								es: 'Migración multiservidor',
+								zh: '多服务器迁移',
+								ja: '複数サーバー移行',
+								'pt-BR': 'Migração multi-servidor'
+							},
+							link: '/multi-server-migration/'
+						},
+						{
+							label: 'Kometa manager',
+							translations: {
+								es: 'Gestor de Kometa',
+								zh: 'Kometa 管理器',
+								ja: 'Kometa マネージャー',
+								'pt-BR': 'Gerenciador do Kometa'
+							},
+							link: '/kometa-config-sync/'
+						}
+					]
 				},
 				{
-					label: 'Configuration',
-					link: '/configuration/'
-				},
-				{
-					label: 'Usage',
-					link: '/usage/'
-				},
-				{
-					label: 'Kometa manager',
-					link: '/kometa-config-sync/'
-				},
-				{
-					label: 'Contributing',
-					link: '/contributing/'
-				},
-				{
-					label: 'Translating',
-					link: '/translating/'
+					label: 'Project',
+					translations: { es: 'Proyecto', zh: '项目', ja: 'プロジェクト', 'pt-BR': 'Projeto' },
+					items: [
+						{
+							label: 'Contributing',
+							translations: {
+								es: 'Contribuir',
+								zh: '贡献',
+								ja: 'コントリビューション',
+								'pt-BR': 'Contribuindo'
+							},
+							link: '/contributing/'
+						},
+						{
+							label: 'Translating',
+							translations: { es: 'Traducir', zh: '翻译', ja: '翻訳', 'pt-BR': 'Tradução' },
+							link: '/translating/'
+						}
+					]
 				}
 			]
 		})

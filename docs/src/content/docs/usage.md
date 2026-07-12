@@ -27,14 +27,16 @@ through six steps in order, persisting each as you go:
 5. **Libraries** — once connected, the wizard lists your movie and show libraries;
    tick the ones to sync (all selected by default, which also picks up libraries
    you add later).
-6. **First sync** — run the initial sync, then jump to the Dashboard.
+6. **First sync** — run the initial sync and follow its live status to a terminal
+   result. Failure detail and retry remain visible; setup does not claim completion
+   merely because the job was accepted.
 
 The wizard is **skippable** at any point (the _Skip_ link goes straight to the
 Dashboard) — everything it covers is also available in **Settings**.
 
 ## Sync a library
 
-A sync pulls your movie and show libraries from the active media server into
+A sync pulls your movie and show libraries from the active named media server into
 PosterPilot's local cache and resolves each title to a TMDB id so artwork
 providers can be queried.
 
@@ -46,7 +48,7 @@ providers can be queried.
    later.
 3. Run the sync from the **Dashboard** (the **Sync** button). It runs as a
    background job with live progress shown right there; the stat cards (items,
-   movies, shows, resolved, with MediUX, applied) climb as it runs.
+   movies, shows, resolved, with artwork, with MediUX, applied) climb as it runs.
 
 Each item comes back with its title, year, type, external GUIDs (tmdb/imdb/tvdb
 when present), and current poster. An item with no external GUID is still listed
@@ -59,13 +61,42 @@ the first. A **full rescan** that re-processes everything stays available, and y
 can turn incremental syncing off entirely (see
 [Configuration → Performance and tuning](/posterpilot/configuration/#performance-and-tuning)).
 
+## Work from the Review inbox
+
+**Review** is the fastest title-by-title workflow. It derives actionable states for
+new, unresolved, no-candidate, suggestion-ready, staged, partially failed, externally
+changed, ignored, and completed items. Filter by server/library/type/state/provider,
+search, choose a deterministic sort, or save the current filter as a named view.
+
+Opening an item preserves the Review context and exposes previous, next, and return
+navigation. Compare current, suggested, and staged artwork per slot. Accepting a
+suggestion is explicit — nothing is staged on page load. Keyboard actions are listed
+on the page and do not fire while focus is in a form field or modal.
+
+**Apply and next** first creates the ordinary exact preview, asks for confirmation,
+waits for the job and post-write verification, and advances only after every selected
+target succeeds. A skip, partial failure, or verification failure keeps you on the
+item with its job detail and retry action.
+
+## Correct a TMDB match
+
+An unresolved or incorrectly matched item can be searched manually by title, year,
+and movie/show type. Results include the TMDB identity and disambiguating metadata.
+Confirming pins that identity, invalidates candidates from the old identity, and
+records an audit event. Replacing or clearing a manual pin is also explicit; clearing
+makes the item eligible for automatic GUID resolution again.
+
+Provider failures are isolated. A transient outage can retain that provider's
+last-known-good candidates, visibly marked stale. A later successful empty result
+clears them instead of treating “no candidates” as an outage.
+
 ## The library wall
 
 The synced library renders as a poster grid with a Notion-style toolbar. You can:
 
 - **Search** by title.
 - **Filter** from the **Filter** popover: media type (movie / show), minimum
-  rating, genre, missing poster, MediUX availability (has candidates), change
+  rating, genre, missing poster, any artwork availability, true MediUX availability, change
   state (unchanged / still on the default poster), and ignored state. The Filter
   button shows a badge with the number of active facets.
 - **Sort** from the **Sort** popover by title, release year, rating, runtime,
@@ -75,8 +106,9 @@ The synced library renders as a poster grid with a Notion-style toolbar. You can
   toolbar always wins.
 - Each active filter and the sort show up as **removable chips** below the toolbar
   — click a chip's ✕ to drop just that one, or **Clear all** to reset everything.
-- Toggle **auto-apply** (the ⚡ button): on, each change navigates immediately; off,
-  changes are staged until you hit **Apply**. The choice is remembered.
+- Toggle **auto-apply** (the ⚡ button) for **filter controls only**: on, each filter
+  change navigates immediately; off, filter changes wait for the toolbar's Apply
+  button. It never applies artwork. The choice is remembered.
 - **Ignore** an item you want left untouched — ignored items are skipped by
   discovery, apply, and automatic selection, are visually marked on the wall, and
   can be filtered in or out from the Filter popover. Toggle it off again at any
@@ -84,8 +116,12 @@ The synced library renders as a poster grid with a Notion-style toolbar. You can
 - See a **spotlight banner** — a backdrop for a recently-changed item above the
   wall once at least one cover has been applied.
 
-Each tile surfaces the item's rating and a status badge (e.g. MediUX-available,
-changed), with the title and year revealed on hover.
+Each tile surfaces the item's rating and a status badge when any provider has artwork;
+the separate MediUX filter means specifically that MediUX returned a candidate. A changed
+badge remains distinct,
+with the title and year revealed on hover.
+
+![PosterPilot library wall with search, filter, sort, status controls, and a grid of movie posters](/posterpilot/screenshots/library.webp)
 
 ![PosterPilot library wall with search, filter, sort, status controls, and a grid of movie posters](/posterpilot/screenshots/library.webp)
 
@@ -94,6 +130,8 @@ changed), with the title and year revealed on hover.
 Open an item to see its detail view: a backdrop hero with the item's logo (or its
 title when no logo exists), rating, year, runtime (or season/episode counts for
 shows), genres, and overview, plus the top-billed cast.
+
+![PosterPilot item detail view with backdrop metadata, cast, discovered artwork count, staged poster and background, and Apply button](/posterpilot/screenshots/item-detail.webp)
 
 - If covers have not been discovered yet, use **Find covers** to run discovery for
   that item.
@@ -107,7 +145,7 @@ shows), genres, and overview, plus the top-billed cast.
   and everything else is collapsed; your collapsed/expanded choices persist in the
   browser across reloads and as you move between items.
 - When **suggested artwork** is enabled, the highest-scored candidate for each slot
-  is pre-selected as a clearly marked suggestion you can accept or override.
+  is clearly marked for an explicit stage/accept action; it is not silently saved.
   Candidates are scored on provider quality, resolution, and aspect-fit; tune the
   weights — or turn the pre-selection off — in Settings (see
   [Configuration → Performance and tuning](/posterpilot/configuration/#performance-and-tuning)).
@@ -140,12 +178,14 @@ poster/background plus counts of staged seasons and episodes — and a single
 ## Apply a cover
 
 Apply a staged selection with the method you choose, selectable per apply action
-with a configurable default (`DEFAULT_APPLY_METHOD`, default `both`):
+with a configurable default (`DEFAULT_APPLY_METHOD`, default `both`). Every method
+first creates an exact preview. Review its server/Kometa operations and skips, then
+use the separate confirmation action. The expiring single-use plan is bound to the
+selection, destination, current artwork, and source state:
 
-- **Media server (direct).** Uploads the poster (and background) through the
-  active media-server provider and locks the field so the server's automatic
-  agents do not overwrite it. The change is effectively instant. Recorded as a
-  server application with the provider's type.
+- **Media server (direct).** Captures the prior slot, uploads through the active
+  named provider, locks where supported, rereads the result, and records exact or
+  best-effort verification according to that instance's capabilities.
 - **Kometa export.** Writes Kometa/PMM-compatible YAML — `url_poster` (and
   `url_background` when a background is staged), keyed by TMDB id — into the
   configured Kometa assets directory, without contacting the media server. Your
@@ -164,9 +204,11 @@ number) and staged episode title cards under `episodes:` (keyed by episode numbe
 alongside the show-level `url_poster` / `url_background`. A season **background** is
 applied via the direct method only — it is omitted from the YAML.
 
-Every apply — success or failure — is recorded with the item, asset URL,
-method(s), outcome, and timestamp, so history is queryable and re-application is
-detectable.
+Every destination and slot — success or failure — is recorded in the append-only
+artwork timeline with safe provenance, prior state, outcome, verification, and
+timestamp. If a bound input changes after preview, confirmation writes nothing and
+requires a new preview. Read [Safety, verification, and undo](../safety/) for the
+full contract.
 
 ### How Kometa consumes the export
 
@@ -175,18 +217,17 @@ PosterPilot writes a single metadata file (default `posterpilot.yml`) into
 entries. Add that file to your Kometa library config (e.g. under
 `metadata_path` / `metadata_files`) so Kometa applies the covers on its next run.
 
-## Revert
+## Artwork history and undo
 
-Every applied cover is reversible from the item detail view:
+The item timeline separates direct-server and Kometa outcomes for show/movie,
+season, and episode slots. Use an available timeline action to preview undo for one
+revision, a season, or the item. The preview lists exact restorations and unavailable
+slots; confirmation restores only that frozen scope, verifies where supported, and
+appends a new undo revision instead of deleting history.
 
-- **Revert to original** reverts the show-level artwork **and every applied season
-  and episode** in one action, restoring what the media server had before
-  PosterPilot changed it.
-- Each season group has its own **Revert season** control that reverts only that
-  season's poster/background and its episodes' title cards, leaving the show-level
-  and other seasons' artwork in place.
-
-Reverts re-resolve season and episode children by number, the same way apply does.
+A partial undo keeps successful restorations and reports failed slots independently.
+An original image that could not be captured is labelled unavailable rather than
+presented as safely restorable.
 
 ## Custom sets
 
@@ -196,7 +237,7 @@ background slot that together form a custom "set":
 - Clicking a poster candidate routes it to the poster slot; clicking a background
   candidate routes it to the background slot — automatically, by kind.
 - Each slot can also be filled from a **pasted image URL** or an **uploaded image
-  file**.
+  file**. File upload itself uses preview then confirmation and validates type/size.
 - Applying the builder applies both staged pieces in one action via your chosen
   method.
 
@@ -209,9 +250,10 @@ and the limitation is made visible rather than writing an invalid entry.
 
 ## Bulk actions
 
-Select multiple items and run discovery and/or apply across the selection as a
-single background job. Bulk apply with automatic selection discovers (if needed),
-auto-selects, and applies covers for each selected item, with live progress.
+Select the current page or **all matching results**, clear the selection, and run
+discovery and/or apply as a background job. All-matching materializes the complete
+server-side filter result rather than only loaded cards, and changing the query
+invalidates that selection.
 
 Automatic selection scores every candidate across all enabled providers —
 combining provider quality, resolution, and aspect-fit — and picks the
@@ -219,43 +261,41 @@ highest-scored poster (and a background where available) for each item, the same
 scoring that drives the suggested pre-selection on the item view. Ignored items are
 left out of the selection.
 
-Before a bulk apply runs, a **dry-run preview** summarizes exactly what would
-happen — the planned uploads, the Kometa exports, and any items or slots that would
-be skipped — so you can confirm before anything is written. Bulk apply then
+Before a bulk apply runs, an **exact preview** freezes target IDs, selected
+candidates, uploads, Kometa exports, current-state identities, and skips. It may
+perform non-destructive discovery to build the plan, but confirmation executes only
+the frozen operations. Bulk apply then
 processes items **concurrently** (bounded by the Apply concurrency setting), so
 large batches finish faster, with the same live progress and cancellation.
 
-## FUN: random movie/series picker
+## FUN experiments
 
 **FUN** is an opt-in section for library experiments (enable it with the FUN
 toggle in **Settings → Kometa & advanced**, or `FUN_ENABLED=true`). Until then it
 stays completely hidden — no nav entry, and its page returns 404.
 
-Its first tool answers "what should we watch tonight?": one click draws a random
-title from your synced library and presents it image-forward — backdrop, poster,
-genres, rating, and overview — with a link to the item and a **re-roll** button
-that draws again under the same filters. You can constrain the draw by:
+The hub includes an up-to-three-choice shareable picker (filters, presets, blind and
+capsule modes), Poster Match, an ambient gallery, and two/three-movie duration-budget
+sessions. Results never apply artwork; Poster Match only stages its winner. Reduced
+motion starts the gallery paused. See [FUN experiments and collections](../fun-collections/).
 
-- **Type** — movies, shows, or both.
-- **Genre** — one of your library's genres, or all.
-- **Year range** — an optional minimum and/or maximum release year.
-- **Watched** — skip titles you've already seen. Watched state is captured
-  during library sync (Plex play counts; Jellyfin/Emby played flags — a show
-  counts as watched only when every episode is played).
+## Collections
 
-:::note
-On Jellyfin/Emby the played flag needs a user context, so sign in with
-username/password rather than a bare API key — with only an API key everything
-syncs as unwatched and the skip-watched filter has nothing to exclude.
-:::
+**Collections** groups local members from native server or TMDB collection identity,
+strictly inside the active server. Detail pages show provenance, unavailable members,
+current/staged artwork, explainable consistency, coordinated family coverage, and
+per-member overrides. Staging a family never applies it. See
+[FUN experiments and collections](../fun-collections/#collections-and-franchises).
 
 ## Dashboard and jobs
 
-The **Dashboard** is home base. It shows the library stat cards, the **Sync**
+The **Dashboard** is home base. It shows actionable Review/job cards, the **Sync**
 button, and any running jobs with a **live progress bar** (updating over
 Server-Sent Events, no refresh needed) that you can **cancel**. The nav badge next
 to Dashboard reflects how many jobs are active. Below that, a **Recent jobs** table
-lists the latest jobs with their type, processed/total counts, and final status.
+lists the latest jobs with type, processed/total counts, result summary, attempts,
+and final status. Terminal failures expose sanitized per-target detail and retry for
+eligible failed work only.
 There is no separate Jobs page — live progress and recent history both live on the
 Dashboard.
 

@@ -22,8 +22,9 @@ specific version tag instead if you prefer reproducible upgrades.
 
 The volumes that matter:
 
-- **`/data`** — persistent app state: the SQLite database, your saved settings,
-  the apply history, and the rotating log file (`/data/logs/posterpilot.log`).
+- **`/data`** — persistent app state: the SQLite database, saved settings,
+  encrypted-credential key, artwork snapshots/revisions, application backups,
+  thumbnail cache, and rotating log file (`/data/logs/posterpilot.log`).
   Keep this on a mounted volume so state survives container updates; the log file
   lives inside `/data`, so no extra volume is needed for it.
 - **`/kometa`** — mount your Kometa assets/config directory here so the exported
@@ -47,12 +48,24 @@ keeping `/data` on persistent, backed-up storage keeps your secrets decryptable
 across container updates.
 
 Optionally set the **`APP_SECRET`** environment variable to derive the key from a
-value you control instead. Set it when you run **multiple replicas sharing one
-database**, or when you want secrets to stay portable if the container (and its
-`data/.app-key`) is recreated. If you do not set `APP_SECRET`, treat `data/.app-key`
+value you control instead. Use it when you want secrets to stay portable if the
+container (and its `data/.app-key`) is recreated. If you do not set `APP_SECRET`, treat `data/.app-key`
 as part of your backups — losing it means re-entering every saved credential. See
 [Configuration → Secrets and encryption](/posterpilot/configuration/#secrets-and-encryption)
 for the full behavior.
+
+## Back up before upgrading
+
+Before changing image versions, let mutating jobs finish and back up the complete
+`/data` volume. If the installed version includes **Settings → Backup & restore**,
+create and validate a manual application backup too. Keep the same `APP_SECRET` or
+the copied `.app-key` available after the upgrade.
+
+Upgrades run additive database migrations at startup. Existing one-server
+installations are migrated in place to a protected named **Default server** without
+discarding cached items or history. Follow the
+[multi-server migration checklist](../multi-server-migration/) for post-upgrade
+validation and rollback guidance.
 
 ## Mount Kometa's config for config sync
 
@@ -117,6 +130,7 @@ services:
       # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
+      # KOMETA_SERVER_INSTANCE_ID: legacy-default
     volumes:
       # Persistent app state (SQLite db + settings + history).
       - ./data:/data
@@ -189,6 +203,7 @@ services:
       # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
+      # KOMETA_SERVER_INSTANCE_ID: legacy-default
     volumes:
       - /mnt/user/appdata/posterpilot:/data
       - /mnt/user/appdata/kometa/config:/kometa
@@ -211,6 +226,9 @@ container on port 3000.
    libraries to sync, and run the first sync. For Plex the wizard includes a PIN
    login and connection discovery so you never have to paste a token or URL. The
    wizard is skippable — you can configure everything in **Settings** instead.
+   Each step advances only after the server accepts it; an inline error keeps the
+   current step. The final step follows the first sync until a terminal result and
+   offers failure detail/retry instead of reporting completion early.
 3. If you set credentials via environment variables, they appear already
    configured and locked from editing in both the wizard and Settings (see
    [Configuration](/posterpilot/configuration/)).
@@ -218,6 +236,15 @@ container on port 3000.
    [Usage](/posterpilot/usage/)).
 
 ![PosterPilot first-run wizard showing the language step and six-step progress indicator](/posterpilot/screenshots/setup-wizard.webp)
+
+## Restoring an application backup
+
+Use **Settings → Backup & restore** rather than replacing a live SQLite file. The
+restore preview validates checksums, database integrity, schema, disk space, paths,
+and encryption-key compatibility. Confirmation blocks new mutations, drains active
+work, creates a protected safety backup, and prepares a restart marker. Restart the
+container for replacement to occur before libsql opens; then inspect the readiness
+report. See [Automation and recovery](../automation-recovery/#restore-workflow).
 
 ## Health check
 

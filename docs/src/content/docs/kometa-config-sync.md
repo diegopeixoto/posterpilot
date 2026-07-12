@@ -1,6 +1,6 @@
 ---
 title: Kometa manager
-description: A dedicated /kometa page that manages Kometa's own config.yml end to end — every service connector, per-library collections, overlays and operations, global settings and webhooks, plus a raw config.yml editor — with a preview diff, atomic writes, timestamped backups, and one-click restore.
+description: Manage Kometa config.yml through exact preview and confirmation, redacted diffs, atomic writes, timestamped backups, and previewed restore.
 ---
 
 Beyond [exporting artwork as a metadata file](/posterpilot/usage/#how-kometa-consumes-the-export),
@@ -71,9 +71,9 @@ Below the hero, the page is organized into sub-sections:
 5. **Backups** — list the timestamped backups PosterPilot writes on each save and
    **restore** any one of them.
 
-The usual flow is: set the path, fill in the sections you want PosterPilot to own,
-**Preview** the diff to see exactly what would change, then **Sync** to write
-`config.yml`.
+The usual flow is: set and save the path/binding, fill in the sections you want
+PosterPilot to own, **Preview changes**, then **Confirm previewed sync**. The
+confirmation is enabled only for the currently visible preview.
 
 ## What gets managed
 
@@ -120,12 +120,16 @@ The Kometa manager is built to be non-destructive:
   content. (`own` mode, opt-in via `KOMETA_CONFIG_MODE=own`, lets PosterPilot
   regenerate and fully own the file.)
 - **Preview before write.** A diff is always shown first; nothing is written until
-  you approve it. Secrets are redacted in the diff.
+  you approve it. Secrets are redacted in the diff. The server-issued plan is
+  expiring and single-use, and it is bound to the source file fingerprint, selected
+  Plex instance, management mode, and complete proposed content. Editing any input
+  invalidates the visible preview.
 - **Atomic writes with a backup.** The new file is written atomically, and the
   previous version is kept beside it as `config.yml.posterpilot-bak-<timestamp>`.
-- **Backups & restore.** The **Backups** section lists those timestamped backups
-  and lets you **restore** any one of them — the restore is itself written
-  atomically and backed up first, so it is just as safe as a normal sync.
+- **Backups & restore.** The **Backups** section lists timestamped backups. Restore
+  first creates an exact redacted diff and a separate confirmation; confirmation
+  is rejected if the current file or selected backup changed. The current file is
+  backed up before the atomic replacement.
 - **Anchors and aliases are skipped.** Any section that uses YAML anchors or
   aliases (`&` / `*`) is left untouched and flagged with a warning, because a
   surgical merge cannot safely rewrite them.
@@ -139,3 +143,21 @@ mounted volume. Make sure that file and its backups live on storage you trust,
 with appropriate filesystem permissions. This is a property of how Kometa is
 configured, not something PosterPilot can work around.
 :::
+
+## Raw editor contract
+
+**Raw config.yml** loads the complete file. **Preview raw changes** first validates
+YAML and creates the exact redacted diff. Invalid YAML receives no confirmation
+plan. **Confirm raw save** is a separate action and writes only the content bound to
+that plan. Editing the text, changing the source file, cancelling, expiry, or reuse
+invalidates the plan and writes nothing.
+
+## Named Plex binding
+
+Kometa is Plex-only. In a multi-server installation, choose the named Plex instance
+in Settings or set `KOMETA_SERVER_INSTANCE_ID`. Every structured/raw preview and
+write remains bound to that instance and cannot borrow another server's credentials.
+
+For the common mutation and revision guarantees, read
+[Safety, verification, and undo](../safety/). For application-level backup and
+restore, see [Automation and recovery](../automation-recovery/).
