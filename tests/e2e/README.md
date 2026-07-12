@@ -5,7 +5,8 @@ This is a real Playwright suite against PosterPilot, not a component mock. Its w
 - starts the SvelteKit application on an isolated port;
 - creates a run-specific SQLite database and data directory under the operating-system temp folder;
 - starts local Jellyfin- and Plex-compatible HTTP fakes that implement the provider contracts used by setup, sync, artwork reads/writes, verification, undo, native collections, and Kometa binding;
-- removes the database, application data, one-time runtime metadata, and fake servers when Playwright stops.
+- gives every invocation a unique runtime/artifact namespace, including concurrent runs;
+- gracefully removes the database, application data, one-time metadata, and fake servers when Playwright stops.
 
 The tests deliberately use the public UI and production API surface. The only direct database fixture runs **after** setup, sync, and full rescan have imported real fake-server records. It adds deterministic TMDB metadata, candidate evidence, and collection membership to that throwaway database because TMDB/provider internet calls must not be part of a repeatable browser test. No test-only route or production backdoor is added.
 
@@ -20,17 +21,25 @@ The Playwright projects form a dependency chain so mutable workflows stay determ
 
 ## Run
 
-Once `@playwright/test` is installed in the workspace and Chromium is available:
+Install Chromium once for the pinned Playwright version:
 
 ```sh
-bunx playwright test --config playwright.e2e.config.mjs
+bunx playwright install chromium
+```
+
+Then run the suite:
+
+```sh
+bun run test:e2e
 ```
 
 Useful focused commands:
 
 ```sh
-bunx playwright test --config playwright.e2e.config.mjs --project product-flows
-bunx playwright test --config playwright.e2e.config.mjs --ui
+bun run test:e2e -- --project product-flows
+bun run test:e2e -- --ui
 ```
 
-Dependent projects automatically run their prerequisites. Reports and traces are written only to ignored `playwright-report/` and `test-results/` directories.
+Dependent projects automatically run their prerequisites. Runtime metadata, reports, and traces are
+namespaced by the application port and a per-run identifier so independent runs cannot share state;
+all artifacts stay in ignored `tests/e2e/`, `playwright-report/`, and `test-results/` paths.

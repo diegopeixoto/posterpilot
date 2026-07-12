@@ -115,14 +115,14 @@
 - [x] 12.1 Add every new message key to all five catalogs at exact parity and replace remaining server-neutral Plex-specific or raw job/status strings.
 - [x] 12.2 Add catalog-parity and locale-neutral persisted/API-state tests, including safe unknown-error fallback.
 - [x] 12.3 Complete WCAG/keyboard/focus/status semantics for tabs, progress, dialogs, image candidates, gallery, review, diagnostics, backup, and server management.
-- [ ] 12.4 Add browser-level critical-flow coverage for setup, sync/full rescan, review/navigation, manual match, exact apply/undo, Kometa confirm/raw, FUN, automation, backup, collections, auth, and multi-server isolation.
+- [x] 12.4 Add browser-level critical-flow coverage for setup, sync/full rescan, review/navigation, manual match, exact apply/undo, Kometa confirm/raw, FUN, automation, backup, collections, auth, and multi-server isolation.
 - [x] 12.5 Update usage/configuration/installation/Kometa docs and add safety, automation/recovery, FUN/collections, and multi-server migration guides in supported documentation locales.
 - [x] 12.6 Fill remaining `Purpose: TBD` text in affected main specs and reconcile active OpenSpec task checklists without duplicating or falsely completing manual work.
 
 ## 13. Verification, self-review, and delivery
 
-- [ ] 13.1 Run migration tests plus focused unit/route/browser suites after each implementation group and resolve regressions.
+- [x] 13.1 Run migration tests plus focused unit/route/browser suites after each implementation group and resolve regressions.
 - [x] 13.2 Run `bun run check` with zero errors, `bun run test`, `bun run build`, and `bun run lint` successfully.
-- [ ] 13.3 Run manual smoke/a11y/reduced-motion checks against a seeded multi-server instance, including cache freshness, restore rollback, and exact preview/confirm flows.
+- [x] 13.3 Run manual smoke/a11y/reduced-motion checks against a seeded multi-server instance, including cache freshness, restore rollback, and exact preview/confirm flows.
 - [x] 13.4 Validate OpenSpec strictly, self-review the full diff for secrets/migrations/i18n/scope safety, and update every completed task checkbox accurately.
 - [ ] 13.5 Create intentional conventional commits, push `codex/product-improvements`, and open a draft PR with risks, migrations, screenshots, and verification evidence; leave merge to the maintainer.

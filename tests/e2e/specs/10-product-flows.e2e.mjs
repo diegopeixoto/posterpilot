@@ -1,6 +1,7 @@
 import {
 	test,
 	expect,
+	gotoHydrated,
 	triggerJob,
 	expectJobCompleted,
 	expectNoHorizontalOverflow
@@ -12,7 +13,7 @@ test.describe
 	test('uses the review inbox, context navigation, and browser-enforced match validation', async ({
 		page
 	}) => {
-		await page.goto('/review');
+		await gotoHydrated(page, '/review');
 		await expect(page.getByRole('heading', { level: 1, name: t('review_title') })).toBeVisible();
 		const alpha = page.getByRole('article', { name: /Alpha Dawn/ });
 		await expect(alpha).toContainText(t('review_state_suggestion_ready'));
@@ -41,7 +42,7 @@ test.describe
 		page,
 		scenario
 	}) => {
-		await page.goto(`/item/${scenario.primaryItems.delta}`);
+		await gotoHydrated(page, `/item/${scenario.primaryItems.delta}`);
 		await expect(
 			page.getByText(
 				t('manual_match_current_manual', {
@@ -59,7 +60,7 @@ test.describe
 		).toBeVisible();
 
 		await page.getByText(t('manual_match_history')).click();
-		await expect(page.getByText(t('manual_match_audit_cleared'))).toBeVisible();
+		await expect(page.getByText(t('manual_match_audit_cleared'), { exact: true })).toBeVisible();
 	});
 
 	test('previews, confirms, verifies, and undoes the exact staged artwork', async ({
@@ -67,7 +68,7 @@ test.describe
 		scenario
 	}) => {
 		const itemId = scenario.primaryItems.alpha;
-		await page.goto(`/item/${itemId}?returnTo=%2Freview`);
+		await gotoHydrated(page, `/item/${itemId}?returnTo=%2Freview`);
 		await page.getByLabel(t('library_apply_method_label')).selectOption('plex');
 		await page.getByRole('button', { name: t('item_apply'), exact: true }).click();
 		await expect(page.getByText(/Plan: 2 uploads · 0 Kometa exports · 0 skipped/)).toBeVisible();
@@ -93,7 +94,7 @@ test.describe
 	test('exercises every FUN experiment without applying artwork automatically', async ({
 		page
 	}) => {
-		await page.goto('/fun');
+		await gotoHydrated(page, '/fun');
 		await expect(
 			page.getByRole('heading', { level: 2, name: t('fun_picker_title') })
 		).toBeVisible();
@@ -108,7 +109,7 @@ test.describe
 		await expect(page.getByRole('link', { name: t('fun_view_item') }).first()).toBeVisible();
 
 		await page.getByRole('link', { name: t('fun_nav_match') }).click();
-		await page.getByLabel(t('fun_match_item')).selectOption({ label: /Alpha Dawn/ });
+		await page.getByLabel(t('fun_match_item')).selectOption({ label: 'Alpha Dawn (2020)' });
 		await page.getByRole('button', { name: t('fun_match_start') }).click();
 		await page
 			.getByRole('group', { name: t('fun_match_title') })
@@ -133,7 +134,7 @@ test.describe
 
 		await page.getByRole('link', { name: t('fun_nav_session') }).click();
 		await page.getByLabel(t('fun_session_budget')).fill('240');
-		await page.getByLabel(t('fun_session_films')).selectOption('2');
+		await page.getByLabel(t('fun_session_films'), { exact: true }).selectOption('2');
 		await page.getByRole('button', { name: t('fun_session_plan') }).click();
 		await expect(page.getByText(t('fun_session_ready'))).toBeVisible();
 	});
@@ -141,16 +142,16 @@ test.describe
 	test('creates a review-only event automation and exposes its one-time webhook token', async ({
 		page
 	}) => {
-		await page.goto('/settings?tab=automation');
+		await gotoHydrated(page, '/settings?tab=automation');
 		await expect(
 			page.getByRole('heading', { level: 2, name: t('automation_title') })
 		).toBeVisible();
 		await expect(page.getByText(t('automation_review_only_badge')).first()).toBeVisible();
 		await page.getByRole('button', { name: t('automation_add') }).click();
 		await page.getByLabel(t('automation_name')).fill('E2E review intake');
-		await page.getByLabel(t('automation_trigger')).selectOption('event');
-		await page.getByLabel(t('automation_event_type')).selectOption('new_items');
-		await page.getByLabel(t('automation_action')).selectOption('sync');
+		await page.getByLabel(t('automation_trigger'), { exact: true }).selectOption('event');
+		await page.getByLabel(t('automation_event_type'), { exact: true }).selectOption('new_items');
+		await page.getByLabel(t('automation_action'), { exact: true }).selectOption('sync');
 		await page.getByRole('button', { name: t('automation_save') }).click();
 		await expect(
 			page.getByRole('status').filter({ hasText: t('automation_created') })
@@ -161,7 +162,7 @@ test.describe
 		await schedule.getByRole('button', { name: t('automation_webhook_create') }).click();
 		await expect(schedule.getByText(t('automation_webhook_once_title'))).toBeVisible();
 		await expect(schedule.getByLabel(t('automation_webhook_token'))).not.toHaveValue('');
-		await schedule.getByRole('button', { name: t('automation_disable') }).click();
+		await schedule.getByRole('button', { name: t('automation_disable'), exact: true }).click();
 		await expect(
 			page.getByRole('status').filter({ hasText: t('automation_toggled') })
 		).toBeVisible();
@@ -170,7 +171,24 @@ test.describe
 	test('creates, verifies, exports, and safety-previews an application backup', async ({
 		page
 	}) => {
-		await page.goto('/settings?tab=backup');
+		await gotoHydrated(page, '/settings?tab=backup');
+		const backups = page.getByRole('region', { name: t('backup_title') });
+		await backups.getByLabel(t('backup_retention_age')).fill('99');
+		await backups.getByRole('button', { name: t('settings_save'), exact: true }).click();
+		await expect(
+			backups.getByRole('status').filter({ hasText: t('backup_policy_saved') })
+		).toBeVisible();
+
+		const clearedPolicyResponse = page.waitForResponse((response) => {
+			const url = new URL(response.url());
+			return url.pathname === '/api/backups/policy' && response.request().method() === 'PUT';
+		});
+		await backups.getByLabel(t('backup_retention_age')).fill('');
+		await backups.getByRole('button', { name: t('settings_save'), exact: true }).click();
+		const clearedPolicy = await clearedPolicyResponse;
+		expect(clearedPolicy.ok()).toBeTruthy();
+		expect(await clearedPolicy.json()).toMatchObject({ policy: { maxAgeDays: null } });
+
 		await page.getByRole('button', { name: t('backup_create') }).click();
 		await expect(page.getByRole('status').filter({ hasText: t('backup_created') })).toBeVisible({
 			timeout: 30_000
@@ -200,7 +218,7 @@ test.describe
 		page,
 		scenario
 	}) => {
-		await page.goto('/collections');
+		await gotoHydrated(page, '/collections');
 		await expect(
 			page.getByRole('heading', { level: 1, name: t('collections_title') })
 		).toBeVisible();

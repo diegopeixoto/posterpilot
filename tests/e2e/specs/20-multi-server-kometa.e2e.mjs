@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import {
 	test,
 	expect,
+	gotoHydrated,
 	triggerJob,
 	expectJobCompleted,
 	expectNoHorizontalOverflow
@@ -16,14 +17,15 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 		page,
 		runtime
 	}) => {
-		await page.goto('/settings?tab=server');
+		await gotoHydrated(page, '/settings?tab=server');
 		const manager = page.getByRole('region', { name: t('server_manager_title') });
 		await manager.getByRole('button', { name: t('server_manager_add') }).click();
-		await manager.getByLabel(t('server_manager_name')).fill('Cinema B');
-		await manager.getByLabel(t('server_manager_type')).selectOption('plex');
-		await manager.getByLabel(t('server_manager_url')).fill(runtime.fakePlexUrl);
-		await manager.getByLabel(t('server_manager_credential')).fill('plex-e2e-token');
-		await manager.getByRole('button', { name: t('server_manager_test') }).click();
+		const addForm = manager.locator('#server-manager-add-form');
+		await addForm.getByLabel(t('server_manager_name')).fill('Cinema B');
+		await addForm.getByLabel(t('server_manager_type'), { exact: true }).selectOption('plex');
+		await addForm.getByLabel(t('server_manager_url')).fill(runtime.fakePlexUrl);
+		await addForm.getByLabel(t('server_manager_credential')).fill('plex-e2e-token');
+		await addForm.getByRole('button', { name: t('server_manager_test') }).click();
 		await expect(manager.getByRole('status')).toContainText('Cinema B');
 
 		const responsePromise = page.waitForResponse(
@@ -31,7 +33,7 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 				new URL(response.url()).pathname === '/api/servers' &&
 				response.request().method() === 'POST'
 		);
-		await manager.getByRole('button', { name: t('server_manager_add_action') }).click();
+		await addForm.getByRole('button', { name: t('server_manager_add_action') }).click();
 		const response = await responsePromise;
 		expect(response.status()).toBe(201);
 		const result = await response.json();
@@ -55,13 +57,13 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 		page,
 		scenario
 	}) => {
-		await page.goto('/');
+		await gotoHydrated(page, '/');
 		const jobId = await triggerJob(page, '/api/sync', () =>
 			page.getByRole('button', { name: t('dashboard_sync') }).click()
 		);
 		await expectJobCompleted(page, jobId);
 
-		await page.goto('/library');
+		await gotoHydrated(page, '/library');
 		await expect(page.getByText('Aurora Archive')).toBeVisible();
 		await expect(page.getByText('Alpha Dawn')).toHaveCount(0);
 
@@ -71,11 +73,11 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 		);
 		await switcher.selectOption(scenario.primaryServerId);
 		await activation;
-		await page.goto('/library');
-		await expect(page.getByText('Alpha Dawn')).toBeVisible();
+		await gotoHydrated(page, '/library');
+		await expect(page.getByText('Alpha Dawn').first()).toBeVisible();
 		await expect(page.getByText('Aurora Archive')).toHaveCount(0);
 
-		await page.goto(`/review?server=${encodeURIComponent(secondaryServerId)}`);
+		await gotoHydrated(page, `/review?server=${encodeURIComponent(secondaryServerId)}`);
 		await expect(page.getByText('Aurora Archive')).toBeVisible();
 		await expect(page.getByText('Alpha Dawn')).toHaveCount(0);
 		await expectNoHorizontalOverflow(page);
@@ -95,7 +97,7 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 		});
 		expect(settings.ok()).toBeTruthy();
 
-		await page.goto('/kometa');
+		await gotoHydrated(page, '/kometa');
 		await expect(
 			page.getByRole('heading', { level: 1, name: t('kometa_manager_title') })
 		).toBeVisible();

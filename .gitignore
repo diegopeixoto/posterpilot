@@ -48,7 +48,7 @@ vite.config.ts.timestamp-*
 .impeccable/
 
 # Playwright E2E runtime and reports (the suite itself is committed).
-/tests/e2e/.runtime.json
-/tests/e2e/.scenario.json
+/tests/e2e/.runtime*.json
+/tests/e2e/.scenario*.json
 /test-results/
 /playwright-report/

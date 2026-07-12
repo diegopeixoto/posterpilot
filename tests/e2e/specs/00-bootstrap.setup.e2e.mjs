@@ -1,6 +1,7 @@
 import {
 	test,
 	expect,
+	gotoHydrated,
 	triggerJob,
 	expectJobCompleted,
 	expectNoHorizontalOverflow
@@ -13,24 +14,37 @@ test.describe.serial('first-run bootstrap and durable library jobs', () => {
 		page,
 		runtime
 	}) => {
-		await page.goto('/');
+		const languageWrites = [];
+		page.on('request', (request) => {
+			if (
+				new URL(request.url()).pathname === '/api/settings' &&
+				request.method() === 'POST' &&
+				Object.hasOwn(request.postDataJSON() ?? {}, 'language')
+			) {
+				languageWrites.push(request);
+			}
+		});
+		await gotoHydrated(page, '/');
 		await expect(page).toHaveURL(/\/setup$/);
 		await expect(page.getByRole('heading', { level: 1, name: t('setup_title') })).toBeVisible();
 		await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+		expect(languageWrites).toHaveLength(0);
 
 		await page.getByRole('button', { name: t('setup_next') }).click();
+		await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
+		expect(languageWrites).toHaveLength(1);
 		await page.getByLabel(t('settings_media_server')).selectOption('jellyfin');
 		await page.getByLabel(t('settings_server_url')).fill(runtime.fakeJellyfinUrl);
 		await page.getByLabel(t('settings_username')).fill('e2e');
 		await page.getByLabel(t('settings_password')).fill('posterpilot');
+		const loginResponse = page.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname === '/api/media-server/login' &&
+				response.request().method() === 'POST'
+		);
 		await page.getByRole('button', { name: t('settings_log_in') }).click();
-		await expect(
-			page
-				.getByRole('status')
-				.filter({ hasText: t('settings_login_success', { user: 'E2E User' }) })
-		).toBeVisible();
-
-		await page.getByRole('button', { name: t('setup_next') }).click();
+		expect((await loginResponse).ok()).toBe(true);
+		await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
 		await page.getByLabel(t('settings_tmdb_key')).fill('e2e-tmdb-key');
 		await page.getByRole('button', { name: t('setup_next') }).click();
 
@@ -40,7 +54,7 @@ test.describe.serial('first-run bootstrap and durable library jobs', () => {
 			t('settings_provider_fanart'),
 			t('settings_provider_theposterdb')
 		]) {
-			const checkbox = page.getByLabel(provider, { exact: false });
+			const checkbox = page.getByRole('checkbox', { name: provider, exact: false });
 			if (await checkbox.isChecked()) await checkbox.uncheck();
 		}
 		await page.getByRole('button', { name: t('setup_next') }).click();
@@ -62,7 +76,7 @@ test.describe.serial('first-run bootstrap and durable library jobs', () => {
 	});
 
 	test('runs incremental sync and the explicit full-rescan confirmation flow', async ({ page }) => {
-		await page.goto('/');
+		await gotoHydrated(page, '/');
 		const incrementalJobId = await triggerJob(page, '/api/sync', () =>
 			page.getByRole('button', { name: t('dashboard_sync') }).click()
 		);

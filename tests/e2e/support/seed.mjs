@@ -2,8 +2,15 @@ import { createClient } from '@libsql/client';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const runtimeFile = fileURLToPath(new URL('../.runtime.json', import.meta.url));
-const scenarioFile = fileURLToPath(new URL('../.scenario.json', import.meta.url));
+const appPort = Number(process.env.POSTERPILOT_E2E_PORT ?? 14170);
+const runId = process.env.POSTERPILOT_E2E_RUN_ID;
+if (!runId || !/^[a-zA-Z0-9_-]+$/.test(runId)) {
+	throw new Error('The Playwright config must provide a safe POSTERPILOT_E2E_RUN_ID.');
+}
+const runtimeFile = fileURLToPath(new URL(`../.runtime-${appPort}-${runId}.json`, import.meta.url));
+const scenarioFile = fileURLToPath(
+	new URL(`../.scenario-${appPort}-${runId}.json`, import.meta.url)
+);
 
 function readJson(path, label) {
 	if (!existsSync(path)) throw new Error(`${label} is unavailable; did the E2E harness start?`);

@@ -5,6 +5,32 @@ import { t } from './i18n.mjs';
 export const test = base.extend({
 	runtime: [async ({ browserName: _browserName }, use) => use(readRuntime()), { scope: 'worker' }],
 	scenario: async ({ browserName: _browserName }, use) => use(readScenario()),
+	localArtwork: [
+		async ({ page, runtime }, use) => {
+			await page.route(
+				(url) => url.pathname === '/api/thumb',
+				async (route) => {
+					const source = new URL(route.request().url()).searchParams.get('url');
+					if (!source?.startsWith(`${runtime.fakeJellyfinUrl}/assets/`)) {
+						await route.continue();
+						return;
+					}
+
+					// Production deliberately rejects loopback provider URLs. The browser
+					// harness serves the same deterministic PNG bytes without weakening that
+					// SSRF boundary just to make the visual FUN flows testable.
+					const response = await fetch(source);
+					await route.fulfill({
+						status: response.status,
+						contentType: response.headers.get('content-type') ?? 'image/png',
+						body: Buffer.from(await response.arrayBuffer())
+					});
+				}
+			);
+			await use(undefined);
+		},
+		{ auto: true }
+	],
 	pageExceptions: [
 		async ({ page }, use, testInfo) => {
 			const exceptions = [];
@@ -23,6 +49,16 @@ export const test = base.extend({
 });
 
 export { expect };
+
+export async function gotoHydrated(page, url) {
+	await page.goto(url);
+	await expect(page.locator('[data-app-hydrated="true"]')).toBeAttached();
+}
+
+export async function reloadHydrated(page) {
+	await page.reload();
+	await expect(page.locator('[data-app-hydrated="true"]')).toBeAttached();
+}
 
 export async function triggerJob(page, endpoint, action) {
 	const responsePromise = page.waitForResponse((response) => {
