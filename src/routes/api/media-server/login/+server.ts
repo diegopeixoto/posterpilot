@@ -46,8 +46,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		await logEvent('info', 'settings', `Logged in to ${flavor}`, { user: result.userName });
 		return json({ ok: true, userName: result.userName });
 	} catch (e) {
-		// 401 for rejected credentials, 502 for upstream/network failures.
-		const status = e instanceof MediaServerLoginError ? e.status : 502;
-		return json({ error: e instanceof Error ? e.message : String(e) }, { status });
+		// 401 for rejected credentials, 502 for upstream/network failures. Only the
+		// curated login-error text is safe to surface; anything unexpected stays generic.
+		if (e instanceof MediaServerLoginError) {
+			return json({ error: e.message }, { status: e.status });
+		}
+		return json({ error: 'Login failed unexpectedly. Check the server logs.' }, { status: 502 });
 	}
 };

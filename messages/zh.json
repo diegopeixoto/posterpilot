@@ -1136,6 +1136,7 @@
 	"backup_deleted": "备份已删除。",
 	"backup_restart_title": "需要重启",
 	"backup_restart_hint": "已验证的恢复已暂存，PosterPilot 目前处于维护模式。请重启进程或容器以应用恢复。在就绪检查通过前，旧数据库会保留用于自动回滚。",
+	"maintenance_banner": "维护模式：已暂存一个通过验证的恢复。在重启 PosterPilot 之前，所有更改均被禁用。",
 	"backup_restore_prepared": "恢复已准备。请重启 PosterPilot 以应用。",
 	"backup_safety_id": "安全备份：{id}",
 	"backup_retention_title": "保留策略",

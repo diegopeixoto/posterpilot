@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { eq, inArray } from 'drizzle-orm';
 import { resolveDataPaths } from '$lib/server/data-paths';
@@ -24,13 +24,13 @@ import {
 } from '$lib/server/media-server/artwork-url';
 
 /** How long a cached thumbnail stays fresh before it is re-fetched (30 days). */
-export const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Total on-disk budget for the thumbnail cache before LRU eviction kicks in (512 MB). */
-export const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 
 /** Per-response ceiling so an untrusted upstream cannot exhaust process memory. */
-export const DEFAULT_MAX_THUMB_BYTES = 20 * 1024 * 1024;
+const DEFAULT_MAX_THUMB_BYTES = 20 * 1024 * 1024;
 
 /**
  * Directory holding the cached image bytes (one file per `urlHash`), placed next to
@@ -75,6 +75,18 @@ export function selectEvictions(
 		total -= entry.sizeBytes;
 	}
 	return evict;
+}
+
+/**
+ * Given the cache directory's file names and the set of indexed hashes, return
+ * the file names that are cache entries (sha256-hex names) with no index row.
+ * Anything that doesn't look like a cache file is left alone. Pure.
+ */
+export function selectOrphanedCacheFiles(
+	fileNames: string[],
+	indexedHashes: Set<string>
+): string[] {
+	return fileNames.filter((name) => /^[a-f0-9]{64}$/.test(name) && !indexedHashes.has(name));
 }
 
 // ── Impure orchestration (db + fs) ─────────────────────────────────────────────
@@ -131,7 +143,7 @@ function filePathFor(urlHash: string): string {
  * from disk (the stale row is deleted in that case). On a hit, `accessedAt` is
  * bumped for LRU.
  */
-export async function getCachedThumb(
+async function getCachedThumb(
 	url: string,
 	opts: { ttlMs?: number } = {}
 ): Promise<ThumbBytes | null> {
@@ -184,7 +196,7 @@ async function evictToBudget(maxBytes: number): Promise<void> {
  * the cache within `maxBytes`. Throws if the upstream fetch fails (non-2xx or
  * network error) — the proxy route turns that into a 502.
  */
-export async function fetchAndCache(
+async function fetchAndCache(
 	url: string,
 	opts: { ttlMs?: number; maxBytes?: number; maxEntryBytes?: number } = {}
 ): Promise<ThumbBytes> {
@@ -227,6 +239,27 @@ export async function fetchAndCache(
 	await evictToBudget(maxBytes);
 
 	return { bytes, contentType };
+}
+
+/**
+ * Delete on-disk cache files that have no index row. Files and rows normally
+ * live and die together, but migration 0008 wiped the index wholesale (cached
+ * credential-bearing URLs must not survive the multi-server upgrade), which
+ * orphaned every pre-upgrade file with no other reclamation path. Runs once at
+ * boot, before any request or job can write new entries.
+ */
+export async function reconcileThumbCacheDisk(): Promise<number> {
+	let names: string[];
+	try {
+		names = await readdir(thumbCacheDir());
+	} catch {
+		// Directory absent (fresh install / nothing cached yet) — nothing to do.
+		return 0;
+	}
+	const rows = await db.select({ urlHash: thumbnailCache.urlHash }).from(thumbnailCache);
+	const orphaned = selectOrphanedCacheFiles(names, new Set(rows.map((row) => row.urlHash)));
+	await Promise.all(orphaned.map((name) => rm(filePathFor(name), { force: true })));
+	return orphaned.length;
 }
 
 /** Serve `url` from the cache, fetching + caching it on a miss. */

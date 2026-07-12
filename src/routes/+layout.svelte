@@ -333,6 +333,15 @@
 		</div>
 	</header>
 
+	{#if data.maintenanceActive}
+		<div
+			class="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-center text-sm text-amber-300"
+			role="status"
+		>
+			{m.maintenance_banner()}
+		</div>
+	{/if}
+
 	{#if !data.configReady}
 		<div
 			class="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-center text-sm text-amber-300"

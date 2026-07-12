@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages';
@@ -253,11 +253,16 @@
 
 	// Returning from item detail restores both the server-side page offset and the
 	// exact card that opened it. The card is focusable only for this restoration.
+	// The `focus` param is consumed on first use (removed via replaceState) so the
+	// invalidateAll() every action triggers doesn't yank focus back to this card.
 	$effect(() => {
 		const focusedId = Number(page.url.searchParams.get('focus'));
 		void data.items;
 		if (!Number.isSafeInteger(focusedId) || focusedId <= 0) return;
 		requestAnimationFrame(() => {
+			const url = new URL(window.location.href);
+			url.searchParams.delete('focus');
+			replaceState(url, page.state);
 			const card = document.getElementById(`review-item-${focusedId}`);
 			if (!card) return;
 			card.focus({ preventScroll: true });

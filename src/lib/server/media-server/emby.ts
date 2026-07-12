@@ -163,8 +163,17 @@ export function embyLikeProvider(
 	const headers = authHeaders(apiKey, flavor);
 	const label = flavor === 'jellyfin' ? 'Jellyfin' : 'Emby';
 
+	// Every request aborts instead of hanging a worker when the server stalls
+	// mid-connection: metadata reads get the readCurrentArtwork budget, image
+	// transfers get a larger one for big files on slow links.
+	const JSON_TIMEOUT_MS = 15_000;
+	const IMAGE_TIMEOUT_MS = 30_000;
+
 	async function getJson<T>(path: string): Promise<T> {
-		const res = await fetch(`${base}${path}`, { headers });
+		const res = await fetch(`${base}${path}`, {
+			headers,
+			signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
+		});
 		if (!res.ok) {
 			throw new Error(`${label} returned HTTP ${res.status} ${res.statusText} for ${path}`);
 		}
@@ -182,7 +191,8 @@ export function embyLikeProvider(
 		const res = await fetch(url, {
 			method: 'POST',
 			headers: { ...headers, 'Content-Type': contentType },
-			body: toBase64(data)
+			body: toBase64(data),
+			signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
 		});
 		if (!res.ok) {
 			throw new Error(`${label} rejected the image upload: HTTP ${res.status} ${res.statusText}`);
@@ -191,7 +201,7 @@ export function embyLikeProvider(
 
 	/** Fetch an image URL into bytes + its content type for byte-based apply. */
 	async function fetchImage(url: string): Promise<{ data: ArrayBuffer; contentType: string }> {
-		const res = await fetch(url);
+		const res = await fetch(url, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
 		if (!res.ok) {
 			throw new Error(`Could not fetch image (${res.status} ${res.statusText}): ${url}`);
 		}
@@ -226,7 +236,7 @@ export function embyLikeProvider(
 		const imagePath = kind === 'poster' ? 'Primary' : 'Backdrop/0';
 		const response = await fetch(
 			`${base}/Items/${encodeURIComponent(itemId)}/Images/${imagePath}`,
-			{ method: 'DELETE', headers }
+			{ method: 'DELETE', headers, signal: AbortSignal.timeout(JSON_TIMEOUT_MS) }
 		);
 		if (response.status === 404) return;
 		if (!response.ok) throw new Error(`${label} artwork delete failed (${response.status}).`);

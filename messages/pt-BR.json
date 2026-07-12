@@ -1136,6 +1136,7 @@
 	"backup_deleted": "Backup excluído.",
 	"backup_restart_title": "Reinicialização necessária",
 	"backup_restart_hint": "A restauração verificada foi preparada e o PosterPilot está em modo de manutenção. Reinicie o processo ou contêiner para aplicá-la. O banco anterior permanece disponível para reversão automática até a aprovação das verificações de prontidão.",
+	"maintenance_banner": "Modo de manutenção: uma restauração verificada está preparada. As alterações ficam desabilitadas até o PosterPilot ser reiniciado.",
 	"backup_restore_prepared": "Restauração preparada. Reinicie o PosterPilot para aplicá-la.",
 	"backup_safety_id": "Backup de segurança: {id}",
 	"backup_retention_title": "Retenção",

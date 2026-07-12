@@ -1136,6 +1136,7 @@
 	"backup_deleted": "バックアップを削除しました。",
 	"backup_restart_title": "再起動が必要です",
 	"backup_restart_hint": "検証済みの復元が準備され、PosterPilot はメンテナンスモードになっています。適用するにはプロセスまたはコンテナを再起動してください。準備完了チェックに合格するまで、以前のデータベースは自動ロールバック用に保持されます。",
+	"maintenance_banner": "メンテナンスモード:検証済みの復元が準備されています。PosterPilot を再起動するまで変更は無効になります。",
 	"backup_restore_prepared": "復元を準備しました。適用するには PosterPilot を再起動してください。",
 	"backup_safety_id": "安全バックアップ: {id}",
 	"backup_retention_title": "保持",

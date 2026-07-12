@@ -1136,6 +1136,7 @@
 	"backup_deleted": "Copia de seguridad eliminada.",
 	"backup_restart_title": "Es necesario reiniciar",
 	"backup_restart_hint": "La restauración verificada está preparada y PosterPilot se encuentra en modo de mantenimiento. Reinicia el proceso o contenedor para aplicarla. La base de datos anterior seguirá disponible para una reversión automática hasta que se superen las comprobaciones de disponibilidad.",
+	"maintenance_banner": "Modo de mantenimiento: hay una restauración verificada preparada. Los cambios están deshabilitados hasta que se reinicie PosterPilot.",
 	"backup_restore_prepared": "Restauración preparada. Reinicia PosterPilot para aplicarla.",
 	"backup_safety_id": "Copia de seguridad: {id}",
 	"backup_retention_title": "Retención",

@@ -83,6 +83,9 @@ body {
 	.badge-changed {
 		@apply bg-emerald-600/90 text-white;
 	}
+	.badge-success {
+		@apply bg-emerald-600/90 text-white;
+	}
 	.badge-muted {
 		@apply border border-neutral-700 bg-black/50 text-neutral-300;
 	}

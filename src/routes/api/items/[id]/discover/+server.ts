@@ -19,8 +19,9 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		const count = await discoverForItem(item, config, { forceRefresh: body.forceRefresh });
 		const detail = await getItemDetail(id, active.id);
 		return json({ count, candidates: detail?.candidates ?? [] });
-	} catch (e) {
-		// MediaUX fetch/parse failure — report it without 500-ing the request.
-		return json({ count: 0, candidates: [], error: e instanceof Error ? e.message : String(e) });
+	} catch {
+		// Provider fetch/parse failure — report it without 500-ing the request. The UI
+		// shows its own generic message, so no exception text crosses the API boundary.
+		return json({ count: 0, candidates: [], error: 'discovery_failed' });
 	}
 };

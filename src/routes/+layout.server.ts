@@ -3,6 +3,7 @@ import { resolveConfig } from '$lib/server/config';
 import { activeJobCount } from '$lib/server/queries';
 import { listManagedServers } from '$lib/server/server-instances';
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from '$lib/i18n/resolve';
+import { maintenanceMode } from '$lib/server/maintenance';
 import { version } from '$lib/version';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
@@ -16,6 +17,9 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	return {
 		activeJobs,
 		version,
+		// A staged restore put the app in maintenance mode: writes are rejected until
+		// the process restarts, so every page shows the restart banner, not just Settings.
+		maintenanceActive: Boolean(maintenanceMode()),
 		// Ready when the active media server is configured and TMDB is set.
 		configReady: Boolean(serverManagement.activeServerId && config.tmdbKey),
 		serverSelection: {

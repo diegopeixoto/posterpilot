@@ -1136,6 +1136,7 @@
 	"backup_deleted": "Backup deleted.",
 	"backup_restart_title": "Restart required",
 	"backup_restart_hint": "The verified restore is staged and PosterPilot is in maintenance mode. Restart the process or container to apply it. The previous database remains available for automatic rollback until readiness checks pass.",
+	"maintenance_banner": "Maintenance mode: a verified restore is staged. Changes are disabled until PosterPilot is restarted.",
 	"backup_restore_prepared": "Restore prepared. Restart PosterPilot to apply it.",
 	"backup_safety_id": "Safety backup: {id}",
 	"backup_retention_title": "Retention",

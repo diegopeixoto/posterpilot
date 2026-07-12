@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { ensurePlexClientId, resolveConfig } from '$lib/server/config';
-import { listConnections } from '$lib/server/media-server/plex-auth';
+import { listConnections, PlexAuthError } from '$lib/server/media-server/plex-auth';
 
 /**
  * Discover the user's Plex servers and their connections (local/remote/relay).
@@ -17,6 +17,9 @@ export const GET: RequestHandler = async () => {
 		const connections = await listConnections(config.plexToken, clientId);
 		return json({ connections });
 	} catch (e) {
-		return json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+		// Only curated plex.tv error text is safe to surface; anything else stays generic.
+		const message =
+			e instanceof PlexAuthError ? e.message : 'Plex server discovery failed unexpectedly.';
+		return json({ error: message }, { status: 502 });
 	}
 };
