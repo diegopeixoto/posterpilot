@@ -1,7 +1,14 @@
 ---
 // Wraps Starlight's default footer and appends a trademark/affiliation disclaimer
-// shown on every page and every locale.
+// shown on every page and every locale, plus project credits: copyright, GitHub
+// star count, and the current app version (read from the root package.json at
+// build time).
 import Default from '@astrojs/starlight/components/Footer.astro';
+import pkg from '../../../package.json';
+
+const repoUrl = 'https://github.com/diegopeixoto/posterpilot';
+const version = pkg.version;
+const year = new Date().getFullYear();
 ---
 
 <Default />
@@ -12,6 +19,41 @@ import Default from '@astrojs/starlight/components/Footer.astro';
 	This product uses the TMDB API but is not endorsed or certified by TMDB.
 </p>
 
+<div class="pp-credits">
+	<a href="https://github.com/diegopeixoto" rel="author">© {year} Diego Peixoto</a>
+	<span aria-hidden="true">·</span>
+	<a class="pp-stars" href={`${repoUrl}/stargazers`} aria-label="GitHub stars">
+		<svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+			<path
+				d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"
+			></path>
+		</svg>
+		<span data-pp-star-count>GitHub</span>
+	</a>
+	<span aria-hidden="true">·</span>
+	<a href={`${repoUrl}/releases`}>v{version}</a>
+</div>
+
+<script>
+	// Fill in the live star count; on any failure the link keeps its "GitHub" label.
+	const el = document.querySelector('[data-pp-star-count]');
+	if (el) {
+		try {
+			const res = await fetch('https://api.github.com/repos/diegopeixoto/posterpilot');
+			if (res.ok) {
+				const { stargazers_count } = await res.json();
+				if (typeof stargazers_count === 'number') {
+					el.textContent = new Intl.NumberFormat(document.documentElement.lang || 'en').format(
+						stargazers_count
+					);
+				}
+			}
+		} catch {
+			// offline or rate-limited: keep the fallback label
+		}
+	}
+</script>
+
 <style>
 	.pp-disclaimer {
 		margin-top: 2rem;
@@ -20,5 +62,30 @@ import Default from '@astrojs/starlight/components/Footer.astro';
 		font-size: var(--sl-text-xs);
 		color: var(--sl-color-gray-3);
 		text-align: center;
+	}
+
+	.pp-credits {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+	}
+
+	.pp-credits a {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.pp-credits a:hover {
+		color: var(--sl-color-white);
+	}
+
+	.pp-stars {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
 	}
 </style>
