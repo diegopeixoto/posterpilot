@@ -5,16 +5,32 @@
 
 ### Features
 
-* complete product improvement workflows ([bea65c4](https://github.com/diegopeixoto/posterpilot/commit/bea65c4d48c533e897893e6e48d84fe801727671))
-* complete product workflows and FUN experiences ([b2d0b2f](https://github.com/diegopeixoto/posterpilot/commit/b2d0b2f693776a7a251f3bb52e509584e31925e0))
-* run artwork undo on the durable job queue ([78699a7](https://github.com/diegopeixoto/posterpilot/commit/78699a7cf5264abe00a0b2736f3aac21e7c6b84c))
+* **Multiple media servers** — name, test, and switch between Plex, Jellyfin, and Emby servers without mixing their libraries or credentials. The existing connection is carried over automatically as a protected default server, so nothing changes until you add a second one. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* **Review inbox** — one queue for everything that needs a decision: unresolved titles, ready suggestions, staged artwork, partial failures, and titles changed on the server. Saved views, manual TMDB matching with an audit trail, and apply-and-next to work straight through. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* **Exact previews, verification, and undo** — every artwork write shows the precise plan first (uploads, Kometa exports, skips), executes only what was confirmed, verifies each destination afterwards, and records a revision per slot. Anything applied can be undone from the artwork timeline — a slot, a season, one revision, or the whole item — restoring the byte-exact artwork that was there before. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* **Collections** — coordinate a collection's own artwork with its members', apply the family as one job, and undo the whole group together. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* **Automation that never applies on its own** — run sync and discovery on an interval, at a time of day, or on a media event, and route the results to the review inbox. Automations are review-only by design: they queue decisions, they never write artwork. Inbound webhooks with one-time tokens included. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* **Backups and recovery** — create, verify, and export application backups. A restore runs a full safety preflight (integrity, schema compatibility, disk space, encryption key), keeps a protected pre-restore safety backup, and stages the swap for the next restart with automatic rollback if readiness checks fail. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* **FUN** — filtered random picks, blind reveal, poster match, an ambient full-screen gallery, and a session planner that fits the available time. All read-only: FUN never applies artwork. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
 
 
 ### Bug Fixes
 
-* harden hydrated setup and accessible settings ([1f6eb12](https://github.com/diegopeixoto/posterpilot/commit/1f6eb1232d238df5966dd8833e169611598b8246))
-* harden restore maintenance gate, provider timeouts, and review focus ([0bc6348](https://github.com/diegopeixoto/posterpilot/commit/0bc6348eabacd9c0f82d8f1c603b8a6acc466dd7))
-* scope new-item automation events to each schedule library ([66f8d06](https://github.com/diegopeixoto/posterpilot/commit/66f8d0634f067d0b5959d9b89f140e187cc9ed84))
+* Automations scoped to a library never fired when a sync added new items to more than one library — the event carried ids from every library, and the scoped schedule silently rejected them. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* Changes made after confirming a restore, while the app awaited its restart, were accepted and then discarded by the restore. Writes are now rejected for that window, and every page says why. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* Jellyfin, Emby, and plex.tv requests could hang indefinitely against a stalled server. Every call now has a timeout. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* The review inbox pulled keyboard focus back to the previous card after each action. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+
+
+### Under the hood
+
+* Durable jobs with lease-based crash recovery — undo runs on the queue too, so a large collection undo reports progress and survives a restart. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+* Diagnostics and support bundles with fail-closed secret redaction, an isolated Playwright suite covering setup through authentication, and reproducible documentation screenshots. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
+
+
+### Upgrading
+
+* This release ships a substantial database migration that creates the multi-server, revision, automation, and backup storage, and re-scopes existing media, jobs, and candidates onto the carried-over server. It runs in a single transaction and rolls back cleanly on failure, but back up the `data/` directory before upgrading — there is no downgrade path. ([#35](https://github.com/diegopeixoto/posterpilot/pull/35))
 
 ## [0.8.0](https://github.com/diegopeixoto/posterpilot/compare/v0.7.0...v0.8.0) (2026-07-07)
 
