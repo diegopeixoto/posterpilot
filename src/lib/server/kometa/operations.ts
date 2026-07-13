@@ -15,8 +15,6 @@ export interface Operation {
 	readonly enumValues?: readonly string[];
 }
 
-export const OPERATIONS_DOC_URL = 'https://kometa.wiki/en/latest/config/operations/';
-
 export const OPERATIONS: readonly Operation[] = Object.freeze([
 	Object.freeze({
 		key: 'assets_for_all',

@@ -12,12 +12,19 @@ import globals from 'globals';
 export default ts.config(
 	{
 		ignores: [
+			'.agents/**',
+			'.codex/**',
+			'AGENTS.md',
 			'src/lib/paraglide/**',
 			'build/**',
 			'.svelte-kit/**',
 			'node_modules/**',
 			'drizzle/**',
-			'docs/**'
+			'docs/**',
+			// Playwright writes bundled vendor code into its reports and traces. Linting
+			// those artifacts fails the gate on any machine that has run the suite.
+			'playwright-report/**',
+			'test-results/**'
 		]
 	},
 	js.configs.recommended,

@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { ensurePlexClientId } from '$lib/server/config';
-import { createPin } from '$lib/server/media-server/plex-auth';
+import { createPin, PlexAuthError } from '$lib/server/media-server/plex-auth';
 
 /**
  * Create a strong plex.tv PIN. Returns the pin id + code to show the user (who
@@ -22,6 +22,8 @@ export const POST: RequestHandler = async () => {
 			linkUrl: 'https://plex.tv/link'
 		});
 	} catch (e) {
-		return json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+		// Only curated plex.tv error text is safe to surface; anything else stays generic.
+		const message = e instanceof PlexAuthError ? e.message : 'Plex sign-in failed unexpectedly.';
+		return json({ error: message }, { status: 502 });
 	}
 };

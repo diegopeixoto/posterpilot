@@ -25,16 +25,12 @@ export const thePosterDbProvider: PosterProvider = {
 		const term = encodeURIComponent(`${item.title} ${item.year ?? ''}`.trim());
 		const section = item.type === 'show' ? 'shows' : 'movies';
 		const url = `${BASE_URL}/search?term=${term}&section=${section}`;
-		try {
-			const html = await fetchText(url, {
-				headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'text/html' },
-				cacheTtlDays: config.httpCacheTtlDays,
-				forceRefresh: opts?.forceRefresh,
-				retries: 1
-			});
-			return parseThePosterDb(html);
-		} catch {
-			return [];
-		}
+		const html = await fetchText(url, {
+			headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'text/html' },
+			cacheTtlDays: config.httpCacheTtlDays,
+			forceRefresh: opts?.forceRefresh,
+			retries: 1
+		});
+		return parseThePosterDb(html);
 	}
 };

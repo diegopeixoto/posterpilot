@@ -11,9 +11,19 @@
  * `writeKometaYaml` touches the filesystem.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { parse, stringify } from 'yaml';
+import { join, resolve } from 'node:path';
+import {
+	isMap,
+	isNode,
+	isScalar,
+	parseDocument,
+	stringify,
+	type Document,
+	type Node,
+	type Pair,
+	type YAMLMap
+} from 'yaml';
+import { readConfig, withConfigLock, writeConfigAtomic } from './config-io';
 
 /** Default file name written into the Kometa assets/config directory. */
 export const DEFAULT_FILENAME = 'posterpilot.yml';
@@ -190,6 +200,122 @@ export function toYaml(obj: Record<string, unknown>): string {
 	return stringify(obj);
 }
 
+/** Return the plain value of a scalar map key without resolving the document. */
+function keyValue(key: unknown): unknown {
+	return isScalar(key) ? key.value : key;
+}
+
+/**
+ * Find a map pair while treating quoted and unquoted numeric keys as the same
+ * logical Kometa identifier. This matters because YAML parses `550:` as a
+ * number, while PosterPilot receives TMDB ids as strings.
+ */
+function findPair(map: YAMLMap, key: string | number): Pair | undefined {
+	return map.items.find((pair) => String(keyValue(pair.key)) === String(key));
+}
+
+/** Keep comments and whitespace hints when an incompatible node must be replaced. */
+function copyPresentation(source: unknown, target: unknown): void {
+	if (!isNode(source) || !isNode(target)) return;
+	target.comment = source.comment;
+	target.commentBefore = source.commentBefore;
+	target.spaceBefore = source.spaceBefore;
+}
+
+function createMap(document: Document<Node>): YAMLMap {
+	return document.createNode({}) as YAMLMap;
+}
+
+/** Get or create a mapping child without replacing a compatible existing node. */
+function ensureMap(document: Document<Node>, parent: YAMLMap, key: string | number): YAMLMap {
+	const pair = findPair(parent, key);
+	if (pair && isMap(pair.value)) return pair.value;
+
+	const map = createMap(document);
+	if (pair) {
+		copyPresentation(pair.value, map);
+		pair.value = map;
+	} else {
+		parent.items.push(document.createPair(key, map));
+	}
+	return map;
+}
+
+/** Update a scalar in place so any inline/before comment stays attached. */
+function setScalar(
+	document: Document<Node>,
+	parent: YAMLMap,
+	key: string | number,
+	value: string
+): void {
+	const pair = findPair(parent, key);
+	if (pair && isScalar(pair.value)) {
+		pair.value.value = value;
+		return;
+	}
+
+	const scalar = document.createNode(value);
+	if (pair) {
+		copyPresentation(pair.value, scalar);
+		pair.value = scalar;
+	} else {
+		parent.items.push(document.createPair(key, scalar));
+	}
+}
+
+/** Merge one item directly into a YAML document while preserving untouched nodes. */
+function mergeItemIntoDocument(
+	document: Document<Node>,
+	metadata: YAMLMap,
+	item: KometaItemInput
+): void {
+	const entry = ensureMap(document, metadata, item.tmdbId);
+	const next = buildEntry(item);
+	if (next.url_poster !== undefined) setScalar(document, entry, 'url_poster', next.url_poster);
+	if (next.url_background !== undefined) {
+		setScalar(document, entry, 'url_background', next.url_background);
+	}
+	if (!next.seasons) return;
+
+	const seasons = ensureMap(document, entry, 'seasons');
+	for (const [seasonKey, nextSeason] of Object.entries(next.seasons)) {
+		const season = ensureMap(document, seasons, Number(seasonKey));
+		if (nextSeason.url_poster !== undefined) {
+			setScalar(document, season, 'url_poster', nextSeason.url_poster);
+		}
+		if (!nextSeason.episodes) continue;
+
+		const episodes = ensureMap(document, season, 'episodes');
+		for (const [episodeKey, nextEpisode] of Object.entries(nextSeason.episodes)) {
+			const episode = ensureMap(document, episodes, Number(episodeKey));
+			if (nextEpisode.url_poster !== undefined) {
+				setScalar(document, episode, 'url_poster', nextEpisode.url_poster);
+			}
+		}
+	}
+}
+
+/** Parse and merge without including source text (which may contain secrets) in errors. */
+function mergeYamlDocument(raw: string | null, items: KometaItemInput[]): string {
+	const document = parseDocument(raw ?? '') as Document<Node>;
+	if (document.errors.length > 0) {
+		throw new Error('Invalid existing Kometa YAML');
+	}
+
+	let root: YAMLMap;
+	if (isMap(document.contents)) {
+		root = document.contents;
+	} else {
+		root = createMap(document);
+		copyPresentation(document.contents, root);
+		document.contents = root;
+	}
+
+	const metadata = ensureMap(document, root, 'metadata');
+	for (const item of items) mergeItemIntoDocument(document, metadata, item);
+	return document.toString();
+}
+
 /**
  * Write (or update) the Kometa YAML file in the given directory.
  *
@@ -203,22 +329,15 @@ export function toYaml(obj: Record<string, unknown>): string {
 export async function writeKometaYaml(
 	dir: string,
 	items: KometaItemInput[],
-	opts: { filename?: string } = {}
+	opts: { filename?: string; validateCurrent?: (raw: string | null) => void } = {}
 ): Promise<void> {
 	const filename = opts.filename ?? DEFAULT_FILENAME;
-	mkdirSync(dir, { recursive: true });
+	const filePath = resolve(join(dir, filename));
 
-	const filePath = join(dir, filename);
-
-	let existing: Record<string, unknown> = {};
-	if (existsSync(filePath)) {
-		const raw = readFileSync(filePath, 'utf8');
-		const parsed = parse(raw);
-		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-			existing = parsed as Record<string, unknown>;
-		}
-	}
-
-	const merged = mergeMetadata(existing, items);
-	writeFileSync(filePath, toYaml(merged), 'utf8');
+	await withConfigLock(filePath, async () => {
+		const current = readConfig(filePath);
+		opts.validateCurrent?.(current);
+		const merged = mergeYamlDocument(current, items);
+		writeConfigAtomic(filePath, merged, new Date().toISOString());
+	});
 }

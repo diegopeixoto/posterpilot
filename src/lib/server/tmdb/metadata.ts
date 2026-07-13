@@ -37,12 +37,23 @@ interface TmdbDetail {
 	number_of_seasons?: number;
 	number_of_episodes?: number;
 	credits?: { cast?: TmdbCredit[] };
+	belongs_to_collection?: { id?: number | string; name?: string } | null;
 }
 
 /** Normalize an empty string to null. */
 function nz(s: string | undefined): string | null {
 	const t = (s ?? '').trim();
 	return t ? t : null;
+}
+
+function collectionRef(
+	value: TmdbDetail['belongs_to_collection'],
+	mediaType: TmdbMediaType
+): TmdbMetadata['collection'] {
+	if (mediaType !== 'movie' || !value) return null;
+	const id = typeof value.id === 'number' || typeof value.id === 'string' ? String(value.id) : '';
+	const name = nz(value.name);
+	return /^[1-9]\d*$/.test(id) && name ? { id, name } : null;
 }
 
 /**
@@ -76,7 +87,8 @@ export function parseDetailMetadata(
 		backdropUrl: tmdbImageUrl(d.backdrop_path, BACKDROP_SIZE),
 		seasonCount: mediaType === 'tv' ? (d.number_of_seasons ?? null) : null,
 		episodeCount: mediaType === 'tv' ? (d.number_of_episodes ?? null) : null,
-		cast
+		cast,
+		collection: collectionRef(d.belongs_to_collection, mediaType)
 	};
 }
 

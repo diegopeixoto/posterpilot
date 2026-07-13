@@ -1,7 +1,7 @@
 # tmdb-metadata Specification
 
 ## Purpose
-TBD - created by archiving change mediux-style-redesign. Update Purpose after archive.
+Define display-metadata and logo enrichment for resolved media, including caching and refresh behavior.
 ## Requirements
 ### Requirement: Fetch display metadata for resolved items
 
@@ -49,4 +49,3 @@ The system SHALL cache TMDB metadata requests through the shared HTTP cache so r
 
 - **WHEN** a forced refresh is requested for an item
 - **THEN** the system bypasses the cache, re-fetches the TMDB detail and images, and updates the stored metadata
-

@@ -20,14 +20,19 @@ export function registerClientLocaleStrategy(): void {
 	defineCustomClientStrategy('custom-setting', {
 		getLocale: () => activeLocale,
 		setLocale: async (locale) => {
-			activeLocale = locale;
+			// Paraglide synchronizes the locale returned by getLocale() back through
+			// setLocale() during hydration. The server value was already seeded, so an
+			// equal value is initialization, not a user preference change.
+			if (activeLocale === locale) return;
 			// Persist as the `language` app setting (same write the Settings page uses)
 			// so the choice is sticky across reloads and SSR.
-			await fetch('/api/settings', {
+			const response = await fetch('/api/settings', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ language: locale })
 			});
+			if (!response.ok) throw new Error(`Failed to persist locale (${response.status})`);
+			activeLocale = locale;
 		}
 	});
 }

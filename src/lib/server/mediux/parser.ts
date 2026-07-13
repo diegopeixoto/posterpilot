@@ -79,7 +79,7 @@ export function extractSetAuthors(rsc: string): Map<string, string> {
 }
 
 /** The target item's display title from the embedded movie/show object, or null. */
-export function extractTargetTitle(rsc: string, tmdbId: string): string | null {
+function extractTargetTitle(rsc: string, tmdbId: string): string | null {
 	const re = new RegExp(
 		`"(?:movie|show)":\\{"id":"${tmdbId}","(?:title|name)":"((?:[^"\\\\]|\\\\.)*)"`
 	);

@@ -2,16 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { resolveChildOps, seasonsNeedingEpisodes, type StagedChildSlot } from './child-apply';
 import type { ServerChild } from '$lib/server/media-server/types';
 
-const seasons: ServerChild[] = [
-	{ id: 's1', number: 1 },
-	{ id: 's2', number: 2 }
-];
+const child = (id: string, number: number): ServerChild => ({
+	id,
+	number,
+	currentPosterUrl: null,
+	currentBackgroundUrl: null,
+	serverUpdatedAt: null
+});
+
+const seasons: ServerChild[] = [child('s1', 1), child('s2', 2)];
 const episodesBySeason: Record<number, ServerChild[]> = {
-	1: [
-		{ id: 's1e1', number: 1 },
-		{ id: 's1e2', number: 2 }
-	],
-	2: [{ id: 's2e1', number: 1 }]
+	1: [child('s1e1', 1), child('s1e2', 2)],
+	2: [child('s2e1', 1)]
 };
 
 describe('seasonsNeedingEpisodes', () => {

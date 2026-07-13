@@ -17,6 +17,43 @@ import type { PlexGuids } from '$lib/server/types';
 /** The supported media-server backends. */
 export type ServerType = 'plex' | 'jellyfin' | 'emby';
 
+/** Stable non-secret identity carried by every credentials-bound provider. */
+export interface MediaServerIdentity {
+	instanceId: string | null;
+	name: string | null;
+	type: ServerType;
+}
+
+export type CapabilitySupport = 'supported' | 'unsupported' | 'unknown';
+
+/** Normalized artwork capabilities used by planning, diagnostics, verification, and undo. */
+export interface MediaServerCapabilities extends Record<string, unknown> {
+	posterWrite: CapabilitySupport;
+	backgroundWrite: CapabilitySupport;
+	seasonWrite: CapabilitySupport;
+	episodeWrite: CapabilitySupport;
+	fieldLock: CapabilitySupport;
+	currentImageRetrieval: CapabilitySupport;
+	artworkDelete: CapabilitySupport;
+	/** Native collection/container discovery, independent of TMDB-backed grouping. */
+	nativeCollectionDiscovery?: CapabilitySupport;
+	/** Poster/background writes to a provider-native collection entity. */
+	collectionArtwork?: CapabilitySupport;
+	evidence: 'provider_contract' | 'advertised' | 'verified' | 'unknown';
+	limitations: string[];
+}
+
+export type ServerArtworkKind = 'poster' | 'background';
+
+/** Current artwork bytes plus a provider-native identity suitable for stale checks. */
+export interface ServerArtwork {
+	kind: ServerArtworkKind;
+	url: string | null;
+	identity: string | null;
+	data: ArrayBuffer;
+	contentType: string | null;
+}
+
 /** A movie or show library/section on a media server. */
 export interface ServerLibrary {
 	/** Provider-native library id/key (Plex section key, Jellyfin/Emby item id). */
@@ -46,6 +83,30 @@ export interface ServerItem {
 	watched: boolean;
 }
 
+/** One provider-native member reference returned with a collection/container. */
+export interface ServerNativeCollectionMember {
+	/** Provider-native item id; never inferred from a title. */
+	id: string;
+	title: string | null;
+	year: number | null;
+}
+
+/** A provider-native collection and its authoritative member identifiers. */
+export interface ServerNativeCollection {
+	/** Provider-native collection/container id. */
+	id: string;
+	name: string;
+	members: ServerNativeCollectionMember[];
+	currentPosterUrl: string | null;
+	currentBackgroundUrl: string | null;
+	/** Library ids that exposed this collection; informational, never identity. */
+	libraryKeys: string[];
+	capabilities: {
+		posterWrite: CapabilitySupport;
+		backgroundWrite: CapabilitySupport;
+	};
+}
+
 /**
  * A show's season or episode child, identified provider-natively and keyed by its
  * number, so number-keyed artwork (season N / episode N) can be mapped to it.
@@ -55,6 +116,10 @@ export interface ServerChild {
 	id: string;
 	/** Season number (for seasons) or episode number (for episodes). */
 	number: number;
+	/** Current child artwork metadata, populated when the provider exposes it. */
+	currentPosterUrl: string | null;
+	currentBackgroundUrl: string | null;
+	serverUpdatedAt: Date | null;
 }
 
 /** Result of a provider connection test. Never thrown — returned as a value. */
@@ -78,6 +143,10 @@ export type LockField = 'poster' | 'background';
 export interface MediaServer {
 	/** Which backend this provider talks to. */
 	readonly type: ServerType;
+	/** Concrete named-instance identity; null ids are limited to legacy resolution. */
+	readonly identity: MediaServerIdentity;
+	/** Explicit capability contract; callers never infer support from type alone. */
+	readonly capabilities: MediaServerCapabilities;
 
 	/** Verify connectivity + credentials. Never throws. */
 	testConnection(): Promise<ConnectionResult>;
@@ -87,6 +156,31 @@ export interface MediaServer {
 
 	/** List a library's items with their resolvable metadata. */
 	listItems(libraryKey: string): Promise<ServerItem[]>;
+
+	/**
+	 * Discover provider-native collections for the selected library scope. Missing
+	 * support is represented by an absent method and never blocks TMDB enrichment.
+	 */
+	listNativeCollections?(libraryKeys: string[]): Promise<ServerNativeCollection[]>;
+
+	/** Apply artwork to a provider-native collection/container when supported. */
+	applyCollectionPosterUrl?(collectionId: string, url: string): Promise<void>;
+	applyCollectionPosterBytes?(
+		collectionId: string,
+		data: ArrayBuffer,
+		contentType?: string
+	): Promise<void>;
+	applyCollectionBackgroundUrl?(collectionId: string, url: string): Promise<void>;
+	applyCollectionBackgroundBytes?(
+		collectionId: string,
+		data: ArrayBuffer,
+		contentType?: string
+	): Promise<void>;
+	readCollectionArtwork?(
+		collectionId: string,
+		kind: ServerArtworkKind
+	): Promise<ServerArtwork | null>;
+	deleteCollectionArtwork?(collectionId: string, kind: ServerArtworkKind): Promise<void>;
 
 	/** List a show's seasons, each with its season number. */
 	listSeasons(showId: string): Promise<ServerChild[]>;
@@ -105,6 +199,12 @@ export interface MediaServer {
 
 	/** Apply a background/art image from raw bytes, then lock the field. */
 	applyBackgroundBytes?(itemId: string, data: ArrayBuffer, contentType?: string): Promise<void>;
+
+	/** Read exact current artwork bytes for snapshots and post-write verification. */
+	readArtwork?(itemId: string, kind: ServerArtworkKind): Promise<ServerArtwork | null>;
+
+	/** Remove an explicitly set artwork slot when the provider supports absence restoration. */
+	deleteArtwork?(itemId: string, kind: ServerArtworkKind): Promise<void>;
 
 	/**
 	 * Lock or unlock a field so the server's automatic agents do not overwrite an

@@ -1,6 +1,7 @@
 {
 	"name": "posterpilot",
 	"private": true,
+	"license": "MIT",
 	"version": "0.8.0",
 	"type": "module",
 	"scripts": {
@@ -10,6 +11,7 @@
 		"start": "node build",
 		"db:generate": "drizzle-kit generate",
 		"test": "vitest run",
+		"test:e2e": "playwright test --config playwright.e2e.config.mjs",
 		"test:watch": "vitest",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
@@ -23,6 +25,7 @@
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@inlang/paraglide-js": "^2.20.1",
+		"@playwright/test": "^1.61.1",
 		"@sveltejs/adapter-node": "^5.5.6",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
@@ -45,7 +48,6 @@
 	"dependencies": {
 		"@libsql/client": "^0.17.4",
 		"drizzle-orm": "^0.45.2",
-		"p-limit": "^7.3.0",
 		"p-retry": "^8.0.0",
 		"yaml": "^2.9.0",
 		"zod": "^4.4.3"

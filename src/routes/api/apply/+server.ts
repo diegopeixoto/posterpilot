@@ -1,19 +1,32 @@
-import { error, json } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { enqueueJob } from '$lib/server/jobs/runner';
+import {
+	activeApplyServerInstanceId,
+	confirmDatabaseArtworkApply
+} from '$lib/server/plans/apply-runtime';
+import { applyRouteError } from '$lib/server/plans/apply-route-error';
+import { maintenanceResponse } from '$lib/server/maintenance-http';
 
 export const POST: RequestHandler = async ({ request }) => {
+	const blocked = maintenanceResponse();
+	if (blocked) return blocked;
 	const body = (await request.json().catch(() => ({}))) as {
-		itemIds?: number[];
-		method?: 'plex' | 'kometa' | 'both';
-		selection?: 'auto' | 'stored';
+		planId?: string;
+		digest?: string;
 	};
-	if (!body.itemIds?.length) throw error(400, 'itemIds is required');
-	const jobId = await enqueueJob({
-		kind: 'apply',
-		itemIds: body.itemIds,
-		method: body.method ?? 'both',
-		selection: body.selection ?? 'auto'
-	});
-	return json({ jobId });
+	if (!body.planId || !body.digest) {
+		return json({ error: 'plan_confirmation_required' }, { status: 400 });
+	}
+	try {
+		const serverInstanceId = await activeApplyServerInstanceId();
+		return json(
+			await confirmDatabaseArtworkApply(
+				{ planId: body.planId, digest: body.digest, serverInstanceId },
+				enqueueJob
+			)
+		);
+	} catch (error) {
+		return applyRouteError(error);
+	}
 };

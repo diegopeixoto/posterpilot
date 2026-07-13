@@ -5,10 +5,16 @@ import type { PosterCandidate } from '$lib/server/db/schema';
 function cand(p: Partial<PosterCandidate>): PosterCandidate {
 	return {
 		id: 0,
+		serverInstanceId: 'server-test',
 		mediaItemId: 1,
+		discoveryRunId: null,
+		providerOutcomeId: null,
 		setId: 's1',
 		provider: 'mediux',
+		providerAssetId: null,
 		setAuthor: null,
+		designFamily: null,
+		language: null,
 		url: 'u',
 		kind: 'poster',
 		season: null,
@@ -16,6 +22,11 @@ function cand(p: Partial<PosterCandidate>): PosterCandidate {
 		width: null,
 		height: null,
 		score: null,
+		resolvedTmdbId: null,
+		resolvedMediaType: null,
+		active: true,
+		stale: false,
+		lastSeenAt: null,
 		createdAt: new Date(0),
 		...p
 	};

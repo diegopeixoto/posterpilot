@@ -46,3 +46,9 @@ vite.config.ts.timestamp-*
 
 # Impeccable design-plugin local state (machine-specific; not committed)
 .impeccable/
+
+# Playwright E2E runtime and reports (the suite itself is committed).
+/tests/e2e/.runtime*.json
+/tests/e2e/.scenario*.json
+/test-results/
+/playwright-report/

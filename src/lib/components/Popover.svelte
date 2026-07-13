@@ -39,14 +39,42 @@
 		if (open && e.key === 'Escape') close();
 	}
 
+	function focusableElements(): HTMLElement[] {
+		if (!panel) return [];
+		return Array.from(
+			panel.querySelectorAll<HTMLElement>(
+				'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			)
+		).filter((element) => element.getClientRects().length > 0);
+	}
+
+	function onPanelKeyDown(event: KeyboardEvent) {
+		if (event.key !== 'Tab') return;
+		const focusable = focusableElements();
+		if (focusable.length === 0) {
+			event.preventDefault();
+			panel?.focus();
+			return;
+		}
+
+		const first = focusable[0];
+		const last = focusable.at(-1)!;
+		const activeElement = document.activeElement;
+		if (event.shiftKey && (activeElement === first || activeElement === panel)) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
+
 	// Move focus into the panel when it opens. Prefer the first interactive control
 	// (it shows its own focus ring); fall back to the panel itself — which keeps a
 	// visible :focus-visible outline so keyboard users always get a focus cue.
 	$effect(() => {
 		if (!open) return;
-		const first = panel?.querySelector<HTMLElement>(
-			'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'
-		);
+		const first = focusableElements()[0];
 		(first ?? panel)?.focus();
 	});
 </script>
@@ -68,6 +96,7 @@
 	{#if open}
 		<div
 			bind:this={panel}
+			onkeydown={onPanelKeyDown}
 			role="dialog"
 			aria-label={label}
 			tabindex="-1"

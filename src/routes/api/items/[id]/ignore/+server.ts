@@ -1,6 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getMediaItem, setItemIgnored } from '$lib/server/queries';
+import { getActiveServerInstance } from '$lib/server/server-instances';
 
 /**
  * Mark an item as ignored (excluded from sync/auto-apply) or restore it. Expects
@@ -10,12 +11,14 @@ import { getMediaItem, setItemIgnored } from '$lib/server/queries';
 export const POST: RequestHandler = async ({ params, request }) => {
 	const id = Number(params.id);
 	if (!Number.isFinite(id)) throw error(400, 'invalid id');
-	const item = await getMediaItem(id);
+	const active = await getActiveServerInstance();
+	if (!active) throw error(404, 'server instance not found');
+	const item = await getMediaItem(id, active.id);
 	if (!item) throw error(404, 'item not found');
 
 	const body = (await request.json().catch(() => ({}))) as { ignored?: unknown };
 	if (typeof body.ignored !== 'boolean') throw error(400, 'ignored must be a boolean');
 
-	await setItemIgnored(id, body.ignored);
+	await setItemIgnored(id, active.id, body.ignored);
 	return json({ ok: true, ignored: body.ignored });
 };

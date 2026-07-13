@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { saveSettings } from '$lib/server/config';
 import { loginByName, MediaServerLoginError } from '$lib/server/media-server/emby';
 import { logEvent } from '$lib/server/events';
+import { materializeLegacyServerInstance } from '$lib/server/server-instances';
 
 /**
  * Log in to Jellyfin/Emby with a username + password, exchanging them for an access
@@ -41,11 +42,15 @@ export const POST: RequestHandler = async ({ request }) => {
 		} else {
 			await saveSettings({ serverType: 'emby', embyUrl: baseUrl, embyApiKey: result.accessToken });
 		}
+		await materializeLegacyServerInstance();
 		await logEvent('info', 'settings', `Logged in to ${flavor}`, { user: result.userName });
 		return json({ ok: true, userName: result.userName });
 	} catch (e) {
-		// 401 for rejected credentials, 502 for upstream/network failures.
-		const status = e instanceof MediaServerLoginError ? e.status : 502;
-		return json({ error: e instanceof Error ? e.message : String(e) }, { status });
+		// 401 for rejected credentials, 502 for upstream/network failures. Only the
+		// curated login-error text is safe to surface; anything unexpected stays generic.
+		if (e instanceof MediaServerLoginError) {
+			return json({ error: e.message }, { status: e.status });
+		}
+		return json({ error: 'Login failed unexpectedly. Check the server logs.' }, { status: 502 });
 	}
 };

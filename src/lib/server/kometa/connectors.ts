@@ -9,6 +9,8 @@
  * the client.
  */
 
+import { MANAGED_SETTING_SECRET_PATHS } from './managed-settings';
+
 export type FieldType = 'text' | 'secret' | 'url' | 'bool' | 'int';
 
 export interface ConnectorField {
@@ -213,11 +215,12 @@ export function secretFieldKeys(section: string): Set<string> {
  * `tautulli.apikey`, `trakt.client_secret`) — for redacting diff before/after
  * values shown in the browser.
  */
-export const SECRET_PATHS: ReadonlySet<string> = new Set(
-	CONNECTORS.flatMap((c) =>
+export const SECRET_PATHS: ReadonlySet<string> = new Set([
+	...CONNECTORS.flatMap((c) =>
 		c.fields.filter((f) => f.type === 'secret').map((f) => `${c.section}.${f.key}`)
-	)
-);
+	),
+	...MANAGED_SETTING_SECRET_PATHS
+]);
 
 /**
  * Default collection/overlay/chart names that REQUIRE a connector section to be

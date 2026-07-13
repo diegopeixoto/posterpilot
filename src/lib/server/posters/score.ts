@@ -14,6 +14,25 @@ export interface ScoreWeights {
 	aspectWeight: number;
 }
 
+const ARTWORK_PROVIDER_IDS = ['mediux', 'theposterdb', 'fanarttv', 'tmdb'] as const;
+export type ArtworkProviderId = (typeof ARTWORK_PROVIDER_IDS)[number];
+
+/** Deterministic tie-break order used when no valid override exists. */
+export const DEFAULT_PROVIDER_PRIORITY: ArtworkProviderId[] = [...ARTWORK_PROVIDER_IDS];
+
+/** Settings/config fields kept flat so every scalar can have its own env override. */
+export interface ScoreWeightConfigFields {
+	scoreProviderMediux: number;
+	scoreProviderThePosterDb: number;
+	scoreProviderFanarttv: number;
+	scoreProviderTmdb: number;
+	scoreResolution: number;
+	scoreAspect: number;
+}
+
+const SCORE_WEIGHT_MIN = 0;
+const SCORE_WEIGHT_MAX = 10;
+
 /**
  * Default weights, tuned for PosterPilot's provider preference order.
  *
@@ -38,6 +57,106 @@ export const DEFAULT_SCORE_WEIGHTS: ScoreWeights = {
 	resolutionWeight: 0.5,
 	aspectWeight: 0.3
 };
+
+const DEFAULT_SCORE_CONFIG_FIELDS: ScoreWeightConfigFields = {
+	scoreProviderMediux: DEFAULT_SCORE_WEIGHTS.providerWeights.mediux,
+	scoreProviderThePosterDb: DEFAULT_SCORE_WEIGHTS.providerWeights.theposterdb,
+	scoreProviderFanarttv: DEFAULT_SCORE_WEIGHTS.providerWeights.fanarttv,
+	scoreProviderTmdb: DEFAULT_SCORE_WEIGHTS.providerWeights.tmdb,
+	scoreResolution: DEFAULT_SCORE_WEIGHTS.resolutionWeight,
+	scoreAspect: DEFAULT_SCORE_WEIGHTS.aspectWeight
+};
+
+function finiteOrDefault(value: unknown, fallback: number): number {
+	return typeof value === 'number' &&
+		Number.isFinite(value) &&
+		value >= SCORE_WEIGHT_MIN &&
+		value <= SCORE_WEIGHT_MAX
+		? value
+		: fallback;
+}
+
+/** Convert effective flat runtime config into the scorer's neutral shape. */
+export function scoreWeightsFromConfig(config: Partial<ScoreWeightConfigFields>): ScoreWeights {
+	return {
+		providerWeights: {
+			mediux: finiteOrDefault(
+				config.scoreProviderMediux,
+				DEFAULT_SCORE_CONFIG_FIELDS.scoreProviderMediux
+			),
+			theposterdb: finiteOrDefault(
+				config.scoreProviderThePosterDb,
+				DEFAULT_SCORE_CONFIG_FIELDS.scoreProviderThePosterDb
+			),
+			fanarttv: finiteOrDefault(
+				config.scoreProviderFanarttv,
+				DEFAULT_SCORE_CONFIG_FIELDS.scoreProviderFanarttv
+			),
+			tmdb: finiteOrDefault(config.scoreProviderTmdb, DEFAULT_SCORE_CONFIG_FIELDS.scoreProviderTmdb)
+		},
+		resolutionWeight: finiteOrDefault(
+			config.scoreResolution,
+			DEFAULT_SCORE_CONFIG_FIELDS.scoreResolution
+		),
+		aspectWeight: finiteOrDefault(config.scoreAspect, DEFAULT_SCORE_CONFIG_FIELDS.scoreAspect)
+	};
+}
+
+/** Strict parser for Settings/API writes; unlike runtime fallback, rejects any bad field. */
+export function parseScoreWeights(value: unknown): ScoreWeights | null {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+	const input = value as Record<string, unknown>;
+	if (!input.providerWeights || typeof input.providerWeights !== 'object') return null;
+	const providerWeights = input.providerWeights as Record<string, unknown>;
+	const valid = (entry: unknown): entry is number =>
+		typeof entry === 'number' &&
+		Number.isFinite(entry) &&
+		entry >= SCORE_WEIGHT_MIN &&
+		entry <= SCORE_WEIGHT_MAX;
+	if (
+		!ARTWORK_PROVIDER_IDS.every((provider) => valid(providerWeights[provider])) ||
+		!valid(input.resolutionWeight) ||
+		!valid(input.aspectWeight)
+	) {
+		return null;
+	}
+	return {
+		providerWeights: Object.fromEntries(
+			ARTWORK_PROVIDER_IDS.map((provider) => [provider, providerWeights[provider] as number])
+		),
+		resolutionWeight: input.resolutionWeight,
+		aspectWeight: input.aspectWeight
+	};
+}
+
+/** Parse JSON-array or comma-separated provider priority, requiring exact parity. */
+export function parseProviderPriority(value: unknown): ArtworkProviderId[] | null {
+	let entries: unknown = value;
+	if (typeof value === 'string') {
+		const trimmed = value.trim();
+		if (!trimmed) return null;
+		if (trimmed.startsWith('[')) {
+			try {
+				entries = JSON.parse(trimmed);
+			} catch {
+				return null;
+			}
+		} else {
+			entries = trimmed.split(',').map((entry) => entry.trim());
+		}
+	}
+	if (!Array.isArray(entries) || entries.length !== ARTWORK_PROVIDER_IDS.length) return null;
+	if (
+		entries.some(
+			(entry) =>
+				typeof entry !== 'string' || !(ARTWORK_PROVIDER_IDS as readonly string[]).includes(entry)
+		)
+	) {
+		return null;
+	}
+	const priority = entries as ArtworkProviderId[];
+	return new Set(priority).size === ARTWORK_PROVIDER_IDS.length ? [...priority] : null;
+}
 
 /**
  * Pixel area (width x height) at which the resolution term saturates to 1. Chosen as

@@ -6,7 +6,9 @@ import { parseLibrarySort, type LibrarySort, type SortDir } from '$lib/library-s
 
 export interface LibraryFilterParsed {
 	type?: 'movie' | 'show';
+	ignored?: 'active' | 'ignored';
 	missingPoster?: boolean;
+	hasCandidates?: boolean;
 	hasMediux?: boolean;
 	unchanged?: boolean;
 	minRating?: number;
@@ -19,11 +21,14 @@ export interface LibraryFilterParsed {
 /** Parse the library filter (filters + sort) from search params. */
 export function parseLibraryFilter(params: URLSearchParams): LibraryFilterParsed {
 	const type = params.get('type');
+	const ignored = params.get('ignored');
 	const dir = params.get('dir');
 	const minRating = Number(params.get('minRating'));
 	return {
 		type: type === 'movie' || type === 'show' ? type : undefined,
+		ignored: ignored === 'active' || ignored === 'ignored' ? ignored : undefined,
 		missingPoster: params.get('missing') === '1',
+		hasCandidates: params.get('covers') === '1',
 		hasMediux: params.get('mediux') === '1',
 		unchanged: params.get('unchanged') === '1',
 		// Ignore missing/zero/non-numeric (libsql throws on NaN binds).

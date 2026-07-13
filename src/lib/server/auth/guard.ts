@@ -17,6 +17,7 @@ const STATIC_EXT =
 /** Classify a request path for the auth guard. */
 export function classifyPath(pathname: string): PathClass {
 	if (PUBLIC_EXACT.has(pathname)) return 'public';
+	if (pathname.startsWith('/api/automation-webhooks/')) return 'public';
 	if (pathname.startsWith('/_app/')) return 'public';
 	if (STATIC_EXT.test(pathname)) return 'public';
 	if (pathname.startsWith('/api/')) return 'api';

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+	buildEmbyLibraryMembershipIndex,
 	buildEmbyImageUrl,
 	collectionTypeToLibraryType,
 	itemTypeToMediaType,
+	mapChildren,
 	mapItems,
 	mapLibraries,
+	mapNativeCollection,
 	parseProviderIds,
+	scopeEmbyCollectionMembers,
 	type RawEmbyItemsResponse
 } from './emby-parse';
 
@@ -109,6 +113,50 @@ describe('mapLibraries', () => {
 	it('handles an empty/missing response', () => {
 		expect(mapLibraries(null)).toEqual([]);
 		expect(mapLibraries({})).toEqual([]);
+	});
+});
+
+describe('mapChildren', () => {
+	it('preserves numbered child artwork identities and last-modified metadata', () => {
+		const result = mapChildren(
+			{
+				Items: [
+					{
+						Id: 'season-1',
+						IndexNumber: 1,
+						ImageTags: { Primary: 'poster-tag' },
+						BackdropImageTags: ['background-tag'],
+						DateLastModified: '2026-07-10T12:30:00.000Z'
+					},
+					{ Id: 'specials' }
+				]
+			},
+			'http://jellyfin:8096',
+			'key'
+		);
+		expect(result).toEqual([
+			{
+				id: 'season-1',
+				number: 1,
+				currentPosterUrl:
+					'http://jellyfin:8096/Items/season-1/Images/Primary?tag=poster-tag&api_key=key',
+				currentBackgroundUrl:
+					'http://jellyfin:8096/Items/season-1/Images/Backdrop?tag=background-tag&api_key=key',
+				serverUpdatedAt: new Date('2026-07-10T12:30:00.000Z')
+			}
+		]);
+	});
+
+	it('returns explicit null artwork metadata when mapping without a connection', () => {
+		expect(mapChildren({ Items: [{ Id: 'episode-2', IndexNumber: 2 }] })).toEqual([
+			{
+				id: 'episode-2',
+				number: 2,
+				currentPosterUrl: null,
+				currentBackgroundUrl: null,
+				serverUpdatedAt: null
+			}
+		]);
 	});
 });
 
@@ -223,5 +271,138 @@ describe('mapItems', () => {
 	it('handles an empty/missing response', () => {
 		expect(mapItems(null, base, key)).toEqual([]);
 		expect(mapItems({}, base, key)).toEqual([]);
+	});
+});
+
+describe('mapNativeCollection', () => {
+	it('maps a BoxSet by native ids and never by title', () => {
+		const result = mapNativeCollection(
+			{
+				Id: 'boxset-1',
+				Name: 'Shared Name',
+				Type: 'BoxSet',
+				ImageTags: { Primary: 'poster-tag' },
+				BackdropImageTags: ['backdrop-tag']
+			},
+			{
+				Items: [
+					{ Id: 'movie-1', Name: 'First', ProductionYear: 2001, Type: 'Movie' },
+					{ Id: 'movie-2', Name: 'Second', ProductionYear: 2002, Type: 'Movie' }
+				]
+			},
+			'http://jelly:8096',
+			'key',
+			['library-a']
+		);
+		expect(result).toMatchObject({
+			id: 'boxset-1',
+			name: 'Shared Name',
+			members: [
+				{ id: 'movie-1', title: 'First', year: 2001 },
+				{ id: 'movie-2', title: 'Second', year: 2002 }
+			],
+			libraryKeys: ['library-a'],
+			capabilities: { posterWrite: 'supported', backgroundWrite: 'supported' }
+		});
+		expect(result?.currentPosterUrl).toContain('/Items/boxset-1/Images/Primary');
+	});
+
+	it('ignores non-BoxSet rows even when the display name matches', () => {
+		expect(
+			mapNativeCollection(
+				{ Id: 'folder-1', Name: 'Shared Name', Type: 'Folder' },
+				{ Items: [] },
+				'http://jelly',
+				'key',
+				[]
+			)
+		).toBeNull();
+	});
+});
+
+describe('native collection library scoping', () => {
+	it('keeps only exact member ids from selected libraries and derives real library intersections', () => {
+		const membership = buildEmbyLibraryMembershipIndex([
+			{
+				libraryKey: 'library-a',
+				response: {
+					Items: [
+						{ Id: 'movie-a', Type: 'Movie' },
+						{ Id: 'movie-shared', Type: 'Movie' }
+					]
+				}
+			},
+			{
+				libraryKey: 'library-b',
+				response: {
+					Items: [
+						{ Id: 'movie-b', Type: 'Movie' },
+						{ Id: 'movie-shared', Type: 'Movie' }
+					]
+				}
+			}
+		]);
+
+		const scoped = scopeEmbyCollectionMembers(
+			{
+				Items: [
+					{ Id: 'movie-a', Name: 'Selected A', Type: 'Movie' },
+					{ Id: 'movie-external', Name: 'External', Type: 'Movie' },
+					{ Id: 'movie-shared', Name: 'Selected twice', Type: 'Movie' },
+					{ Id: 'movie-b', Name: 'Selected B', Type: 'Movie' }
+				]
+			},
+			membership
+		);
+
+		expect(scoped.membersResponse.Items?.map((item) => item.Id)).toEqual([
+			'movie-a',
+			'movie-shared',
+			'movie-b'
+		]);
+		expect(scoped.libraryKeys).toEqual(['library-a', 'library-b']);
+	});
+
+	it('returns no scope for a same-named collection whose members are all external', () => {
+		const membership = buildEmbyLibraryMembershipIndex([
+			{
+				libraryKey: 'selected-library',
+				response: { Items: [{ Id: 'selected-item', Name: 'Saga', Type: 'Movie' }] }
+			}
+		]);
+
+		expect(
+			scopeEmbyCollectionMembers(
+				{ Items: [{ Id: 'external-item', Name: 'Saga', Type: 'Movie' }] },
+				membership
+			)
+		).toEqual({ membersResponse: { Items: [] }, libraryKeys: [] });
+	});
+
+	it('deduplicates duplicate library snapshots and member ids without using names', () => {
+		const membership = buildEmbyLibraryMembershipIndex([
+			{
+				libraryKey: 'library-a',
+				response: {
+					Items: [
+						{ Id: 'member-1', Name: 'First', Type: 'Movie' },
+						{ Id: 'member-1', Name: 'Duplicate', Type: 'Movie' }
+					]
+				}
+			},
+			{ libraryKey: 'library-a', response: { Items: [{ Id: 'member-1', Type: 'Movie' }] } }
+		]);
+		const scoped = scopeEmbyCollectionMembers(
+			{
+				Items: [
+					{ Id: 'member-1', Name: 'Original member', Type: 'Movie' },
+					{ Id: 'member-1', Name: 'Duplicate member', Type: 'Movie' }
+				]
+			},
+			membership
+		);
+
+		expect(scoped.membersResponse.Items).toHaveLength(1);
+		expect(scoped.libraryKeys).toEqual(['library-a']);
 	});
 });

@@ -144,6 +144,41 @@ describe('applyPlan — settings & secrets', () => {
 		const url = redacted.find((c) => c.path === 'plex.url');
 		expect(url?.after).toBe('http://new:32400'); // non-secret untouched
 	});
+
+	it('redacts all managed webhook URLs in a structured diff', () => {
+		const webhook = 'https://discord.com/api/webhooks/123/secret-token';
+		const { changes } = applyPlan(
+			loadDoc(''),
+			plan({
+				settings: [
+					{ section: 'webhooks', key: 'error', value: webhook },
+					{ section: 'webhooks', key: 'run_start', value: webhook },
+					{ section: 'webhooks', key: 'run_end', value: webhook }
+				]
+			}),
+			null
+		);
+		const display = JSON.stringify(redactSecrets(changes));
+		expect(display).not.toContain(webhook);
+		for (const key of ['error', 'run_start', 'run_end']) {
+			expect(redactSecrets(changes)).toContainEqual(
+				expect.objectContaining({ path: `webhooks.${key}`, after: '***' })
+			);
+		}
+	});
+
+	it('keeps an existing managed webhook secret when the masked input is omitted', () => {
+		const webhook = 'https://discord.com/api/webhooks/123/secret-token';
+		const source = loadDoc(`webhooks:\n  error: ${webhook}\n`);
+		const result = applyPlan(source, plan({ settingKeep: ['webhooks.error'] }), {
+			metadataPath: META,
+			libraries: {},
+			managedSettingKeys: ['webhooks.error']
+		});
+		expect(serialize(result.doc)).toContain(webhook);
+		expect(result.changes).not.toContainEqual(expect.objectContaining({ path: 'webhooks.error' }));
+		expect(result.nextSnapshot.managedSettingKeys).toContain('webhooks.error');
+	});
 });
 
 const NO_CREDS = { plexUrl: null, plexToken: null, tmdbKey: null };

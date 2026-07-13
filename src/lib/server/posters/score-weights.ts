@@ -6,12 +6,65 @@
  * `config` imports `$env/dynamic/private`. `config` re-exports these for callers that
  * already depend on it (e.g. the settings route). Only `db` is touched (mocked in tests).
  */
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
-import { DEFAULT_SCORE_WEIGHTS, type ScoreWeights } from './score';
+import {
+	DEFAULT_PROVIDER_PRIORITY,
+	DEFAULT_SCORE_WEIGHTS,
+	parseProviderPriority,
+	parseScoreWeights,
+	scoreWeightsFromConfig,
+	type ArtworkProviderId,
+	type ScoreWeights
+} from './score';
 
 const SCORE_WEIGHTS_KEY = 'scoreWeights';
+const PROVIDER_PRIORITY_KEY = 'providerPriority';
+
+export interface ArtworkRankingSettings {
+	providerPriority: ArtworkProviderId[];
+	weights: ScoreWeights;
+	source: {
+		providerPriority: 'stored' | 'default';
+		weights: 'stored' | 'default';
+	};
+}
+
+function weightsFromStored(value: string | undefined): ScoreWeights {
+	if (!value) return DEFAULT_SCORE_WEIGHTS;
+	try {
+		const stored = JSON.parse(value) as Partial<ScoreWeights>;
+		return scoreWeightsFromConfig({
+			scoreProviderMediux: stored.providerWeights?.mediux,
+			scoreProviderThePosterDb: stored.providerWeights?.theposterdb,
+			scoreProviderFanarttv: stored.providerWeights?.fanarttv,
+			scoreProviderTmdb: stored.providerWeights?.tmdb,
+			scoreResolution: stored.resolutionWeight,
+			scoreAspect: stored.aspectWeight
+		});
+	} catch {
+		return DEFAULT_SCORE_WEIGHTS;
+	}
+}
+
+/** Resolve ranking inputs plus whether each value came from storage or defaults. */
+export async function getArtworkRankingSettings(): Promise<ArtworkRankingSettings> {
+	const rows = await db
+		.select({ key: settings.key, value: settings.value })
+		.from(settings)
+		.where(inArray(settings.key, [SCORE_WEIGHTS_KEY, PROVIDER_PRIORITY_KEY]));
+	const values = new Map(rows.map((row) => [row.key, row.value]));
+	const storedPriority = parseProviderPriority(values.get(PROVIDER_PRIORITY_KEY));
+	return {
+		providerPriority: storedPriority ?? [...DEFAULT_PROVIDER_PRIORITY],
+		weights: weightsFromStored(values.get(SCORE_WEIGHTS_KEY)),
+		source: {
+			providerPriority: storedPriority ? 'stored' : 'default',
+			weights: values.has(SCORE_WEIGHTS_KEY) ? 'stored' : 'default'
+		}
+	};
+}
 
 /**
  * Read the tunable scoring weights. On missing/invalid data falls back to
@@ -24,38 +77,38 @@ export async function getScoreWeights(): Promise<ScoreWeights> {
 		await db.select().from(settings).where(eq(settings.key, SCORE_WEIGHTS_KEY)).limit(1)
 	)[0];
 	if (!row?.value) return DEFAULT_SCORE_WEIGHTS;
-	try {
-		const obj = JSON.parse(row.value);
-		if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return DEFAULT_SCORE_WEIGHTS;
-		const stored = obj as Partial<ScoreWeights>;
-		// Keep only finite numeric provider weights — a stray string/NaN would turn
-		// scorePoster() into string concatenation and corrupt ranking.
-		const providerWeights = { ...DEFAULT_SCORE_WEIGHTS.providerWeights };
-		if (stored.providerWeights && typeof stored.providerWeights === 'object') {
-			for (const [k, v] of Object.entries(stored.providerWeights)) {
-				if (typeof v === 'number' && Number.isFinite(v)) providerWeights[k] = v;
-			}
-		}
-		return {
-			providerWeights,
-			// Gate scalars on Number.isFinite so a stored NaN/Infinity/string can't
-			// propagate into scorePoster() and produce NaN scores that break ranking.
-			resolutionWeight: Number.isFinite(stored.resolutionWeight as number)
-				? (stored.resolutionWeight as number)
-				: DEFAULT_SCORE_WEIGHTS.resolutionWeight,
-			aspectWeight: Number.isFinite(stored.aspectWeight as number)
-				? (stored.aspectWeight as number)
-				: DEFAULT_SCORE_WEIGHTS.aspectWeight
-		};
-	} catch {
-		return DEFAULT_SCORE_WEIGHTS;
-	}
+	return weightsFromStored(row.value);
 }
 
-/** Persist the tunable scoring weights. */
-export async function setScoreWeights(weights: ScoreWeights): Promise<void> {
-	await db
-		.insert(settings)
-		.values({ key: SCORE_WEIGHTS_KEY, value: JSON.stringify(weights) })
-		.onConflictDoUpdate({ target: settings.key, set: { value: JSON.stringify(weights) } });
+export async function getProviderPriority(): Promise<ArtworkProviderId[]> {
+	const row = (
+		await db.select().from(settings).where(eq(settings.key, PROVIDER_PRIORITY_KEY)).limit(1)
+	)[0];
+	return parseProviderPriority(row?.value) ?? [...DEFAULT_PROVIDER_PRIORITY];
+}
+
+/** Atomically persist one complete deterministic ranking definition. */
+export async function setArtworkRankingSettings(input: {
+	providerPriority: unknown;
+	weights: unknown;
+}): Promise<ArtworkRankingSettings> {
+	const providerPriority = parseProviderPriority(input.providerPriority);
+	const weights = parseScoreWeights(input.weights);
+	if (!providerPriority || !weights) throw new TypeError('invalid_artwork_ranking');
+	await db.transaction(async (tx) => {
+		for (const [key, value] of [
+			[PROVIDER_PRIORITY_KEY, JSON.stringify(providerPriority)],
+			[SCORE_WEIGHTS_KEY, JSON.stringify(weights)]
+		] as const) {
+			await tx
+				.insert(settings)
+				.values({ key, value })
+				.onConflictDoUpdate({ target: settings.key, set: { value } });
+		}
+	});
+	return {
+		providerPriority,
+		weights,
+		source: { providerPriority: 'stored', weights: 'stored' }
+	};
 }

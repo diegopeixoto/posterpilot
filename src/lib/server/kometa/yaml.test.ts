@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parse } from 'yaml';
-import { buildMetadataObject, mergeMetadata, toYaml, type KometaItemInput } from './yaml';
+import {
+	buildMetadataObject,
+	mergeMetadata,
+	toYaml,
+	writeKometaYaml,
+	type KometaItemInput
+} from './yaml';
 
 describe('buildMetadataObject', () => {
 	it('encodes poster-only items under metadata keyed by tmdb id', () => {
@@ -253,5 +262,96 @@ describe('toYaml', () => {
 		const parsed = parse(yaml);
 
 		expect(parsed).toEqual(obj);
+	});
+});
+
+describe('writeKometaYaml', () => {
+	const dir = join(tmpdir(), `posterpilot-kometa-yaml-${process.pid}`);
+	const file = join(dir, 'posterpilot.yml');
+
+	beforeEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+		mkdirSync(dir, { recursive: true });
+	});
+
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+	it('atomically merges an existing file and preserves its comments', async () => {
+		const original = [
+			'# Hand-maintained Kometa metadata',
+			'libraries:',
+			'  Movies: {} # keep library settings',
+			'metadata:',
+			'  # Existing title',
+			'  603:',
+			'    url_poster: https://old.test/603.jpg # keep poster note',
+			'    custom_field: keep-me',
+			''
+		].join('\n');
+		writeFileSync(file, original, 'utf8');
+
+		await writeKometaYaml(dir, [
+			{
+				tmdbId: '603',
+				title: 'The Matrix',
+				posterUrl: 'https://new.test/603.jpg',
+				backgroundUrl: 'https://new.test/603-bg.jpg'
+			}
+		]);
+
+		const written = readFileSync(file, 'utf8');
+		expect(written).toContain('# Hand-maintained Kometa metadata');
+		expect(written).toContain('# keep library settings');
+		expect(written).toContain('# Existing title');
+		expect(written).toContain('# keep poster note');
+		expect(parse(written)).toEqual({
+			libraries: { Movies: {} },
+			metadata: {
+				603: {
+					url_poster: 'https://new.test/603.jpg',
+					custom_field: 'keep-me',
+					url_background: 'https://new.test/603-bg.jpg'
+				}
+			}
+		});
+
+		const entries = readdirSync(dir);
+		expect(entries.some((name) => name.includes('.posterpilot-bak-'))).toBe(true);
+		expect(entries.some((name) => name.includes('.tmp-'))).toBe(false);
+	});
+
+	it('serializes concurrent read-modify-write calls without losing either item', async () => {
+		await Promise.all([
+			writeKometaYaml(dir, [
+				{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://example.test/550.jpg' }
+			]),
+			writeKometaYaml(dir, [
+				{ tmdbId: '603', title: 'The Matrix', posterUrl: 'https://example.test/603.jpg' }
+			])
+		]);
+
+		const result = parse(readFileSync(file, 'utf8')) as {
+			metadata: Record<string, { url_poster: string }>;
+		};
+		expect(result.metadata['550'].url_poster).toBe('https://example.test/550.jpg');
+		expect(result.metadata['603'].url_poster).toBe('https://example.test/603.jpg');
+	});
+
+	it('does not include credential-bearing source text in parse errors', async () => {
+		const credential = 'do-not-leak-this-token';
+		const malformed = `plex_token: ${credential}\nmetadata: [\n`;
+		writeFileSync(file, malformed, 'utf8');
+
+		const error = await writeKometaYaml(dir, [
+			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://example.test/550.jpg' }
+		]).then(
+			() => null,
+			(reason: unknown) => reason
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect(String(error)).toContain('Invalid existing Kometa YAML');
+		expect(String(error)).not.toContain(credential);
+		expect(readFileSync(file, 'utf8')).toBe(malformed);
 	});
 });

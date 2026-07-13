@@ -12,20 +12,27 @@
  */
 
 import {
+	buildEmbyLibraryMembershipIndex,
+	buildEmbyImageUrl,
 	mapChildren,
 	mapItems,
 	mapLibraries,
+	mapNativeCollection,
 	parseAuthResult,
+	scopeEmbyCollectionMembers,
 	type AuthResult,
+	type RawEmbyItem,
 	type RawEmbyItemsResponse
 } from './emby-parse';
+import { defaultMediaServerCapabilities, mediaServerIdentity } from './capabilities';
 import type {
 	ConnectionResult,
 	LockField,
 	MediaServer,
 	ServerChild,
 	ServerItem,
-	ServerLibrary
+	ServerLibrary,
+	ServerNativeCollection
 } from './types';
 import { version } from '$lib/version';
 
@@ -143,13 +150,30 @@ function toBase64(data: ArrayBuffer): string {
  * @param apiKey The API key used for authentication.
  * @param flavor `jellyfin` or `emby` — selects the auth header dialect.
  */
-export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFlavor): MediaServer {
+export function embyLikeProvider(
+	baseUrl: string,
+	apiKey: string,
+	flavor: EmbyFlavor,
+	context: Pick<MediaServer, 'identity' | 'capabilities'> = {
+		identity: mediaServerIdentity(flavor),
+		capabilities: defaultMediaServerCapabilities(flavor)
+	}
+): MediaServer {
 	const base = normalizeBase(baseUrl);
 	const headers = authHeaders(apiKey, flavor);
 	const label = flavor === 'jellyfin' ? 'Jellyfin' : 'Emby';
 
+	// Every request aborts instead of hanging a worker when the server stalls
+	// mid-connection: metadata reads get the readCurrentArtwork budget, image
+	// transfers get a larger one for big files on slow links.
+	const JSON_TIMEOUT_MS = 15_000;
+	const IMAGE_TIMEOUT_MS = 30_000;
+
 	async function getJson<T>(path: string): Promise<T> {
-		const res = await fetch(`${base}${path}`, { headers });
+		const res = await fetch(`${base}${path}`, {
+			headers,
+			signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
+		});
 		if (!res.ok) {
 			throw new Error(`${label} returned HTTP ${res.status} ${res.statusText} for ${path}`);
 		}
@@ -167,7 +191,8 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 		const res = await fetch(url, {
 			method: 'POST',
 			headers: { ...headers, 'Content-Type': contentType },
-			body: toBase64(data)
+			body: toBase64(data),
+			signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
 		});
 		if (!res.ok) {
 			throw new Error(`${label} rejected the image upload: HTTP ${res.status} ${res.statusText}`);
@@ -176,7 +201,7 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 
 	/** Fetch an image URL into bytes + its content type for byte-based apply. */
 	async function fetchImage(url: string): Promise<{ data: ArrayBuffer; contentType: string }> {
-		const res = await fetch(url);
+		const res = await fetch(url, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
 		if (!res.ok) {
 			throw new Error(`Could not fetch image (${res.status} ${res.statusText}): ${url}`);
 		}
@@ -184,8 +209,43 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 		return { data: await res.arrayBuffer(), contentType };
 	}
 
+	async function readCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
+		const item = await getJson<RawEmbyItem>(`/Items/${encodeURIComponent(itemId)}`);
+		const imageType = kind === 'poster' ? ('Primary' as const) : ('Backdrop' as const);
+		const identity = kind === 'poster' ? item.ImageTags?.Primary : item.BackdropImageTags?.[0];
+		if (!identity) return null;
+		const url = buildEmbyImageUrl(base, itemId, imageType, identity, apiKey)!;
+		const response = await fetch(
+			`${base}/Items/${encodeURIComponent(itemId)}/Images/${imageType}`,
+			{ headers, signal: AbortSignal.timeout(15_000) }
+		);
+		if (response.status === 404) return null;
+		if (!response.ok) {
+			throw new Error(`${label} artwork read failed (${response.status}).`);
+		}
+		return {
+			kind,
+			url,
+			identity,
+			data: await response.arrayBuffer(),
+			contentType: response.headers.get('content-type')
+		};
+	}
+
+	async function deleteCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
+		const imagePath = kind === 'poster' ? 'Primary' : 'Backdrop/0';
+		const response = await fetch(
+			`${base}/Items/${encodeURIComponent(itemId)}/Images/${imagePath}`,
+			{ method: 'DELETE', headers, signal: AbortSignal.timeout(JSON_TIMEOUT_MS) }
+		);
+		if (response.status === 404) return;
+		if (!response.ok) throw new Error(`${label} artwork delete failed (${response.status}).`);
+	}
+
 	return {
 		type: flavor,
+		identity: context.identity,
+		capabilities: context.capabilities,
 
 		async testConnection(): Promise<ConnectionResult> {
 			try {
@@ -234,14 +294,123 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 			return mapItems(res, base, apiKey);
 		},
 
+		async listNativeCollections(libraryKeys: string[]): Promise<ServerNativeCollection[]> {
+			const selectedLibraryKeys = [...new Set(libraryKeys.filter((key) => key.length > 0))];
+			if (selectedLibraryKeys.length === 0) return [];
+
+			const librarySnapshots = await Promise.all(
+				selectedLibraryKeys.map(async (libraryKey) => {
+					const libraryParams = new URLSearchParams({
+						ParentId: libraryKey,
+						Recursive: 'true',
+						IncludeItemTypes: 'Movie,Series',
+						Fields: 'ProductionYear',
+						GroupItemsIntoCollections: 'false'
+					});
+					return {
+						libraryKey,
+						response: await getJson<RawEmbyItemsResponse>(`/Items?${libraryParams.toString()}`)
+					};
+				})
+			);
+			const libraryMembership = buildEmbyLibraryMembershipIndex(librarySnapshots);
+
+			const params = new URLSearchParams({
+				Recursive: 'true',
+				IncludeItemTypes: 'BoxSet',
+				Fields: 'ProductionYear',
+				EnableImageTypes: 'Primary,Backdrop'
+			});
+			const boxSets = await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`);
+			const collections: ServerNativeCollection[] = [];
+			for (const boxSet of boxSets.Items ?? []) {
+				if (!boxSet.Id) continue;
+				const memberParams = new URLSearchParams({
+					ParentId: boxSet.Id,
+					Recursive: 'true',
+					IncludeItemTypes: 'Movie,Series',
+					Fields: 'ProductionYear',
+					GroupItemsIntoCollections: 'false'
+				});
+				const members = await getJson<RawEmbyItemsResponse>(`/Items?${memberParams.toString()}`);
+				const scopedMembers = scopeEmbyCollectionMembers(members, libraryMembership);
+				if (scopedMembers.libraryKeys.length === 0) continue;
+				const collection = mapNativeCollection(
+					boxSet,
+					scopedMembers.membersResponse,
+					base,
+					apiKey,
+					scopedMembers.libraryKeys
+				);
+				if (collection) {
+					collections.push({
+						...collection,
+						capabilities: {
+							posterWrite: context.capabilities.collectionArtwork ?? 'supported',
+							backgroundWrite: context.capabilities.collectionArtwork ?? 'supported'
+						}
+					});
+				}
+			}
+			return collections;
+		},
+
+		async applyCollectionPosterUrl(collectionId: string, url: string): Promise<void> {
+			const { data, contentType } = await fetchImage(url);
+			await postImage(collectionId, 'Primary', data, contentType);
+		},
+
+		async applyCollectionPosterBytes(
+			collectionId,
+			data,
+			contentType = 'image/jpeg'
+		): Promise<void> {
+			await postImage(collectionId, 'Primary', data, contentType);
+		},
+
+		async applyCollectionBackgroundUrl(collectionId: string, url: string): Promise<void> {
+			const { data, contentType } = await fetchImage(url);
+			await postImage(collectionId, 'Backdrop', data, contentType);
+		},
+
+		async applyCollectionBackgroundBytes(
+			collectionId,
+			data,
+			contentType = 'image/jpeg'
+		): Promise<void> {
+			await postImage(collectionId, 'Backdrop', data, contentType);
+		},
+
+		readCollectionArtwork: readCurrentArtwork,
+
+		deleteCollectionArtwork: deleteCurrentArtwork,
+
 		async listSeasons(showId: string): Promise<ServerChild[]> {
-			const params = new URLSearchParams({ ParentId: showId, IncludeItemTypes: 'Season' });
-			return mapChildren(await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`));
+			const params = new URLSearchParams({
+				ParentId: showId,
+				IncludeItemTypes: 'Season',
+				Fields: 'DateLastModified',
+				EnableImageTypes: 'Primary,Backdrop'
+			});
+			return mapChildren(
+				await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`),
+				base,
+				apiKey
+			);
 		},
 
 		async listEpisodes(seasonId: string): Promise<ServerChild[]> {
-			const params = new URLSearchParams({ ParentId: seasonId, IncludeItemTypes: 'Episode' });
-			return mapChildren(await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`));
+			const params = new URLSearchParams({
+				ParentId: seasonId,
+				IncludeItemTypes: 'Episode',
+				Fields: 'DateLastModified',
+				EnableImageTypes: 'Primary,Backdrop'
+			});
+			return mapChildren(
+				await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`),
+				base,
+				apiKey
+			);
 		},
 
 		async applyPosterUrl(itemId: string, url: string): Promise<void> {
@@ -261,6 +430,10 @@ export function embyLikeProvider(baseUrl: string, apiKey: string, flavor: EmbyFl
 		async applyBackgroundBytes(itemId, data, contentType = 'image/jpeg'): Promise<void> {
 			await postImage(itemId, 'Backdrop', data, contentType);
 		},
+
+		readArtwork: readCurrentArtwork,
+
+		deleteArtwork: deleteCurrentArtwork,
 
 		// Jellyfin/Emby do not auto-replace an explicitly set image, so there is no
 		// lock concept. The interface still exposes lockField for parity.

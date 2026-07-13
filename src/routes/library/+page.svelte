@@ -2,19 +2,29 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page, navigating } from '$app/state';
-	import PosterCard from '$lib/components/PosterCard.svelte';
 	import JobProgress from '$lib/components/JobProgress.svelte';
-	import Popover from '$lib/components/Popover.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
+	import LibraryGrid from '$lib/components/library/LibraryGrid.svelte';
 	import LibrarySpotlight from '$lib/components/library/LibrarySpotlight.svelte';
+	import LibraryToolbar from '$lib/components/library/LibraryToolbar.svelte';
 	import { m } from '$lib/paraglide/messages';
-	import { LIBRARY_SORTS, defaultSortDir, type LibrarySort } from '$lib/library-sort';
-	import { sortLabels } from '$lib/sort-labels';
+	import { defaultSortDir, type LibrarySort } from '$lib/library-sort';
+	import { toasts } from '$lib/stores/toasts.svelte';
 
 	let { data } = $props();
 
 	const selected = new SvelteSet<number>();
-	let method = $state<'plex' | 'kometa' | 'both'>('both');
+	let selectionMode = $state<'explicit' | 'all_matching'>('explicit');
+	let allMatchingFingerprint = $state<string | null>(null);
+	let allMatchingCount = $state(0);
+	let selectingAll = $state(false);
+	const selectedCount = $derived(
+		selectionMode === 'all_matching' ? allMatchingCount : selected.size
+	);
+	function isSelected(id: number): boolean {
+		return selectionMode === 'all_matching' || selected.has(id);
+	}
+	// svelte-ignore state_referenced_locally
+	let method = $state<'plex' | 'kometa' | 'both'>(data.defaultApplyMethod);
 	let jobId = $state<number | null>(null);
 
 	// Bulk-action state: in-flight guard, last error, and a confirm gate for the
@@ -22,12 +32,15 @@
 	let busy = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let confirmApply = $state(false);
-	// Dry-run preview of the pending bulk apply (computed when the confirm gate opens).
+	// Exact, confirmation-bearing preview of the pending bulk apply.
 	let applyPreview = $state<{
-		serverUploads: number;
-		childUploads: number;
-		kometaExports: number;
-		skipped: number;
+		planId: string | null;
+		digest: string | null;
+		summary: {
+			operationCount: number;
+			skipCount: number;
+			destinations: { server: number; kometa: number };
+		};
 	} | null>(null);
 	let previewing = $state(false);
 
@@ -49,7 +62,7 @@
 		localStorage.setItem('pp_autoapply', autoApply ? '1' : '0');
 	}
 
-	// --- Ignore: per-item toggle + client-side filter ---------------------------
+	// --- Ignore: per-item toggle + server-side filter ---------------------------
 	// Each row carries a server `ignored` flag; we keep optimistic overrides locally
 	// so a toggle reflects instantly without a round-trip. An override always agrees
 	// with the DB once its request resolves, so it stays valid across filter/sort
@@ -74,27 +87,20 @@
 				body: JSON.stringify({ ignored: next })
 			});
 			if (!res.ok) throw new Error(String(res.status));
+			await invalidateAll();
+			toasts.success(next ? m.library_item_ignored() : m.library_item_restored());
 		} catch {
 			ignoreOverrides.set(id, prev); // roll back to the last known state
 			ignoreError = m.library_action_failed();
 		}
 	}
 
-	// Client-side "All / Active / Ignored" view over the loaded rows (persisted).
+	// Server-side "All / Active / Ignored" view. Keeping it in the URL means
+	// counts, pagination, bulk scope, reloads, and shared links agree.
 	type IgnoreView = 'all' | 'active' | 'ignored';
-	const ignoreViews = [
-		{ value: 'all', label: m.library_ignore_all },
-		{ value: 'active', label: m.library_ignore_active },
-		{ value: 'ignored', label: m.library_ignore_ignored }
-	] as const;
-	let ignoreView = $state<IgnoreView>('all');
-	$effect(() => {
-		const saved = localStorage.getItem('pp_ignoreview');
-		if (saved === 'all' || saved === 'active' || saved === 'ignored') ignoreView = saved;
-	});
+	const ignoreView = $derived<IgnoreView>(data.filter.ignored ?? 'all');
 	function setIgnoreView(view: IgnoreView) {
-		ignoreView = view;
-		localStorage.setItem('pp_ignoreview', view);
+		navigate({ ignored: view === 'all' ? undefined : view });
 	}
 
 	// Accumulated server rows (first page from SSR, more appended on scroll). Re-seeded
@@ -111,8 +117,7 @@
 		total = data.total;
 	});
 
-	// More server rows exist beyond what we've loaded (the ignore-view filter below is
-	// client-side, so paging is bounded by the raw server count, not the visible count).
+	// More server rows exist beyond what we've loaded under the complete server filter.
 	const hasMore = $derived(items.length < total);
 
 	async function loadMore() {
@@ -135,34 +140,12 @@
 		}
 	}
 
-	const visibleItems = $derived(
-		items.filter((item) => {
-			if (ignoreView === 'all') return true;
-			return ignoreView === 'ignored' ? isIgnored(item) : !isIgnored(item);
-		})
-	);
-
-	// Auto-load the next page when a sentinel near the end of the grid scrolls into
-	// view (prefetch margin), with the button as a no-JS / manual fallback.
-	function onVisible(node: HTMLElement, callback: () => void) {
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries[0]?.isIntersecting) callback();
-			},
-			{ rootMargin: '600px' }
-		);
-		observer.observe(node);
-		return { destroy: () => observer.disconnect() };
-	}
+	const visibleItems = $derived(items);
 
 	// Popover open state.
 	let filterOpen = $state(false);
 	let sortOpen = $state(false);
 
-	const typeLabels: Record<string, () => string> = {
-		movie: m.library_type_movies,
-		show: m.library_type_shows
-	};
 	// The effective field falls back to the configured default; only an explicit
 	// URL sort counts as "active" (chip-worthy), so the default never shows a chip.
 	const sortField = $derived(data.filter.sort ?? data.defaultSort);
@@ -174,11 +157,12 @@
 		(data.filter.type ? 1 : 0) +
 			(data.filter.minRating ? 1 : 0) +
 			(data.filter.genre ? 1 : 0) +
+			(data.filter.hasCandidates ? 1 : 0) +
 			(data.filter.hasMediux ? 1 : 0) +
 			(data.filter.missingPoster ? 1 : 0) +
 			(data.filter.unchanged ? 1 : 0)
 	);
-	const hasAnyFilter = $derived(activeFilterCount > 0 || !!data.filter.q);
+	const hasAnyFilter = $derived(activeFilterCount > 0 || !!data.filter.q || !!data.filter.ignored);
 
 	// Locally staged params, applied to the URL only when autoApply is off and the user
 	// hits Apply. When autoApply is on, this is kept in sync but each change navigates.
@@ -212,35 +196,19 @@
 		filterOpen = false;
 	}
 
-	function onTypeChange(e: Event) {
-		setParam('type', (e.currentTarget as HTMLSelectElement).value || undefined);
-	}
-	function onMinRatingChange(e: Event) {
-		setParam('minRating', (e.currentTarget as HTMLSelectElement).value || undefined);
-	}
-	function onGenreChange(e: Event) {
-		setParam('genre', (e.currentTarget as HTMLSelectElement).value || undefined);
-	}
-	function onToggle(key: string, e: Event) {
-		setParam(key, (e.currentTarget as HTMLInputElement).checked ? '1' : undefined);
-	}
-
-	function onSearchInput(e: Event) {
-		const value = (e.currentTarget as HTMLInputElement).value || undefined;
+	function onSearchInput(value: string | undefined) {
 		staged.q = value;
 		if (!autoApply) return;
 		clearTimeout(searchTimer);
 		searchTimer = setTimeout(() => navigate({ q: value }), 400);
 	}
-	function onSearchSubmit(e: Event) {
-		e.preventDefault();
+	function onSearchSubmit() {
 		navigate({ q: staged.q ?? data.filter.q });
 	}
 
 	// Sort: selecting a field resets to its natural direction; the toggle flips it.
 	// Sort always applies immediately (it's not part of the staged filter set).
-	function onSortChange(e: Event) {
-		const value = (e.currentTarget as HTMLSelectElement).value as LibrarySort;
+	function onSortChange(value: LibrarySort) {
 		// Picking the configured default drops both params — back to the pristine
 		// state, so the URL stays meaningful if the configured default changes.
 		const isDefault = value === data.defaultSort;
@@ -268,11 +236,54 @@
 	/** Reset every filter + sort back to defaults. */
 	function clearAll() {
 		staged = {};
-		setIgnoreView('all');
 		goto('/library', { keepFocus: true, noScroll: true });
 	}
 
+	/** Select every eligible card in the currently loaded page/window. */
+	function selectPage() {
+		selectionMode = 'explicit';
+		allMatchingFingerprint = null;
+		allMatchingCount = 0;
+		for (const item of visibleItems) selected.add(item.id);
+		confirmApply = false;
+		applyPreview = null;
+		errorMsg = null;
+	}
+
+	async function selectAllMatching() {
+		if (selectingAll || total === 0) return;
+		selectingAll = true;
+		errorMsg = null;
+		try {
+			const response = await fetch(`/api/library/selection${page.url.search}`);
+			if (!response.ok) throw new Error(String(response.status));
+			const result = (await response.json()) as { count: number; fingerprint: string };
+			if (!Number.isSafeInteger(result.count) || result.count <= 0 || !result.fingerprint) {
+				throw new Error('invalid_selection');
+			}
+			selected.clear();
+			selectionMode = 'all_matching';
+			allMatchingCount = result.count;
+			allMatchingFingerprint = result.fingerprint;
+			confirmApply = false;
+			applyPreview = null;
+		} catch {
+			errorMsg = m.library_select_all_failed();
+		} finally {
+			selectingAll = false;
+		}
+	}
+
 	function toggle(id: number) {
+		if (selectionMode === 'all_matching') {
+			// Leaving an all-results snapshot turns the currently loaded cards into an
+			// explicit selection, then applies the requested per-card toggle.
+			selectionMode = 'explicit';
+			allMatchingFingerprint = null;
+			allMatchingCount = 0;
+			selected.clear();
+			for (const item of visibleItems) selected.add(item.id);
+		}
 		if (selected.has(id)) selected.delete(id);
 		else selected.add(id);
 		// The selection changed, so a pending confirm/error no longer matches it.
@@ -282,15 +293,36 @@
 	}
 	function clearSelection() {
 		selected.clear();
+		selectionMode = 'explicit';
+		allMatchingFingerprint = null;
+		allMatchingCount = 0;
 		confirmApply = false;
 		applyPreview = null;
 		errorMsg = null;
 	}
 
+	function selectionRequest() {
+		return selectionMode === 'all_matching' && allMatchingFingerprint
+			? {
+					selectionScope: {
+						query: page.url.search,
+						fingerprint: allMatchingFingerprint
+					}
+				}
+			: { itemIds: [...selected] };
+	}
+
+	let lastSelectionQuery = page.url.search;
+	$effect(() => {
+		const currentQuery = page.url.search;
+		if (currentQuery === lastSelectionQuery) return;
+		lastSelectionQuery = currentQuery;
+		clearSelection();
+	});
+
 	/**
-	 * Open the apply confirm gate and fetch a dry-run preview of what would be written
-	 * (server uploads, Kometa exports, skipped child slots) so the user confirms with
-	 * full knowledge. The preview is best-effort: if it fails, the confirm still works.
+	 * Open the apply confirm gate and materialize the exact frozen plan. Confirmation
+	 * stays disabled unless the server returns its single-use id and digest.
 	 */
 	async function startApplyPreview() {
 		confirmApply = true;
@@ -300,13 +332,47 @@
 			const res = await fetch('/api/apply/preview', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ itemIds: [...selected], method, selection: 'auto' })
+				body: JSON.stringify({ ...selectionRequest(), method, selection: 'auto' })
 			});
-			if (res.ok) applyPreview = (await res.json()).plan ?? null;
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as { error?: string };
+				if (body.error === 'result_set_changed') {
+					clearSelection();
+					errorMsg = m.library_selection_changed();
+					return;
+				}
+				throw new Error(String(res.status));
+			}
+			applyPreview = await res.json();
 		} catch {
-			// best-effort preview; ignore and let the user confirm without it
+			confirmApply = false;
+			errorMsg = m.library_action_failed();
 		} finally {
 			previewing = false;
+		}
+	}
+
+	async function confirmFrozenApply() {
+		if (!applyPreview?.planId || !applyPreview.digest || busy) return;
+		busy = true;
+		errorMsg = null;
+		try {
+			const res = await fetch('/api/apply', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ planId: applyPreview.planId, digest: applyPreview.digest })
+			});
+			if (!res.ok) throw new Error(String(res.status));
+			const { jobId: id } = await res.json();
+			jobId = id;
+			clearSelection();
+			toasts.success(m.library_apply_queued());
+		} catch {
+			errorMsg = m.library_action_failed();
+			confirmApply = false;
+			applyPreview = null;
+		} finally {
+			busy = false;
 		}
 	}
 
@@ -314,7 +380,11 @@
 	 * Fire a bulk action. Guards against double-submit, keeps the selection on
 	 * failure (so the user can retry), and only clears it once a job is queued.
 	 */
-	async function bulk(path: string, extra: Record<string, unknown> = {}) {
+	async function bulk(
+		path: string,
+		extra: Record<string, unknown> = {},
+		successMessage = m.library_discovery_queued
+	) {
 		if (busy) return;
 		busy = true;
 		errorMsg = null;
@@ -322,12 +392,23 @@
 			const res = await fetch(path, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ itemIds: [...selected], ...extra })
+				body: JSON.stringify({ ...selectionRequest(), ...extra })
 			});
-			if (!res.ok) throw new Error(String(res.status));
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as {
+					error?: { code?: string };
+				};
+				if (body.error?.code === 'result_set_changed') {
+					clearSelection();
+					errorMsg = m.library_selection_changed();
+					return;
+				}
+				throw new Error(String(res.status));
+			}
 			const { jobId: id } = await res.json();
 			jobId = id;
 			clearSelection();
+			toasts.success(successMessage());
 		} catch {
 			errorMsg = m.library_action_failed();
 		} finally {
@@ -340,298 +421,87 @@
 
 <div class="flex items-center justify-between">
 	<h1 class="text-2xl font-semibold tracking-tight">{m.library_title()}</h1>
-	<span class="text-sm text-neutral-400"
-		>{m.library_item_count({ count: visibleItems.length })}</span
-	>
+	<span class="text-sm text-neutral-400">
+		{m.library_item_range({ shown: visibleItems.length, total })}
+	</span>
 </div>
 
 <!-- Spotlight -->
 <LibrarySpotlight spotlight={data.spotlight} />
 
-<!-- Toolbar: search · Filter · Sort · auto-apply -->
-<div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
-	<form onsubmit={onSearchSubmit}>
-		<input
-			name="q"
-			type="search"
-			value={data.filter.q ?? ''}
-			placeholder={m.library_search_placeholder()}
-			aria-label={m.library_search_placeholder()}
-			oninput={onSearchInput}
-			class="input w-44"
-		/>
-	</form>
+<LibraryToolbar
+	filter={data.filter}
+	genres={data.genres}
+	{sortField}
+	{sortDir}
+	{hasSort}
+	{activeFilterCount}
+	{hasAnyFilter}
+	{ignoreView}
+	{autoApply}
+	visibleCount={visibleItems.length}
+	{total}
+	{selectingAll}
+	{ignoreError}
+	bind:filterOpen
+	bind:sortOpen
+	{onSearchInput}
+	{onSearchSubmit}
+	onSetParam={setParam}
+	onApplyStaged={applyStaged}
+	{onSortChange}
+	onToggleDir={toggleDir}
+	onSetIgnoreView={setIgnoreView}
+	onToggleAuto={toggleAuto}
+	onClearAll={clearAll}
+	onSelectPage={selectPage}
+	onSelectAllMatching={selectAllMatching}
+	onRemoveParam={removeParam}
+/>
 
-	<!-- Filter popover -->
-	<Popover bind:open={filterOpen} label={m.library_filter_button()} active={activeFilterCount > 0}>
-		{#snippet trigger()}
-			<svg
-				class="size-4"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
-			>
-				<path d="M3 5h18M6 12h12M10 19h4" />
-			</svg>
-			<span>{m.library_filter_button()}</span>
-			{#if activeFilterCount > 0}
-				<span class="rounded-full bg-accent-600 px-1.5 text-[10px] font-semibold text-white">
-					{activeFilterCount}
-				</span>
-			{/if}
-		{/snippet}
-		<div class="space-y-3">
-			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.library_filter_type()}</span>
-				<select value={data.filter.type ?? ''} onchange={onTypeChange} class="input w-full">
-					<option value="">{m.library_all_types()}</option>
-					<option value="movie">{m.library_type_movies()}</option>
-					<option value="show">{m.library_type_shows()}</option>
-				</select>
-			</label>
-			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.library_filter_min_rating()}</span>
-				<select
-					value={data.filter.minRating?.toString() ?? ''}
-					onchange={onMinRatingChange}
-					class="input w-full"
-				>
-					<option value="">{m.library_any_rating()}</option>
-					<option value="6">{m.library_rating_6()}</option>
-					<option value="7">{m.library_rating_7()}</option>
-					<option value="8">{m.library_rating_8()}</option>
-					<option value="9">{m.library_rating_9()}</option>
-				</select>
-			</label>
-			{#if data.genres.length}
-				<label class="block">
-					<span class="mb-1 block text-xs text-neutral-400">{m.library_filter_genre()}</span>
-					<select value={data.filter.genre ?? ''} onchange={onGenreChange} class="input w-full">
-						<option value="">{m.library_all_genres()}</option>
-						{#each data.genres as g (g)}<option value={g}>{g}</option>{/each}
-					</select>
-				</label>
-			{/if}
-			<div class="space-y-1.5 border-t border-neutral-800 pt-2">
-				<label class="flex items-center gap-2 text-neutral-300">
-					<input
-						type="checkbox"
-						checked={data.filter.hasMediux}
-						onchange={(e) => onToggle('mediux', e)}
-					/>
-					{m.library_filter_mediux()}
-				</label>
-				<label class="flex items-center gap-2 text-neutral-300">
-					<input
-						type="checkbox"
-						checked={data.filter.missingPoster}
-						onchange={(e) => onToggle('missing', e)}
-					/>
-					{m.library_filter_missing()}
-				</label>
-				<label class="flex items-center gap-2 text-neutral-300">
-					<input
-						type="checkbox"
-						checked={data.filter.unchanged}
-						onchange={(e) => onToggle('unchanged', e)}
-					/>
-					{m.library_filter_unchanged()}
-				</label>
-			</div>
-			{#if !autoApply}
-				<button type="button" class="btn btn-subtle w-full" onclick={applyStaged}>
-					{m.library_apply_filters()}
-				</button>
-			{/if}
-		</div>
-	</Popover>
-
-	<!-- Sort popover -->
-	<Popover bind:open={sortOpen} label={m.library_sort_button()} active={hasSort}>
-		{#snippet trigger()}
-			<svg
-				class="size-4"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
-			>
-				<path d="M3 6h10M3 12h7M3 18h4M16 5v14M16 19l3-3M16 19l-3-3" />
-			</svg>
-			<span>{m.library_sort_button()}</span>
-		{/snippet}
-		<div class="space-y-3">
-			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.library_sort_button()}</span>
-				<select value={sortField} onchange={onSortChange} class="input w-full">
-					{#each LIBRARY_SORTS as sort (sort)}
-						<option value={sort}>{sortLabels[sort]()}</option>
-					{/each}
-				</select>
-			</label>
-			<button
-				type="button"
-				onclick={toggleDir}
-				class="btn btn-ghost w-full justify-between"
-				aria-label={m.library_sort_dir()}
-			>
-				<span>{m.library_sort_dir()}</span>
-				<span>{sortDir === 'asc' ? '↑ ' + m.library_sort_asc() : '↓ ' + m.library_sort_desc()}</span
-				>
-			</button>
-		</div>
-	</Popover>
-
-	<!-- Ignored view: client-side All / Active / Ignored over the loaded rows. -->
-	<div
-		role="group"
-		aria-label={m.library_ignore_filter_label()}
-		class="inline-flex divide-x divide-neutral-800 overflow-hidden rounded-md border border-neutral-700"
-	>
-		{#each ignoreViews as view (view.value)}
-			<button
-				type="button"
-				onclick={() => setIgnoreView(view.value)}
-				aria-pressed={ignoreView === view.value}
-				class="px-2.5 py-2 text-xs font-medium transition-colors {ignoreView === view.value
-					? 'bg-accent-600 text-white'
-					: 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
-			>
-				{view.label()}
-			</button>
-		{/each}
-	</div>
-
-	<button
-		type="button"
-		onclick={toggleAuto}
-		title={m.library_autoapply()}
-		aria-label={m.library_autoapply()}
-		aria-pressed={autoApply}
-		class="btn px-2.5 py-2 {autoApply ? 'btn-accent' : 'btn-ghost text-neutral-400'}"
-	>
-		<svg
-			class="size-4"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" />
-		</svg>
-	</button>
-
-	{#if hasAnyFilter || hasSort}
-		<button type="button" onclick={clearAll} class="text-neutral-400 hover:text-neutral-200">
-			{m.library_clear_all()}
-		</button>
-	{/if}
-</div>
-
-<!-- Active filter chips -->
-{#if hasAnyFilter || hasSort}
-	<div class="mt-3 flex flex-wrap items-center gap-2">
-		{#if data.filter.q}
-			<button type="button" onclick={() => removeParam('q')} class="chip chip-active gap-1">
-				<span>“{data.filter.q}”</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if data.filter.type}
-			<button type="button" onclick={() => removeParam('type')} class="chip chip-active gap-1">
-				<span>{typeLabels[data.filter.type]()}</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if data.filter.minRating}
-			<button type="button" onclick={() => removeParam('minRating')} class="chip chip-active gap-1">
-				<span>★ ≥ {data.filter.minRating}</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if data.filter.genre}
-			<button type="button" onclick={() => removeParam('genre')} class="chip chip-active gap-1">
-				<span>{data.filter.genre}</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if data.filter.hasMediux}
-			<button type="button" onclick={() => removeParam('mediux')} class="chip chip-active gap-1">
-				<span>{m.library_filter_mediux()}</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if data.filter.missingPoster}
-			<button type="button" onclick={() => removeParam('missing')} class="chip chip-active gap-1">
-				<span>{m.library_filter_missing()}</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if data.filter.unchanged}
-			<button type="button" onclick={() => removeParam('unchanged')} class="chip chip-active gap-1">
-				<span>{m.library_filter_unchanged()}</span><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-		{#if hasSort}
-			<button
-				type="button"
-				onclick={() => removeParam('sort', 'dir')}
-				class="chip chip-active gap-1"
-			>
-				<span
-					>{m.library_sort_button()}: {sortLabels[sortField]()}
-					{sortDir === 'asc' ? '↑' : '↓'}</span
-				><span aria-hidden="true">✕</span>
-			</button>
-		{/if}
-	</div>
-{/if}
-
-{#if ignoreError}
-	<div
-		role="alert"
-		class="mt-3 rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
-	>
-		{ignoreError}
-	</div>
-{/if}
-
-{#if selected.size > 0}
+{#if selectedCount > 0}
 	<div
 		class="surface sticky top-16 z-10 mt-4 flex flex-wrap items-center gap-3 border-accent-800 bg-accent-950/40 px-4 py-2 text-sm backdrop-blur"
 		aria-busy={busy}
 	>
-		<span class="font-medium">{m.library_selected_count({ count: selected.size })}</span>
+		<span class="font-medium">{m.library_selected_count({ count: selectedCount })}</span>
+		{#if selectionMode === 'all_matching'}
+			<span class="badge badge-info">{m.library_selection_exact_snapshot()}</span>
+		{/if}
 		<button disabled={busy} onclick={() => bulk('/api/discover')} class="btn btn-subtle px-3 py-1">
 			{busy ? m.item_working() : m.library_find_covers()}
 		</button>
-		<select bind:value={method} aria-label={m.library_apply_method_label()} class="input py-1">
+		<select
+			bind:value={method}
+			onchange={() => {
+				confirmApply = false;
+				applyPreview = null;
+			}}
+			aria-label={m.library_apply_method_label()}
+			class="input py-1"
+		>
 			<option value="both">{m.library_method_both()}</option>
 			<option value="plex">{m.library_method_plex()}</option>
 			<option value="kometa">{m.library_method_kometa()}</option>
 		</select>
 		{#if confirmApply}
 			<!-- Two-step confirm: auto-apply writes to the live server and is hard to undo. -->
-			<span class="text-neutral-200">{m.library_apply_confirm({ count: selected.size })}</span>
+			<span class="text-neutral-200">{m.library_apply_confirm({ count: selectedCount })}</span>
 			<!-- Dry-run preview of what this apply would write, so the confirm is informed. -->
 			<span class="text-xs text-neutral-400">
 				{#if previewing}
 					{m.library_preview_calculating()}
 				{:else if applyPreview}
 					{m.library_preview_summary({
-						uploads: applyPreview.serverUploads + applyPreview.childUploads,
-						exports: applyPreview.kometaExports,
-						skipped: applyPreview.skipped
+						uploads: applyPreview.summary.destinations.server,
+						exports: applyPreview.summary.destinations.kometa,
+						skipped: applyPreview.summary.skipCount
 					})}
 				{/if}
 			</span>
 			<button
-				disabled={busy}
-				onclick={() => bulk('/api/apply', { method, selection: 'auto' })}
+				disabled={busy || !applyPreview?.planId || !applyPreview.digest}
+				onclick={confirmFrozenApply}
 				class="btn btn-accent px-3 py-1"
 			>
 				{busy ? m.item_working() : m.library_apply_confirm_yes()}
@@ -669,121 +539,22 @@
 	<div class="mt-4"><JobProgress {jobId} onDone={() => invalidateAll()} /></div>
 {/if}
 
-{#if data.items.length === 0}
-	<div class="surface mt-10 p-10 text-center">
-		<p class="font-medium text-neutral-200">{m.library_empty_title()}</p>
-		<p class="mx-auto mt-1 max-w-md text-sm text-neutral-400">{m.library_empty()}</p>
-		<div class="mt-5 flex flex-wrap items-center justify-center gap-2">
-			<a href="/settings" class="btn btn-subtle px-3 py-1.5">{m.nav_settings()}</a>
-			<a href="/" class="btn btn-ghost px-3 py-1.5">{m.nav_dashboard()}</a>
-		</div>
-	</div>
-{:else if visibleItems.length === 0}
-	<div class="surface mt-10 p-10 text-center">
-		<p class="text-sm text-neutral-400">{m.library_no_match()}</p>
-		<button
-			type="button"
-			onclick={() => setIgnoreView('all')}
-			class="btn btn-ghost mt-4 px-3 py-1.5"
-		>
-			{m.library_ignore_all()}
-		</button>
-	</div>
-{:else}
-	<div
-		class="mt-4 grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 {libraryNavigating
-			? 'opacity-50'
-			: ''}"
-		aria-busy={libraryNavigating}
-	>
-		{#each visibleItems as item (item.id)}
-			{@const ignored = isIgnored(item)}
-			<div class="group/wrap relative">
-				<!-- Dim only the card; the badge + toggle live outside this layer so they stay crisp. -->
-				<div class="transition-[opacity,filter] {ignored ? 'opacity-40 saturate-50' : ''}">
-					<PosterCard
-						{item}
-						selectable
-						selected={selected.has(item.id)}
-						onToggle={() => toggle(item.id)}
-					/>
-				</div>
-
-				{#if ignored}
-					<!-- State is shown three ways (dim + label + icon), never on color alone. -->
-					<span
-						class="badge badge-muted pointer-events-none absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 backdrop-blur-sm"
-					>
-						<svg
-							class="size-3"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							aria-hidden="true"
-						>
-							<path
-								d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
-							/>
-							<line x1="1" y1="1" x2="23" y2="23" />
-						</svg>
-						{m.poster_badge_ignored()}
-					</span>
-				{/if}
-
-				<!-- Ignore toggle (bottom-right, clear of the select checkbox + rating). -->
-				<button
-					type="button"
-					onclick={() => toggleIgnore(item)}
-					aria-pressed={ignored}
-					aria-label={ignored ? m.poster_unignore() : m.poster_ignore()}
-					title={ignored ? m.poster_unignore() : m.poster_ignore()}
-					class="absolute right-2 bottom-2 flex h-8 w-8 items-center justify-center rounded border transition {ignored
-						? 'border-accent-400 bg-accent-600 text-white'
-						: 'border-neutral-600 bg-neutral-900/80 text-neutral-300 opacity-0 group-focus-within/wrap:opacity-100 group-hover/wrap:opacity-100 hover:border-neutral-400 focus-visible:opacity-100 pointer-coarse:opacity-100'}"
-				>
-					<svg
-						class="size-4"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path
-							d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
-						/>
-						<line x1="1" y1="1" x2="23" y2="23" />
-					</svg>
-				</button>
-			</div>
-		{/each}
-	</div>
-
-	{#if loadingMore}
-		<!-- Skeleton tiles while the next page loads, matching the grid layout. -->
-		<div
-			class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
-			aria-hidden="true"
-		>
-			{#each Array(8) as _, i (i)}
-				<Skeleton class="aspect-[2/3] w-full rounded-lg" />
-			{/each}
-		</div>
-	{/if}
-	{#if hasMore}
-		<!-- Sentinel: auto-loads the next page when it nears the viewport. -->
-		<div use:onVisible={loadMore} class="mt-6 flex justify-center">
-			<button type="button" onclick={loadMore} disabled={loadingMore} class="btn btn-ghost">
-				{loadingMore ? m.library_loading_more() : m.library_load_more()}
-			</button>
-		</div>
-	{/if}
-	{#if loadError}
-		<p class="mt-3 text-center text-sm text-red-300" role="alert">{m.library_load_error()}</p>
-	{/if}
-{/if}
+<LibraryGrid
+	items={visibleItems}
+	{total}
+	{hasAnyFilter}
+	{hasSort}
+	{ignoreView}
+	{libraryNavigating}
+	{loadingMore}
+	{hasMore}
+	{loadError}
+	{isIgnored}
+	{isSelected}
+	hrefFor={(id) =>
+		`/item/${id}?returnTo=${encodeURIComponent(page.url.pathname + page.url.search)}`}
+	onToggle={toggle}
+	onToggleIgnore={toggleIgnore}
+	onSetIgnoreView={setIgnoreView}
+	onLoadMore={loadMore}
+/>

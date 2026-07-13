@@ -9,8 +9,9 @@ PosterPilot is configured two ways, and they work together:
   and secret management.
 - **The in-app Settings page** — entered in the UI and persisted to the SQLite
   database under `/data` so they survive restarts. Settings is organized into
-  tabs: **Media server**, **Metadata & providers**, **Kometa & advanced**,
-  **Language**, and **Activity** (the in-app event log). Managing Kometa's own
+  **Servers**, **Metadata & providers**, **Kometa & advanced**, **Diagnostics**,
+  **Backup & restore**, **Automation**, **Security**, **Language**, and **Activity**.
+  Managing Kometa's own
   `config.yml` lives on its own [Kometa manager page](/posterpilot/kometa-config-sync/)
   (the **Kometa** item in the main nav), not in Settings. A guided
   [first-install wizard](/posterpilot/installation/#first-run) at `/setup` covers
@@ -112,11 +113,22 @@ existing installs behave exactly as before until you opt in. There is no data
 migration and no change to how the container runs.
 :::
 
-## Media server
+## Named media servers
 
-PosterPilot talks to one active media server at a time, chosen by `SERVER_TYPE`
-(`plex`, `jellyfin`, or `emby`; defaults to `plex`). Only the active server's
-credentials are validated before a sync.
+PosterPilot can store multiple named Plex, Jellyfin, and Emby instances. One enabled
+instance is active at a time for Library, Review, Collections, FUN, jobs, and
+mutations. Add and test instances in **Settings → Servers**; with two or more enabled
+instances, the app shell also shows a switcher.
+
+`SERVER_TYPE` plus `PLEX_*`, `JELLYFIN_*`, or `EMBY_*` remain the environment form
+of the protected legacy/default instance. On upgrade, existing single-server data is
+assigned to that named instance in place. Additional servers are stored separately
+with encrypted credentials; the legacy variables do not define a list of servers.
+See [Multi-server migration](../multi-server-migration/).
+
+Every server reports its own capabilities. Preview disables or skips unsupported
+poster, background, season, episode, read, lock, or delete operations instead of
+assuming that every Plex/Jellyfin/Emby version behaves identically.
 
 ### Plex
 
@@ -198,9 +210,10 @@ the environment) tune how PosterPilot scores, syncs, applies, and caches. They
 follow the usual precedence — an environment variable overrides the persisted value
 and locks the control in the UI.
 
-- **Suggested-artwork pre-selection** (`SUGGEST_PRESELECT`, default on). When on,
-  the item view pre-selects the highest-scored candidate per slot as an overridable
-  suggestion. Turn it off to leave every slot unselected until you choose.
+- **Suggested artwork** (`SUGGEST_PRESELECT`, default on). When on, the item and
+  review views compute and label the highest-scored candidate per slot. Accepting or
+  staging that suggestion remains an explicit action; page load does not silently
+  persist it. Turn it off to hide automatic suggestions.
 - **Scoring weights.** PosterPilot ranks candidates on three terms — a per-provider
   base weight (MediUX, ThePosterDB, Fanart.tv, TMDB), a resolution score, and an
   aspect-fit score (2:3 for posters, 16:9 for backdrops and title cards). The
@@ -225,19 +238,45 @@ and locks the control in the UI.
 
 ## The FUN section
 
-**FUN** (`FUN_ENABLED`, default off) is an opt-in home for library experiments,
-hidden until you enable it in **Settings → Kometa & advanced**. Its first tool is a
-random movie/series picker — see [Usage](/posterpilot/usage/#fun-random-movieseries-picker).
-While the toggle is off, FUN has no navigation entry and its page returns 404.
+**FUN** (`FUN_ENABLED`, default off) is an opt-in home for the three-choice picker,
+blind/capsule picks, Poster Match, ambient gallery, and duration-budget session
+planner. While off, FUN has no navigation entry and its routes return 404. See
+[FUN experiments and collections](../fun-collections/).
+
+## Review-first automation
+
+**Settings → Automation** manages named schedules for the active server. Each one
+is scoped to selected libraries and can use an interval, daily local time, or an
+event trigger (`new_items` or `sync_completed`). Choose `sync` or
+`sync_discover`, an IANA timezone, optional saved review view, catch-up window, and
+failure pause threshold. These records are persisted separately from global defaults.
+
+Automations are review-only: they synchronize and optionally discover candidates,
+but never create an apply job. Webhook tokens are generated per automation and shown
+once. See [Automation and recovery](../automation-recovery/).
+
+## Backup, restore, and diagnostics
+
+**Settings → Backup & restore** creates application-managed bundles under the
+directory derived from `DATABASE_URL` (normally `/data/backups`). Retention by
+maximum count and/or age is stored in the database; it is not currently configured
+through an environment variable. Backups can be validated, explicitly exported,
+deleted, or restored through preflight and confirmation. Restore requires a container
+restart after the protected safety backup and marker are prepared.
+
+**Settings → Diagnostics** checks every server, TMDB, provider, and configured
+data/Kometa/backup path without mutating them, and can explicitly export a redacted
+support bundle. See [Automation and recovery](../automation-recovery/) for key modes,
+restore readiness, and rollback.
 
 ## Kometa export
 
 When you apply a cover with the Kometa method, PosterPilot writes
 Kometa/PMM-compatible YAML (`url_poster` / `url_background`, keyed by TMDB id) into
-the directory named by `KOMETA_ASSETS_DIR` (default `/kometa` in Docker). Mount
-that path at your existing Kometa config directory so Kometa applies the covers on
-its next run. See [Usage](/posterpilot/usage/#apply-a-cover) for how the export is
-consumed.
+the directory named by `KOMETA_ASSETS_DIR` (default `/kometa` in Docker). If
+`KOMETA_CONFIG_PATH` is set, the effective output directory is the directory that
+contains that `config.yml`, keeping `posterpilot.yml` co-located. Mount it read/write
+so Kometa can consume the file on its next run. See [Usage](../usage/#apply-a-cover).
 
 That export is a _metadata_ file. PosterPilot can also surgically manage Kometa's
 **own `config.yml`** — every service connector, per-library collections, overlays
@@ -292,6 +331,7 @@ and are locked in the UI.
 | `KOMETA_ASSETS_DIR`       | Kometa assets dir         | `./data/kometa` (`/kometa` in Docker) | Directory the exported Kometa YAML is written to.                                             |
 | `KOMETA_CONFIG_PATH`      | Kometa config path        | —                                     | Path to Kometa's own `config.yml` to manage. Empty/unset = Kometa manager off.                |
 | `KOMETA_CONFIG_MODE`      | Kometa config mode        | `merge`                               | `merge` (surgical — preserves your other keys and comments) or `own` (regenerate the whole file). |
+| `KOMETA_SERVER_INSTANCE_ID` | Kometa Plex binding     | `legacy-default`                      | Exact named Plex instance used by every Kometa preview/write; non-Plex bindings are rejected. |
 | `DEFAULT_APPLY_METHOD`    | Default apply method      | `both`                                | Default apply method: `plex`, `kometa`, or `both`.                                            |
 | `INCLUDED_SECTIONS`       | Included sections         | all movie/show                        | Library section keys to sync; comma-separated (env) or a JSON array (persisted). Empty = all. |
 | `PROVIDER_MEDIUX`         | MediUX provider           | on                                    | Enable the MediUX provider.                                                                   |
@@ -303,10 +343,10 @@ and are locked in the UI.
 | `MEDIUX_CONCURRENCY`      | MediUX concurrency        | `5`                                   | Max concurrent MediUX requests.                                                               |
 | `HTTP_CACHE_TTL_DAYS`     | HTTP cache TTL            | `7`                                   | How long cached HTTP responses (scrapes) are reused, in days.                                 |
 | `APPLY_CONCURRENCY`       | Apply concurrency         | `4`                                   | How many items a bulk apply processes concurrently.                                           |
-| `SUGGEST_PRESELECT`       | Suggested pre-select      | on                                    | Pre-select the top-scored candidate per slot as an overridable suggestion.                    |
+| `SUGGEST_PRESELECT`       | Suggested artwork         | on                                    | Compute and label top-scored candidates; accepting/staging remains explicit.                  |
 | `INCREMENTAL_SYNC`        | Incremental sync          | on                                    | Skip unchanged items on repeat syncs (a full rescan stays available).                         |
 | `LIBRARY_DEFAULT_SORT`    | Library default sort      | `title`                               | Sort the library wall opens with: `title`, `year`, `rating`, `runtime`, `recent`, or `added`. |
-| `FUN_ENABLED`             | FUN section               | off                                   | Show the experimental FUN section (random movie/series picker).                               |
+| `FUN_ENABLED`             | FUN section               | off                                   | Show the picker, Poster Match, ambient gallery, and session planner.                           |
 | `THUMB_CACHE_TTL_DAYS`    | Thumbnail cache TTL       | `30`                                  | Days a cached provider preview image stays fresh before it is re-fetched.                     |
 | `THUMB_CACHE_MAX_MB`      | Thumbnail cache size      | `512`                                 | Max on-disk size of the thumbnail cache (MB) before least-recently-used eviction.             |
 | `AUTH_MODE`               | Security → mode           | `disabled`                            | Authentication mode: `disabled`, `local`, or `enabled`. Overrides the UI and locks the control. |

@@ -5,7 +5,7 @@
  * the logic it composes is tested in `config.test.ts` / `config-io.test.ts`.
  */
 
-import { posix, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import {
 	getCachedLibraries,
 	getKometaDefaultCollections,
@@ -42,8 +42,8 @@ import {
 import type { KometaConfigMode } from '$lib/server/config';
 import {
 	listBackups,
+	readBackup,
 	readConfig,
-	restoreBackup,
 	withConfigLock,
 	writeConfigAtomic,
 	type BackupInfo
@@ -61,8 +61,28 @@ import {
 import { OVERLAY_GROUPS, knownOverlays, type OverlayGroup } from './overlay-defaults';
 import { OPERATIONS, type Operation } from './operations';
 import type { SyncSelectionInput } from './selection';
+import {
+	kometaBindingErrorCode,
+	resolveKometaServerBinding,
+	type KometaServerBinding,
+	type KometaServerBindingStatus
+} from './server-binding';
+import {
+	KOMETA_CONFIG_PLAN_KIND,
+	assertKometaConfigPlanPayload,
+	kometaFileFingerprint,
+	kometaProposedFingerprint,
+	rawKometaChanges,
+	type KometaConfigPlanAction,
+	type KometaConfigPlanPayload
+} from './plan';
+import {
+	OperationPlanError,
+	operationPlanStore,
+	type OperationPlan
+} from '$lib/server/plans/operation-plan-store';
 
-export { parseSelectionInput, type SyncSelectionInput } from './selection';
+export { type SyncSelectionInput } from './selection';
 
 /** State the settings page needs to render the Kometa tab. */
 export interface KometaTabState {
@@ -77,9 +97,15 @@ export interface KometaTabState {
 	metadataFile: string;
 	exists: boolean;
 	parseError: string | null;
+	/** Client-safe identity of the exact Plex instance that owns this target. */
+	serverBinding: { id: string; name: string } | null;
+	serverBindingStatus: KometaServerBindingStatus;
 	managedLibraries: string[];
 	defaultCollections: Record<string, string[]>;
+	/** Non-secret managed values only. */
 	managedSettings: Record<string, string>;
+	/** Secret managed-setting ids that have a value, without returning that value. */
+	managedSettingSecretsSet: string[];
 	/** Catalog of default collection sets, grouped (static; passed so the client
 	 *  never imports a `$lib/server` module). */
 	catalog: readonly DefaultGroup[];
@@ -108,8 +134,8 @@ export interface KometaTabState {
 			hasMetadata: boolean;
 		}
 	>;
-	/** Current global settings/webhooks from the file. */
-	globals: { settings: Record<string, string>; webhooks: Record<string, string> };
+	/** Current non-secret globals plus set-state for secret webhook fields. */
+	globals: { settings: Record<string, string>; webhooksSet: string[] };
 	backups: BackupInfo[];
 	consistency: ConsistencyWarning[];
 }
@@ -129,6 +155,35 @@ export interface SyncResult {
 	consistency: ConsistencyWarning[];
 	backup?: boolean;
 	scaffolded?: boolean;
+	planId?: string | null;
+	digest?: string | null;
+	expiresAt?: string | null;
+	sourceFingerprint?: string;
+	proposedFingerprint?: string;
+	serverBinding?: { id: string; name: string } | null;
+}
+
+export interface ConfirmKometaPlanRequest {
+	planId: string;
+	digest: string;
+}
+
+function jsonSafe<T>(value: T): T {
+	return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function planIdentity(plan: OperationPlan<KometaConfigPlanPayload>) {
+	return {
+		planId: plan.id,
+		digest: plan.digest,
+		expiresAt: plan.expiresAt.toISOString(),
+		sourceFingerprint: plan.payload.sourceFingerprint,
+		proposedFingerprint: plan.payload.proposedFingerprint,
+		serverBinding: {
+			id: plan.payload.serverInstanceId,
+			name: plan.payload.serverName
+		}
+	};
 }
 
 /**
@@ -140,14 +195,15 @@ function metadataFilePath(_config: AppConfig): string {
 	return DEFAULT_FILENAME;
 }
 
-/** Absolute on-disk directory where posterpilot.yml is written (the config dir). */
-export function kometaOutputDir(config: AppConfig): string {
-	return config.kometaConfigPath ? posix.dirname(config.kometaConfigPath) : config.kometaAssetsDir;
-}
-
 /** Build the desired-state plan from the user's selections + resolved config. */
-async function planFromSelections(config: AppConfig, sel: SyncSelectionInput): Promise<ConfigPlan> {
-	const cached = await getCachedLibraries();
+async function planFromSelections(
+	config: AppConfig,
+	sel: SyncSelectionInput,
+	binding: KometaServerBinding,
+	currentManagedSettings: Record<string, string>,
+	storedManagedSettings: Record<string, string>
+): Promise<ConfigPlan> {
+	const cached = await getCachedLibraries(binding.id);
 	const titleByKey = new Map(cached.map((l) => [l.key, l.title]));
 	const libraries = sel.libraries
 		.map((key) => ({
@@ -177,24 +233,78 @@ async function planFromSelections(config: AppConfig, sel: SyncSelectionInput): P
 		if (keep.length) connectionKeep[section] = keep;
 	}
 
-	const settings = MANAGED_SETTINGS.flatMap((def) => {
-		const value = sel.settings[def.id];
-		return value ? [{ section: def.section, key: def.key, value }] : [];
-	});
+	const settings = [] as ConfigPlan['settings'];
+	const settingKeep: string[] = [];
+	for (const def of MANAGED_SETTINGS) {
+		const value = sel.settings[def.id]?.trim() ?? '';
+		if (value) {
+			settings.push({ section: def.section, key: def.key, value });
+			continue;
+		}
+		if (!def.secret) continue;
+
+		const currentValue = currentManagedSettings[def.id] ?? '';
+		const storedValue = storedManagedSettings[def.id] ?? '';
+		if (config.kometaConfigMode === 'merge' && currentValue) {
+			settingKeep.push(`${def.section}.${def.key}`);
+		} else if (currentValue || storedValue) {
+			// In own/scaffold mode the document is rebuilt, so the server-held value
+			// must be copied into the proposed content without round-tripping via SSR.
+			settings.push({
+				section: def.section,
+				key: def.key,
+				value: currentValue || storedValue
+			});
+		}
+	}
 
 	return buildPlan({
-		creds: { plexUrl: config.plexUrl, plexToken: config.plexToken, tmdbKey: config.tmdbKey },
+		creds: { plexUrl: binding.plexUrl, plexToken: binding.plexToken, tmdbKey: config.tmdbKey },
 		metadataFile: metadataFilePath(config),
 		libraries,
 		settings,
+		settingKeep,
 		connections,
 		connectionKeep
 	});
 }
 
+function readManagedSettingValues(doc: ReturnType<typeof loadDoc>): Record<string, string> {
+	const bySection = new Map<string, Record<string, string>>();
+	const values: Record<string, string> = {};
+	for (const def of MANAGED_SETTINGS) {
+		let section = bySection.get(def.section);
+		if (!section) {
+			section = readScalarMap(doc, [def.section]);
+			bySection.set(def.section, section);
+		}
+		const value = section[def.key];
+		if (value !== undefined && value !== '') values[def.id] = value;
+	}
+	return values;
+}
+
+function syncStoredSecretSettings(
+	base: Record<string, string>,
+	proposedContent: string
+): Record<string, string> {
+	const next = { ...base };
+	const doc = loadDoc(proposedContent);
+	if (doc.errors.length) return next;
+	const proposed = readManagedSettingValues(doc);
+	for (const def of MANAGED_SETTINGS) {
+		if (!def.secret) continue;
+		if (proposed[def.id]) next[def.id] = proposed[def.id];
+		else delete next[def.id];
+	}
+	return next;
+}
+
 /** Load everything the Kometa manager page needs to render. */
 export async function loadKometaState(): Promise<KometaTabState> {
 	const config = await resolveConfig();
+	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+	const binding = resolvedBinding.binding;
 	const active = Boolean(config.kometaConfigPath);
 	let exists = false;
 	let parseError: string | null = null;
@@ -209,8 +319,21 @@ export async function loadKometaState(): Promise<KometaTabState> {
 		}
 	}
 
-	const cached = await getCachedLibraries();
+	const cached = binding ? await getCachedLibraries(binding.id) : [];
 	const metadataRef = metadataFilePath(config);
+	const storedManagedSettings = await getKometaManagedSettings();
+	const currentManagedSettings = readManagedSettingValues(doc);
+	const managedSettings: Record<string, string> = {};
+	const managedSettingSecretsSet: string[] = [];
+	for (const def of MANAGED_SETTINGS) {
+		if (def.secret) {
+			if (currentManagedSettings[def.id] || storedManagedSettings[def.id]) {
+				managedSettingSecretsSet.push(def.id);
+			}
+		} else if (storedManagedSettings[def.id]) {
+			managedSettings[def.id] = storedManagedSettings[def.id];
+		}
+	}
 
 	// Connector current values — never expose secret values, only "is set".
 	const connectionValues: Record<string, Record<string, string>> = {};
@@ -245,7 +368,11 @@ export async function loadKometaState(): Promise<KometaTabState> {
 
 	// Consistency against the file's current enabled features.
 	const currentPlan = buildPlan({
-		creds: { plexUrl: config.plexUrl, plexToken: config.plexToken, tmdbKey: config.tmdbKey },
+		creds: {
+			plexUrl: binding?.plexUrl ?? null,
+			plexToken: binding?.plexToken ?? null,
+			tmdbKey: config.tmdbKey
+		},
 		metadataFile: metadataRef,
 		libraries: Object.entries(libraryState).map(([name, s]) => ({
 			name,
@@ -264,9 +391,12 @@ export async function loadKometaState(): Promise<KometaTabState> {
 		metadataFile: metadataRef,
 		exists,
 		parseError,
+		serverBinding: binding ? { id: binding.id, name: binding.name } : null,
+		serverBindingStatus: resolvedBinding.status,
 		managedLibraries: await getKometaManagedLibraries(),
 		defaultCollections: await getKometaDefaultCollections(),
-		managedSettings: await getKometaManagedSettings(),
+		managedSettings,
+		managedSettingSecretsSet,
 		catalog: DEFAULT_COLLECTION_GROUPS,
 		managedSettingDefs: MANAGED_SETTINGS,
 		connectorCatalog: CONNECTORS,
@@ -279,7 +409,9 @@ export async function loadKometaState(): Promise<KometaTabState> {
 		libraryState,
 		globals: {
 			settings: readScalarMap(doc, ['settings']),
-			webhooks: readScalarMap(doc, ['webhooks'])
+			webhooksSet: MANAGED_SETTINGS.filter(
+				(def) => def.secret && def.section === 'webhooks' && currentManagedSettings[def.id]
+			).map((def) => def.key)
 		},
 		backups: active && exists ? listBackups(config.kometaConfigPath) : [],
 		consistency: checkConsistency(currentPlan, doc)
@@ -311,6 +443,23 @@ function parseErrorResult(mode: KometaConfigMode, message: string): SyncResult {
 		parseError: message,
 		changes: [],
 		warnings: [],
+		dropped: [],
+		consistency: []
+	};
+}
+
+function bindingErrorResult(
+	config: AppConfig,
+	status: Exclude<KometaServerBindingStatus, 'ready'>
+): SyncResult {
+	return {
+		active: Boolean(config.kometaConfigPath),
+		mode: config.kometaConfigMode,
+		exists: Boolean(config.kometaConfigPath && readConfig(config.kometaConfigPath) !== null),
+		willScaffold: false,
+		parseError: null,
+		changes: [],
+		warnings: [kometaBindingErrorCode(status)],
 		dropped: [],
 		consistency: []
 	};
@@ -353,12 +502,59 @@ function computeSync(
 export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> {
 	const config = await resolveConfig();
 	if (!config.kometaConfigPath) return inactiveResult();
+	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+	if (!resolvedBinding.binding) {
+		return bindingErrorResult(
+			config,
+			resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>
+		);
+	}
+	const binding = resolvedBinding.binding;
 	const raw = readConfig(config.kometaConfigPath);
-	const plan = await planFromSelections(config, sel);
-	const snapshot = await getKometaLastApplied();
+	const sourceDoc = loadDoc(raw ?? '');
+	const [snapshot, storedManagedSettings] = await Promise.all([
+		getKometaLastApplied(),
+		getKometaManagedSettings()
+	]);
+	const plan = await planFromSelections(
+		config,
+		sel,
+		binding,
+		readManagedSettingValues(sourceDoc),
+		storedManagedSettings
+	);
 
 	const out = computeSync(config, plan, raw, snapshot);
 	if ('parseError' in out) return parseErrorResult(config.kometaConfigMode, out.parseError);
+	const consistency = checkConsistency(plan, raw !== null ? loadDoc(raw) : loadDoc(''));
+	const proposedContent = serialize(out.res.doc);
+	const payload = jsonSafe<KometaConfigPlanPayload>({
+		type: KOMETA_CONFIG_PLAN_KIND,
+		version: 1,
+		action: 'structured',
+		serverInstanceId: binding.id,
+		serverName: binding.name,
+		configPath: config.kometaConfigPath,
+		mode: config.kometaConfigMode,
+		sourceFingerprint: kometaFileFingerprint(raw),
+		proposedFingerprint: kometaProposedFingerprint(proposedContent),
+		proposedContent,
+		display: {
+			changes: out.res.changes,
+			warnings: out.res.warnings,
+			dropped: out.dropped,
+			consistency,
+			willScaffold: out.willScaffold
+		},
+		structured: { selection: sel, nextSnapshot: out.res.nextSnapshot },
+		restore: null
+	});
+	assertKometaConfigPlanPayload(payload);
+	const frozen = await operationPlanStore.create({
+		kind: KOMETA_CONFIG_PLAN_KIND,
+		serverInstanceId: binding.id,
+		payload
+	});
 	return {
 		active: true,
 		mode: config.kometaConfigMode,
@@ -368,68 +564,28 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		changes: redactSecrets(out.res.changes),
 		warnings: out.res.warnings,
 		dropped: out.dropped,
-		consistency: checkConsistency(plan, raw !== null ? loadDoc(raw) : loadDoc(''))
+		consistency,
+		...planIdentity(frozen)
 	};
 }
 
-/** Apply the sync: write the file atomically (+ backup) and persist selections. */
-export async function runSync(sel: SyncSelectionInput): Promise<SyncResult> {
-	const config = await resolveConfig();
-	if (!config.kometaConfigPath) return inactiveResult();
-	return withConfigLock(config.kometaConfigPath, async () => {
-		const raw = readConfig(config.kometaConfigPath);
-		const plan = await planFromSelections(config, sel);
-		const snapshot = await getKometaLastApplied();
-
-		const out = computeSync(config, plan, raw, snapshot);
-		if ('parseError' in out) return parseErrorResult(config.kometaConfigMode, out.parseError);
-
-		const stamp = new Date().toISOString();
-		const { backup } = writeConfigAtomic(config.kometaConfigPath, serialize(out.res.doc), stamp);
-
-		await setKometaManagedLibraries(sel.libraries);
-		await setKometaDefaultCollections(sel.defaults);
-		await setKometaManagedSettings(sel.settings);
-		await setKometaLastApplied(out.res.nextSnapshot);
-
-		const created = out.willScaffold;
-		await logEvent(
-			'info',
-			'kometa',
-			created
-				? 'Created Kometa config.yml'
-				: `Synced Kometa config.yml (${config.kometaConfigMode})`,
-			{
-				mode: config.kometaConfigMode,
-				changes: out.res.changes.length,
-				dropped: out.dropped.length,
-				warnings: out.res.warnings,
-				backup: backup !== null
-			}
-		);
-
-		return {
-			active: true,
-			mode: config.kometaConfigMode,
-			exists: true,
-			willScaffold: false,
-			parseError: null,
-			scaffolded: created,
-			backup: backup !== null,
-			changes: redactSecrets(out.res.changes),
-			warnings: out.res.warnings,
-			dropped: out.dropped,
-			consistency: checkConsistency(plan, raw !== null ? loadDoc(raw) : loadDoc(''))
-		};
-	});
-}
-
-/** Result of a raw-editor save or a backup restore. */
+/** Result of a raw-editor/restore preview or confirmation. */
 export interface RawResult {
 	ok: boolean;
 	active?: boolean;
 	parseError: string | null;
 	backup?: boolean;
+	errorCode?: string;
+	changes?: ChangeEntry[];
+	warnings?: string[];
+	planId?: string | null;
+	digest?: string | null;
+	expiresAt?: string | null;
+	sourceFingerprint?: string;
+	proposedFingerprint?: string;
+	serverBinding?: { id: string; name: string } | null;
+	action?: KometaConfigPlanAction;
+	backupName?: string;
 }
 
 /** Read the current raw config text (for the raw editor). */
@@ -439,34 +595,298 @@ export async function loadRaw(): Promise<{ active: boolean; text: string }> {
 	return { active: true, text: readConfig(config.kometaConfigPath) ?? '' };
 }
 
-/** Validate and save raw config text (atomic write + backup). */
-export async function saveRaw(text: string): Promise<RawResult> {
+function rawBindingError(status: Exclude<KometaServerBindingStatus, 'ready'>): RawResult {
+	return {
+		ok: false,
+		active: true,
+		parseError: null,
+		errorCode: kometaBindingErrorCode(status)
+	};
+}
+
+/** Validate raw YAML and issue a single-use exact-content preview. */
+export async function previewRawConfig(text: string): Promise<RawResult> {
 	const config = await resolveConfig();
 	if (!config.kometaConfigPath) return { ok: false, active: false, parseError: null };
-	return withConfigLock(config.kometaConfigPath, async () => {
-		const doc = loadDoc(text);
-		if (doc.errors.length) return { ok: false, active: true, parseError: doc.errors[0].message };
-		const { backup } = writeConfigAtomic(config.kometaConfigPath, text, new Date().toISOString());
-		await logEvent('info', 'kometa', 'Saved Kometa config.yml (raw editor)', {
-			backup: backup !== null
+	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+	if (!resolvedBinding.binding) {
+		return rawBindingError(resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>);
+	}
+	const binding = resolvedBinding.binding;
+	const doc = loadDoc(text);
+	if (doc.errors.length) return { ok: false, active: true, parseError: doc.errors[0].message };
+	const raw = readConfig(config.kometaConfigPath);
+	const diff = rawKometaChanges(raw, text);
+	if (kometaFileFingerprint(raw) === kometaFileFingerprint(text)) {
+		return { ok: true, active: true, parseError: null, changes: [], planId: null };
+	}
+	const payload: KometaConfigPlanPayload = {
+		type: KOMETA_CONFIG_PLAN_KIND,
+		version: 1,
+		action: 'raw',
+		serverInstanceId: binding.id,
+		serverName: binding.name,
+		configPath: config.kometaConfigPath,
+		mode: config.kometaConfigMode,
+		sourceFingerprint: kometaFileFingerprint(raw),
+		proposedFingerprint: kometaProposedFingerprint(text),
+		proposedContent: text,
+		display: {
+			changes: diff.changes,
+			warnings: diff.truncated ? ['diff_truncated'] : [],
+			dropped: [],
+			consistency: [],
+			willScaffold: raw === null
+		},
+		structured: null,
+		restore: null
+	};
+	assertKometaConfigPlanPayload(payload);
+	const frozen = await operationPlanStore.create({
+		kind: KOMETA_CONFIG_PLAN_KIND,
+		serverInstanceId: binding.id,
+		payload
+	});
+	return {
+		ok: true,
+		active: true,
+		parseError: null,
+		changes: diff.changes,
+		warnings: payload.display.warnings,
+		action: 'raw',
+		...planIdentity(frozen)
+	};
+}
+
+/** Read a backup, diff it against current bytes, and issue a bound restore preview. */
+export async function previewRestoreConfig(name: string): Promise<RawResult> {
+	const config = await resolveConfig();
+	if (!config.kometaConfigPath) return { ok: false, active: false, parseError: null };
+	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+	if (!resolvedBinding.binding) {
+		return rawBindingError(resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>);
+	}
+	const binding = resolvedBinding.binding;
+	let backupContent: string;
+	try {
+		backupContent = readBackup(config.kometaConfigPath, name);
+	} catch (error) {
+		return {
+			ok: false,
+			active: true,
+			parseError: error instanceof Error ? error.message : String(error)
+		};
+	}
+	const doc = loadDoc(backupContent);
+	if (doc.errors.length) return { ok: false, active: true, parseError: doc.errors[0].message };
+	const raw = readConfig(config.kometaConfigPath);
+	const diff = rawKometaChanges(raw, backupContent);
+	if (kometaFileFingerprint(raw) === kometaFileFingerprint(backupContent)) {
+		return {
+			ok: true,
+			active: true,
+			parseError: null,
+			changes: [],
+			planId: null,
+			backupName: name
+		};
+	}
+	const payload: KometaConfigPlanPayload = {
+		type: KOMETA_CONFIG_PLAN_KIND,
+		version: 1,
+		action: 'restore',
+		serverInstanceId: binding.id,
+		serverName: binding.name,
+		configPath: config.kometaConfigPath,
+		mode: config.kometaConfigMode,
+		sourceFingerprint: kometaFileFingerprint(raw),
+		proposedFingerprint: kometaProposedFingerprint(backupContent),
+		proposedContent: backupContent,
+		display: {
+			changes: diff.changes,
+			warnings: diff.truncated ? ['diff_truncated'] : [],
+			dropped: [],
+			consistency: [],
+			willScaffold: raw === null
+		},
+		structured: null,
+		restore: {
+			backupName: name,
+			backupFingerprint: kometaFileFingerprint(backupContent)
+		}
+	};
+	assertKometaConfigPlanPayload(payload);
+	const frozen = await operationPlanStore.create({
+		kind: KOMETA_CONFIG_PLAN_KIND,
+		serverInstanceId: binding.id,
+		payload
+	});
+	return {
+		ok: true,
+		active: true,
+		parseError: null,
+		changes: diff.changes,
+		warnings: payload.display.warnings,
+		action: 'restore',
+		backupName: name,
+		...planIdentity(frozen)
+	};
+}
+
+async function validateStoredKometaPlan(
+	request: ConfirmKometaPlanRequest,
+	expectedAction: KometaConfigPlanAction
+): Promise<OperationPlan<KometaConfigPlanPayload>> {
+	if (!request.planId || !/^[0-9a-f]{64}$/.test(request.digest)) {
+		throw new OperationPlanError('plan_digest_mismatch', request.planId || 'unknown');
+	}
+	const plan = await operationPlanStore.validate<KometaConfigPlanPayload>(request.planId, {
+		kind: KOMETA_CONFIG_PLAN_KIND,
+		digest: request.digest
+	});
+	try {
+		assertKometaConfigPlanPayload(plan.payload);
+	} catch {
+		throw new OperationPlanError('plan_corrupt', request.planId);
+	}
+	if (plan.payload.action !== expectedAction) {
+		throw new OperationPlanError('plan_kind_mismatch', request.planId);
+	}
+	return plan;
+}
+
+async function confirmKometaConfigPlan(
+	request: ConfirmKometaPlanRequest,
+	expectedAction: KometaConfigPlanAction
+): Promise<{ payload: KometaConfigPlanPayload; backup: boolean }> {
+	const initial = await validateStoredKometaPlan(request, expectedAction);
+	return withConfigLock(initial.payload.configPath, async () => {
+		const pending = await validateStoredKometaPlan(request, expectedAction);
+		const config = await resolveConfig();
+		const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+		if (
+			!resolvedBinding.binding ||
+			resolvedBinding.binding.id !== pending.payload.serverInstanceId ||
+			config.kometaConfigPath !== pending.payload.configPath ||
+			config.kometaConfigMode !== pending.payload.mode
+		) {
+			throw new OperationPlanError('plan_stale', request.planId);
+		}
+
+		const current = readConfig(pending.payload.configPath);
+		if (kometaFileFingerprint(current) !== pending.payload.sourceFingerprint) {
+			throw new OperationPlanError('plan_stale', request.planId);
+		}
+		if (pending.payload.restore) {
+			let backupContent: string;
+			try {
+				backupContent = readBackup(pending.payload.configPath, pending.payload.restore.backupName);
+			} catch {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+			if (
+				kometaFileFingerprint(backupContent) !== pending.payload.restore.backupFingerprint ||
+				kometaProposedFingerprint(backupContent) !== pending.payload.proposedFingerprint
+			) {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+		}
+
+		const consumed = await operationPlanStore.consume<KometaConfigPlanPayload>(request.planId, {
+			kind: KOMETA_CONFIG_PLAN_KIND,
+			digest: request.digest,
+			serverInstanceId: pending.payload.serverInstanceId
 		});
-		return { ok: true, active: true, parseError: null, backup: backup !== null };
+		const { backup } = writeConfigAtomic(
+			consumed.payload.configPath,
+			consumed.payload.proposedContent,
+			new Date().toISOString()
+		);
+
+		let managedSettings = await getKometaManagedSettings();
+		if (consumed.payload.structured) {
+			const { selection, nextSnapshot } = consumed.payload.structured;
+			await setKometaManagedLibraries(selection.libraries);
+			await setKometaDefaultCollections(selection.defaults);
+			await setKometaLastApplied(nextSnapshot);
+			managedSettings = selection.settings;
+		}
+		await setKometaManagedSettings(
+			syncStoredSecretSettings(managedSettings, consumed.payload.proposedContent)
+		);
+
+		await logEvent(
+			'info',
+			'kometa',
+			consumed.payload.action === 'structured'
+				? consumed.payload.display.willScaffold
+					? 'Created Kometa config.yml from confirmed preview'
+					: `Synced Kometa config.yml from confirmed preview (${consumed.payload.mode})`
+				: consumed.payload.action === 'raw'
+					? 'Saved Kometa config.yml from confirmed raw preview'
+					: 'Restored Kometa config.yml from confirmed backup preview',
+			{
+				serverInstanceId: consumed.payload.serverInstanceId,
+				serverName: consumed.payload.serverName,
+				operationPlanId: consumed.id,
+				action: consumed.payload.action,
+				mode: consumed.payload.mode,
+				changes: consumed.payload.display.changes.length,
+				backup: backup !== null,
+				backupName: consumed.payload.restore?.backupName ?? null
+			}
+		);
+
+		return { payload: consumed.payload, backup: backup !== null };
 	});
 }
 
-/** Restore a named backup over the current config. */
-export async function restoreConfig(name: string): Promise<RawResult> {
-	const config = await resolveConfig();
-	if (!config.kometaConfigPath) return { ok: false, active: false, parseError: null };
-	return withConfigLock(config.kometaConfigPath, async () => {
-		try {
-			restoreBackup(config.kometaConfigPath, name, new Date().toISOString());
-		} catch (e) {
-			return { ok: false, active: true, parseError: e instanceof Error ? e.message : String(e) };
-		}
-		await logEvent('info', 'kometa', 'Restored Kometa config.yml backup', { name });
-		return { ok: true, active: true, parseError: null, backup: true };
-	});
+/** Confirm one unchanged structured preview; never recomputes selections. */
+export async function runSync(request: ConfirmKometaPlanRequest): Promise<SyncResult> {
+	const { payload, backup } = await confirmKometaConfigPlan(request, 'structured');
+	return {
+		active: true,
+		mode: payload.mode,
+		exists: true,
+		willScaffold: false,
+		parseError: null,
+		scaffolded: payload.display.willScaffold,
+		backup,
+		changes: redactSecrets(payload.display.changes),
+		warnings: payload.display.warnings,
+		dropped: payload.display.dropped,
+		consistency: payload.display.consistency,
+		serverBinding: { id: payload.serverInstanceId, name: payload.serverName }
+	};
+}
+
+export async function confirmRawConfig(request: ConfirmKometaPlanRequest): Promise<RawResult> {
+	const { payload, backup } = await confirmKometaConfigPlan(request, 'raw');
+	return {
+		ok: true,
+		active: true,
+		parseError: null,
+		backup,
+		action: 'raw',
+		changes: payload.display.changes,
+		warnings: payload.display.warnings,
+		serverBinding: { id: payload.serverInstanceId, name: payload.serverName }
+	};
+}
+
+export async function confirmRestoreConfig(request: ConfirmKometaPlanRequest): Promise<RawResult> {
+	const { payload, backup } = await confirmKometaConfigPlan(request, 'restore');
+	return {
+		ok: true,
+		active: true,
+		parseError: null,
+		backup,
+		action: 'restore',
+		backupName: payload.restore?.backupName,
+		changes: payload.display.changes,
+		warnings: payload.display.warnings,
+		serverBinding: { id: payload.serverInstanceId, name: payload.serverName }
+	};
 }
 
 /** List backups for the configured file (for a refresh). */

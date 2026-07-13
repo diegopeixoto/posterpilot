@@ -22,8 +22,8 @@ tag de versão específica, se preferir upgrades reproduzíveis.
 
 Dois volumes importam:
 
-- **`/data`** — estado persistente do app: o banco de dados SQLite, suas configurações salvas,
-  o histórico de aplicações e o arquivo de log rotativo (`/data/logs/posterpilot.log`).
+- **`/data`** — estado persistente: SQLite, configurações, chave de criptografia,
+  snapshots/revisões de artwork, backups da aplicação, cache e log rotativo.
   Mantenha isto em um volume montado para que o estado sobreviva às atualizações do contêiner;
   o arquivo de log fica dentro de `/data`, então não é necessário um volume extra para ele.
 - **`/kometa`** — monte aqui o diretório de assets/config do Kometa para que o
@@ -41,12 +41,29 @@ dentro do volume `/data`, manter `/data` em armazenamento persistente e com back
 segredos descriptografáveis entre atualizações do contêiner.
 
 Opcionalmente, defina a variável de ambiente **`APP_SECRET`** para derivar a chave de um valor
-que você controla. Defina-a quando você roda **várias réplicas compartilhando um banco de dados**,
-ou quando quer que os segredos permaneçam portáteis se o contêiner (e seu `data/.app-key`) for
+que você controla quando quer que os segredos permaneçam portáteis se o contêiner (e seu `data/.app-key`) for
 recriado. Se você não definir `APP_SECRET`, trate `data/.app-key` como parte dos seus backups —
 perdê-lo significa redigitar cada credencial salva. Veja
-[Configuração → Segredos e criptografia](/posterpilot/pt-br/configuration/#segredos-e-criptografia)
+[Configuração](../configuration/)
 para o comportamento completo.
+
+## Faça backup antes do upgrade
+
+Aguarde jobs de mutação terminarem e copie todo o volume `/data`. Se a versão já
+tiver **Configurações → Backup e restauração**, crie e valide também um backup manual.
+Preserve o mesmo `APP_SECRET` ou `.app-key`.
+
+Upgrades executam migrações aditivas. Uma instalação de servidor único vira uma
+instância nomeada e protegida **Servidor padrão**, sem descartar itens ou histórico.
+Siga a [lista de migração multi-servidor](../multi-server-migration/).
+
+## Montar a configuração do Kometa
+
+Para usar o [Gerenciador do Kometa](../kometa-config-sync/), monte com leitura/escrita
+o diretório de `config.yml` e defina, por exemplo,
+`KOMETA_CONFIG_PATH=/config/config.yml`. `posterpilot.yml` fica ao lado dele; não
+há outro caminho de metadados. Esse volume contém segredos do Kometa em texto simples,
+portanto proteja suas permissões.
 
 ## Docker Compose (macOS)
 
@@ -164,12 +181,21 @@ contêiner na porta 3000.
    escolher quais bibliotecas sincronizar e executar a primeira sincronização. Para o Plex, o
    assistente inclui um login por PIN e a descoberta de conexões, de modo que você nunca precisa
    colar um token ou uma URL. O assistente é pulável — você pode configurar tudo em
-   **Configurações**.
+   **Configurações**. Cada etapa só avança após uma resposta válida; a última acompanha
+   o primeiro job até um estado terminal e mostra falha/retry quando necessário.
 3. Se você definir credenciais via variáveis de ambiente, elas aparecem já configuradas e
    bloqueadas para edição tanto no assistente quanto em Configurações (veja
    [Configuração](/posterpilot/pt-br/configuration/)).
 4. Após a sincronização, comece a encontrar e aplicar capas (veja
    [Uso](/posterpilot/pt-br/usage/)).
+
+## Restaurar um backup da aplicação
+
+Use **Configurações → Backup e restauração**; não substitua o SQLite em execução. A
+prévia valida checksums, integridade, schema, espaço, caminhos e chave. Confirmar entra
+em manutenção, drena mutações, cria backup de segurança e prepara o marcador. Reinicie
+o contêiner para substituir antes de abrir libsql e confira o relatório. Veja
+[Automação e recuperação](../automation-recovery/).
 
 ## Verificação de saúde
 

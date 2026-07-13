@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resizedPosterUrl, GRID_THUMB_WIDTH } from './poster-thumb';
+import { resizedPosterUrl, versionedArtworkUrl, GRID_THUMB_WIDTH } from './poster-thumb';
 
 describe('media-server/poster-thumb · resizedPosterUrl', () => {
 	it('appends fillWidth for Emby/Jellyfin image URLs', () => {
@@ -23,5 +23,19 @@ describe('media-server/poster-thumb · resizedPosterUrl', () => {
 
 	it('passes an empty URL through unchanged', () => {
 		expect(resizedPosterUrl('emby', '')).toBe('');
+	});
+});
+
+describe('versionedArtworkUrl', () => {
+	it('adds or replaces a bounded cache version while preserving credentials', () => {
+		expect(versionedArtworkUrl('https://server/image?token=secret', 4)).toBe(
+			'https://server/image?token=secret&posterpilot_v=4'
+		);
+		expect(versionedArtworkUrl('https://server/image?posterpilot_v=2', 7)).toBe(
+			'https://server/image?posterpilot_v=7'
+		);
+		expect(versionedArtworkUrl('https://server/image', -1)).toBe(
+			'https://server/image?posterpilot_v=0'
+		);
 	});
 });

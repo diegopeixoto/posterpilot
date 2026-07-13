@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({ runSync: vi.fn() }));
 vi.mock('$lib/server/kometa/sync', () => ({ runSync: h.runSync }));
+vi.mock('$lib/server/plans/apply-route-error', () => ({
+	applyRouteError: () => new Response(JSON.stringify({ error: 'failed' }), { status: 409 })
+}));
 
 import { POST } from './+server';
 
@@ -14,7 +17,7 @@ function req(body: unknown) {
 describe('POST /api/kometa/config/sync', () => {
 	beforeEach(() => h.runSync.mockReset());
 
-	it('delegates to runSync and returns its result', async () => {
+	it('confirms an exact plan and returns its result', async () => {
 		h.runSync.mockResolvedValue({
 			active: true,
 			exists: true,
@@ -26,25 +29,22 @@ describe('POST /api/kometa/config/sync', () => {
 			warnings: []
 		});
 		const res = await (POST as (e: unknown) => Promise<Response>)(
-			req({ libraries: ['1'], defaults: {}, settings: {} })
+			req({ planId: 'plan-1', digest: 'a'.repeat(64) })
 		);
 		expect(res.status).toBe(200);
+		expect(res.headers.get('cache-control')).toBe('private, no-store');
 		const body = (await res.json()) as { backup: boolean };
 		expect(body.backup).toBe(true);
-		expect(h.runSync).toHaveBeenCalledWith(expect.objectContaining({ libraries: ['1'] }));
+		expect(h.runSync).toHaveBeenCalledWith({ planId: 'plan-1', digest: 'a'.repeat(64) });
 	});
 
-	it('surfaces a parse error from runSync without throwing', async () => {
-		h.runSync.mockResolvedValue({
-			active: true,
-			exists: true,
-			willScaffold: false,
-			parseError: 'bad yaml at line 3',
-			changes: [],
-			warnings: []
-		});
-		const res = await (POST as (e: unknown) => Promise<Response>)(req({}));
-		const body = (await res.json()) as { parseError: string };
-		expect(body.parseError).toBe('bad yaml at line 3');
+	it('rejects legacy direct-selection writes before calling the service', async () => {
+		const res = await (POST as (e: unknown) => Promise<Response>)(
+			req({ libraries: ['1'], defaults: {}, settings: {} })
+		);
+		expect(res.status).toBe(409);
+		expect(res.headers.get('cache-control')).toBe('private, no-store');
+		expect(await res.json()).toEqual({ error: 'preview_required' });
+		expect(h.runSync).not.toHaveBeenCalled();
 	});
 });

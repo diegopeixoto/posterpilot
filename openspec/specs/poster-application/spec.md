@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define artwork selection, staging, direct-server and Kometa application, audit history, and restoration behavior for title and child slots.
 ## Requirements
 ### Requirement: Select a candidate cover
 
@@ -222,4 +222,3 @@ SHALL re-resolve season/episode children by number.
 - **WHEN** the user reverts a specific season
 - **THEN** the system reverts only that season's poster/background and its episodes' title
   cards, leaving the show-level and other seasons' artwork in place
-

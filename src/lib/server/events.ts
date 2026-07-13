@@ -4,11 +4,12 @@ import { events } from './db/schema';
 import { resolveConfig } from './config';
 import { formatEventLine, type EventLevel } from './events-format';
 import { appendLogLine } from './log-file';
+import { sanitizeSupportEntry } from './support-bundle/sanitize';
 
-export { formatEventLine, type EventLevel } from './events-format';
+export { type EventLevel } from './events-format';
 
 /** Fallback row cap used when the configured `eventRetention` is unavailable. */
-export const EVENT_RETENTION = 2000;
+const EVENT_RETENTION = 2000;
 
 /** Prune roughly every this-many inserts, to keep the table bounded cheaply. */
 const PRUNE_EVERY = 50;
@@ -25,7 +26,8 @@ export async function logEvent(
 	message: string,
 	context?: unknown
 ): Promise<void> {
-	const line = formatEventLine(level, type, message, context);
+	const sanitizedContext = safeEventContext(context);
+	const line = formatEventLine(level, type, message, sanitizedContext);
 	if (level === 'error') console.error(line);
 	else if (level === 'warn') console.warn(line);
 	else console.log(line);
@@ -33,11 +35,13 @@ export async function logEvent(
 	appendLogLine(line);
 
 	try {
+		const scope = eventScope(context);
 		await db.insert(events).values({
+			...scope,
 			level,
 			type,
 			message,
-			context: context === undefined || context === null ? null : safeJson(context)
+			context: sanitizedContext === undefined ? null : safeJson(sanitizedContext)
 		});
 		if (++sinceLastPrune >= PRUNE_EVERY) {
 			sinceLastPrune = 0;
@@ -47,6 +51,36 @@ export async function logEvent(
 		// Never let logging failures propagate into the caller.
 		console.error(`[error] system: failed to persist event`, e);
 	}
+}
+
+/** Redact before console, rotating-file, or database serialization; fail closed. */
+function safeEventContext(context: unknown): unknown | undefined {
+	if (context === undefined || context === null) return undefined;
+	try {
+		return sanitizeSupportEntry(context);
+	} catch {
+		return { omitted: 'sanitization_failed' };
+	}
+}
+
+function eventScope(context: unknown): {
+	serverInstanceId?: string;
+	jobId?: number;
+	mediaItemId?: number;
+} {
+	if (!context || typeof context !== 'object' || Array.isArray(context)) return {};
+	const value = context as Record<string, unknown>;
+	return {
+		...(typeof value.serverInstanceId === 'string' && value.serverInstanceId
+			? { serverInstanceId: value.serverInstanceId }
+			: {}),
+		...(Number.isSafeInteger(value.jobId) && Number(value.jobId) > 0
+			? { jobId: Number(value.jobId) }
+			: {}),
+		...(Number.isSafeInteger(value.mediaItemId) && Number(value.mediaItemId) > 0
+			? { mediaItemId: Number(value.mediaItemId) }
+			: {})
+	};
 }
 
 /**

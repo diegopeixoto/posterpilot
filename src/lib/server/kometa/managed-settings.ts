@@ -15,14 +15,41 @@ export interface ManagedSettingDef {
 	key: string;
 	/** Hint for the input control. */
 	placeholder?: string;
+	/** Secret values are never returned to the browser after being stored. */
+	secret?: boolean;
 }
 
 export const MANAGED_SETTINGS: readonly ManagedSettingDef[] = Object.freeze([
 	{ id: 'asset_directory', section: 'settings', key: 'asset_directory', placeholder: '/assets' },
-	{ id: 'webhook_error', section: 'webhooks', key: 'error', placeholder: 'https://…' },
-	{ id: 'webhook_run_start', section: 'webhooks', key: 'run_start', placeholder: 'https://…' },
-	{ id: 'webhook_run_end', section: 'webhooks', key: 'run_end', placeholder: 'https://…' }
+	{
+		id: 'webhook_error',
+		section: 'webhooks',
+		key: 'error',
+		placeholder: 'https://…',
+		secret: true
+	},
+	{
+		id: 'webhook_run_start',
+		section: 'webhooks',
+		key: 'run_start',
+		placeholder: 'https://…',
+		secret: true
+	},
+	{
+		id: 'webhook_run_end',
+		section: 'webhooks',
+		key: 'run_end',
+		placeholder: 'https://…',
+		secret: true
+	}
 ]);
+
+/** Managed setting paths that must be masked in structured and raw previews. */
+export const MANAGED_SETTING_SECRET_PATHS: ReadonlySet<string> = new Set(
+	MANAGED_SETTINGS.filter((setting) => setting.secret).map(
+		(setting) => `${setting.section}.${setting.key}`
+	)
+);
 
 const BY_ID = new Map(MANAGED_SETTINGS.map((s) => [s.id, s]));
 

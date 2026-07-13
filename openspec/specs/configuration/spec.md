@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define validated runtime and persisted configuration, environment precedence, secret handling, provider controls, and user preferences.
 ## Requirements
 ### Requirement: Provide and persist runtime configuration
 
@@ -127,4 +127,3 @@ The system SHALL provide a `libraryDefaultSort` setting naming the sort the libr
 
 - **WHEN** the persisted or environment value names an unknown sort
 - **THEN** the system treats the setting as unset and uses `title`, without error
-

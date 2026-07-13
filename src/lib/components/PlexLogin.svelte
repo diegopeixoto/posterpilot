@@ -68,7 +68,7 @@
 		try {
 			const res = await fetch('/api/plex/pin', { method: 'POST' });
 			const body = await res.json();
-			if (!res.ok) throw new Error(body.error ?? 'Could not create a PIN');
+			if (!res.ok) throw new Error('plex_login_failed');
 			login = {
 				code: body.code,
 				authUrl: body.authUrl,
@@ -90,7 +90,7 @@
 				if (Date.now() > expiresAt) {
 					stopPolling();
 					closeTab();
-					if (login) login = { ...login, status: 'error', error: 'The PIN expired. Try again.' };
+					if (login) login = { ...login, status: 'error', error: m.settings_plex_pin_expired() };
 					return;
 				}
 				try {
@@ -108,14 +108,14 @@
 					// transient; keep polling until expiry
 				}
 			}, 2000);
-		} catch (e) {
+		} catch {
 			closeTab();
 			login = {
 				code: '',
 				authUrl: '',
 				linkUrl: '',
 				status: 'error',
-				error: e instanceof Error ? e.message : String(e)
+				error: m.settings_plex_login_failed()
 			};
 		}
 	}
@@ -130,10 +130,10 @@
 		try {
 			const res = await fetch('/api/plex/connections');
 			const body = await res.json();
-			if (!res.ok) throw new Error(body.error ?? 'Discovery failed');
+			if (!res.ok) throw new Error('plex_discovery_failed');
 			connections = body.connections ?? [];
-		} catch (e) {
-			connectionError = e instanceof Error ? e.message : String(e);
+		} catch {
+			connectionError = m.settings_plex_discovery_failed();
 		} finally {
 			loadingConnections = false;
 		}
@@ -158,6 +158,7 @@
 			which the global reduced-motion rule already neutralizes.
 		-->
 		<button
+			type="button"
 			onclick={startPlexLogin}
 			aria-label={plexTokenSet
 				? m.settings_plex_reconnect_button()
@@ -234,9 +235,9 @@
 				</div>
 			{/if}
 		{:else if login.status === 'done'}
-			<p class="text-sm text-emerald-400">{m.settings_plex_logged_in()}</p>
+			<p class="text-sm text-emerald-400" role="status">{m.settings_plex_logged_in()}</p>
 		{:else}
-			<p class="text-sm text-red-400">{login.error}</p>
+			<p class="text-sm text-red-400" role="alert">{login.error}</p>
 		{/if}
 	{/if}
 
@@ -244,6 +245,7 @@
 		<div class="flex items-center justify-between">
 			<label for="plexUrl" class="mb-1 block text-sm font-medium">{m.settings_plex_url()}</label>
 			<button
+				type="button"
 				onclick={loadConnections}
 				disabled={!plexTokenSet || loadingConnections}
 				class="btn btn-ghost px-2 py-1 text-xs"
@@ -258,11 +260,14 @@
 			class="input w-full"
 		/>
 
-		{#if connectionError}<p class="mt-1 text-xs text-red-400">{connectionError}</p>{/if}
+		{#if connectionError}<p class="mt-1 text-xs text-red-400" role="alert">
+				{connectionError}
+			</p>{/if}
 		{#if connections.length}
 			<div class="mt-2 space-y-1">
 				{#each connections as conn (conn.uri)}
 					<button
+						type="button"
 						onclick={() => (plexUrl = conn.uri)}
 						class="flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left text-xs transition {plexUrl ===
 						conn.uri

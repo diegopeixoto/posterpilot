@@ -1,6 +1,12 @@
 import { fetchJson } from '$lib/server/http';
 import type { PlexGuids, TmdbMediaType, TmdbMetadata, TmdbResolution } from '$lib/server/types';
 import { parseFindResult, pickExternalId, tmdbAuth, type TmdbAuth } from './auth';
+import {
+	parseTmdbManualSearchResults,
+	parseVerifiedTmdbCandidate,
+	type TmdbManualCandidate,
+	type TmdbManualSearchType
+} from './manual-search';
 import { parseDetailMetadata, pickLogoUrl } from './metadata';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
@@ -21,7 +27,12 @@ function isTmdbEntity(json: unknown): boolean {
  * Classify a known TMDB id as a movie or TV show by probing the movie endpoint first
  * and falling back to the TV endpoint.
  */
-async function classifyTmdbId(
+function isTmdbNotFound(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : '';
+	return /HTTP (?:400|404)\b/u.test(message);
+}
+
+async function classifyTmdbIdStrict(
 	tmdbId: string,
 	auth: TmdbAuth,
 	cacheTtlDays: number,
@@ -36,10 +47,11 @@ async function classifyTmdbId(
 				forceRefresh
 			});
 			return isTmdbEntity(json);
-		} catch {
-			// A 4xx (e.g. 404 "not found as a movie") is a permanent failure in the
-			// underlying fetch; treat it as "no match for this media type".
-			return false;
+		} catch (error) {
+			// A 404/400 means only that this id is absent for this media type. Network,
+			// auth, and upstream failures must remain distinguishable from no-match.
+			if (isTmdbNotFound(error)) return false;
+			throw error;
 		}
 	};
 
@@ -60,7 +72,7 @@ async function classifyTmdbId(
  * @param opts Optional cache controls.
  * @returns The resolved TMDB id and media type, or null when nothing resolves.
  */
-export async function resolveTmdb(
+export async function resolveTmdbStrict(
 	guids: PlexGuids,
 	key: string,
 	opts: { forceRefresh?: boolean; cacheTtlDays?: number } = {}
@@ -72,7 +84,7 @@ export async function resolveTmdb(
 	const auth = tmdbAuth(key);
 
 	if (selected.source === 'tmdb') {
-		const mediaType = await classifyTmdbId(selected.id, auth, cacheTtlDays, forceRefresh);
+		const mediaType = await classifyTmdbIdStrict(selected.id, auth, cacheTtlDays, forceRefresh);
 		return mediaType ? { tmdbId: selected.id, mediaType } : null;
 	}
 
@@ -87,8 +99,90 @@ export async function resolveTmdb(
 			forceRefresh
 		});
 		return parseFindResult(json);
+	} catch (error) {
+		if (isTmdbNotFound(error)) return null;
+		throw error;
+	}
+}
+
+/** Compatibility resolver: transient failures degrade to null for legacy callers. */
+export async function resolveTmdb(
+	guids: PlexGuids,
+	key: string,
+	opts: { forceRefresh?: boolean; cacheTtlDays?: number } = {}
+): Promise<TmdbResolution | null> {
+	try {
+		return await resolveTmdbStrict(guids, key, opts);
 	} catch {
 		return null;
+	}
+}
+
+export interface SearchTmdbInput {
+	query: string;
+	year?: number;
+	mediaType: TmdbManualSearchType;
+	language?: string;
+}
+
+function manualSearchUrl(input: SearchTmdbInput, mediaType: TmdbMediaType, auth: TmdbAuth): string {
+	const params = new URLSearchParams({
+		query: input.query,
+		include_adult: 'false'
+	});
+	if (input.language) params.set('language', input.language);
+	if (input.year !== undefined) {
+		params.set(mediaType === 'movie' ? 'year' : 'first_air_date_year', String(input.year));
+	}
+	return withAuthQuery(`${TMDB_BASE}/search/${mediaType}?${params.toString()}`, auth.query);
+}
+
+/** Search movie, TV, or both TMDB catalogs without mutating local state. */
+export async function searchTmdbCandidates(
+	input: SearchTmdbInput,
+	key: string
+): Promise<TmdbManualCandidate[]> {
+	const auth = tmdbAuth(key);
+	const mediaTypes: TmdbMediaType[] =
+		input.mediaType === 'both' ? ['movie', 'tv'] : [input.mediaType];
+	const pages = await Promise.all(
+		mediaTypes.map(async (mediaType) => {
+			const json = await fetchJson<unknown>(manualSearchUrl(input, mediaType, auth), {
+				headers: auth.headers,
+				cacheTtlDays: 0
+			});
+			return parseTmdbManualSearchResults(json, mediaType);
+		})
+	);
+	return pages.flat();
+}
+
+/**
+ * Re-read the exact candidate immediately before pinning it. A true 404/400 means
+ * the identity no longer exists; network/upstream failures remain distinguishable.
+ */
+export async function verifyTmdbCandidate(
+	tmdbId: string,
+	mediaType: TmdbMediaType,
+	key: string,
+	language?: string
+): Promise<TmdbManualCandidate | null> {
+	const auth = tmdbAuth(key);
+	const params = new URLSearchParams();
+	if (language) params.set('language', language);
+	const suffix = params.size > 0 ? `?${params.toString()}` : '';
+	const url = withAuthQuery(`${TMDB_BASE}/${mediaType}/${tmdbId}${suffix}`, auth.query);
+	try {
+		const json = await fetchJson<unknown>(url, {
+			headers: auth.headers,
+			cacheTtlDays: 0,
+			forceRefresh: true
+		});
+		return parseVerifiedTmdbCandidate(json, mediaType, tmdbId);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : '';
+		if (/HTTP (?:400|404)\b/u.test(message)) return null;
+		throw error;
 	}
 }
 

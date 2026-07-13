@@ -46,22 +46,22 @@
 				userName?: string;
 				error?: string;
 			};
-			if (!res.ok || !body.ok) throw new Error(body.error ?? String(res.status));
+			if (!res.ok || !body.ok) throw new Error('media_server_login_failed');
 			// The server saved the URL + access token; reflect "connected" immediately
 			// and drop the password so it never lingers in client state.
 			apiKeySet = true;
 			password = '';
 			status = { kind: 'ok', user: body.userName ?? username.trim() };
 			await onLogin?.();
-		} catch (e) {
-			status = { kind: 'error', error: e instanceof Error ? e.message : String(e) };
+		} catch {
+			status = { kind: 'error', error: m.settings_login_failed({ server: serverName }) };
 		} finally {
 			loggingIn = false;
 		}
 	}
 </script>
 
-<form class="space-y-4" onsubmit={logIn}>
+<form class="space-y-4" aria-busy={loggingIn} onsubmit={logIn}>
 	<div>
 		<p class="text-sm font-medium">
 			{m.settings_login_account({ server: serverName })}

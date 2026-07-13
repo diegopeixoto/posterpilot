@@ -1,6 +1,8 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { selectCandidate, selectChild, selectChildrenBulk } from '$lib/server/posters/service';
+import { getMediaItem } from '$lib/server/queries';
+import { getActiveServerInstance } from '$lib/server/server-instances';
 
 type ChildKind = 'poster' | 'background' | 'title_card';
 interface ChildSlotInput {
@@ -13,6 +15,8 @@ interface ChildSlotInput {
 interface SelectBody {
 	posterUrl?: string | null;
 	backgroundUrl?: string | null;
+	posterCandidateId?: number | null;
+	backgroundCandidateId?: number | null;
 	/** When present, stage a single season/episode slot instead of the show-level cover. */
 	child?: ChildSlotInput;
 	/** When present, stage many season/episode slots at once (used by "use this set"). */
@@ -32,6 +36,8 @@ function validSlot(s: ChildSlotInput): boolean {
 export const POST: RequestHandler = async ({ params, request }) => {
 	const id = Number(params.id);
 	if (!Number.isFinite(id)) throw error(400, 'invalid id');
+	const active = await getActiveServerInstance();
+	if (!active || !(await getMediaItem(id, active.id))) throw error(404, 'item not found');
 	const body = (await request.json().catch(() => ({}))) as SelectBody;
 
 	if (body.children) {
@@ -55,6 +61,17 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		return json({ ok: true });
 	}
 
-	await selectCandidate(id, body.posterUrl ?? null, body.backgroundUrl ?? null);
+	const selection = {
+		...(Object.hasOwn(body, 'posterUrl') ? { posterUrl: body.posterUrl ?? null } : {}),
+		...(Object.hasOwn(body, 'backgroundUrl') ? { backgroundUrl: body.backgroundUrl ?? null } : {}),
+		...(Object.hasOwn(body, 'posterCandidateId')
+			? { posterCandidateId: body.posterCandidateId ?? null }
+			: {}),
+		...(Object.hasOwn(body, 'backgroundCandidateId')
+			? { backgroundCandidateId: body.backgroundCandidateId ?? null }
+			: {})
+	};
+	if (Object.keys(selection).length === 0) throw error(400, 'no selection fields');
+	await selectCandidate(id, selection);
 	return json({ ok: true });
 };

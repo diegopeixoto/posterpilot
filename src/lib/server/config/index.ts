@@ -7,6 +7,7 @@ import { parseLibrarySort, type LibrarySort } from '$lib/library-sort';
 import { getEncryptionKey } from '$lib/server/secrets/key';
 import { decryptSecret, encryptSecret } from '$lib/server/secrets/crypto';
 import type { KometaSnapshot } from '$lib/server/kometa/config';
+import { LEGACY_SERVER_INSTANCE_ID } from '$lib/server/server-instances/legacy';
 
 export type { KometaSnapshot };
 
@@ -44,6 +45,8 @@ export interface AppConfig {
 	kometaConfigPath: string;
 	/** Whether PosterPilot surgically merges (`merge`) or fully owns (`own`) config.yml. */
 	kometaConfigMode: KometaConfigMode;
+	/** Named Plex instance explicitly bound to the Kometa target. */
+	kometaServerInstanceId: string | null;
 	mediuxDelayMs: number;
 	mediuxConcurrency: number;
 	httpCacheTtlDays: number;
@@ -84,13 +87,7 @@ export interface AppConfig {
 }
 
 /** Config keys that are secrets — never returned to the client, redacted in logs. */
-export const SECRET_KEYS = [
-	'plexToken',
-	'jellyfinApiKey',
-	'embyApiKey',
-	'tmdbKey',
-	'fanartKey'
-] as const;
+const SECRET_KEYS = ['plexToken', 'jellyfinApiKey', 'embyApiKey', 'tmdbKey', 'fanartKey'] as const;
 type ConfigKey = keyof AppConfig;
 
 /** Settings key -> environment variable name. Env always overrides persisted settings. */
@@ -107,6 +104,7 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	kometaAssetsDir: 'KOMETA_ASSETS_DIR',
 	kometaConfigPath: 'KOMETA_CONFIG_PATH',
 	kometaConfigMode: 'KOMETA_CONFIG_MODE',
+	kometaServerInstanceId: 'KOMETA_SERVER_INSTANCE_ID',
 	mediuxDelayMs: 'MEDIUX_REQUEST_DELAY_MS',
 	mediuxConcurrency: 'MEDIUX_CONCURRENCY',
 	httpCacheTtlDays: 'HTTP_CACHE_TTL_DAYS',
@@ -140,6 +138,8 @@ const DEFAULTS = {
 	httpCacheTtlDays: 7,
 	defaultApplyMethod: 'both' as ApplyMethod,
 	kometaConfigMode: 'merge' as KometaConfigMode,
+	// Existing single-server installations materialize to this protected id.
+	kometaServerInstanceId: 'legacy-default',
 	// MediUX + TMDB artwork on by default (no key / key already present); the keyed/
 	// scrape providers are opt-in.
 	providerMediux: true,
@@ -160,7 +160,7 @@ const DEFAULTS = {
 };
 
 /** Persisted-settings keys that the UI is allowed to write. */
-export const WRITABLE_KEYS: ConfigKey[] = [
+const WRITABLE_KEYS: ConfigKey[] = [
 	'serverType',
 	'plexUrl',
 	'plexToken',
@@ -173,6 +173,7 @@ export const WRITABLE_KEYS: ConfigKey[] = [
 	'kometaAssetsDir',
 	'kometaConfigPath',
 	'kometaConfigMode',
+	'kometaServerInstanceId',
 	'mediuxDelayMs',
 	'mediuxConcurrency',
 	'httpCacheTtlDays',
@@ -279,6 +280,8 @@ export async function resolveConfig(): Promise<AppConfig> {
 		kometaAssetsDir,
 		kometaConfigPath: rawValue('kometaConfigPath', persisted) ?? '',
 		kometaConfigMode: rawValue('kometaConfigMode', persisted) === 'own' ? 'own' : 'merge',
+		kometaServerInstanceId:
+			rawValue('kometaServerInstanceId', persisted) ?? DEFAULTS.kometaServerInstanceId,
 		mediuxDelayMs: toInt(rawValue('mediuxDelayMs', persisted), DEFAULTS.mediuxDelayMs),
 		mediuxConcurrency: toInt(rawValue('mediuxConcurrency', persisted), DEFAULTS.mediuxConcurrency),
 		httpCacheTtlDays: toInt(rawValue('httpCacheTtlDays', persisted), DEFAULTS.httpCacheTtlDays),
@@ -312,12 +315,12 @@ export async function resolveConfig(): Promise<AppConfig> {
 }
 
 /** True when a key is sourced from the environment (and thus locked from UI editing). */
-export function isEnvManaged(key: ConfigKey): boolean {
+function isEnvManaged(key: ConfigKey): boolean {
 	const v = env[ENV_MAP[key]];
 	return v !== undefined && v !== '';
 }
 
-export class MissingConfigError extends Error {
+class MissingConfigError extends Error {
 	constructor(public readonly missing: ConfigKey[]) {
 		super(`Missing required configuration: ${missing.join(', ')}`);
 		this.name = 'MissingConfigError';
@@ -330,24 +333,6 @@ export function requireConfig(config: AppConfig, keys: ConfigKey[]): void {
 		(k) => config[k] === null || config[k] === undefined || config[k] === ''
 	);
 	if (missing.length) throw new MissingConfigError(missing);
-}
-
-/** The credential keys required for a given active server type. */
-export function requiredKeysFor(serverType: ServerType): ConfigKey[] {
-	switch (serverType) {
-		case 'jellyfin':
-			return ['jellyfinUrl', 'jellyfinApiKey'];
-		case 'emby':
-			return ['embyUrl', 'embyApiKey'];
-		case 'plex':
-		default:
-			return ['plexUrl', 'plexToken'];
-	}
-}
-
-/** Throw MissingConfigError if the active server type's credentials are unset. */
-export function requireActiveServer(config: AppConfig): void {
-	requireConfig(config, requiredKeysFor(config.serverType));
 }
 
 /**
@@ -372,19 +357,31 @@ export interface CachedLibrary {
 
 /** Internal settings key holding the cached library list (not a WRITABLE_KEY). */
 const CACHED_LIBRARIES_KEY = 'cachedLibraries';
+const INCLUDED_SECTIONS_KEY = 'includedSections';
+
+function scopedSettingsKey(base: string, serverInstanceId: string): string {
+	const id = serverInstanceId.trim();
+	if (!id || id !== serverInstanceId) throw new TypeError('server instance id is required');
+	return `${base}:${id}`;
+}
 
 /**
  * Read the last-known media-server library list from the settings KV. This is an
  * internal cache (not a user-editable WRITABLE_KEY) so the Settings page can render
  * the "Libraries to sync" checklist instantly without a network round-trip.
  */
-export async function getCachedLibraries(): Promise<CachedLibrary[]> {
-	const row = (
-		await db.select().from(settings).where(eq(settings.key, CACHED_LIBRARIES_KEY)).limit(1)
-	)[0];
-	if (!row?.value) return [];
+export async function getCachedLibraries(
+	serverInstanceId: string = LEGACY_SERVER_INSTANCE_ID
+): Promise<CachedLibrary[]> {
+	const scoped = await readKv(scopedSettingsKey(CACHED_LIBRARIES_KEY, serverInstanceId));
+	// Preserve the existing one-server installation cache until it is refreshed once
+	// under the new scoped key. Never expose that fallback to a different instance.
+	const value =
+		scoped ??
+		(serverInstanceId === LEGACY_SERVER_INSTANCE_ID ? await readKv(CACHED_LIBRARIES_KEY) : null);
+	if (!value) return [];
 	try {
-		const arr = JSON.parse(row.value);
+		const arr = JSON.parse(value);
 		if (!Array.isArray(arr)) return [];
 		return arr
 			.filter((e) => e && typeof e.key === 'string')
@@ -399,14 +396,38 @@ export async function getCachedLibraries(): Promise<CachedLibrary[]> {
 }
 
 /** Persist the media-server library list to the settings KV (internal cache). */
-export async function setCachedLibraries(libraries: CachedLibrary[]): Promise<void> {
+export async function setCachedLibraries(
+	libraries: CachedLibrary[],
+	serverInstanceId: string = LEGACY_SERVER_INSTANCE_ID
+): Promise<void> {
 	const value = JSON.stringify(
 		libraries.map((l) => ({ key: l.key, title: l.title, type: l.type }))
 	);
-	await db
-		.insert(settings)
-		.values({ key: CACHED_LIBRARIES_KEY, value })
-		.onConflictDoUpdate({ target: settings.key, set: { value } });
+	await writeKv(scopedSettingsKey(CACHED_LIBRARIES_KEY, serverInstanceId), value);
+}
+
+/** Resolve a server's library selection without borrowing another server's keys. */
+export async function getIncludedSectionsForServer(serverInstanceId: string): Promise<string[]> {
+	const fromEnv = env[ENV_MAP.includedSections];
+	if (fromEnv !== undefined && fromEnv !== '') return parseSections(fromEnv);
+	const scoped = await readKv(scopedSettingsKey(INCLUDED_SECTIONS_KEY, serverInstanceId));
+	if (scoped !== null) return parseSections(scoped);
+	if (serverInstanceId !== LEGACY_SERVER_INSTANCE_ID) return [];
+	return parseSections((await readKv(INCLUDED_SECTIONS_KEY)) ?? undefined);
+}
+
+/** Persist a normalized library selection for exactly one named server. */
+export async function setIncludedSectionsForServer(
+	serverInstanceId: string,
+	sectionKeys: readonly string[]
+): Promise<void> {
+	const normalized = [
+		...new Set(sectionKeys.map((key) => key.trim()).filter((key) => key.length > 0))
+	];
+	await writeKv(
+		scopedSettingsKey(INCLUDED_SECTIONS_KEY, serverInstanceId),
+		JSON.stringify(normalized)
+	);
 }
 
 // ── Kometa config-sync selections (internal KV, not WRITABLE_KEYS) ─────────────
@@ -598,7 +619,10 @@ export async function bumpAuthSessionVersion(): Promise<number> {
 // Poster-scoring weights live in `$lib/server/posters/score-weights` (an $env-free
 // module so service.ts can import them without pulling in $env); re-exported here for
 // callers that already depend on config (e.g. the settings route).
-export { getScoreWeights, setScoreWeights } from '$lib/server/posters/score-weights';
+export {
+	getArtworkRankingSettings,
+	setArtworkRankingSettings
+} from '$lib/server/posters/score-weights';
 
 /** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
 export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
@@ -634,6 +658,7 @@ export interface PublicConfig {
 	kometaAssetsDir: string;
 	kometaConfigPath: string;
 	kometaConfigMode: KometaConfigMode;
+	kometaServerInstanceId: string | null;
 	mediuxDelayMs: number;
 	mediuxConcurrency: number;
 	httpCacheTtlDays: number;
@@ -667,8 +692,11 @@ export interface PublicConfig {
 	envManaged: Partial<Record<ConfigKey, boolean>>;
 }
 
-export async function publicConfig(): Promise<PublicConfig> {
+export async function publicConfig(serverInstanceId?: string): Promise<PublicConfig> {
 	const c = await resolveConfig();
+	const includedSections = serverInstanceId
+		? await getIncludedSectionsForServer(serverInstanceId)
+		: c.includedSections;
 	const envManaged: Partial<Record<ConfigKey, boolean>> = {};
 	for (const k of WRITABLE_KEYS) envManaged[k] = isEnvManaged(k);
 	return {
@@ -683,11 +711,12 @@ export async function publicConfig(): Promise<PublicConfig> {
 		kometaAssetsDir: c.kometaAssetsDir,
 		kometaConfigPath: c.kometaConfigPath,
 		kometaConfigMode: c.kometaConfigMode,
+		kometaServerInstanceId: c.kometaServerInstanceId,
 		mediuxDelayMs: c.mediuxDelayMs,
 		mediuxConcurrency: c.mediuxConcurrency,
 		httpCacheTtlDays: c.httpCacheTtlDays,
 		defaultApplyMethod: c.defaultApplyMethod,
-		includedSections: c.includedSections,
+		includedSections,
 		providerMediux: c.providerMediux,
 		providerTmdb: c.providerTmdb,
 		providerFanart: c.providerFanart,
@@ -705,14 +734,4 @@ export async function publicConfig(): Promise<PublicConfig> {
 		libraryDefaultSort: c.libraryDefaultSort,
 		envManaged
 	};
-}
-
-/** Redact known secret values from an arbitrary string (for safe logging). */
-export function redact(text: string, config: AppConfig): string {
-	let out = text;
-	for (const key of SECRET_KEYS) {
-		const secret = config[key];
-		if (secret && secret.length >= 4) out = out.split(secret).join('***');
-	}
-	return out;
 }

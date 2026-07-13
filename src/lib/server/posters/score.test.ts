@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SCORE_WEIGHTS, scorePoster, type ScoreWeights } from './score';
+import {
+	DEFAULT_SCORE_WEIGHTS,
+	parseProviderPriority,
+	parseScoreWeights,
+	scorePoster,
+	scoreWeightsFromConfig,
+	type ScoreWeights
+} from './score';
 
 /** A small, explicit weight set so term contributions are easy to reason about. */
 const weights: ScoreWeights = {
@@ -97,5 +104,39 @@ describe('scorePoster', () => {
 	it('uses DEFAULT_SCORE_WEIGHTS when no weights argument is given', () => {
 		const dims = { provider: 'mediux', width: 1000, height: 1500, kind: 'poster' };
 		expect(scorePoster(dims)).toBe(scorePoster(dims, DEFAULT_SCORE_WEIGHTS));
+	});
+});
+
+describe('artwork ranking configuration', () => {
+	it('accepts only a complete unique provider order', () => {
+		expect(parseProviderPriority('tmdb,mediux,fanarttv,theposterdb')).toEqual([
+			'tmdb',
+			'mediux',
+			'fanarttv',
+			'theposterdb'
+		]);
+		expect(parseProviderPriority(['mediux', 'mediux', 'fanarttv', 'tmdb'])).toBeNull();
+		expect(parseProviderPriority(['mediux', 'tmdb'])).toBeNull();
+	});
+
+	it('strictly rejects missing, non-numeric, and out-of-range write values', () => {
+		expect(parseScoreWeights(weights)).toEqual(weights);
+		expect(parseScoreWeights({ ...weights, aspectWeight: 11 })).toBeNull();
+		expect(
+			parseScoreWeights({ ...weights, providerWeights: { ...weights.providerWeights, tmdb: '1' } })
+		).toBeNull();
+	});
+
+	it('falls back field-by-field for invalid persisted runtime values', () => {
+		const resolved = scoreWeightsFromConfig({
+			scoreProviderMediux: 4,
+			scoreProviderTmdb: 99,
+			scoreResolution: Number.NaN,
+			scoreAspect: 2
+		});
+		expect(resolved.providerWeights.mediux).toBe(4);
+		expect(resolved.providerWeights.tmdb).toBe(DEFAULT_SCORE_WEIGHTS.providerWeights.tmdb);
+		expect(resolved.resolutionWeight).toBe(DEFAULT_SCORE_WEIGHTS.resolutionWeight);
+		expect(resolved.aspectWeight).toBe(2);
 	});
 });

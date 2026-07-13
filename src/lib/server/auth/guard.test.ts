@@ -6,6 +6,7 @@ describe('auth/guard · classifyPath', () => {
 		expect(classifyPath('/api/health')).toBe('public');
 		expect(classifyPath('/login')).toBe('public');
 		expect(classifyPath('/api/auth/logout')).toBe('public');
+		expect(classifyPath('/api/automation-webhooks/automation-a')).toBe('public');
 		expect(classifyPath('/_app/immutable/chunk.js')).toBe('public');
 		expect(classifyPath('/favicon.ico')).toBe('public');
 		expect(classifyPath('/logo.svg')).toBe('public');

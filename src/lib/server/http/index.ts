@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
 import pRetry, { AbortError } from 'p-retry';
-import pLimit, { type LimitFunction } from 'p-limit';
 import { db } from '$lib/server/db';
 import { httpCache } from '$lib/server/db/schema';
 import { parseRetryAfter } from './retry-after';
+import { httpCacheKey, safeHttpTarget } from './cache-key';
 
 /** A retryable HTTP failure (429/5xx) carrying an optional server-requested delay. */
 class RetryableHttpError extends Error {
@@ -37,17 +37,17 @@ export interface FetchOptions {
 	timeoutMs?: number;
 }
 
-async function readCacheRow(url: string): Promise<{ body: string; ageMs: number } | null> {
-	const row = (await db.select().from(httpCache).where(eq(httpCache.url, url)).limit(1))[0];
+async function readCacheRow(cacheKey: string): Promise<{ body: string; ageMs: number } | null> {
+	const row = (await db.select().from(httpCache).where(eq(httpCache.url, cacheKey)).limit(1))[0];
 	if (!row) return null;
 	return { body: row.body, ageMs: Date.now() - row.fetchedAt.getTime() };
 }
 
-async function writeCache(url: string, body: string): Promise<void> {
+async function writeCache(cacheKey: string, body: string): Promise<void> {
 	const now = new Date();
 	await db
 		.insert(httpCache)
-		.values({ url, body, fetchedAt: now })
+		.values({ url: cacheKey, body, fetchedAt: now })
 		.onConflictDoUpdate({ target: httpCache.url, set: { body, fetchedAt: now } });
 }
 
@@ -71,12 +71,18 @@ function fetchFresh(
 							res.status === 429 || res.status === 503
 								? parseRetryAfter(res.headers.get('retry-after'), Date.now())
 								: null;
-						throw new RetryableHttpError(`HTTP ${res.status} for ${url}`, retryAfterMs);
+						throw new RetryableHttpError(
+							`HTTP ${res.status} for ${safeHttpTarget(url)}`,
+							retryAfterMs
+						);
 					}
 					// 4xx (other than 429) is a permanent failure — do not retry.
-					throw new AbortError(`HTTP ${res.status} for ${url}`);
+					throw new AbortError(`HTTP ${res.status} for ${safeHttpTarget(url)}`);
 				}
 				return await res.text();
+			} catch (error) {
+				if (error instanceof RetryableHttpError || error instanceof AbortError) throw error;
+				throw new RetryableHttpError(`Request failed for ${safeHttpTarget(url)}`, null);
 			} finally {
 				clearTimeout(timer);
 			}
@@ -100,17 +106,18 @@ const revalidating = new Set<string>();
 
 /** Refresh a URL's cached body in the background. Never throws. */
 function revalidate(
+	cacheKey: string,
 	url: string,
 	headers: Record<string, string> | undefined,
 	retries: number,
 	timeoutMs: number
 ): void {
-	if (revalidating.has(url)) return;
-	revalidating.add(url);
+	if (revalidating.has(cacheKey)) return;
+	revalidating.add(cacheKey);
 	void fetchFresh(url, headers, retries, timeoutMs)
-		.then((body) => writeCache(url, body))
+		.then((body) => writeCache(cacheKey, body))
 		.catch(() => {})
-		.finally(() => revalidating.delete(url));
+		.finally(() => revalidating.delete(cacheKey));
 }
 
 /**
@@ -126,20 +133,21 @@ export async function fetchText(url: string, opts: FetchOptions = {}): Promise<s
 		retries = 3,
 		timeoutMs = 20_000
 	} = opts;
+	const cacheKey = httpCacheKey(url, headers);
 
 	if (cacheTtlDays > 0 && !forceRefresh) {
-		const row = await readCacheRow(url);
+		const row = await readCacheRow(cacheKey);
 		if (row) {
 			if (row.ageMs <= cacheTtlDays * DAY_MS) return row.body; // fresh
 			if (staleWhileRevalidate) {
-				revalidate(url, headers, retries, timeoutMs); // refresh for next time
+				revalidate(cacheKey, url, headers, retries, timeoutMs); // refresh for next time
 				return row.body; // serve stale now, never blocking
 			}
 		}
 	}
 
 	const body = await fetchFresh(url, headers, retries, timeoutMs);
-	if (cacheTtlDays > 0) await writeCache(url, body);
+	if (cacheTtlDays > 0) await writeCache(cacheKey, body);
 	return body;
 }
 
@@ -149,12 +157,7 @@ export async function fetchJson<T = unknown>(url: string, opts: FetchOptions = {
 	return JSON.parse(text) as T;
 }
 
-/** Create a concurrency limiter (wraps p-limit) for bounded fan-out. */
-export function createLimiter(concurrency: number): LimitFunction {
-	return pLimit(Math.max(1, concurrency));
-}
-
 /** Await a fixed delay — used to space out polite scraping requests. */
-export function delay(ms: number): Promise<void> {
+function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }

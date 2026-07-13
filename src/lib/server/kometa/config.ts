@@ -64,6 +64,8 @@ export interface ConfigPlan {
 	metadataFile: string;
 	libraries: PlanLibrary[];
 	settings: ManagedSetting[];
+	/** Secret setting paths to preserve from the source without exposing their value. */
+	settingKeep?: string[];
 	/**
 	 * Generic service connectors beyond plex/tmdb (which come via `creds`):
 	 * section → key/value, e.g. `{ tautulli: { url, apikey }, trakt: { … } }`.
@@ -126,6 +128,7 @@ export function buildPlan(input: {
 		settingsOverrides?: Record<string, string>;
 	}[];
 	settings?: ManagedSetting[];
+	settingKeep?: string[];
 	connections?: Record<string, Record<string, string>>;
 	connectionKeep?: Record<string, string[]>;
 }): ConfigPlan {
@@ -141,6 +144,7 @@ export function buildPlan(input: {
 			settingsOverrides: l.settingsOverrides
 		})),
 		settings: input.settings ?? [],
+		settingKeep: input.settingKeep,
 		connections: input.connections,
 		connectionKeep: input.connectionKeep
 	};
@@ -361,7 +365,10 @@ export function applyPlan(
 	}
 
 	// ── Bounded global settings / webhooks ──────────────────────────────────────
-	const desiredKeys = new Set(plan.settings.map((s) => `${s.section}.${s.key}`));
+	const desiredKeys = new Set([
+		...plan.settings.map((s) => `${s.section}.${s.key}`),
+		...(plan.settingKeep ?? [])
+	]);
 	for (const s of plan.settings) {
 		const secNode = nodeAt(doc, [s.section]);
 		if (secNode !== undefined && hasAliasOrAnchor(secNode)) {
@@ -381,10 +388,17 @@ export function applyPlan(
 		}
 	}
 
+	const keptSettingKeys = (plan.settingKeep ?? []).filter((composite) => {
+		const [section, key] = splitComposite(composite);
+		return scalarAt(doc, [section, key]) !== undefined;
+	});
 	const nextSnapshot: KometaSnapshot = {
 		metadataPath: plan.metadataFile,
 		libraries: managedByLib,
-		managedSettingKeys: plan.settings.map((s) => `${s.section}.${s.key}`),
+		managedSettingKeys: dedupe([
+			...plan.settings.map((s) => `${s.section}.${s.key}`),
+			...keptSettingKeys
+		]),
 		connections: managedConn
 	};
 

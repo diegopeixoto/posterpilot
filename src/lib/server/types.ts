@@ -23,8 +23,10 @@ export interface PlexItem {
 	year: number | null;
 	type: 'movie' | 'show';
 	guids: PlexGuids;
-	/** Absolute URL (including token) of the item's current poster, or null. */
+	/** Provider-returned poster URL; callers must sanitize it before persistence. */
 	currentPosterUrl: string | null;
+	/** Provider-returned background URL; callers must sanitize it before persistence. */
+	currentBackgroundUrl: string | null;
 	/** Plex's own last-modified time for this item (from `updatedAt`), or null. */
 	serverUpdatedAt: Date | null;
 	/** When the item was added to the library (from `addedAt`), or null. */
@@ -49,6 +51,12 @@ export interface TmdbCastMember {
 	profileUrl: string | null;
 }
 
+/** TMDB's stable, source-qualified franchise identity for a movie. */
+export interface TmdbCollectionRef {
+	id: string;
+	name: string;
+}
+
 /**
  * Display metadata for an item, derived from the TMDB detail (+credits) response
  * and the images endpoint. All fields are optional — TMDB may omit any of them.
@@ -64,6 +72,8 @@ export interface TmdbMetadata {
 	seasonCount: number | null;
 	episodeCount: number | null;
 	cast: TmdbCastMember[];
+	/** `belongs_to_collection` for movies; null for ungrouped movies and TV. */
+	collection: TmdbCollectionRef | null;
 }
 
 // --- MediaUX ---

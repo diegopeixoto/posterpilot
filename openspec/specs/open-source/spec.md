@@ -1,7 +1,7 @@
 # open-source Specification
 
 ## Purpose
-TBD - created by archiving change open-source-release. Update Purpose after archive.
+Define the licensing, community, security, continuous-integration, release, container-publication, and health-check requirements for the open-source project.
 ## Requirements
 ### Requirement: MIT license
 
@@ -152,4 +152,3 @@ The application SHALL expose an unauthenticated `GET /api/health` endpoint that 
 
 - **WHEN** an operator reads the README
 - **THEN** it documents the `/api/health` endpoint and shows an example container health-check using it
-

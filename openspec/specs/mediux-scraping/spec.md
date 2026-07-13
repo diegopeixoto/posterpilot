@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define MediaUX set discovery, candidate extraction, request resilience, caching, and provider integration.
 ## Requirements
 ### Requirement: Discover MediaUX sets for a TMDB ID
 
@@ -74,4 +74,3 @@ The MediUX scraper and parser SHALL be exposed through the shared `PosterProvide
 
 - **WHEN** the MediUX provider runs
 - **THEN** it retains its existing listing-payload parsing, target-title filtering, throttling, retry, and caching behaviour
-

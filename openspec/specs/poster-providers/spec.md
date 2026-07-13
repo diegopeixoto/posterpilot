@@ -1,7 +1,7 @@
 # poster-providers Specification
 
 ## Purpose
-TBD - created by archiving change poster-providers. Update Purpose after archive.
+Define the shared artwork-provider contract, built-in sources, enablement controls, and resilient multi-provider discovery behavior.
 ## Requirements
 ### Requirement: Poster provider abstraction
 
@@ -72,4 +72,3 @@ The system SHALL ship providers for MediUX (scrape), ThePosterDB (scrape), Fanar
 
 - **WHEN** the ThePosterDB provider runs for a resolved title
 - **THEN** it returns the title's community poster/background sets parsed from ThePosterDB, throttled and cached like the MediUX scraper
-

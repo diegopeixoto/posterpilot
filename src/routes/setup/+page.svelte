@@ -1,11 +1,19 @@
 <script lang="ts">
 	import { invalidateAll, goto } from '$app/navigation';
+	import { onMount, tick } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages';
 	import { setLocale } from '$lib/paraglide/runtime';
 	import PlexLogin from '$lib/components/PlexLogin.svelte';
+	import EmbyLogin from '$lib/components/EmbyLogin.svelte';
+	import JobProgress from '$lib/components/JobProgress.svelte';
+	import { jobStatusLabel } from '$lib/job-labels';
 
 	let { data } = $props();
+	let hydrated = $state(false);
+	onMount(() => {
+		hydrated = true;
+	});
 
 	const steps = [
 		{ title: m.setup_step_language, desc: m.setup_step_language_desc },
@@ -17,7 +25,8 @@
 	];
 	const total = steps.length;
 	const LIBRARIES_STEP = 4;
-	let step = $state(0);
+	// svelte-ignore state_referenced_locally
+	let step = $state(data.resumeStep);
 
 	// Step values, seeded from current config (so re-running the wizard is sane).
 	// svelte-ignore state_referenced_locally
@@ -34,8 +43,12 @@
 	let jellyfinUrl = $state(data.config.jellyfinUrl ?? '');
 	let jellyfinApiKey = $state('');
 	// svelte-ignore state_referenced_locally
+	let jellyfinApiKeySet = $state(data.config.jellyfinApiKeySet);
+	// svelte-ignore state_referenced_locally
 	let embyUrl = $state(data.config.embyUrl ?? '');
 	let embyApiKey = $state('');
+	// svelte-ignore state_referenced_locally
+	let embyApiKeySet = $state(data.config.embyApiKeySet);
 
 	let tmdbKey = $state('');
 
@@ -92,10 +105,10 @@
 					for (const s of sections) selectedSections.add(s.key);
 				}
 			}
-			libsError = body.error ?? null;
+			libsError = body.error ? m.api_error_generic() : null;
 			connectionOk = !body.error;
-		} catch (e) {
-			libsError = e instanceof Error ? e.message : String(e);
+		} catch {
+			libsError = m.api_error_generic();
 			connectionOk = false;
 		} finally {
 			refreshingLibs = false;
@@ -106,8 +119,16 @@
 	let testing = $state(false);
 	let testMsg = $state<{ ok: boolean; text: string } | null>(null);
 	let syncing = $state(false);
-	let synced = $state(false);
+	let syncJobId = $state<number | null>(null);
+	// svelte-ignore state_referenced_locally
+	let syncStatus = $state<string | null>(data.successfulSync ? 'completed' : null);
 	let stepError = $state<string | null>(null);
+	let stepHeading: HTMLHeadingElement | null = $state(null);
+
+	async function focusStepHeading() {
+		await tick();
+		stepHeading?.focus();
+	}
 
 	/**
 	 * Block advancing past a step that isn't configured, so a first-timer can't
@@ -120,9 +141,9 @@
 				// Plex needs both a URL and a token, so block if either is missing.
 				if (!plexUrl.trim() || !plexTokenSet) return m.setup_need_server();
 			} else if (serverType === 'jellyfin') {
-				if (!jellyfinUrl.trim() || !(jellyfinApiKey.trim() || data.config.jellyfinApiKeySet))
+				if (!jellyfinUrl.trim() || !(jellyfinApiKey.trim() || jellyfinApiKeySet))
 					return m.setup_need_server();
-			} else if (!embyUrl.trim() || !(embyApiKey.trim() || data.config.embyApiKeySet)) {
+			} else if (!embyUrl.trim() || !(embyApiKey.trim() || embyApiKeySet)) {
 				return m.setup_need_server();
 			}
 		} else if (step === 2) {
@@ -132,11 +153,13 @@
 	}
 
 	async function postSettings(payload: Record<string, unknown>) {
-		await fetch('/api/settings', {
+		const response = await fetch('/api/settings', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(payload)
 		});
+		await response.json().catch(() => ({}));
+		if (!response.ok) throw new Error(m.api_error_generic());
 	}
 
 	function changeLanguage(event: Event) {
@@ -157,8 +180,26 @@
 		busy = true;
 		stepError = null;
 		testMsg = null;
+		const startingStep = step;
+		// The locale write can cause the locale strategy to refresh the route. Move
+		// to the server step synchronously so that refresh cannot recreate the
+		// language step while the click handler is awaiting its request.
+		if (startingStep === 0) {
+			step = 1;
+			void focusStepHeading();
+		}
 		try {
-			if (step === 1) {
+			if (startingStep === 0) {
+				// Persist even the already-selected default locale. Relying only on the
+				// select's change event makes English users lose their progress after
+				// an invalidation or reload because no change event ever fires.
+				await postSettings({ language });
+				// Re-enter the same route from persisted state. Locale strategies may
+				// refresh the layout while this write is in flight; an explicit route
+				// navigation makes the resumable server-derived step authoritative.
+				await goto('/setup', { invalidateAll: true, replaceState: true, noScroll: true });
+				return;
+			} else if (startingStep === 1) {
 				const payload: Record<string, unknown> = { serverType };
 				if (serverType === 'plex') {
 					payload.plexUrl = plexUrl;
@@ -170,9 +211,9 @@
 					if (embyApiKey) payload.embyApiKey = embyApiKey;
 				}
 				await postSettings(payload);
-			} else if (step === 2) {
+			} else if (startingStep === 2) {
 				if (tmdbKey) await postSettings({ tmdbKey });
-			} else if (step === 3) {
+			} else if (startingStep === 3) {
 				const payload: Record<string, unknown> = {
 					providerMediux: String(providerMediux),
 					providerTmdb: String(providerTmdb),
@@ -181,27 +222,37 @@
 				};
 				if (fanartKey) payload.fanartKey = fanartKey;
 				await postSettings(payload);
-			} else if (step === LIBRARIES_STEP) {
+			} else if (startingStep === LIBRARIES_STEP) {
 				// All known libraries selected → [] (sync everything, incl. future ones).
 				await postSettings({
 					includedSections: allSelected ? [] : [...selectedSections]
 				});
 			}
-			await invalidateAll();
-			if (step < total - 1) {
+			if (startingStep !== 0 && step < total - 1) {
 				step += 1;
+				await focusStepHeading();
 				// Arriving at the Libraries step: fetch the server's libraries live.
-				if (step === LIBRARIES_STEP) refreshLibraries();
+				if (step === LIBRARIES_STEP) void refreshLibraries();
 			}
+			// Let the visible wizard advance as soon as its write succeeds. Root/page
+			// data can refresh in the background; awaiting invalidation here allowed a
+			// concurrent loader remount to strand the user on the completed step.
+			void invalidateAll();
+		} catch (e) {
+			if (startingStep === 0) step = 0;
+			stepError = m.setup_save_failed({ error: e instanceof Error ? e.message : String(e) });
 		} finally {
 			busy = false;
 		}
 	}
 
-	function back() {
+	async function back() {
 		testMsg = null;
 		stepError = null;
-		if (step > 0) step -= 1;
+		if (step > 0) {
+			step -= 1;
+			await focusStepHeading();
+		}
 	}
 
 	/** Save the current server fields, then test the stored config. */
@@ -221,14 +272,15 @@
 			}
 			await postSettings(payload);
 			const res = await fetch('/api/settings/test', { method: 'POST' });
-			const body = await res.json();
-			testMsg = body.plex?.ok
-				? { ok: true, text: m.setup_test_ok() }
-				: { ok: false, text: m.setup_test_fail({ error: body.plex?.error ?? '' }) };
-		} catch (e) {
+			const body = (await res.json().catch(() => ({}))) as { plex?: { ok?: boolean } };
+			testMsg =
+				res.ok && body.plex?.ok
+					? { ok: true, text: m.setup_test_ok() }
+					: { ok: false, text: m.setup_test_fail({ error: m.api_error_generic() }) };
+		} catch {
 			testMsg = {
 				ok: false,
-				text: m.setup_test_fail({ error: e instanceof Error ? e.message : String(e) })
+				text: m.setup_test_fail({ error: m.api_error_generic() })
 			};
 		} finally {
 			testing = false;
@@ -236,12 +288,41 @@
 	}
 
 	async function startSync() {
+		if (syncing) return;
 		syncing = true;
+		stepError = null;
+		syncStatus = null;
 		try {
-			await fetch('/api/sync', { method: 'POST' });
-			synced = true;
+			const response = await fetch('/api/sync', { method: 'POST' });
+			const body = (await response.json().catch(() => ({}))) as {
+				jobId?: number;
+				error?: string;
+			};
+			if (!response.ok || !Number.isInteger(body.jobId)) {
+				throw new Error(m.api_error_generic());
+			}
+			syncJobId = body.jobId!;
+		} catch (e) {
+			syncStatus = 'failed';
+			stepError = m.setup_sync_failed({ error: e instanceof Error ? e.message : String(e) });
 		} finally {
 			syncing = false;
+		}
+	}
+
+	function onSyncDone(status: string) {
+		syncStatus = status;
+		if (status !== 'completed') syncJobId = null;
+	}
+
+	async function dismissSetup(destination = '/') {
+		stepError = null;
+		try {
+			const response = await fetch('/api/setup/dismiss', { method: 'POST' });
+			if (!response.ok) throw new Error(m.api_error_generic());
+			await goto(destination);
+		} catch (e) {
+			stepError = m.setup_skip_failed({ error: e instanceof Error ? e.message : String(e) });
 		}
 	}
 </script>
@@ -251,22 +332,42 @@
 <div class="mx-auto max-w-xl">
 	<div class="flex items-center justify-between">
 		<h1 class="text-2xl font-semibold tracking-tight">{m.setup_title()}</h1>
-		<a href="/" class="text-sm text-neutral-400 underline hover:text-neutral-200"
-			>{m.setup_skip()}</a
+		<button
+			type="button"
+			onclick={() => dismissSetup()}
+			class="text-sm text-neutral-400 underline hover:text-neutral-200"
 		>
+			{m.setup_skip()}
+		</button>
 	</div>
 
 	<!-- Progress -->
-	<div class="mt-4 flex gap-1.5">
+	<div
+		class="mt-4 flex gap-1.5"
+		role="progressbar"
+		aria-label={m.setup_step({ current: step + 1, total })}
+		aria-valuemin="1"
+		aria-valuemax={total}
+		aria-valuenow={step + 1}
+	>
 		{#each { length: total } as _, i (i)}
-			<div class="h-1.5 flex-1 rounded-full {i <= step ? 'bg-accent-500' : 'bg-neutral-800'}"></div>
+			<div
+				aria-hidden="true"
+				class="h-1.5 flex-1 rounded-full {i <= step ? 'bg-accent-500' : 'bg-neutral-800'}"
+			></div>
 		{/each}
 	</div>
 	<p class="mt-2 text-xs text-neutral-400">{m.setup_step({ current: step + 1, total })}</p>
 
 	<div class="surface mt-4 space-y-4 p-5">
 		<div>
-			<h2 class="text-lg font-medium">{steps[step].title()}</h2>
+			<h2
+				bind:this={stepHeading}
+				tabindex="-1"
+				class="text-lg font-medium focus-visible:outline-none"
+			>
+				{steps[step].title()}
+			</h2>
 			<p class="mt-0.5 text-sm text-neutral-400">{steps[step].desc()}</p>
 		</div>
 
@@ -296,67 +397,78 @@
 			{#if serverType === 'plex'}
 				<PlexLogin bind:plexUrl bind:plexTokenSet onLogin={() => invalidateAll()} />
 			{:else if serverType === 'jellyfin'}
-				<div>
-					<label for="setup-jf-url" class="mb-1 block text-sm font-medium"
-						>{m.settings_jellyfin_url()}</label
+				<EmbyLogin
+					flavor="jellyfin"
+					bind:serverUrl={jellyfinUrl}
+					bind:apiKeySet={jellyfinApiKeySet}
+					onLogin={() => invalidateAll()}
+				/>
+				<details class="border-t border-neutral-800 pt-3">
+					<summary class="cursor-pointer text-sm text-neutral-400"
+						>{m.setup_api_key_fallback()}</summary
 					>
-					<input
-						id="setup-jf-url"
-						bind:value={jellyfinUrl}
-						placeholder="http://192.168.1.10:8096"
-						class="input w-full"
-					/>
-				</div>
-				<div>
-					<label for="setup-jf-key" class="mb-1 block text-sm font-medium"
-						>{m.settings_jellyfin_api_key()}</label
-					>
-					<input
-						id="setup-jf-key"
-						type="password"
-						bind:value={jellyfinApiKey}
-						placeholder={data.config.jellyfinApiKeySet
-							? m.settings_secret_placeholder_set()
-							: m.settings_jellyfin_api_key_placeholder_unset()}
-						class="input w-full"
-					/>
-				</div>
-				<button onclick={testServer} disabled={testing} class="btn btn-subtle px-3 py-1.5">
-					{testing ? m.setup_testing() : m.setup_test()}
-				</button>
+					<div class="mt-3 space-y-3">
+						<input
+							bind:value={jellyfinUrl}
+							aria-label={m.settings_jellyfin_url()}
+							placeholder="http://192.168.1.10:8096"
+							class="input w-full"
+						/>
+						<input
+							type="password"
+							bind:value={jellyfinApiKey}
+							aria-label={m.settings_jellyfin_api_key()}
+							placeholder={jellyfinApiKeySet
+								? m.settings_secret_placeholder_set()
+								: m.settings_jellyfin_api_key_placeholder_unset()}
+							class="input w-full"
+						/>
+						<button onclick={testServer} disabled={testing} class="btn btn-subtle px-3 py-1.5"
+							>{testing ? m.setup_testing() : m.setup_test()}</button
+						>
+					</div>
+				</details>
 			{:else}
-				<div>
-					<label for="setup-emby-url" class="mb-1 block text-sm font-medium"
-						>{m.settings_emby_url()}</label
+				<EmbyLogin
+					flavor="emby"
+					bind:serverUrl={embyUrl}
+					bind:apiKeySet={embyApiKeySet}
+					onLogin={() => invalidateAll()}
+				/>
+				<details class="border-t border-neutral-800 pt-3">
+					<summary class="cursor-pointer text-sm text-neutral-400"
+						>{m.setup_api_key_fallback()}</summary
 					>
-					<input
-						id="setup-emby-url"
-						bind:value={embyUrl}
-						placeholder="http://192.168.1.10:8096"
-						class="input w-full"
-					/>
-				</div>
-				<div>
-					<label for="setup-emby-key" class="mb-1 block text-sm font-medium"
-						>{m.settings_emby_api_key()}</label
-					>
-					<input
-						id="setup-emby-key"
-						type="password"
-						bind:value={embyApiKey}
-						placeholder={data.config.embyApiKeySet
-							? m.settings_secret_placeholder_set()
-							: m.settings_emby_api_key_placeholder_unset()}
-						class="input w-full"
-					/>
-				</div>
-				<button onclick={testServer} disabled={testing} class="btn btn-subtle px-3 py-1.5">
-					{testing ? m.setup_testing() : m.setup_test()}
-				</button>
+					<div class="mt-3 space-y-3">
+						<input
+							bind:value={embyUrl}
+							aria-label={m.settings_emby_url()}
+							placeholder="http://192.168.1.10:8096"
+							class="input w-full"
+						/>
+						<input
+							type="password"
+							bind:value={embyApiKey}
+							aria-label={m.settings_emby_api_key()}
+							placeholder={embyApiKeySet
+								? m.settings_secret_placeholder_set()
+								: m.settings_emby_api_key_placeholder_unset()}
+							class="input w-full"
+						/>
+						<button onclick={testServer} disabled={testing} class="btn btn-subtle px-3 py-1.5"
+							>{testing ? m.setup_testing() : m.setup_test()}</button
+						>
+					</div>
+				</details>
 			{/if}
 
 			{#if testMsg}
-				<p class="text-sm {testMsg.ok ? 'text-emerald-400' : 'text-red-400'}">{testMsg.text}</p>
+				<p
+					role={testMsg.ok ? 'status' : 'alert'}
+					class="text-sm {testMsg.ok ? 'text-emerald-400' : 'text-red-400'}"
+				>
+					{testMsg.text}
+				</p>
 			{/if}
 		{:else if step === 2}
 			<div>
@@ -420,7 +532,7 @@
 			<!-- Connection state -->
 			<div class="surface flex items-center gap-2 p-3 text-sm">
 				{#if refreshingLibs && connectionOk === null}
-					<span class="text-neutral-400">{m.setup_libraries_checking()}</span>
+					<span role="status" class="text-neutral-400">{m.setup_libraries_checking()}</span>
 				{:else if connectionOk === true}
 					<span class="text-emerald-400">{m.setup_libraries_connected()}</span>
 				{:else if connectionOk === false}
@@ -461,7 +573,11 @@
 									onchange={() => toggleSection(section.key)}
 								/>
 								{section.title}
-								<span class="text-xs text-neutral-400">({section.type})</span>
+								<span class="text-xs text-neutral-400">
+									({section.type === 'movie'
+										? m.manual_match_type_movie()
+										: m.manual_match_type_show()})
+								</span>
 							</label>
 						{/each}
 					</div>
@@ -469,17 +585,29 @@
 			</div>
 		{:else}
 			<div class="space-y-3">
-				<button onclick={startSync} disabled={syncing || synced} class="btn btn-accent px-4 py-2">
+				<button
+					onclick={startSync}
+					disabled={syncing || syncStatus === 'completed' || syncJobId !== null}
+					class="btn btn-accent px-4 py-2"
+				>
 					{syncing ? m.setup_sync_running() : m.setup_sync_start()}
 				</button>
-				{#if synced}
-					<p class="text-sm text-emerald-400">{m.setup_done()}</p>
+				{#if syncJobId !== null}
+					<JobProgress jobId={syncJobId} onDone={onSyncDone} />
 				{/if}
-				<div>
-					<button onclick={() => goto('/')} class="btn btn-subtle px-4 py-2">
-						{m.setup_go_dashboard()}
-					</button>
-				</div>
+				{#if syncStatus === 'completed'}
+					<p class="text-sm text-emerald-400" role="status">{m.setup_done()}</p>
+					<button onclick={() => dismissSetup('/')} class="btn btn-subtle px-4 py-2"
+						>{m.setup_go_dashboard()}</button
+					>
+				{:else if syncStatus && syncStatus !== 'completed'}
+					<p role="alert" class="text-sm text-red-300">
+						{m.setup_sync_terminal_failed({ status: jobStatusLabel(syncStatus) })}
+					</p>
+					<button onclick={startSync} disabled={syncing} class="btn btn-subtle px-4 py-2"
+						>{m.setup_sync_retry()}</button
+					>
+				{/if}
 			</div>
 		{/if}
 
@@ -492,7 +620,11 @@
 				{#if step > 0}
 					<button onclick={back} class="btn btn-ghost px-4 py-2">{m.setup_back()}</button>
 				{/if}
-				<button onclick={next} disabled={busy} class="btn btn-accent ml-auto px-4 py-2">
+				<button
+					onclick={next}
+					disabled={busy || !hydrated}
+					class="btn btn-accent ml-auto px-4 py-2"
+				>
 					{busy ? m.setup_saving() : m.setup_next()}
 				</button>
 			</div>

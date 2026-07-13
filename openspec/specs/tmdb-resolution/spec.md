@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define authenticated TMDB identity resolution from media-server GUIDs and its cache behavior.
 
 ## Requirements
 

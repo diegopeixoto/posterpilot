@@ -31,9 +31,11 @@ export const fanartProvider: PosterProvider = {
 				forceRefresh: opts?.forceRefresh
 			});
 			return parseFanart(json, item.mediaType);
-		} catch {
-			// 404 = no Fanart.tv entry for this title; treat as no candidates.
-			return [];
+		} catch (error) {
+			// A real 404 is an authoritative empty result. Transient/network failures
+			// must propagate so discovery retains last-known-good candidates.
+			if (error instanceof Error && /HTTP 404\b/.test(error.message)) return [];
+			throw error;
 		}
 	}
 };

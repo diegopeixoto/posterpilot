@@ -6,8 +6,10 @@
 	import { m } from '$lib/paraglide/messages';
 	import { setLocale } from '$lib/paraglide/runtime';
 	import { registerClientLocaleStrategy, seedClientLocale } from '$lib/i18n/strategy.client';
+	import { canonicalPathAfterServerSwitch } from '$lib/server-context-navigation';
 	import WhatsNewModal from '$lib/components/WhatsNewModal.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
+	import { toasts } from '$lib/stores/toasts.svelte';
 
 	// Local copy of the version comparison (the canonical `isNewerVersion` lives in
 	// `$lib/server/semver`, which SvelteKit forbids importing into client code).
@@ -46,13 +48,15 @@
 
 	// Register the client locale strategy and seed it with the locale the server
 	// resolved for this page so hydration matches SSR.
-	registerClientLocaleStrategy();
 	// svelte-ignore state_referenced_locally
 	seedClientLocale(data.locale);
+	registerClientLocaleStrategy();
 
 	const links = $derived([
 		{ href: '/', label: m.nav_dashboard() },
 		{ href: '/library', label: m.nav_library() },
+		{ href: '/collections', label: m.nav_collections() },
+		{ href: '/review', label: m.nav_review() },
 		{ href: '/kometa', label: m.nav_kometa() },
 		...(data.funEnabled ? [{ href: '/fun', label: m.nav_fun() }] : []),
 		{ href: '/settings', label: m.nav_settings() }
@@ -75,6 +79,7 @@
 		currentResolved: boolean;
 	};
 	let update = $state<Update | null>(null);
+	let appHydrated = $state(false);
 
 	// "What's new" modal. Two intents share it: 'current' shows the notes for the
 	// version you're running (post-upgrade), 'latest' previews the available
@@ -136,6 +141,7 @@
 	}
 
 	onMount(() => {
+		appHydrated = true;
 		// Decide whether to show the "What's new" modal only once the check resolves.
 		void refreshUpdate().then(maybeShowWhatsNew);
 
@@ -159,6 +165,8 @@
 	// reload takes a beat, so we show a pending state immediately — without it the
 	// switch looks like it did nothing until the reload lands.
 	let switchingLocale = $state(false);
+	let switchingServer = $state(false);
+	let mobileMenuOpen = $state(false);
 	function onLanguageChange(event: Event) {
 		const value = (event.currentTarget as HTMLSelectElement).value;
 		if (value === data.locale) return;
@@ -168,6 +176,28 @@
 		Promise.resolve(setLocale(value as Parameters<typeof setLocale>[0])).catch(() => {
 			switchingLocale = false;
 		});
+	}
+
+	async function onServerChange(event: Event) {
+		const id = (event.currentTarget as HTMLSelectElement).value;
+		if (!id || id === data.serverSelection.activeServerId || switchingServer) return;
+		switchingServer = true;
+		try {
+			const response = await fetch(`/api/servers/${encodeURIComponent(id)}/activate`, {
+				method: 'POST'
+			});
+			if (!response.ok) throw new Error(String(response.status));
+			await goto(canonicalPathAfterServerSwitch(page.url), {
+				invalidateAll: true,
+				noScroll: true,
+				keepFocus: true,
+				replaceState: true
+			});
+		} catch {
+			toasts.error(m.server_switcher_failed());
+		} finally {
+			switchingServer = false;
+		}
 	}
 
 	// Clear the session server-side, then land on the login page.
@@ -181,79 +211,136 @@
 	}
 </script>
 
-<div class="min-h-screen">
+<div class="min-h-screen" data-app-hydrated={appHydrated ? 'true' : undefined}>
 	<header class="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-950/80 backdrop-blur">
-		<div class="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4">
+		<div
+			class="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-3 px-4 py-2 lg:h-14 lg:flex-nowrap lg:gap-6 lg:py-0"
+		>
 			<a href="/" class="flex items-center" aria-label={m.app_name()}>
 				<img src="/logo.png" alt={m.app_name()} class="h-7 w-auto" />
 			</a>
-			<nav class="flex items-center gap-1 text-sm">
-				{#each links as link (link.href)}
-					<a
-						href={link.href}
-						class="rounded-md px-3 py-1.5 transition {isActive(link.href)
-							? 'bg-accent-600/15 text-accent-200'
-							: 'text-neutral-400 hover:text-neutral-100'}"
-					>
-						{link.label}
-						{#if link.href === '/' && data.activeJobs > 0}
-							<span class="ml-1 rounded-full bg-accent-500 px-1.5 text-[10px] text-white"
-								>{data.activeJobs}</span
-							>
-						{/if}
-					</a>
-				{/each}
-			</nav>
-			<label
-				class="ml-auto flex items-center gap-1.5 text-sm text-neutral-400"
-				aria-busy={switchingLocale}
+			<button
+				type="button"
+				class="btn btn-ghost ml-auto px-2.5 lg:hidden"
+				aria-expanded={mobileMenuOpen}
+				aria-controls="primary-navigation"
+				aria-label={mobileMenuOpen ? m.nav_menu_close() : m.nav_menu_open()}
+				onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
 			>
-				<span class="sr-only">{m.language_label()}</span>
-				{#if switchingLocale}
-					<svg
-						class="size-3.5 animate-spin text-accent-400"
-						viewBox="0 0 24 24"
-						fill="none"
-						aria-hidden="true"
-					>
-						<circle
-							class="opacity-25"
-							cx="12"
-							cy="12"
-							r="10"
-							stroke="currentColor"
-							stroke-width="3"
-						/>
-						<path
-							class="opacity-90"
-							fill="currentColor"
-							d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7V2z"
-						/>
-					</svg>
-				{/if}
-				<select
-					value={data.locale}
-					onchange={onLanguageChange}
-					aria-label={m.language_label()}
-					disabled={switchingLocale}
-					class="input py-1 text-sm disabled:opacity-60"
+				<span aria-hidden="true">{mobileMenuOpen ? '×' : '☰'}</span>
+			</button>
+
+			<div
+				id="primary-navigation"
+				class="{mobileMenuOpen
+					? 'flex'
+					: 'hidden'} order-last w-full flex-col gap-3 border-t border-neutral-800 pt-3 lg:order-none lg:flex lg:min-w-0 lg:flex-1 lg:flex-row lg:items-center lg:border-0 lg:pt-0"
+			>
+				<nav
+					class="grid grid-cols-2 gap-1 text-sm sm:grid-cols-4 lg:flex lg:min-w-0 lg:items-center lg:overflow-x-auto lg:whitespace-nowrap"
 				>
-					{#each data.availableLocales as loc (loc.code)}
-						<option value={loc.code}>{loc.name}</option>
+					{#each links as link (link.href)}
+						<a
+							href={link.href}
+							aria-current={isActive(link.href) ? 'page' : undefined}
+							onclick={() => (mobileMenuOpen = false)}
+							class="rounded-md px-3 py-1.5 transition {isActive(link.href)
+								? 'bg-accent-600/15 text-accent-200'
+								: 'text-neutral-400 hover:text-neutral-100'}"
+						>
+							{link.label}
+							{#if link.href === '/' && data.activeJobs > 0}
+								<span class="ml-1 rounded-full bg-accent-500 px-1.5 text-[10px] text-white"
+									>{data.activeJobs}</span
+								>
+							{/if}
+						</a>
 					{/each}
-				</select>
-			</label>
-			{#if data.showLogout}
-				<button
-					type="button"
-					onclick={logout}
-					class="rounded-md px-3 py-1.5 text-sm text-neutral-400 transition hover:text-neutral-100"
-				>
-					{m.auth_logout()}
-				</button>
-			{/if}
+				</nav>
+
+				<div class="flex flex-col gap-2 sm:flex-row sm:items-center lg:ml-auto lg:flex-none">
+					{#if data.serverSelection.servers.length > 1}
+						<label
+							class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-neutral-400"
+							aria-busy={switchingServer}
+						>
+							<span class="sr-only">{m.server_switcher_label()}</span>
+							<select
+								value={data.serverSelection.activeServerId ?? ''}
+								onchange={onServerChange}
+								aria-label={m.server_switcher_label()}
+								disabled={switchingServer}
+								class="input w-full py-1 text-sm disabled:opacity-60 lg:max-w-48"
+							>
+								{#each data.serverSelection.servers as server (server.id)}
+									<option value={server.id}
+										>{server.name} · {server.type === 'jellyfin'
+											? 'Jellyfin'
+											: server.type === 'emby'
+												? 'Emby'
+												: 'Plex'}</option
+									>
+								{/each}
+							</select>
+						</label>
+					{/if}
+					<label
+						class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-neutral-400"
+						aria-busy={switchingLocale}
+					>
+						<span class="sr-only">{m.language_label()}</span>
+						{#if switchingLocale}
+							<svg
+								class="size-3.5 motion-safe:animate-spin text-accent-400"
+								viewBox="0 0 24 24"
+								fill="none"
+								aria-hidden="true"
+							>
+								<circle
+									class="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									stroke-width="3"
+								/>
+								<path
+									class="opacity-90"
+									fill="currentColor"
+									d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7V2z"
+								/>
+							</svg>
+						{/if}
+						<select
+							value={data.locale}
+							onchange={onLanguageChange}
+							aria-label={m.language_label()}
+							disabled={switchingLocale}
+							class="input w-full py-1 text-sm disabled:opacity-60 sm:w-auto"
+						>
+							{#each data.availableLocales as loc (loc.code)}
+								<option value={loc.code}>{loc.name}</option>
+							{/each}
+						</select>
+					</label>
+					{#if data.showLogout}
+						<button type="button" onclick={logout} class="btn btn-ghost sm:flex-none">
+							{m.auth_logout()}
+						</button>
+					{/if}
+				</div>
+			</div>
 		</div>
 	</header>
+
+	{#if data.maintenanceActive}
+		<div
+			class="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-center text-sm text-amber-300"
+			role="status"
+		>
+			{m.maintenance_banner()}
+		</div>
+	{/if}
 
 	{#if !data.configReady}
 		<div
@@ -289,7 +376,9 @@
 	{/if}
 
 	<main class="mx-auto max-w-7xl px-4 py-6">
-		{@render children()}
+		{#key data.serverSelection.activeServerId}
+			{@render children()}
+		{/key}
 	</main>
 
 	<footer class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-neutral-400">

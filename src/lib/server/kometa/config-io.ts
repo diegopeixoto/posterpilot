@@ -102,6 +102,17 @@ export function listBackups(path: string): BackupInfo[] {
 		.sort((a, b) => b.stamp.localeCompare(a.stamp));
 }
 
+/** Read one validated backup belonging to this config file. */
+export function readBackup(path: string, name: string): string {
+	const prefix = `${basename(path)}${BACKUP_INFIX}`;
+	if (!name.startsWith(prefix) || name.includes('/') || name.includes('..')) {
+		throw new Error('Invalid backup name');
+	}
+	const src = join(dirname(path), name);
+	if (!existsSync(src)) throw new Error('Backup not found');
+	return readFileSync(src, 'utf8');
+}
+
 /**
  * Restore a named backup over the current config, backing up the current file
  * first. The backup name is validated to belong to this config (no traversal).
@@ -111,13 +122,7 @@ export function restoreBackup(
 	name: string,
 	stamp: string
 ): { backup: string | null } {
-	const prefix = `${basename(path)}${BACKUP_INFIX}`;
-	if (!name.startsWith(prefix) || name.includes('/') || name.includes('..')) {
-		throw new Error('Invalid backup name');
-	}
-	const src = join(dirname(path), name);
-	if (!existsSync(src)) throw new Error('Backup not found');
-	const content = readFileSync(src, 'utf8');
+	const content = readBackup(path, name);
 	return writeConfigAtomic(path, content, stamp);
 }
 

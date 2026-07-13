@@ -1,8 +1,15 @@
 import { type Handle, json, redirect } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { env } from '$env/dynamic/private';
-import { migrateDb } from '$lib/server/db';
-import { markInterruptedJobs } from '$lib/server/jobs/runner';
+import { db, migrateDb, restoreBootResult } from '$lib/server/db';
+import { recoverInterruptedRevisionGroups } from '$lib/server/artwork-revisions/group-recovery';
+import { finalizeApplicationRestoreBoot } from '$lib/server/backups/restore-boot';
+import { enqueueJobDetailed, markInterruptedJobs } from '$lib/server/jobs/runner';
+import {
+	configureAutomationScheduler,
+	startAutomationScheduler
+} from '$lib/server/automation/scheduler-runtime';
+import { materializeLegacyServerInstance } from '$lib/server/server-instances';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { registerServerLocaleStrategy } from '$lib/i18n/strategy.server';
 import { getAuthState } from '$lib/server/config';
@@ -11,12 +18,57 @@ import { classifyPath, safeRedirectTarget } from '$lib/server/auth/guard';
 import { decideLocalBypass } from '$lib/server/auth/local-address';
 import { verifySessionToken } from '$lib/server/auth/session';
 import { getSessionKey, issueSessionCookie, SESSION_COOKIE } from '$lib/server/auth/server';
+import { pruneOperationPlans } from '$lib/server/plans/operation-plan-store';
+import { maintenanceMode } from '$lib/server/maintenance';
+import { maintenanceBlocksRequest } from '$lib/server/maintenance-http';
+import { reconcileThumbCacheDisk } from '$lib/server/posters/thumb-cache';
 
 // Run database migrations once at server startup, before any request is handled.
 await migrateDb();
 
-// Any job left "pending"/"running" by a previous crash is marked interrupted.
+// A staged restore is not committed until migrations and local readiness pass.
+// On failure the pending marker remains, so the next boot restores rollback state.
+await finalizeApplicationRestoreBoot(restoreBootResult);
+
+// Preserve the existing environment/persisted single-server connection as the
+// protected default instance before any scoped job or request can resolve it.
+await materializeLegacyServerInstance();
+
+// Migration 0008 wiped the thumbnail index (credential-bearing cached URLs must
+// not survive) but could not touch the files; drop any bytes with no index row
+// before requests or recovered jobs can write new entries.
+await reconcileThumbCacheDisk().catch(() => undefined);
+
+// Mutation previews are ephemeral and may freeze sensitive configuration. Remove
+// expired plans immediately and consumed plans after a short audit/debug window.
+const PLAN_CONSUMED_RETENTION_MS = 24 * 60 * 60 * 1000;
+const PLAN_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+async function pruneEphemeralPlans(): Promise<void> {
+	await pruneOperationPlans({
+		consumedBefore: new Date(Date.now() - PLAN_CONSUMED_RETENTION_MS)
+	});
+}
+await pruneEphemeralPlans();
+const operationPlanPruner = setInterval(() => {
+	void pruneEphemeralPlans().catch(() => undefined);
+}, PLAN_PRUNE_INTERVAL_MS);
+operationPlanPruner.unref();
+
+// Configure scheduling before durable recovery can resume a sync that emits an
+// automation event. The scheduler module deliberately does not import the worker.
+configureAutomationScheduler((payload, options) => enqueueJobDetailed(payload, options));
+
+// Re-enter durable pending/retry work and recover only expired worker leases.
 await markInterruptedJobs();
+
+// Request-scoped undo/upload groups have no job to recover them: a restart
+// mid-execution leaves them `pending` forever. Close them from the outcomes
+// recorded before the interruption so history never shows a phantom run.
+await recoverInterruptedRevisionGroups(db).catch(() => undefined);
+
+// Poll persisted interval/calendar occurrences after recovery. The timer is
+// unreferenced so it never delays process shutdown.
+startAutomationScheduler();
 
 // Boot-time hygiene: warn if the encryption key file is group/world-accessible.
 warnIfKeyFileInsecure();
@@ -94,6 +146,17 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 	throw redirect(303, `/login?redirectTo=${encodeURIComponent(redirectTo)}`);
 };
 
+// Once a restore is staged (maintenance mode), every write would be silently
+// discarded by the boot-time database swap. Individual runtimes assert this
+// invariant too, but the blanket gate here means new endpoints inherit it
+// instead of each author having to remember `assertMutationsAllowed()`.
+const handleMaintenance: Handle = async ({ event, resolve }) => {
+	if (maintenanceMode() && maintenanceBlocksRequest(event.url.pathname, event.request.method)) {
+		return json({ error: { code: 'maintenance_mode' } }, { status: 503 });
+	}
+	return resolve(event);
+};
+
 /**
  * Baseline security response headers on every response. HSTS only over HTTPS (an
  * HTTP LAN install must not receive it), mirroring the conditional `Secure` cookie.
@@ -127,4 +190,9 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 		);
 	});
 
-export const handle: Handle = sequence(handleSecurityHeaders, handleAuth, handleParaglide);
+export const handle: Handle = sequence(
+	handleSecurityHeaders,
+	handleAuth,
+	handleMaintenance,
+	handleParaglide
+);

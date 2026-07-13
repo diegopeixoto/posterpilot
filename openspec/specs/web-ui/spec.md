@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define the user-facing library, item, bulk, jobs, settings, Kometa, FUN, and staged-artwork workflows and visual behavior.
 ## Requirements
 ### Requirement: Library grid with filters and search
 
@@ -329,4 +329,3 @@ The web UI SHALL show a "Fun" entry in the main navigation only when the `funEna
 
 - **WHEN** the user picks a default library sort in settings and saves
 - **THEN** the system persists it as the `libraryDefaultSort` setting and the library grid opens with that sort on subsequent visits without a sort URL parameter
-

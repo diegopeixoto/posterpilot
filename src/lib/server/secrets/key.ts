@@ -9,14 +9,14 @@
  *      `DATABASE_URL`), so it always lands on the same persistent volume as the data
  *      it protects — losing it would make stored secrets undecryptable.
  *
- * Kept out of the unit-tested crypto module because it reads `$env` and the
- * filesystem; the crypto in `./crypto.ts` stays pure over the key for testing.
+ * Kept out of the unit-tested crypto module because it reads the process environment
+ * and filesystem; the crypto in `./crypto.ts` stays pure over the key for testing.
  */
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { scryptSync } from 'node:crypto';
 import { randomBytes } from 'node:crypto';
-import { env } from '$env/dynamic/private';
+import { resolveDataPaths } from '$lib/server/data-paths';
 
 const KEY_BYTES = 32;
 /** Fixed KDF salt — not secret; only ties the derivation to this application. */
@@ -24,24 +24,8 @@ const APP_SECRET_SALT = 'posterpilot:secrets:v1';
 
 let cachedKey: Buffer | null = null;
 
-/**
- * The directory the SQLite DB lives in, derived from `DATABASE_URL` (e.g.
- * `file:/data/posterpilot.db` → `/data`). This is the persistent volume in Docker,
- * so the key belongs here too. Falls back to `./data` for the dev default.
- */
-function dataDir(): string {
-	const dbUrl = env.DATABASE_URL;
-	if (dbUrl && dbUrl.startsWith('file:')) {
-		const dir = dirname(dbUrl.slice('file:'.length));
-		if (dir && dir !== '.') return dir;
-	}
-	return './data';
-}
-
 function keyFilePath(): string {
-	return env.APP_KEY_FILE && env.APP_KEY_FILE !== ''
-		? env.APP_KEY_FILE
-		: join(dataDir(), '.app-key');
+	return resolveDataPaths(process.env.DATABASE_URL, process.env.APP_KEY_FILE).appKeyFile;
 }
 
 function loadOrCreateKeyFile(): Buffer {
@@ -61,7 +45,7 @@ function loadOrCreateKeyFile(): Buffer {
 /** Return the cached 32-byte encryption key, resolving it on first use. */
 export function getEncryptionKey(): Buffer {
 	if (cachedKey) return cachedKey;
-	const appSecret = env.APP_SECRET;
+	const appSecret = process.env.APP_SECRET;
 	cachedKey =
 		appSecret && appSecret !== ''
 			? scryptSync(appSecret, APP_SECRET_SALT, KEY_BYTES)
@@ -77,7 +61,7 @@ export function getEncryptionKey(): Buffer {
  */
 export function warnIfKeyFileInsecure(): void {
 	// When APP_SECRET drives the key there is no file to guard.
-	if (env.APP_SECRET && env.APP_SECRET !== '') return;
+	if (process.env.APP_SECRET && process.env.APP_SECRET !== '') return;
 	const path = keyFilePath();
 	try {
 		const st = statSync(path);

@@ -100,6 +100,9 @@
 	const globalSettings = $state<Record<string, string>>(
 		Object.fromEntries(km.managedSettingDefs.map((d) => [d.id, km.managedSettings[d.id] ?? '']))
 	);
+	function managedSettingSecretSet(id: string): boolean {
+		return km.managedSettingSecretsSet.includes(id);
+	}
 	const settingLabel: Record<string, () => string> = {
 		asset_directory: m.kometa_setting_asset_directory,
 		webhook_error: m.kometa_setting_webhook_error,
@@ -137,7 +140,7 @@
 	}
 
 	// ── Preview / Sync ─────────────────────────────────────────────────────────
-	type Change = { op: string; path: string; after?: string | null };
+	type Change = { op: string; path: string; before?: string | null; after?: string | null };
 	type Result = {
 		changes: Change[];
 		warnings: string[];
@@ -146,6 +149,9 @@
 		parseError: string | null;
 		scaffolded?: boolean;
 		backup?: boolean;
+		planId?: string | null;
+		digest?: string | null;
+		expiresAt?: string | null;
 	};
 	let busy = $state(false);
 	let preview = $state<Result | null>(null);
@@ -162,7 +168,7 @@
 		return (await res.json()) as Result;
 	}
 	async function doPreview() {
-		if (busy) return;
+		if (busy || !bindingReady || headerDirty) return;
 		busy = true;
 		error = null;
 		done = null;
@@ -171,16 +177,23 @@
 			if (preview.parseError) error = preview.parseError;
 		} catch {
 			error = m.kometa_request_failed();
+			preview = null;
 		} finally {
 			busy = false;
 		}
 	}
 	async function doSync() {
-		if (busy) return;
+		if (busy || !bindingReady || headerDirty || !preview?.planId || !preview.digest) return;
 		busy = true;
 		error = null;
 		try {
-			const r = await post('/api/kometa/config/sync');
+			const res = await fetch('/api/kometa/config/sync', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ planId: preview.planId, digest: preview.digest })
+			});
+			if (!res.ok) throw new Error(String(res.status));
+			const r = (await res.json()) as Result;
 			if (r.parseError) error = r.parseError;
 			else {
 				done = r.scaffolded ? m.kometa_created() : m.kometa_synced();
@@ -193,12 +206,28 @@
 			busy = false;
 		}
 	}
+	// A preview authorizes only the currently visible inputs and header state.
+	$effect(() => {
+		JSON.stringify([selection(), configPath, mode]);
+		preview = null;
+		done = null;
+	});
 
 	// ── Raw editor ─────────────────────────────────────────────────────────────
+	type RawPlanResult = {
+		ok: boolean;
+		parseError: string | null;
+		changes?: Change[];
+		warnings?: string[];
+		planId?: string | null;
+		digest?: string | null;
+		backupName?: string;
+	};
 	let rawText = $state('');
 	let rawLoaded = $state(false);
 	let rawBusy = $state(false);
 	let rawMsg = $state<string | null>(null);
+	let rawPreview = $state<RawPlanResult | null>(null);
 	async function loadRaw() {
 		rawBusy = true;
 		try {
@@ -210,7 +239,8 @@
 			rawBusy = false;
 		}
 	}
-	async function saveRaw() {
+	async function previewRaw() {
+		if (!bindingReady || headerDirty) return;
 		rawBusy = true;
 		rawMsg = null;
 		try {
@@ -219,13 +249,42 @@
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ text: rawText })
 			});
-			const body = (await res.json()) as { ok: boolean; parseError: string | null };
-			rawMsg = body.ok ? m.kometa_raw_saved() : (body.parseError ?? m.kometa_request_failed());
-			if (body.ok) await invalidateAll();
+			const body = (await res.json()) as RawPlanResult;
+			rawPreview = body.ok ? body : null;
+			rawMsg = body.ok
+				? body.planId
+					? null
+					: m.kometa_preview_none()
+				: (body.parseError ?? m.kometa_request_failed());
 		} finally {
 			rawBusy = false;
 		}
 	}
+	async function confirmRaw() {
+		if (!rawPreview?.planId || !rawPreview.digest || rawBusy) return;
+		rawBusy = true;
+		rawMsg = null;
+		try {
+			const res = await fetch('/api/kometa/config/raw', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ planId: rawPreview.planId, digest: rawPreview.digest })
+			});
+			if (!res.ok) throw new Error(String(res.status));
+			rawPreview = null;
+			rawMsg = m.kometa_raw_saved();
+			await invalidateAll();
+		} catch {
+			rawMsg = m.kometa_request_failed();
+			rawPreview = null;
+		} finally {
+			rawBusy = false;
+		}
+	}
+	$effect(() => {
+		JSON.stringify(rawText);
+		rawPreview = null;
+	});
 	$effect(() => {
 		if (section === 'raw' && !rawLoaded) loadRaw();
 	});
@@ -234,28 +293,60 @@
 	// Read from the derived `km` so the list refreshes after a sync (new backup)
 	// or reload, rather than freezing at the initial load.
 	const backups = $derived(km.backups);
-	let confirmRestore = $state<string | null>(null);
-	async function restore(name: string) {
-		if (confirmRestore !== name) {
-			confirmRestore = name;
-			return;
+	let restorePreview = $state<RawPlanResult | null>(null);
+	let restoreBusy = $state(false);
+	let restoreError = $state<string | null>(null);
+	async function previewRestore(name: string) {
+		if (!bindingReady || headerDirty || restoreBusy) return;
+		restoreBusy = true;
+		restoreError = null;
+		try {
+			const res = await fetch('/api/kometa/config/restore', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name })
+			});
+			const body = (await res.json()) as RawPlanResult;
+			if (!res.ok || !body.ok) throw new Error(body.parseError ?? String(res.status));
+			restorePreview = body;
+		} catch {
+			restoreError = m.kometa_request_failed();
+		} finally {
+			restoreBusy = false;
 		}
-		confirmRestore = null;
-		await fetch('/api/kometa/config/restore', {
-			method: 'POST',
+	}
+	async function confirmRestore() {
+		if (!restorePreview?.planId || !restorePreview.digest || restoreBusy) return;
+		restoreBusy = true;
+		restoreError = null;
+		const res = await fetch('/api/kometa/config/restore', {
+			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name })
+			body: JSON.stringify({ planId: restorePreview.planId, digest: restorePreview.digest })
 		});
-		// The file content changed under us — recreate the page so all form state
-		// re-initializes from the restored config rather than the pre-restore one.
-		location.reload();
+		if (res.ok) location.reload();
+		else {
+			restoreBusy = false;
+			restoreError = m.kometa_request_failed();
+			restorePreview = null;
+		}
 	}
 	function fmtStamp(stamp: string): string {
 		return stamp.replace(/-/g, ':').replace('T', ' ').replace('Z', '');
 	}
 
 	const managedCount = $derived(libs.filter((l) => l.managed).length);
-	const plexReady = $derived(Boolean(data.config?.plexUrl && data.config?.plexTokenSet));
+	const headerDirty = $derived(configPath !== km.configPath || mode !== km.mode);
+	const bindingReady = $derived(Boolean(km.serverBinding));
+	const bindingMessage = $derived(
+		km.serverBinding
+			? m.kometa_bound_server({ name: km.serverBinding.name })
+			: km.serverBindingStatus === 'incompatible'
+				? m.kometa_binding_incompatible()
+				: km.serverBindingStatus === 'unavailable'
+					? m.kometa_binding_unavailable()
+					: m.kometa_binding_missing()
+	);
 </script>
 
 <svelte:head><title>{m.kometa_manager_title()} · PosterPilot</title></svelte:head>
@@ -265,8 +356,13 @@
 	{#if data.montage?.length}
 		<!-- Decorative collage of random library posters behind the title. -->
 		<div class="absolute inset-0 flex" aria-hidden="true">
-			{#each data.montage as poster, i (i)}
-				<img src={poster} alt="" class="h-full min-w-0 flex-1 object-cover" loading="lazy" />
+			{#each data.montage as poster (poster.id)}
+				<img
+					src={`/api/poster-thumb/${poster.id}?v=${encodeURIComponent(poster.version)}`}
+					alt=""
+					class="h-full min-w-0 flex-1 object-cover"
+					loading="lazy"
+				/>
 			{/each}
 		</div>
 	{:else if data.spotlight?.backdropUrl}
@@ -338,7 +434,12 @@
 	<p class="mt-3 text-sm text-neutral-400">{m.kometa_setup_hint()}</p>
 {:else}
 	{#if mode === 'own'}<p class="mt-3 text-xs text-amber-400">{m.kometa_mode_own_warning()}</p>{/if}
-	{#if !plexReady}<p class="mt-2 text-xs text-amber-400">{m.kometa_missing_plex_creds()}</p>{/if}
+	<p class="mt-2 text-xs {bindingReady ? 'text-emerald-300' : 'text-amber-400'}">
+		{bindingMessage}
+	</p>
+	{#if headerDirty}
+		<p class="mt-1 text-xs text-amber-400" role="status">{m.kometa_save_header_first()}</p>
+	{/if}
 
 	<!-- Section tabs -->
 	<div class="mt-5 flex flex-wrap gap-1 border-b border-neutral-800">
@@ -369,7 +470,8 @@
 								target="_blank"
 								rel="noopener"
 								onclick={(e) => e.stopPropagation()}
-								class="text-xs font-normal text-accent-300 hover:underline">docs ↗</a
+								class="text-xs font-normal text-accent-300 hover:underline"
+								>{m.kometa_docs_link()}</a
 							>
 						{/if}
 					</summary>
@@ -411,7 +513,9 @@
 						<label class="flex items-center gap-2 text-sm font-medium">
 							<input type="checkbox" bind:checked={lib.managed} />
 							{lib.title}
-							<span class="text-xs text-neutral-400">({lib.type})</span>
+							<span class="text-xs text-neutral-400">
+								({lib.type === 'movie' ? m.manual_match_type_movie() : m.manual_match_type_show()})
+							</span>
 						</label>
 						<button
 							type="button"
@@ -550,7 +654,11 @@
 						<input
 							id="gset-{def.id}"
 							bind:value={globalSettings[def.id]}
-							placeholder={def.placeholder ?? ''}
+							type={def.secret ? 'password' : 'text'}
+							autocomplete={def.secret ? 'off' : undefined}
+							placeholder={def.secret && managedSettingSecretSet(def.id)
+								? '••••••••'
+								: (def.placeholder ?? '')}
 							class="input w-full"
 						/>
 					</div>
@@ -560,18 +668,56 @@
 			<p class="text-xs text-neutral-400">{m.kometa_raw_hint()}</p>
 			<textarea
 				bind:value={rawText}
+				aria-label={m.kometa_raw_editor_label()}
 				spellcheck="false"
 				class="input h-[28rem] w-full font-mono text-xs"
 				placeholder={rawBusy ? '…' : ''}></textarea>
 			<div class="flex items-center gap-3">
-				<button onclick={saveRaw} disabled={rawBusy} class="btn btn-accent px-4 py-2">
-					{rawBusy ? m.settings_saving() : m.kometa_raw_save()}
+				<button
+					onclick={previewRaw}
+					disabled={rawBusy || !bindingReady || headerDirty}
+					class="btn btn-subtle px-4 py-2"
+				>
+					{rawBusy ? m.kometa_previewing() : m.kometa_raw_preview()}
 				</button>
+				{#if rawPreview?.planId}
+					<button onclick={confirmRaw} disabled={rawBusy} class="btn btn-accent px-4 py-2">
+						{rawBusy ? m.settings_saving() : m.kometa_raw_confirm()}
+					</button>
+					<button
+						onclick={() => (rawPreview = null)}
+						disabled={rawBusy}
+						class="btn btn-ghost px-3 py-2">{m.kometa_cancel_preview()}</button
+					>
+				{/if}
 				<button onclick={loadRaw} disabled={rawBusy} class="btn btn-ghost px-3 py-2">
 					{m.kometa_raw_reload()}
 				</button>
 				{#if rawMsg}<span class="text-sm text-neutral-300">{rawMsg}</span>{/if}
 			</div>
+			{#if rawPreview}
+				<div class="surface space-y-2 p-3 text-sm" aria-live="polite">
+					{#if rawPreview.warnings?.includes('diff_truncated')}
+						<p class="text-amber-400">{m.kometa_diff_truncated()}</p>
+					{/if}
+					{#if !rawPreview.changes?.length}
+						<p class="text-neutral-400">{m.kometa_preview_none()}</p>
+					{:else}
+						<ul class="space-y-1">
+							{#each rawPreview.changes as change, index (index)}
+								<li class="font-mono text-xs text-neutral-300">
+									<span class="text-amber-300">{change.op}</span>
+									{change.path}
+									{#if change.before != null}<span class="text-neutral-500">{change.before}</span
+										>{/if}
+									{#if change.after != null}<span class="text-neutral-500">→ {change.after}</span
+										>{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
 		{:else if section === 'backups'}
 			{#if backups.length === 0}
 				<p class="text-xs text-neutral-400">{m.kometa_backups_none()}</p>
@@ -582,16 +728,56 @@
 							<span class="font-mono text-xs text-neutral-300">{fmtStamp(b.stamp)}</span>
 							<button
 								type="button"
-								onclick={() => restore(b.name)}
-								onblur={() => (confirmRestore = null)}
-								class="btn {confirmRestore === b.name
-									? 'bg-red-900/50 text-red-300 hover:bg-red-900/70'
-									: 'btn-ghost'} px-3 py-1 text-xs"
+								onclick={() => previewRestore(b.name)}
+								disabled={!bindingReady || headerDirty || restoreBusy}
+								class="btn btn-ghost px-3 py-1 text-xs"
 							>
-								{confirmRestore === b.name ? m.kometa_restore_confirm() : m.kometa_restore()}
+								{m.kometa_restore_preview()}
 							</button>
 						</div>
 					{/each}
+				</div>
+			{/if}
+			{#if restoreError}<p class="text-sm text-red-300" role="alert">{restoreError}</p>{/if}
+			{#if restorePreview}
+				<div class="surface space-y-3 p-4" aria-live="polite">
+					<h2 class="text-sm font-semibold">
+						{m.kometa_restore_preview_title({ name: restorePreview.backupName ?? '' })}
+					</h2>
+					{#if restorePreview.warnings?.includes('diff_truncated')}
+						<p class="text-amber-400">{m.kometa_diff_truncated()}</p>
+					{/if}
+					{#if !restorePreview.changes?.length}
+						<p class="text-neutral-400">{m.kometa_preview_none()}</p>
+					{:else}
+						<ul class="max-h-72 space-y-1 overflow-auto">
+							{#each restorePreview.changes as change, index (index)}
+								<li class="font-mono text-xs text-neutral-300">
+									<span class="text-amber-300">{change.op}</span>
+									{change.path}
+									{#if change.before != null}<span class="text-neutral-500">{change.before}</span
+										>{/if}
+									{#if change.after != null}<span class="text-neutral-500">→ {change.after}</span
+										>{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					<div class="flex gap-2">
+						{#if restorePreview.planId}
+							<button
+								onclick={confirmRestore}
+								disabled={restoreBusy}
+								class="btn bg-red-900/50 px-4 py-2 text-red-200 hover:bg-red-900/70"
+								>{m.kometa_restore_confirm()}</button
+							>
+						{/if}
+						<button
+							onclick={() => (restorePreview = null)}
+							disabled={restoreBusy}
+							class="btn btn-ghost px-3 py-2">{m.kometa_cancel_preview()}</button
+						>
+					</div>
 				</div>
 			{/if}
 		{/if}
@@ -600,15 +786,23 @@
 	<!-- Action bar (preview/sync) — not on raw/backups -->
 	{#if section !== 'raw' && section !== 'backups'}
 		<div class="surface mt-6 flex items-center gap-3 p-4">
-			<button onclick={doPreview} disabled={busy} class="btn btn-subtle px-4 py-2">
+			<button
+				onclick={doPreview}
+				disabled={busy || !bindingReady || headerDirty}
+				class="btn btn-subtle px-4 py-2"
+			>
 				{busy ? m.kometa_previewing() : m.kometa_preview()}
 			</button>
 			<button
 				onclick={doSync}
-				disabled={busy || Boolean(km.parseError)}
+				disabled={busy ||
+					!bindingReady ||
+					headerDirty ||
+					Boolean(km.parseError) ||
+					!preview?.planId}
 				class="btn btn-accent px-4 py-2"
 			>
-				{busy ? m.kometa_syncing() : m.kometa_sync()}
+				{busy ? m.kometa_syncing() : m.kometa_confirm_sync()}
 			</button>
 			{#if done}<span class="text-sm text-emerald-400" role="status">{done}</span>{/if}
 			{#if error}<span class="text-sm text-red-300" role="alert">{error}</span>{/if}
@@ -647,6 +841,7 @@
 											: 'text-amber-300'}>{c.op}</span
 								>
 								<span class="text-neutral-300">{c.path}</span>
+								{#if c.before != null}<span class="text-neutral-500">{c.before}</span>{/if}
 								{#if c.after != null}<span class="text-neutral-500">→ {c.after}</span>{/if}
 							</li>
 						{/each}

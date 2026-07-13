@@ -22,6 +22,26 @@ const PRODUCT = 'PosterPilot';
 const DEVICE = 'PosterPilot';
 
 /**
+ * A plex.tv failure with a curated, secret-free message. API routes surface this
+ * message verbatim; any other error type must stay behind a generic response.
+ */
+export class PlexAuthError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options);
+		this.name = 'PlexAuthError';
+	}
+}
+
+/** plex.tv fetch with a hard timeout; network failures become curated errors. */
+async function plexTvFetch(path: string, init: RequestInit, what: string): Promise<Response> {
+	try {
+		return await fetch(`${PLEX_TV}${path}`, { ...init, signal: AbortSignal.timeout(8000) });
+	} catch (err) {
+		throw new PlexAuthError(`plex.tv is unreachable (${what}).`, { cause: err });
+	}
+}
+
+/**
  * Headers every plex.tv call carries. Beyond the product + stable client
  * identifier, plex.tv uses the device/platform/version fields to register the
  * acquired token as a recognizable device entry in the user's account
@@ -45,12 +65,15 @@ function plexTvHeaders(clientId: string): Record<string, string> {
  * https://plex.tv/link, after which {@link pollPin} returns the token.
  */
 export async function createPin(clientId: string): Promise<CreatedPin> {
-	const res = await fetch(`${PLEX_TV}/pins?strong=true`, {
-		method: 'POST',
-		headers: plexTvHeaders(clientId)
-	});
+	const res = await plexTvFetch(
+		'/pins?strong=true',
+		{ method: 'POST', headers: plexTvHeaders(clientId) },
+		'PIN request'
+	);
 	if (!res.ok) {
-		throw new Error(`plex.tv rejected the PIN request: HTTP ${res.status} ${res.statusText}`);
+		throw new PlexAuthError(
+			`plex.tv rejected the PIN request: HTTP ${res.status} ${res.statusText}`
+		);
 	}
 	const raw = (await res.json()) as RawPin;
 	return parseCreatedPin(raw);
@@ -62,11 +85,13 @@ export async function createPin(clientId: string): Promise<CreatedPin> {
  * PIN's expiry passes.
  */
 export async function pollPin(id: number, clientId: string): Promise<string | null> {
-	const res = await fetch(`${PLEX_TV}/pins/${encodeURIComponent(String(id))}`, {
-		headers: plexTvHeaders(clientId)
-	});
+	const res = await plexTvFetch(
+		`/pins/${encodeURIComponent(String(id))}`,
+		{ headers: plexTvHeaders(clientId) },
+		'PIN poll'
+	);
 	if (!res.ok) {
-		throw new Error(`plex.tv PIN poll failed: HTTP ${res.status} ${res.statusText}`);
+		throw new PlexAuthError(`plex.tv PIN poll failed: HTTP ${res.status} ${res.statusText}`);
 	}
 	const raw = (await res.json()) as RawPin;
 	return parsePinToken(raw);
@@ -80,11 +105,15 @@ export async function listConnections(
 	token: string,
 	clientId: string
 ): Promise<ConnectionCandidate[]> {
-	const res = await fetch(`${PLEX_TV}/resources?includeHttps=1`, {
-		headers: { ...plexTvHeaders(clientId), 'X-Plex-Token': token }
-	});
+	const res = await plexTvFetch(
+		'/resources?includeHttps=1',
+		{ headers: { ...plexTvHeaders(clientId), 'X-Plex-Token': token } },
+		'resources lookup'
+	);
 	if (!res.ok) {
-		throw new Error(`plex.tv resources lookup failed: HTTP ${res.status} ${res.statusText}`);
+		throw new PlexAuthError(
+			`plex.tv resources lookup failed: HTTP ${res.status} ${res.statusText}`
+		);
 	}
 	const raw = (await res.json()) as RawResource[];
 	return parseConnections(raw);

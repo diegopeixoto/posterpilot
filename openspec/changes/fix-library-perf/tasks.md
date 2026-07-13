@@ -14,12 +14,12 @@
 
 - [x] 3.1 `resizedPosterUrl` (pure, tested): Emby/Jellyfin `fillWidth` resize; Plex/unknown → full-size (cached). Plex transcode deferred (fragile to build offline; caching still applies).
 - [x] 3.2 `GET /api/poster-thumb/[id]` — resolves the item's poster URL server-side, caches via `getOrFetchThumb` (TTL + LRU from config), serves with immutable cache headers; 404 on no poster.
-- [~] 3.3 Browser no longer fetches the media server directly (served by id via the proxy). **Full token-stripping from the SSR payload deferred** — `currentPosterUrl` is still the presence flag; a small follow-up can project it to `hasPoster`. Spec claim aligned to this.
+- [x] 3.3 Browser no longer fetches the media server directly (served by id via the proxy); the library SSR/API projection exposes only `hasPoster`/`hasStagedPoster` and a safe cache version, never media-server or provider URLs.
 
 ## 4. Grid rendering
 
 - [x] 4.1 `PosterCard` `<img src>` → `/api/poster-thumb/<id>` + `decoding="async"` + intrinsic `width`/`height`; keeps `loading="lazy"` and the no-poster placeholder.
-- [~] 4.2 Deferred (see 3.3) — `currentPosterUrl` still present as the presence flag; image no longer loads from it.
+- [x] 4.2 Library grid payloads use the credentials-safe projection; tests reject serialization of current/staged artwork URLs or token-like values.
 
 ## 5. Verification
 

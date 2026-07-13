@@ -12,17 +12,25 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { eq, inArray } from 'drizzle-orm';
+import { resolveDataPaths } from '$lib/server/data-paths';
 import { db } from '$lib/server/db';
 import { thumbnailCache } from '$lib/server/db/schema';
+import {
+	safeArtworkRequestTarget,
+	sanitizeServerArtworkUrl
+} from '$lib/server/media-server/artwork-url';
 
 /** How long a cached thumbnail stays fresh before it is re-fetched (30 days). */
-export const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Total on-disk budget for the thumbnail cache before LRU eviction kicks in (512 MB). */
-export const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+
+/** Per-response ceiling so an untrusted upstream cannot exhaust process memory. */
+const DEFAULT_MAX_THUMB_BYTES = 20 * 1024 * 1024;
 
 /**
  * Directory holding the cached image bytes (one file per `urlHash`), placed next to
@@ -32,12 +40,7 @@ export const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
  * import this module, stay free of `$env` resolution.
  */
 function thumbCacheDir(): string {
-	const dbUrl = process.env.DATABASE_URL;
-	if (dbUrl && dbUrl.startsWith('file:')) {
-		const dir = dirname(dbUrl.slice('file:'.length));
-		if (dir && dir !== '.') return join(dir, 'thumb-cache');
-	}
-	return './data/thumb-cache';
+	return resolveDataPaths(process.env.DATABASE_URL).thumbCacheDirectory;
 }
 
 // ── Pure helpers (no db / fs / $env) ───────────────────────────────────────────
@@ -74,12 +77,59 @@ export function selectEvictions(
 	return evict;
 }
 
+/**
+ * Given the cache directory's file names and the set of indexed hashes, return
+ * the file names that are cache entries (sha256-hex names) with no index row.
+ * Anything that doesn't look like a cache file is left alone. Pure.
+ */
+export function selectOrphanedCacheFiles(
+	fileNames: string[],
+	indexedHashes: Set<string>
+): string[] {
+	return fileNames.filter((name) => /^[a-f0-9]{64}$/.test(name) && !indexedHashes.has(name));
+}
+
 // ── Impure orchestration (db + fs) ─────────────────────────────────────────────
 
 /** Cached image bytes plus the MIME type to serve them with. */
 export interface ThumbBytes {
 	bytes: Buffer;
 	contentType: string;
+}
+
+/** Read a fetch response incrementally and stop before it can exceed `maxBytes`. */
+export async function readBoundedThumbBody(response: Response, maxBytes: number): Promise<Buffer> {
+	if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+		throw new RangeError('Thumbnail response limit must be a positive integer');
+	}
+	const declaredLength = Number(response.headers.get('content-length'));
+	if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+		throw new Error('Thumbnail response exceeds the per-image size limit');
+	}
+	if (!response.body) return Buffer.alloc(0);
+
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			total += value.byteLength;
+			if (total > maxBytes) {
+				await reader.cancel().catch(() => undefined);
+				throw new Error('Thumbnail response exceeds the per-image size limit');
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	return Buffer.concat(
+		chunks.map((chunk) => Buffer.from(chunk)),
+		total
+	);
 }
 
 /** Absolute-from-cwd path of the on-disk file for a given URL hash. */
@@ -93,7 +143,7 @@ function filePathFor(urlHash: string): string {
  * from disk (the stale row is deleted in that case). On a hit, `accessedAt` is
  * bumped for LRU.
  */
-export async function getCachedThumb(
+async function getCachedThumb(
 	url: string,
 	opts: { ttlMs?: number } = {}
 ): Promise<ThumbBytes | null> {
@@ -146,19 +196,20 @@ async function evictToBudget(maxBytes: number): Promise<void> {
  * the cache within `maxBytes`. Throws if the upstream fetch fails (non-2xx or
  * network error) — the proxy route turns that into a 502.
  */
-export async function fetchAndCache(
+async function fetchAndCache(
 	url: string,
-	opts: { ttlMs?: number; maxBytes?: number } = {}
+	opts: { ttlMs?: number; maxBytes?: number; maxEntryBytes?: number } = {}
 ): Promise<ThumbBytes> {
 	const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+	const maxEntryBytes = opts.maxEntryBytes ?? DEFAULT_MAX_THUMB_BYTES;
 	const urlHash = hashUrl(url);
 
 	// Refuse redirects so an allowlisted CDN host can't 30x us to an internal target
 	// (SSRF), and time out so a hung upstream can't pin the request open.
 	const res = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15000) });
-	if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status} for ${safeArtworkRequestTarget(url)}`);
 	const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
-	const bytes = Buffer.from(await res.arrayBuffer());
+	const bytes = await readBoundedThumbBody(res, maxEntryBytes);
 
 	await mkdir(thumbCacheDir(), { recursive: true });
 	await writeFile(filePathFor(urlHash), bytes);
@@ -168,7 +219,7 @@ export async function fetchAndCache(
 		.insert(thumbnailCache)
 		.values({
 			urlHash,
-			url,
+			url: sanitizeServerArtworkUrl(url) ?? '[omitted]',
 			contentType,
 			sizeBytes: bytes.byteLength,
 			fetchedAt: now,
@@ -176,7 +227,13 @@ export async function fetchAndCache(
 		})
 		.onConflictDoUpdate({
 			target: thumbnailCache.urlHash,
-			set: { url, contentType, sizeBytes: bytes.byteLength, fetchedAt: now, accessedAt: now }
+			set: {
+				url: sanitizeServerArtworkUrl(url) ?? '[omitted]',
+				contentType,
+				sizeBytes: bytes.byteLength,
+				fetchedAt: now,
+				accessedAt: now
+			}
 		});
 
 	await evictToBudget(maxBytes);
@@ -184,10 +241,31 @@ export async function fetchAndCache(
 	return { bytes, contentType };
 }
 
+/**
+ * Delete on-disk cache files that have no index row. Files and rows normally
+ * live and die together, but migration 0008 wiped the index wholesale (cached
+ * credential-bearing URLs must not survive the multi-server upgrade), which
+ * orphaned every pre-upgrade file with no other reclamation path. Runs once at
+ * boot, before any request or job can write new entries.
+ */
+export async function reconcileThumbCacheDisk(): Promise<number> {
+	let names: string[];
+	try {
+		names = await readdir(thumbCacheDir());
+	} catch {
+		// Directory absent (fresh install / nothing cached yet) — nothing to do.
+		return 0;
+	}
+	const rows = await db.select({ urlHash: thumbnailCache.urlHash }).from(thumbnailCache);
+	const orphaned = selectOrphanedCacheFiles(names, new Set(rows.map((row) => row.urlHash)));
+	await Promise.all(orphaned.map((name) => rm(filePathFor(name), { force: true })));
+	return orphaned.length;
+}
+
 /** Serve `url` from the cache, fetching + caching it on a miss. */
 export async function getOrFetchThumb(
 	url: string,
-	opts: { ttlMs?: number; maxBytes?: number } = {}
+	opts: { ttlMs?: number; maxBytes?: number; maxEntryBytes?: number } = {}
 ): Promise<ThumbBytes> {
 	const cached = await getCachedThumb(url, opts);
 	if (cached) return cached;

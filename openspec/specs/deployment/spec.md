@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define the self-hosted container deployment model and its persistent data, mounted Kometa, and runtime configuration requirements.
 ## Requirements
 ### Requirement: Single-container deployment
 
@@ -58,4 +58,3 @@ The system SHALL be able to read and write the user's existing Kometa `config.ym
 
 - **WHEN** no Kometa config-file path is configured or the path is not mounted into the container
 - **THEN** the Kometa config-sync feature stays inactive and the rest of the application runs normally
-

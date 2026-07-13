@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by syncing change add-fun-menu. Update Purpose after sync.
+Define the opt-in FUN area and safe, eligible random media-selection behavior.
 ## Requirements
 ### Requirement: Fun section gated by setting
 

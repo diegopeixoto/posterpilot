@@ -51,6 +51,7 @@ interface MetadataEntry {
 	year?: number;
 	type: string;
 	thumb?: string;
+	art?: string;
 	/** Season/episode ordinal on `/children` responses. */
 	index?: number;
 	/** Last-modified time as epoch seconds. */
@@ -74,6 +75,31 @@ interface MetadataContainer {
 export interface PlexChild {
 	ratingKey: string;
 	index: number | null;
+	currentPosterUrl: string | null;
+	currentBackgroundUrl: string | null;
+	serverUpdatedAt: Date | null;
+}
+
+export interface PlexArtworkRead {
+	url: string;
+	identity: string;
+	data: ArrayBuffer;
+	contentType: string | null;
+}
+
+export interface PlexNativeCollectionMember {
+	ratingKey: string;
+	title: string | null;
+	year: number | null;
+}
+
+export interface PlexNativeCollection {
+	ratingKey: string;
+	title: string;
+	members: PlexNativeCollectionMember[];
+	currentPosterUrl: string | null;
+	currentBackgroundUrl: string | null;
+	libraryKeys: string[];
 }
 
 /** Headers every Plex request must carry. */
@@ -219,11 +245,59 @@ export async function listItems(
 			type,
 			guids: parseGuids(entry.Guid),
 			currentPosterUrl: buildPosterUrl(baseUrl, entry.thumb, token),
+			currentBackgroundUrl: buildPosterUrl(baseUrl, entry.art, token),
 			serverUpdatedAt: parseUpdatedAt(entry.updatedAt),
 			addedAt: parseUpdatedAt(entry.addedAt),
 			watched: parseWatched(type, entry)
 		};
 	});
+}
+
+/**
+ * Discover Plex collection containers and their exact rating-key members for the
+ * requested sections. Collection title is display metadata only; identity is the
+ * provider-native collection rating key.
+ */
+export async function listCollections(
+	baseUrl: string,
+	token: string,
+	sectionKeys: string[]
+): Promise<PlexNativeCollection[]> {
+	const byId = new Map<string, PlexNativeCollection>();
+	for (const sectionKey of [...new Set(sectionKeys)]) {
+		const container = await getContainer<MetadataContainer>(
+			baseUrl,
+			token,
+			`/library/sections/${encodeURIComponent(sectionKey)}/collections`
+		);
+		for (const entry of container.Metadata ?? []) {
+			if (!entry.ratingKey || entry.type !== 'collection') continue;
+			const children = await getContainer<MetadataContainer>(
+				baseUrl,
+				token,
+				`/library/metadata/${encodeURIComponent(entry.ratingKey)}/children`
+			);
+			const prior = byId.get(entry.ratingKey);
+			const members = new Map((prior?.members ?? []).map((member) => [member.ratingKey, member]));
+			for (const child of children.Metadata ?? []) {
+				if (!child.ratingKey) continue;
+				members.set(child.ratingKey, {
+					ratingKey: child.ratingKey,
+					title: child.title?.trim() || null,
+					year: typeof child.year === 'number' ? child.year : null
+				});
+			}
+			byId.set(entry.ratingKey, {
+				ratingKey: entry.ratingKey,
+				title: entry.title?.trim() || entry.ratingKey,
+				members: [...members.values()],
+				currentPosterUrl: buildPosterUrl(baseUrl, entry.thumb, token),
+				currentBackgroundUrl: buildPosterUrl(baseUrl, entry.art, token),
+				libraryKeys: [...new Set([...(prior?.libraryKeys ?? []), sectionKey])]
+			});
+		}
+	}
+	return [...byId.values()];
 }
 
 /**
@@ -249,8 +323,41 @@ export async function listChildren(
 	);
 	return (container.Metadata ?? []).map((entry) => ({
 		ratingKey: entry.ratingKey,
-		index: typeof entry.index === 'number' ? entry.index : null
+		index: typeof entry.index === 'number' ? entry.index : null,
+		currentPosterUrl: buildPosterUrl(baseUrl, entry.thumb, token),
+		currentBackgroundUrl: buildPosterUrl(baseUrl, entry.art, token),
+		serverUpdatedAt: parseUpdatedAt(entry.updatedAt)
 	}));
+}
+
+/** Read exact current artwork bytes plus the native path used for stale checks. */
+export async function readArtwork(
+	baseUrl: string,
+	token: string,
+	ratingKey: string,
+	kind: 'poster' | 'background'
+): Promise<PlexArtworkRead | null> {
+	const container = await getContainer<MetadataContainer>(
+		baseUrl,
+		token,
+		`/library/metadata/${encodeURIComponent(ratingKey)}`
+	);
+	const entry = container.Metadata?.[0];
+	const identity = kind === 'poster' ? entry?.thumb : entry?.art;
+	if (!identity) return null;
+	const url = buildPosterUrl(baseUrl, identity, token)!;
+	const response = await fetch(url, {
+		headers: plexHeaders(token),
+		signal: AbortSignal.timeout(15_000)
+	});
+	if (response.status === 404) return null;
+	if (!response.ok) throw new Error(`Plex artwork read failed (${response.status}).`);
+	return {
+		url,
+		identity,
+		data: await response.arrayBuffer(),
+		contentType: response.headers.get('content-type')
+	};
 }
 
 /**

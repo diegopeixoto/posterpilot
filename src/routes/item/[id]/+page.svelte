@@ -1,11 +1,27 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import type { PosterCandidate } from '$lib/server/db/schema';
 	import type { CandidateSet } from '$lib/server/posters/sets';
 	import { groupSetArtwork } from '$lib/posters/season-groups';
 	import { defaultExpanded, providerKey, setKey, seasonKey } from '$lib/posters/collapse';
 	import { m } from '$lib/paraglide/messages';
+	import JobProgress from '$lib/components/JobProgress.svelte';
+	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
+	import ArtworkTimeline from '$lib/components/ArtworkTimeline.svelte';
+	import ArtworkUndoDialog from '$lib/components/ArtworkUndoDialog.svelte';
+	import type { PublicJobProgress } from '$lib/job-progress';
+	import { jobStatusLabel } from '$lib/job-labels';
+	import {
+		canConfirmApplyAndNext,
+		canRetryApplyNextCompletion,
+		isFullySuccessfulApply
+	} from '$lib/review-apply-next';
+	import {
+		isEditableReviewTarget,
+		reviewShortcutForKey,
+		reviewShortcutsBlocked
+	} from '$lib/review-shortcuts';
 
 	let { data } = $props();
 
@@ -13,27 +29,82 @@
 	let selectedPoster = $state<string | null>(data.item.selectedPosterUrl);
 	// svelte-ignore state_referenced_locally
 	let selectedBackground = $state<string | null>(data.item.selectedBackgroundUrl);
-	let method = $state<'plex' | 'kometa' | 'both'>('both');
+	// svelte-ignore state_referenced_locally
+	let method = $state<'plex' | 'kometa' | 'both'>(data.defaultApplyMethod);
 	let busy = $state(false);
+	let jobId = $state<number | null>(null);
+	let undoJobId = $state<number | null>(null);
+	let historyRefresh = $state(0);
 	let message = $state<string | null>(null);
 	// Whether the current message is an error (drives role="alert" + red styling).
 	let messageError = $state(false);
+	let reviewBusy = $state(false);
+	let advanceAfterApply = $state(false);
+	let advanceTargetHref = $state<string | null>(null);
+	let finishingAdvance = $state(false);
+	let completionRetry = $state<{ jobId: number; targetHref: string } | null>(null);
 	function setMessage(text: string, isError = false) {
 		message = text;
 		messageError = isError;
 	}
 
-	// Confirm gate for applying artwork to the live server (plex/both write to the
-	// real media server and are hard to undo; kometa-only writes a re-runnable file).
+	function returnToContext(event: MouseEvent) {
+		if (!data.canUseHistoryBack || history.length <= 1) return;
+		event.preventDefault();
+		history.back();
+	}
+
+	// Every destination is confirmation-bearing; the plan below is the source of truth.
 	let confirmApply = $state(false);
-	const needsConfirm = $derived(method === 'plex' || method === 'both');
+	let applyPreview = $state<{
+		planId: string | null;
+		digest: string | null;
+		summary: {
+			skipCount: number;
+			destinations: { server: number; kometa: number };
+		};
+	} | null>(null);
 	const confirmTarget = $derived(
-		method === 'both' ? `${m.apply_target_server()} + Kometa` : m.apply_target_server()
+		method === 'both'
+			? `${m.apply_target_server()} + Kometa`
+			: method === 'kometa'
+				? 'Kometa'
+				: m.apply_target_server()
 	);
 
 	let posterUrlInput = $state('');
 	let backgroundUrlInput = $state('');
 	let posterFile = $state<File | null>(null);
+	let uploadPreview = $state<{
+		planId: string;
+		digest: string;
+		image: { sizeBytes: number; contentType: string; sha256: string };
+		expiresAt: string;
+	} | null>(null);
+
+	type UndoUiScope =
+		| { kind: 'item' }
+		| { kind: 'revision'; revisionId: string }
+		| { kind: 'season'; season: number };
+	interface UndoPreview {
+		planId: string;
+		digest: string;
+		scope: unknown;
+		operations: unknown[];
+		summary: {
+			operationCount: number;
+			actionableCount: number;
+			unavailableCount: number;
+			targetCount: number;
+			slotCount: number;
+			destinations: { server: number; kometa: number };
+			restoreStates: { present: number; absent: number; unavailable: number };
+		};
+	}
+	let undoPreview = $state<UndoPreview | null>(null);
+	let undoContextLabel = $state('');
+	let undoBusy = $state(false);
+	let undoAvailable = $state(false);
 
 	const isShow = $derived(data.item.type === 'show');
 
@@ -117,14 +188,18 @@
 	const suggestions = $derived(computeSuggestions(data.candidates, data.suggestPreselect));
 
 	/**
-	 * Pre-stage the suggested pick for every slot the user hasn't already chosen,
+	 * Explicitly stage the suggested pick for every slot the user hasn't already chosen,
 	 * persisting exactly like a manual pick (children must be persisted for apply
 	 * to read them). Only fills EMPTY slots, so it never overrides a real choice.
-	 * Runs at discrete moments (mount / after discovery / on item change) rather
-	 * than reactively, so an in-session de-selection isn't immediately undone.
 	 */
-	async function applySuggestions() {
-		if (!data.suggestPreselect) return;
+	async function stageSuggestions() {
+		if (!data.suggestPreselect || busy || finishingAdvance) return;
+		busy = true;
+		confirmApply = false;
+		applyPreview = null;
+		advanceAfterApply = false;
+		advanceTargetHref = null;
+		completionRetry = null;
 		const s = suggestions;
 		let showChanged = false;
 		if (!selectedPoster && s.poster) {
@@ -147,25 +222,39 @@
 				children.push({ kind: 'title_card', season: c.season, episode: c.episode, url: c.url });
 			}
 		}
-		// Suggestions are best-effort: persist is fire-and-forget and must never surface
-		// as an unhandled rejection (callers invoke this via `void applySuggestions()`).
 		try {
-			if (showChanged) await persistSelection();
+			if (showChanged && !(await persistSelection())) throw new Error('selection_failed');
 			if (children.length) {
 				const res = await fetch(`/api/items/${data.item.id}/select`, {
 					method: 'POST',
 					headers: jsonHeaders,
 					body: JSON.stringify({ children })
 				});
-				// Only reflect the children locally once the server has persisted them.
-				if (res.ok) {
-					const add: Record<string, string> = {};
-					for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
-					childSel = { ...childSel, ...add };
+				if (!res.ok) throw new Error('selection_failed');
+				const add: Record<string, string> = {};
+				for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
+				childSel = { ...childSel, ...add };
+			}
+			if (showChanged || children.length) {
+				setMessage(m.review_suggestion_staged());
+				if (data.reviewNavigation) {
+					await fetch(`/api/review/items/${data.item.id}`, {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({
+							serverId: data.item.serverInstanceId,
+							action: 'staged',
+							context: { source: 'item_detail' }
+						})
+					});
 				}
+			} else {
+				setMessage(m.review_no_suggestion_to_stage());
 			}
 		} catch {
-			// ignore — the user can still pick artwork manually
+			setMessage(m.review_action_failed(), true);
+		} finally {
+			busy = false;
 		}
 	}
 
@@ -211,14 +300,17 @@
 			message = null;
 			messageError = false;
 			confirmApply = false;
-			void applySuggestions();
+			applyPreview = null;
+			advanceAfterApply = false;
+			advanceTargetHref = null;
+			finishingAdvance = false;
+			completionRetry = null;
+			jobId = null;
+			undoJobId = null;
+			undoPreview = null;
+			undoContextLabel = '';
+			undoAvailable = false;
 		}
-	});
-
-	// Initial load: pre-stage suggestions once the page is interactive (mount only;
-	// later item navigations are handled by the resync effect above).
-	onMount(() => {
-		void applySuggestions();
 	});
 
 	function formatRuntime(min: number | null): string | null {
@@ -271,25 +363,38 @@
 	const jsonHeaders = { 'content-type': 'application/json' };
 
 	/** Persist the current staged poster + background as the pending selection. */
-	async function persistSelection() {
-		await fetch(`/api/items/${data.item.id}/select`, {
+	async function persistSelection(): Promise<boolean> {
+		if (finishingAdvance) return false;
+		confirmApply = false;
+		applyPreview = null;
+		advanceAfterApply = false;
+		advanceTargetHref = null;
+		completionRetry = null;
+		const response = await fetch(`/api/items/${data.item.id}/select`, {
 			method: 'POST',
 			headers: jsonHeaders,
 			body: JSON.stringify({ posterUrl: selectedPoster, backgroundUrl: selectedBackground })
 		});
+		return response.ok;
 	}
 
 	async function pickPoster(url: string) {
+		if (finishingAdvance) return;
 		selectedPoster = selectedPoster === url ? null : url;
 		await persistSelection();
 	}
 	async function pickBackground(url: string) {
+		if (finishingAdvance) return;
 		selectedBackground = selectedBackground === url ? null : url;
 		await persistSelection();
 	}
 
 	/** Toggle a single season/episode slot and persist it. */
 	async function pickChild(kind: string, season: number, episode: number | null, url: string) {
+		if (finishingAdvance) return;
+		confirmApply = false;
+		applyPreview = null;
+		completionRetry = null;
 		const key = childKey(kind, season, episode);
 		const next = childSel[key] === url ? null : url;
 		if (next === null) {
@@ -308,6 +413,9 @@
 
 	/** Stage a whole set: show poster + backdrop and every season/episode slot it covers. */
 	async function useSet(set: CandidateSet) {
+		if (finishingAdvance) return;
+		confirmApply = false;
+		applyPreview = null;
 		const g = groupSetArtwork(set.candidates);
 		if (g.posters[0]) selectedPoster = g.posters[0].url;
 		if (g.backgrounds[0]) selectedBackground = g.backgrounds[0].url;
@@ -341,6 +449,7 @@
 	}
 
 	async function useCustomUrl(which: 'poster' | 'background') {
+		if (finishingAdvance) return;
 		const url = (which === 'poster' ? posterUrlInput : backgroundUrlInput).trim();
 		if (!url) return;
 		if (which === 'poster') selectedPoster = url;
@@ -356,7 +465,7 @@
 			const res = await fetch(`/api/items/${data.item.id}/discover`, { method: 'POST' });
 			const result = await res.json().catch(() => ({}));
 			if (!res.ok || result.error) {
-				setMessage(m.item_msg_discovery_failed({ error: result.error ?? res.status }), true);
+				setMessage(m.item_msg_discovery_failed({ error: m.api_error_generic() }), true);
 			} else {
 				setMessage(
 					result.count === 1
@@ -365,8 +474,6 @@
 				);
 			}
 			await invalidateAll();
-			// Newly discovered covers are now scored — pre-stage the top picks.
-			await applySuggestions();
 		} catch {
 			setMessage(m.item_msg_discovery_failed({ error: m.item_error_network() }), true);
 		} finally {
@@ -381,11 +488,28 @@
 		try {
 			const fd = new FormData();
 			fd.append('file', posterFile);
-			const res = await fetch(`/api/items/${data.item.id}/upload`, { method: 'POST', body: fd });
+			if (uploadPreview) {
+				fd.append('planId', uploadPreview.planId);
+				fd.append('digest', uploadPreview.digest);
+			}
+			const res = await fetch(`/api/items/${data.item.id}/upload`, {
+				method: uploadPreview ? 'PUT' : 'POST',
+				body: fd
+			});
 			const result = await res.json().catch(() => ({}));
-			if (res.ok && result.ok) setMessage(m.item_msg_uploaded());
-			else setMessage(m.item_msg_upload_failed({ error: result.error ?? res.status }), true);
-			await invalidateAll();
+			if (res.ok && result.ok && result.preview) {
+				uploadPreview = result.preview;
+				setMessage(m.item_msg_upload_preview_ready());
+			} else if (res.ok && result.ok && result.result) {
+				uploadPreview = null;
+				posterFile = null;
+				setMessage(m.item_msg_uploaded());
+				await invalidateAll();
+				historyRefresh += 1;
+			} else {
+				if (result?.error?.code === 'plan_stale') uploadPreview = null;
+				setMessage(m.item_msg_upload_failed({ error: m.api_error_generic() }), true);
+			}
 		} catch {
 			setMessage(m.item_msg_upload_failed({ error: m.item_error_network() }), true);
 		} finally {
@@ -393,123 +517,205 @@
 		}
 	}
 
-	async function revert() {
-		if (busy) return;
-		busy = true;
+	async function requestUndo(scope: UndoUiScope, contextLabel: string) {
+		if (busy || undoBusy) return;
+		undoBusy = true;
+		undoPreview = null;
+		undoContextLabel = contextLabel;
 		setMessage('');
 		try {
-			const res = await fetch(`/api/items/${data.item.id}/revert`, { method: 'POST' });
-			const result = await res.json().catch(() => ({}));
-			if (res.ok && result.ok) {
-				setMessage(m.item_msg_reverted());
-				selectedPoster = null;
-				selectedBackground = null;
-				childSel = {};
-			} else {
-				setMessage(m.item_msg_revert_failed({ error: result.error ?? res.status }), true);
-			}
-			await invalidateAll();
-		} catch {
-			setMessage(m.item_msg_revert_failed({ error: m.item_error_network() }), true);
-		} finally {
-			busy = false;
-		}
-	}
-
-	/** Revert a single season (its poster + its episodes' title cards). */
-	async function revertSeason(season: number) {
-		if (busy) return;
-		busy = true;
-		setMessage('');
-		try {
-			const res = await fetch(`/api/items/${data.item.id}/revert`, {
+			const res = await fetch(`/api/items/${data.item.id}/undo`, {
 				method: 'POST',
 				headers: jsonHeaders,
-				body: JSON.stringify({ season })
+				body: JSON.stringify({ scope })
 			});
 			const result = await res.json().catch(() => ({}));
-			if (res.ok && result.ok) {
-				setMessage(m.item_msg_reverted());
-				const copy = { ...childSel };
-				for (const k of Object.keys(copy)) {
-					if (Number(k.split(':')[1]) === season) delete copy[k];
-				}
-				childSel = copy;
+			if (res.ok && result.ok && result.preview) {
+				undoPreview = result.preview as UndoPreview;
 			} else {
-				setMessage(m.item_msg_revert_failed({ error: result.error ?? res.status }), true);
+				setMessage(m.item_undo_failed(), true);
 			}
-			await invalidateAll();
 		} catch {
 			setMessage(m.item_msg_revert_failed({ error: m.item_error_network() }), true);
 		} finally {
-			busy = false;
+			undoBusy = false;
 		}
 	}
 
-	/** Apply button: validate, then gate live-server writes behind a confirm. */
-	function requestApply() {
+	function cancelUndo(): void {
+		if (undoBusy) return;
+		undoPreview = null;
+		undoContextLabel = '';
+	}
+
+	async function confirmUndo() {
+		if (busy || undoBusy || !undoPreview) return;
+		const frozenPreview = undoPreview;
+		undoBusy = true;
+		setMessage('');
+		try {
+			const res = await fetch(`/api/items/${data.item.id}/undo`, {
+				method: 'PUT',
+				headers: jsonHeaders,
+				body: JSON.stringify({
+					planId: frozenPreview.planId,
+					digest: frozenPreview.digest
+				})
+			});
+			const result = await res.json().catch(() => ({}));
+			// Confirmation consumes the plan and hands it to the durable worker, so the
+			// outcome arrives through job progress rather than from this response.
+			if (res.ok && result.job) {
+				undoJobId = result.job.jobId as number;
+				setMessage(m.item_working());
+			} else {
+				setMessage(
+					result?.error?.code === 'plan_stale' ? m.item_undo_stale() : m.item_undo_failed(),
+					true
+				);
+			}
+			undoPreview = null;
+			undoContextLabel = '';
+		} catch {
+			setMessage(m.item_msg_revert_failed({ error: m.item_error_network() }), true);
+		} finally {
+			undoBusy = false;
+		}
+	}
+
+	async function onUndoDone(status: string) {
+		undoJobId = null;
+		if (status === 'completed') setMessage(m.item_undo_success());
+		else if (status === 'partial_failed') setMessage(m.item_undo_partial(), true);
+		else setMessage(m.item_undo_failed(), true);
+		await invalidateAll();
+		historyRefresh += 1;
+	}
+
+	function previewUndoItem(): void {
+		void requestUndo({ kind: 'item' }, data.item.title);
+	}
+
+	function previewUndoSeason(season: number): void {
+		void requestUndo({ kind: 'season', season }, m.item_season_label({ number: season }));
+	}
+
+	function previewUndoRevision(revisionId: string): void {
+		void requestUndo(
+			{ kind: 'revision', revisionId },
+			`${data.item.title} · ${m.item_undo_revision()}`
+		);
+	}
+
+	async function toggleReviewIgnored() {
+		if (!data.reviewNavigation || reviewBusy) return;
+		reviewBusy = true;
+		try {
+			const response = await fetch(`/api/review/items/${data.item.id}`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({
+					serverId: data.item.serverInstanceId,
+					action: data.item.ignored ? 'unignored' : 'ignored',
+					context: { source: 'item_detail' }
+				})
+			});
+			if (!response.ok) throw new Error('review_action_failed');
+			setMessage(m.review_action_done());
+			await invalidateAll();
+		} catch {
+			setMessage(m.review_action_failed(), true);
+		} finally {
+			reviewBusy = false;
+		}
+	}
+
+	function focusArtworkComparison() {
+		const comparison = document.getElementById('artwork-compare');
+		if (!comparison) {
+			setMessage(m.review_no_comparison(), true);
+			return;
+		}
+		comparison.focus({ preventScroll: true });
+		comparison.scrollIntoView({
+			block: 'start',
+			behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+		});
+		setMessage(m.review_comparison_focused());
+	}
+
+	function handleReviewShortcut(event: KeyboardEvent) {
+		if (!data.reviewNavigation) return;
+		const target = event.target instanceof HTMLElement ? event.target : null;
+		if (isEditableReviewTarget(target)) return;
+		if (
+			reviewShortcutsBlocked({
+				busy,
+				reviewBusy,
+				finishingAdvance,
+				confirmationOpen: confirmApply,
+				undoBusy,
+				undoOpen: undoPreview !== null,
+				modalOpen: Boolean(document.querySelector('dialog[open], [aria-modal="true"]'))
+			})
+		)
+			return;
+		const shortcut = reviewShortcutForKey(event);
+		if (!shortcut) return;
+		if (shortcut === 'previous' && data.reviewNavigation.previous) {
+			event.preventDefault();
+			void goto(data.reviewNavigation.previous.href);
+		} else if (shortcut === 'next' && data.reviewNavigation.next) {
+			event.preventDefault();
+			void goto(data.reviewNavigation.next.href);
+		} else if (shortcut === 'stage_suggestion') {
+			event.preventDefault();
+			void stageSuggestions();
+		} else if (shortcut === 'ignore') {
+			event.preventDefault();
+			void toggleReviewIgnored();
+		} else if (shortcut === 'compare') {
+			event.preventDefault();
+			focusArtworkComparison();
+		} else if (shortcut === 'apply_next' && data.reviewNavigation.next) {
+			event.preventDefault();
+			void requestApply(true);
+		}
+	}
+
+	onMount(() => {
+		window.addEventListener('keydown', handleReviewShortcut);
+		return () => window.removeEventListener('keydown', handleReviewShortcut);
+	});
+
+	/** Materialize the exact plan before showing the separate confirmation action. */
+	async function requestApply(shouldAdvance = false) {
 		if (!hasStaged) {
+			advanceAfterApply = false;
+			advanceTargetHref = null;
 			setMessage(m.item_msg_stage_first(), true);
 			return;
 		}
-		if (needsConfirm) {
-			confirmApply = true;
-			return;
-		}
-		apply();
-	}
-
-	async function apply() {
-		if (busy || !hasStaged) return;
+		if (busy || finishingAdvance) return;
+		advanceAfterApply = shouldAdvance;
+		advanceTargetHref = shouldAdvance ? (data.reviewNavigation?.next?.href ?? null) : null;
+		completionRetry = null;
 		busy = true;
 		setMessage('');
 		try {
 			const res = await fetch(`/api/items/${data.item.id}/apply`, {
 				method: 'POST',
 				headers: jsonHeaders,
-				body: JSON.stringify({
-					posterUrl: selectedPoster,
-					backgroundUrl: selectedBackground,
-					method
-				})
+				body: JSON.stringify({ method })
 			});
-			const { outcomes } = (await res.json().catch(() => ({ outcomes: [] }))) as {
-				outcomes: {
-					method: string;
-					status: string;
-					error?: string;
-					children?: { applied: number; failed: number; skipped: number };
-				}[];
-			};
-			const targetLabel = (mth: string) => (mth === 'kometa' ? 'Kometa' : m.apply_target_server());
-			const failed = outcomes.filter((o) => o.status === 'failed');
-			const skipped = outcomes.reduce((n, o) => n + (o.children?.skipped ?? 0), 0);
-			// Per-child upload failures keep method status 'success' (the show-level write
-			// succeeded), so surface them here rather than reporting a clean success.
-			const childFailed = outcomes.reduce((n, o) => n + (o.children?.failed ?? 0), 0);
-			if (!res.ok && !outcomes.length) {
-				setMessage(m.item_msg_apply_failed({ target: confirmTarget, error: res.status }), true);
-			} else if (failed.length === 0) {
-				if (childFailed > 0) {
-					setMessage(m.item_msg_applied_partial({ count: childFailed }), true);
-				} else {
-					setMessage(
-						skipped ? m.item_msg_applied_skipped({ count: skipped }) : m.item_msg_applied()
-					);
-				}
-				confirmApply = false;
-			} else {
-				setMessage(
-					failed
-						.map((o) =>
-							m.item_msg_apply_failed({ target: targetLabel(o.method), error: o.error ?? '' })
-						)
-						.join(' · '),
-					true
-				);
-			}
-			await invalidateAll();
+			if (!res.ok) throw new Error(String(res.status));
+			applyPreview = await res.json();
+			confirmApply = true;
 		} catch {
+			advanceAfterApply = false;
+			advanceTargetHref = null;
+			applyPreview = null;
+			confirmApply = false;
 			setMessage(
 				m.item_msg_apply_failed({ target: confirmTarget, error: m.item_error_network() }),
 				true
@@ -517,6 +723,118 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	async function apply() {
+		if (
+			busy ||
+			finishingAdvance ||
+			!applyPreview?.planId ||
+			!applyPreview.digest ||
+			(advanceAfterApply && !canConfirmApplyAndNext(applyPreview))
+		) {
+			return;
+		}
+		busy = true;
+		setMessage('');
+		try {
+			const res = await fetch(`/api/items/${data.item.id}/apply`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({
+					planId: applyPreview.planId,
+					digest: applyPreview.digest
+				})
+			});
+			if (!res.ok) throw new Error(String(res.status));
+			const result = (await res.json()) as { jobId: number };
+			jobId = result.jobId;
+			confirmApply = false;
+			applyPreview = null;
+			setMessage(m.item_working());
+		} catch {
+			advanceAfterApply = false;
+			advanceTargetHref = null;
+			confirmApply = false;
+			applyPreview = null;
+			setMessage(
+				m.item_msg_apply_failed({ target: confirmTarget, error: m.item_error_network() }),
+				true
+			);
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function completeReviewAndAdvance(job: number, targetHref: string): Promise<void> {
+		finishingAdvance = true;
+		completionRetry = null;
+		setMessage(m.review_apply_next_finishing());
+		try {
+			const response = await fetch(`/api/review/items/${data.item.id}/apply-next-complete`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({ jobId: job })
+			});
+			const body = (await response.json().catch(() => ({}))) as {
+				state?: string;
+				error?: { code?: string };
+			};
+			if (!response.ok || body.state !== 'completed') {
+				const code = body.error?.code ?? 'internal_error';
+				if (canRetryApplyNextCompletion(code)) completionRetry = { jobId: job, targetHref };
+				setMessage(
+					code === 'selection_changed'
+						? m.review_apply_next_selection_changed()
+						: code === 'job_not_verified' || code === 'review_not_completed'
+							? m.review_apply_next_not_verified()
+							: m.review_apply_next_completion_failed(),
+					true
+				);
+				return;
+			}
+			selectedPoster = null;
+			selectedBackground = null;
+			childSel = {};
+			setMessage(m.review_apply_next_completed());
+			await invalidateAll();
+			historyRefresh += 1;
+			await goto(targetHref);
+		} catch {
+			completionRetry = { jobId: job, targetHref };
+			setMessage(m.review_apply_next_completion_failed(), true);
+		} finally {
+			finishingAdvance = false;
+		}
+	}
+
+	async function onApplyDone(status: string, progress: PublicJobProgress) {
+		const shouldAdvance = advanceAfterApply;
+		const targetHref = advanceTargetHref;
+		advanceAfterApply = false;
+		advanceTargetHref = null;
+		if (shouldAdvance && targetHref) {
+			if (isFullySuccessfulApply(status, progress.resultSummary)) {
+				await completeReviewAndAdvance(progress.jobId, targetHref);
+				return;
+			}
+			completionRetry = null;
+			setMessage(
+				progress.resultSummary.skipped > 0
+					? m.review_apply_next_skipped({ count: progress.resultSummary.skipped })
+					: m.review_apply_next_stayed({ status: jobStatusLabel(status) }),
+				true
+			);
+		} else if (status === 'completed') {
+			setMessage(m.item_msg_applied());
+		} else {
+			setMessage(
+				m.item_msg_apply_failed({ target: confirmTarget, error: jobStatusLabel(status) }),
+				true
+			);
+		}
+		await invalidateAll();
+		historyRefresh += 1;
 	}
 </script>
 
@@ -526,12 +844,14 @@
 	<button
 		type="button"
 		onclick={() => pickPoster(c.url)}
+		aria-pressed={selectedPoster === c.url}
+		aria-label={m.item_candidate_label({ kind: m.item_poster(), provider: c.provider })}
 		class="relative overflow-hidden rounded-lg border-2 transition {selectedPoster === c.url
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="poster" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-[2/3] w-full object-cover" />
 	</button>
 {/snippet}
 
@@ -539,17 +859,14 @@
 	<button
 		type="button"
 		onclick={() => pickBackground(c.url)}
+		aria-pressed={selectedBackground === c.url}
+		aria-label={m.item_candidate_label({ kind: m.item_backdrop(), provider: c.provider })}
 		class="relative overflow-hidden rounded-lg border-2 transition {selectedBackground === c.url
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img
-			src={thumb(c.url)}
-			alt="backdrop"
-			loading="lazy"
-			class="aspect-video w-full object-cover"
-		/>
+		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-video w-full object-cover" />
 	</button>
 {/snippet}
 
@@ -557,6 +874,11 @@
 	<button
 		type="button"
 		onclick={() => pickChild('poster', season, null, c.url)}
+		aria-pressed={isChildStaged('poster', season, null, c.url)}
+		aria-label={m.item_candidate_label({
+			kind: `${m.item_season_label({ number: season })} · ${m.item_poster()}`,
+			provider: c.provider
+		})}
 		class="relative overflow-hidden rounded-lg border-2 transition {isChildStaged(
 			'poster',
 			season,
@@ -567,12 +889,7 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img
-			src={thumb(c.url)}
-			alt="season poster"
-			loading="lazy"
-			class="aspect-[2/3] w-full object-cover"
-		/>
+		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-[2/3] w-full object-cover" />
 	</button>
 {/snippet}
 
@@ -580,6 +897,11 @@
 	<button
 		type="button"
 		onclick={() => pickChild('title_card', season, c.episode, c.url)}
+		aria-pressed={isChildStaged('title_card', season, c.episode, c.url)}
+		aria-label={m.item_candidate_label({
+			kind: `${m.item_season_label({ number: season })} · ${m.item_episode_label({ number: c.episode ?? 0 })} · ${m.item_title_card()}`,
+			provider: c.provider
+		})}
 		class="relative overflow-hidden rounded-lg border-2 transition {isChildStaged(
 			'title_card',
 			season,
@@ -590,12 +912,7 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img
-			src={thumb(c.url)}
-			alt="title card"
-			loading="lazy"
-			class="aspect-video w-full object-cover"
-		/>
+		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-video w-full object-cover" />
 	</button>
 {/snippet}
 
@@ -617,14 +934,67 @@
 	>
 {/snippet}
 
-<a href="/library" class="text-sm text-neutral-400 hover:text-neutral-200"
-	>{m.item_back_to_library()}</a
->
+<div class="flex flex-wrap items-center justify-between gap-3">
+	<a
+		href={data.returnTo}
+		onclick={returnToContext}
+		class="text-sm text-neutral-400 hover:text-neutral-200"
+		>{data.isReviewReturn ? m.review_back_to_inbox() : m.item_back_to_library()}</a
+	>
+	{#if data.reviewNavigation}
+		<nav class="flex items-center gap-2" aria-label={m.review_item_navigation()}>
+			{#if data.reviewNavigation.previous}
+				<a
+					class="btn btn-ghost"
+					href={data.reviewNavigation.previous.href}
+					rel="prev"
+					aria-keyshortcuts="K">← {m.review_previous_item()}</a
+				>
+			{:else}
+				<button class="btn btn-ghost" type="button" disabled>← {m.review_previous_item()}</button>
+			{/if}
+			<span class="hidden text-xs text-neutral-500 sm:inline">
+				{m.review_context_count({ count: data.reviewNavigation.matchingCount })}
+			</span>
+			{#if data.reviewNavigation.next}
+				<a
+					class="btn btn-ghost"
+					href={data.reviewNavigation.next.href}
+					rel="next"
+					aria-keyshortcuts="J">{m.review_next_item()} →</a
+				>
+			{:else}
+				<button class="btn btn-ghost" type="button" disabled>{m.review_next_item()} →</button>
+			{/if}
+		</nav>
+	{/if}
+</div>
+{#if data.reviewNavigation}
+	<details class="mt-2 text-xs text-neutral-500">
+		<summary class="w-fit cursor-pointer hover:text-neutral-300"
+			>{m.review_shortcuts_title()}</summary
+		>
+		<p class="mt-2 flex flex-wrap gap-x-4 gap-y-1" aria-label={m.review_shortcuts_title()}>
+			<span><kbd>K</kbd> {m.review_previous_item()}</span>
+			<span><kbd>J</kbd> {m.review_next_item()}</span>
+			<span><kbd>S</kbd> {m.review_stage_suggestion()}</span>
+			<span><kbd>I</kbd> {data.item.ignored ? m.review_restore() : m.review_ignore()}</span>
+			<span><kbd>C</kbd> {m.review_compare_action()}</span>
+			<span><kbd>A</kbd> {m.review_apply_next()}</span>
+		</p>
+	</details>
+{/if}
 
 <!-- Hero -->
 <section class="relative mt-3 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950">
-	{#if data.item.backdropUrl}
-		<img src={data.item.backdropUrl} alt="" class="absolute inset-0 h-full w-full object-cover" />
+	{#if data.item.hasCurrentBackground || data.item.backdropUrl}
+		<img
+			src={data.item.hasCurrentBackground
+				? `/api/artwork/${data.item.id}/background?v=${data.item.currentBackgroundFingerprint ?? data.item.artworkVersion}`
+				: data.item.backdropUrl}
+			alt=""
+			class="absolute inset-0 h-full w-full object-cover"
+		/>
 	{/if}
 	<div
 		class="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-neutral-950/30"
@@ -635,8 +1005,12 @@
 		<div
 			class="w-32 flex-none overflow-hidden rounded-lg border border-neutral-800 shadow-2xl sm:w-40"
 		>
-			{#if data.item.currentPosterUrl}
-				<img src={data.item.currentPosterUrl} alt={data.item.title} class="w-full" />
+			{#if data.item.hasCurrentPoster}
+				<img
+					src={`/api/artwork/${data.item.id}/poster?v=${data.item.currentPosterFingerprint ?? data.item.artworkVersion}`}
+					alt={data.item.title}
+					class="w-full"
+				/>
 			{:else}
 				<div class="flex aspect-[2/3] items-center justify-center text-neutral-400">
 					{m.item_no_poster()}
@@ -682,8 +1056,41 @@
 				<button onclick={discover} disabled={busy || !data.item.resolved} class="btn btn-subtle">
 					{busy ? m.item_working() : m.item_find_covers()}
 				</button>
-				{#if data.history.length}
-					<button onclick={revert} disabled={busy} class="btn btn-ghost">{m.item_revert()}</button>
+				{#if suggestions.ids.size > 0}
+					<button
+						type="button"
+						class="btn btn-accent"
+						disabled={busy}
+						aria-keyshortcuts="S"
+						onclick={stageSuggestions}>{m.review_stage_suggestion()}</button
+					>
+				{/if}
+				{#if data.providerGroups.length > 0}
+					<button
+						type="button"
+						class="btn btn-ghost"
+						aria-keyshortcuts="C"
+						onclick={focusArtworkComparison}>{m.review_compare_action()}</button
+					>
+				{/if}
+				<a href="#artwork-history-title" class="btn btn-ghost">{m.item_history_title()}</a>
+				{#if data.reviewNavigation}
+					<button
+						type="button"
+						class="btn btn-ghost"
+						disabled={reviewBusy}
+						aria-keyshortcuts="I"
+						onclick={toggleReviewIgnored}
+						>{data.item.ignored ? m.review_restore() : m.review_ignore()}</button
+					>
+				{/if}
+				{#if undoAvailable}
+					<button
+						type="button"
+						onclick={previewUndoItem}
+						disabled={busy || undoBusy}
+						class="btn btn-ghost">{m.item_undo_item()}</button
+					>
 				{/if}
 			</div>
 
@@ -695,6 +1102,8 @@
 		</div>
 	</div>
 </section>
+
+<ManualTmdbMatch item={data.item} locale={data.locale} />
 
 {#if data.item.cast?.length}
 	<section class="mt-6">
@@ -730,8 +1139,9 @@
 {/if}
 
 <!-- Artwork sets, grouped by provider (collapsible) -->
+<div id="artwork-compare" tabindex="-1" class="scroll-mt-20 focus-visible:outline-none"></div>
 {#if data.providerGroups.length}
-	<section class="mt-8 space-y-6 pb-32">
+	<section class="mt-8 space-y-6 pb-4">
 		{#each data.providerGroups as group (group.provider)}
 			{@const pKey = providerKey(group.provider)}
 			<div>
@@ -822,12 +1232,12 @@
 														{@render chevron(isExpanded(seaKey))}
 														{m.item_season_label({ number: sg.season })}
 													</button>
-													{#if data.history.length}
+													{#if undoAvailable}
 														<button
-															onclick={() => revertSeason(sg.season)}
-															disabled={busy}
-															class="btn btn-ghost px-2 py-1 text-xs"
-															>{m.item_revert_season()}</button
+															type="button"
+															onclick={() => previewUndoSeason(sg.season)}
+															disabled={busy || undoBusy}
+															class="btn btn-ghost px-2 py-1 text-xs">{m.item_undo_season()}</button
 														>
 													{/if}
 												</div>
@@ -868,10 +1278,38 @@
 		{/each}
 	</section>
 {:else}
-	<p class="mt-8 pb-32 text-sm text-neutral-400">
+	<p class="mt-8 pb-4 text-sm text-neutral-400">
 		{data.item.resolved ? m.item_no_candidates_resolved() : m.item_no_candidates_unresolved()}
 	</p>
 {/if}
+
+<div class="pb-28">
+	<ArtworkTimeline
+		itemId={data.item.id}
+		locale={data.locale}
+		refreshToken={historyRefresh}
+		onUndoItem={previewUndoItem}
+		onUndoRevision={previewUndoRevision}
+		onUndoAvailabilityChange={(available) => (undoAvailable = available)}
+	/>
+</div>
+
+{#if jobId !== null}
+	<div class="mt-6 pb-28"><JobProgress {jobId} onDone={onApplyDone} /></div>
+{/if}
+
+{#if undoJobId}
+	<div class="mt-6 pb-28"><JobProgress jobId={undoJobId} onDone={onUndoDone} /></div>
+{/if}
+
+<ArtworkUndoDialog
+	open={undoPreview !== null}
+	busy={undoBusy}
+	preview={undoPreview}
+	contextLabel={undoContextLabel}
+	onConfirm={confirmUndo}
+	onCancel={cancelUndo}
+/>
 
 <!-- Sticky custom-set builder -->
 <div
@@ -885,6 +1323,28 @@
 				class="basis-full text-xs {messageError ? 'text-red-300' : 'text-neutral-300'}"
 			>
 				{message}
+			</p>
+		{/if}
+		{#if completionRetry}
+			<div class="basis-full">
+				<button
+					type="button"
+					class="btn btn-subtle px-3 py-1.5 text-xs"
+					disabled={finishingAdvance}
+					onclick={() =>
+						completeReviewAndAdvance(completionRetry!.jobId, completionRetry!.targetHref)}
+				>
+					{finishingAdvance
+						? m.review_apply_next_finishing()
+						: m.review_apply_next_retry_completion()}
+				</button>
+			</div>
+		{/if}
+		{#if confirmApply && advanceAfterApply && applyPreview && !canConfirmApplyAndNext(applyPreview)}
+			<p class="basis-full text-xs text-amber-300" role="alert">
+				{applyPreview.summary.skipCount > 0
+					? m.review_apply_next_preview_skips({ count: applyPreview.summary.skipCount })
+					: m.review_apply_next_preview_incomplete()}
 			</p>
 		{/if}
 		<div class="flex items-center gap-2">
@@ -946,17 +1406,37 @@
 				<div class="flex items-center gap-1.5">
 					<input
 						type="file"
-						accept="image/*"
+						accept="image/jpeg,image/png,image/webp"
 						aria-label={m.item_upload_file_label()}
-						onchange={(e) => (posterFile = e.currentTarget.files?.[0] ?? null)}
+						onchange={(e) => {
+							posterFile = e.currentTarget.files?.[0] ?? null;
+							uploadPreview = null;
+						}}
 						class="max-w-[180px] text-[11px] text-neutral-400"
 					/>
 					<button
 						onclick={uploadPoster}
 						disabled={busy || !posterFile}
-						class="btn btn-subtle px-2 py-1 text-xs">{m.item_upload_poster()}</button
+						class={uploadPreview
+							? 'btn btn-accent px-2 py-1 text-xs'
+							: 'btn btn-subtle px-2 py-1 text-xs'}
+						>{uploadPreview ? m.item_upload_confirm() : m.item_upload_preview()}</button
 					>
 				</div>
+				{#if uploadPreview}
+					<div class="rounded border border-neutral-700 bg-neutral-950/70 p-2" role="status">
+						<p class="text-[11px] text-neutral-200">
+							{m.item_upload_preview_summary({
+								size: (uploadPreview.image.sizeBytes / (1024 * 1024)).toFixed(1)
+							})}
+						</p>
+						<button
+							type="button"
+							class="mt-1 text-[11px] text-neutral-400 underline hover:text-neutral-200"
+							onclick={() => (uploadPreview = null)}>{m.item_upload_cancel()}</button
+						>
+					</div>
+				{/if}
 				<p class="text-[10px] text-neutral-400">
 					{m.item_upload_hint()}
 				</p>
@@ -966,7 +1446,14 @@
 		<div class="ml-auto flex items-center gap-2">
 			<select
 				bind:value={method}
-				onchange={() => (confirmApply = false)}
+				disabled={finishingAdvance}
+				onchange={() => {
+					confirmApply = false;
+					applyPreview = null;
+					advanceAfterApply = false;
+					advanceTargetHref = null;
+					completionRetry = null;
+				}}
 				aria-label={m.library_apply_method_label()}
 				class="input py-1 text-xs"
 			>
@@ -975,20 +1462,61 @@
 				<option value="kometa">{m.library_method_kometa()}</option>
 			</select>
 			{#if confirmApply}
-				<!-- Confirm before writing to the live server (hard to undo). -->
+				<!-- Confirm the exact frozen destination operations. -->
 				<span class="hidden text-xs text-neutral-200 sm:inline"
-					>{m.item_apply_confirm({ target: confirmTarget })}</span
+					>{advanceAfterApply
+						? m.review_apply_next_confirm({ target: confirmTarget })
+						: m.item_apply_confirm({ target: confirmTarget })}
+					{#if applyPreview}
+						· {m.library_preview_summary({
+							uploads: applyPreview.summary.destinations.server,
+							exports: applyPreview.summary.destinations.kometa,
+							skipped: applyPreview.summary.skipCount
+						})}
+					{/if}</span
 				>
-				<button onclick={apply} disabled={busy} class="btn btn-accent">
-					{busy ? m.item_working() : m.library_apply_confirm_yes()}
+				<button
+					onclick={apply}
+					disabled={busy ||
+						finishingAdvance ||
+						!applyPreview?.planId ||
+						!applyPreview.digest ||
+						(advanceAfterApply && !canConfirmApplyAndNext(applyPreview))}
+					class="btn btn-accent"
+				>
+					{busy
+						? m.item_working()
+						: advanceAfterApply
+							? m.review_confirm_apply_next()
+							: m.library_apply_confirm_yes()}
 				</button>
-				<button onclick={() => (confirmApply = false)} disabled={busy} class="btn btn-ghost">
+				<button
+					onclick={() => {
+						confirmApply = false;
+						applyPreview = null;
+						advanceAfterApply = false;
+						advanceTargetHref = null;
+					}}
+					disabled={busy || finishingAdvance}
+					class="btn btn-ghost"
+				>
 					{m.jobs_cancel()}
 				</button>
 			{:else}
-				<button onclick={requestApply} disabled={busy || !hasStaged} class="btn btn-accent"
-					>{busy ? m.item_working() : m.item_apply()}</button
+				<button
+					onclick={() => requestApply(false)}
+					disabled={busy || finishingAdvance || !hasStaged}
+					class="btn btn-accent">{busy ? m.item_working() : m.item_apply()}</button
 				>
+				{#if data.reviewNavigation?.next}
+					<button
+						type="button"
+						class="btn btn-subtle"
+						disabled={busy || finishingAdvance || !hasStaged}
+						aria-keyshortcuts="A"
+						onclick={() => requestApply(true)}>{m.review_apply_next()}</button
+					>
+				{/if}
 			{/if}
 		</div>
 	</div>

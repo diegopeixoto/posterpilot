@@ -15,28 +15,41 @@ import {
 	testConnection as plexTestConnection,
 	listSections,
 	listItems,
+	listCollections,
 	listChildren,
 	uploadPosterFromUrl,
 	uploadPosterBytes,
 	setPosterLock,
 	uploadBackgroundFromUrl,
 	uploadBackgroundBytes,
-	setBackgroundLock
+	setBackgroundLock,
+	readArtwork as readPlexArtwork,
+	type PlexChild
 } from '$lib/server/plex/client';
+import { defaultMediaServerCapabilities, mediaServerIdentity } from './capabilities';
 import type {
 	ConnectionResult,
 	LockField,
 	MediaServer,
 	ServerChild,
 	ServerItem,
-	ServerLibrary
+	ServerLibrary,
+	ServerNativeCollection
 } from './types';
 
 /** Map Plex children to neutral `ServerChild`, dropping any without a numeric index. */
-function toChildren(rows: { ratingKey: string; index: number | null }[]): ServerChild[] {
+function toChildren(rows: PlexChild[]): ServerChild[] {
 	const out: ServerChild[] = [];
 	for (const r of rows) {
-		if (r.index !== null) out.push({ id: r.ratingKey, number: r.index });
+		if (r.index !== null) {
+			out.push({
+				id: r.ratingKey,
+				number: r.index,
+				currentPosterUrl: r.currentPosterUrl,
+				currentBackgroundUrl: r.currentBackgroundUrl,
+				serverUpdatedAt: r.serverUpdatedAt
+			});
+		}
 	}
 	return out;
 }
@@ -45,9 +58,18 @@ function toChildren(rows: { ratingKey: string; index: number | null }[]): Server
  * Construct a Plex `MediaServer` bound to a base URL + token. All calls delegate
  * to the unchanged `plex/client.ts` functions.
  */
-export function plexProvider(baseUrl: string, token: string): MediaServer {
+export function plexProvider(
+	baseUrl: string,
+	token: string,
+	context: Pick<MediaServer, 'identity' | 'capabilities'> = {
+		identity: mediaServerIdentity('plex'),
+		capabilities: defaultMediaServerCapabilities('plex')
+	}
+): MediaServer {
 	return {
 		type: 'plex',
+		identity: context.identity,
+		capabilities: context.capabilities,
 
 		async testConnection(): Promise<ConnectionResult> {
 			const res = await plexTestConnection(baseUrl, token);
@@ -70,13 +92,51 @@ export function plexProvider(baseUrl: string, token: string): MediaServer {
 				type: i.type,
 				guids: i.guids,
 				currentPosterUrl: i.currentPosterUrl,
-				// Plex backgrounds are not surfaced by listItems today; left null so the
-				// app's TMDB-derived backdrop drives backgrounds, as it does now.
-				currentBackgroundUrl: null,
+				currentBackgroundUrl: i.currentBackgroundUrl,
 				serverUpdatedAt: i.serverUpdatedAt,
 				addedAt: i.addedAt,
 				watched: i.watched
 			}));
+		},
+
+		async listNativeCollections(libraryKeys: string[]): Promise<ServerNativeCollection[]> {
+			return (await listCollections(baseUrl, token, libraryKeys)).map((collection) => ({
+				id: collection.ratingKey,
+				name: collection.title,
+				members: collection.members.map((member) => ({
+					id: member.ratingKey,
+					title: member.title,
+					year: member.year
+				})),
+				currentPosterUrl: collection.currentPosterUrl,
+				currentBackgroundUrl: collection.currentBackgroundUrl,
+				libraryKeys: collection.libraryKeys,
+				capabilities: {
+					posterWrite: context.capabilities.collectionArtwork ?? 'supported',
+					backgroundWrite: context.capabilities.collectionArtwork ?? 'supported'
+				}
+			}));
+		},
+
+		async applyCollectionPosterUrl(collectionId: string, url: string): Promise<void> {
+			await uploadPosterFromUrl(baseUrl, token, collectionId, url);
+		},
+
+		async applyCollectionPosterBytes(collectionId, data, contentType): Promise<void> {
+			await uploadPosterBytes(baseUrl, token, collectionId, data, contentType);
+		},
+
+		async applyCollectionBackgroundUrl(collectionId: string, url: string): Promise<void> {
+			await uploadBackgroundFromUrl(baseUrl, token, collectionId, url);
+		},
+
+		async applyCollectionBackgroundBytes(collectionId, data, contentType): Promise<void> {
+			await uploadBackgroundBytes(baseUrl, token, collectionId, data, contentType);
+		},
+
+		async readCollectionArtwork(collectionId, kind) {
+			const artwork = await readPlexArtwork(baseUrl, token, collectionId, kind);
+			return artwork ? { kind, ...artwork } : null;
 		},
 
 		async listSeasons(showId: string): Promise<ServerChild[]> {
@@ -101,6 +161,11 @@ export function plexProvider(baseUrl: string, token: string): MediaServer {
 
 		async applyBackgroundBytes(itemId, data, contentType): Promise<void> {
 			await uploadBackgroundBytes(baseUrl, token, itemId, data, contentType);
+		},
+
+		async readArtwork(itemId, kind) {
+			const artwork = await readPlexArtwork(baseUrl, token, itemId, kind);
+			return artwork ? { kind, ...artwork } : null;
 		},
 
 		async lockField(itemId: string, field: LockField, locked: boolean): Promise<void> {

@@ -23,6 +23,7 @@ describe('parseDetailMetadata (movie)', () => {
 		runtime: 164,
 		vote_average: 8.0,
 		backdrop_path: '/bd.jpg',
+		belongs_to_collection: { id: 726871, name: 'Blade Runner Collection' },
 		credits: {
 			cast: [
 				{ name: 'Ryan Gosling', character: 'K', profile_path: '/rg.jpg' },
@@ -39,6 +40,7 @@ describe('parseDetailMetadata (movie)', () => {
 		expect(m.runtime).toBe(164);
 		expect(m.rating).toBe(8.0);
 		expect(m.backdropUrl).toBe('https://image.tmdb.org/t/p/w1280/bd.jpg');
+		expect(m.collection).toEqual({ id: '726871', name: 'Blade Runner Collection' });
 	});
 
 	it('extracts top-billed cast with profile URLs', () => {
@@ -90,6 +92,7 @@ describe('parseDetailMetadata (tv)', () => {
 		const m = parseDetailMetadata(detail, 'tv');
 		expect(m.seasonCount).toBe(5);
 		expect(m.episodeCount).toBe(62);
+		expect(m.collection).toBeNull();
 	});
 
 	it('uses the first episode run time as runtime', () => {
@@ -107,6 +110,14 @@ describe('parseDetailMetadata (missing fields)', () => {
 		expect(m.rating).toBeNull();
 		expect(m.backdropUrl).toBeNull();
 		expect(m.cast).toEqual([]);
+		expect(m.collection).toBeNull();
+	});
+
+	it('rejects incomplete collection identities instead of grouping by name', () => {
+		expect(
+			parseDetailMetadata({ belongs_to_collection: { name: 'Name without a source id' } }, 'movie')
+				.collection
+		).toBeNull();
 	});
 
 	it('treats an unrated (vote_average 0) item as no rating', () => {

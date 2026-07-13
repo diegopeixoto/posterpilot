@@ -1,312 +1,129 @@
 ---
 title: Uso
-description: Ejecuta el asistente de configuración, sincroniza una biblioteca, encuentra carátulas en varios proveedores, aplícalas mediante la API del servidor multimedia o la exportación de Kometa, crea conjuntos personalizados, filtra y ordena la biblioteca y consulta el registro de actividad.
+description: Sincroniza, revisa, corrige coincidencias, prepara ilustración, confirma planes exactos, sigue trabajos y deshaz mediante revisiones.
 ---
 
-Esta página recorre el flujo de trabajo cotidiano una vez que PosterPilot está
-[instalado](/posterpilot/es/installation/) y
-[configurado](/posterpilot/es/configuration/).
+Este es el flujo diario después de [instalar](../installation/) y
+[configurar](../configuration/) PosterPilot.
 
-## Asistente de primera instalación
+## Setup y primera sincronización
 
-En una instalación nueva, un banner te dirige al asistente en `/setup`. Te guía
-por seis pasos en orden, persistiendo cada uno a medida que avanzas:
+El asistente `/setup` recorre idioma, servidor, TMDB, proveedores, bibliotecas y la
+primera sincronización. Plex ofrece PIN/descubrimiento; Jellyfin/Emby aceptan
+usuario/contraseña o clave. Cada paso avanza solo tras una respuesta válida. **Omitir**
+sale del asistente; la sincronización se sigue hasta éxito terminal o muestra fallo y
+reintento.
 
-1. **Idioma** — elige el locale de la interfaz.
-2. **Servidor multimedia** — elige Plex, Jellyfin o Emby. Para Plex puedes iniciar
-   sesión con un PIN (PosterPilot muestra un código y un enlace de autorización, y
-   luego almacena el token obtenido por ti) y elegir una conexión local/remota
-   descubierta. Jellyfin y Emby toman una URL de servidor y te permiten **iniciar
-   sesión con tu nombre de usuario y contraseña** — PosterPilot los intercambia por
-   un token de acceso, así que nunca tienes que buscar una clave de API (la
-   contraseña se usa solo para esa única petición y nunca se almacena; pegar una
-   clave a mano sigue disponible como alternativa). Un botón de **Probar** verifica
-   la conexión.
-3. **TMDB** — pega una clave de API de TMDB (se proporciona un enlace a los ajustes
-   de la API de TMDB).
-4. **Proveedores** — activa los proveedores de carátulas (MediUX, TMDB, Fanart.tv,
-   ThePosterDB) e introduce una clave de Fanart.tv si la usas.
-5. **Bibliotecas** — una vez conectado, el asistente lista tus bibliotecas de
-   películas y series; marca las que quieras sincronizar (todas seleccionadas por
-   defecto, lo que también recoge las bibliotecas que añadas más tarde).
-6. **Primera sincronización** — ejecuta la sincronización inicial y luego salta al
-   Panel.
+## Sincronizar y reanalizar
 
-El asistente se puede **omitir** en cualquier momento (el enlace de _Omitir_ va
-directo al Panel); todo lo que cubre también está disponible en **Ajustes**.
+En el Panel, **Sincronizar** importa películas/series del servidor nombrado activo,
+resuelve TMDB y actualiza metadatos. `INCLUDED_SECTIONS` o la lista de bibliotecas
+limita el alcance. Los elementos sin GUID siguen visibles como no resueltos.
 
-## Sincronizar una biblioteca
+La sincronización es incremental por defecto. **Reanálisis completo** relee todo,
+reconcilia eliminados y detecta ilustración cambiada externamente sin borrar
+instantáneas/revisiones ni aplicar carátulas.
 
-Una sincronización extrae tus bibliotecas de películas y series del servidor
-multimedia activo hacia la caché local de PosterPilot y resuelve cada título a un
-id de TMDB para que los proveedores de carátulas puedan consultarse.
+Los trabajos muestran cola, fase, progreso, intentos y resultado en vivo. Recargar no
+los cancela; solicitudes equivalentes reutilizan el trabajo activo.
 
-1. Asegúrate de que las credenciales del tipo de servidor activo y una clave de
-   TMDB están configuradas. Una sincronización se bloquea (con un mensaje claro
-   sobre qué falta) si no lo están.
-2. Opcionalmente, acota qué secciones se sincronizan desde la lista de verificación
-   **Bibliotecas a sincronizar** (en el asistente o en Ajustes → Servidor
-   multimedia) o con `INCLUDED_SECTIONS`; déjalo vacío para sincronizar todas las
-   secciones de películas y series, incluidas las que añadas más tarde.
-3. Ejecuta la sincronización desde el **Panel** (el botón **Sincronizar**). Se
-   ejecuta como una tarea en segundo plano con progreso en vivo mostrado justo ahí;
-   las tarjetas de estadísticas (elementos, películas, series, resueltos, con
-   MediUX, aplicados) suben a medida que avanza.
+## Biblioteca a escala
 
-Cada elemento vuelve con su título, año, tipo, GUID externos (tmdb/imdb/tvdb cuando
-están presentes) y póster actual. Un elemento sin GUID externo sigue apareciendo en
-la lista, pero se marca como irresoluble para la búsqueda en proveedores en lugar
-de descartarse.
+Biblioteca busca y filtra en servidor por tipo, biblioteca, activo/ignorado, póster
+ausente, candidatas generales o MediUX, cambio, puntuación y género. Ordena por título,
+año, puntuación, duración, cambio reciente o fecha de alta. URL y vuelta conservan el
+contexto.
 
-Las sincronizaciones repetidas son **incrementales** por defecto: PosterPilot
-compara cada elemento con la marca de tiempo de última modificación del servidor
-multimedia y solo vuelve a resolver y reenriquecer los que cambiaron desde la
-sincronización anterior, de modo que un reanálisis rutinario es mucho más rápido
-que el primero. Sigue disponible un **reanálisis completo** que reprocesa todo, y
-puedes desactivar por completo la sincronización incremental (consulta
-[Configuración → Rendimiento y ajuste](/posterpilot/es/configuration/#rendimiento-y-ajuste)).
+Para lotes, usa **Seleccionar página** o **Seleccionar todos los resultados**, compara
+cargados con total y limpia cuando proceda. Todos los resultados se materializan desde
+el filtro exacto; cambiar la consulta invalida la selección.
 
-## El muro de la biblioteca
+## Bandeja de Review
 
-La biblioteca sincronizada se muestra como una cuadrícula de pósters con una barra
-de herramientas al estilo de Notion. Puedes:
+**Review** agrupa estados accionables: nuevo, no resuelto, sin candidatas, sugerencia,
+preparado, fallo parcial, cambio externo, ignorado y completado. Filtra, ordena y
+guarda vistas. Anterior/siguiente/volver conservan el contexto al abrir un elemento.
 
-- **Buscar** por título.
-- **Filtrar** desde el menú emergente **Filtrar**: tipo de medio (película /
-  serie), valoración mínima, género, póster faltante, disponibilidad en MediUX
-  (tiene candidatas), estado de cambio (sin cambios / aún con el póster
-  predeterminado) y estado de ignorado. El botón Filtrar muestra una insignia con
-  el número de facetas activas.
-- **Ordenar** desde el menú emergente **Ordenar** por título, año de estreno,
-  valoración, duración, más recientemente cambiados o fecha de añadido al servidor
-  multimedia, con un selector ascendente/descendente independiente. El muro se abre
-  con la ordenación configurada en **Ajustes → Kometa y avanzado** (por defecto:
-  título); una elección explícita en la barra de herramientas siempre gana.
-- Cada filtro activo y la ordenación aparecen como **chips eliminables** debajo de
-  la barra de herramientas; haz clic en la ✕ de un chip para descartar solo ese, o
-  en **Limpiar todo** para reiniciarlo todo.
-- Alterna la **aplicación automática** (el botón ⚡): activada, cada cambio navega
-  de inmediato; desactivada, los cambios se preparan hasta que pulsas **Aplicar**.
-  La elección se recuerda.
-- **Ignorar** un elemento que quieres dejar intacto: los elementos ignorados se
-  omiten en el descubrimiento, la aplicación y la selección automática, se marcan
-  visualmente en el muro y pueden incluirse o excluirse desde el menú emergente
-  Filtrar. Desactívalo de nuevo en cualquier momento para devolver el elemento al
-  flujo de trabajo.
-- Ver un **banner destacado** — un fondo de un elemento cambiado recientemente
-  sobre el muro una vez que se ha aplicado al menos una carátula.
+Compara ilustración **actual**, **sugerida** y **preparada** por ranura. Aceptar una
+sugerencia es explícito; abrir la página no persiste nada. Los atajos no se ejecutan
+en campos editables ni modales.
 
-Cada tarjeta muestra la valoración del elemento y una insignia de estado (p. ej.
-disponible en MediUX, cambiado), con el título y el año revelados al pasar el
-cursor.
+**Aplicar y siguiente** usa la vista previa/confirmación normal, espera el trabajo y
+solo avanza cuando todos los destinos seleccionados terminan y se verifican. Fallo,
+omisión o resultado parcial permanece con detalle y reintento.
 
-## Encontrar carátulas
+## Corregir coincidencia TMDB
 
-Abre un elemento para ver su vista de detalle: un héroe de fondo con el logo del
-elemento (o su título cuando no existe logo), la valoración, el año, la duración (o
-los recuentos de temporadas/episodios para las series), los géneros y la sinopsis,
-además del reparto principal.
+Busca un elemento no resuelto o incorrecto por título, año y tipo. Los resultados
+incluyen ID TMDB y metadatos para desambiguar. Confirmar fija la identidad, invalida
+candidatas antiguas y registra auditoría. Reemplazar o borrar también es explícito;
+borrar permite otra resolución automática por GUID.
 
-- Si aún no se han descubierto carátulas, usa **Encontrar carátulas** para ejecutar
-  el descubrimiento de ese elemento.
-- El descubrimiento despliega la búsqueda entre todos los proveedores habilitados y
-  almacena la unión de sus candidatas, cada una etiquetada con su proveedor.
-- Las candidatas se agrupan **primero por proveedor y luego por conjunto**. Cada
-  conjunto muestra su atribución de autor con el póster y el fondo juntos. Para las
-  series, la vista también presenta conjuntos de pósters de temporada y de tarjetas
-  de título.
-- Las secciones de proveedor, las tarjetas de conjunto individuales y (para las
-  series) los grupos de temporada son **plegables**. En la primera carga, el primer
-  proveedor y su primer conjunto están expandidos y todo lo demás está plegado; tus
-  elecciones de plegado/expansión persisten en el navegador entre recargas y a
-  medida que te mueves entre elementos.
-- Cuando la **carátula sugerida** está habilitada, la candidata con mayor
-  puntuación para cada ranura se preselecciona como una sugerencia claramente
-  marcada que puedes aceptar o anular. Las candidatas se puntúan según la calidad
-  del proveedor, la resolución y el ajuste de proporción; ajusta los pesos —o
-  desactiva la preselección— en Ajustes (consulta
-  [Configuración → Rendimiento y ajuste](/posterpilot/es/configuration/#rendimiento-y-ajuste)).
+Los fallos de proveedores están aislados. Candidatas conocidas pueden permanecer
+marcadas obsoletas durante un fallo transitorio; una respuesta vacía exitosa posterior
+las elimina.
 
-Puedes preparar un conjunto entero ("usar este conjunto") o tomar un póster
-individual de un conjunto y un fondo de otro; las dos ranuras son independientes.
+## Descubrir y preparar ilustración
 
-## Carátulas de temporada y episodio
+**Encontrar carátulas** consulta proveedores habilitados. Agrupa por proveedor/set,
+con póster/fondo y, para series, temporadas y title cards. Prepara una pieza, el set
+completo o mezcla ranuras. La mejor sugerencia se marca, pero solo se prepara al
+aceptarla.
 
-Para una serie, la carátula se prepara por ranura, de modo que la portada de la
-serie, el póster de cada temporada y la tarjeta de título de cada episodio son
-independientes entre sí:
+El constructor fijo resume póster, fondo, temporadas y episodios. Una URL personalizada
+es una ranura normal. Una carga de archivo tiene vista previa/confirmación y solo puede
+ir al servidor directo, pues un binario no es una URL YAML de Kometa.
 
-- La carátula de un conjunto se organiza en un **grupo de serie** (póster y fondo)
-  y un **grupo por temporada**. Cada grupo de temporada contiene el póster de esa
-  temporada y las tarjetas de título de sus episodios. (En el modelo existe una
-  ranura de fondo de temporada, pero no se muestra, porque actualmente ningún
-  proveedor ofrece fondos de temporada.)
-- Seleccionar una candidata dentro de la ranura de una temporada o un episodio
-  prepara solo esa ranura, sin tocar el nivel de serie ni ninguna otra ranura.
-  Volver a seleccionar la candidata ya preparada en una ranura la limpia de nuevo.
-- **Usar este conjunto** rellena de una vez todas las ranuras que el conjunto
-  cubre —serie, cada temporada y cada episodio— emparejadas por número de temporada
-  y episodio. Después puedes anular cualquier ranura individual y mantener el resto
-  del conjunto preparado.
+## Previsualizar y aplicar
 
-El constructor fijo resume todo lo que está preparado actualmente —el póster/fondo
-de la serie más los recuentos de temporadas y episodios preparados— y un único
-**Aplicar** lo escribe todo en una sola acción (consulta
-[Aplicar una carátula](#aplicar-una-carátula)).
+Elige método (inicia con `DEFAULT_APPLY_METHOD`):
 
-## Aplicar una carátula
+- **Servidor directo (`plex`)** — captura estado anterior, escribe mediante Plex/
+  Jellyfin/Emby activo, bloquea donde se admite y verifica.
+- **Kometa** — actualiza `posterpilot.yml`, conserva contenido ajeno y verifica YAML.
+- **Ambos** — destinos independientes; uno puede fallar sin ocultar el otro.
 
-Aplica una selección preparada con el método que elijas, seleccionable por acción
-de aplicación con un valor predeterminado configurable (`DEFAULT_APPLY_METHOD`, por
-defecto `both`):
+Primero genera la **vista previa exacta** de elementos, ranuras, candidatas, estado,
+destinos y omisiones. La confirmación separada usa un plan con caducidad, un solo uso
+y ligado a selecciones/huellas. Si algo cambia, no escribe y exige otra vista.
 
-- **Servidor multimedia (directo).** Sube el póster (y el fondo) a través del
-  proveedor de servidor multimedia activo y bloquea el campo para que los agentes
-  automáticos del servidor no lo sobrescriban. El cambio es prácticamente
-  instantáneo. Se registra como una aplicación de servidor con el tipo del
-  proveedor.
-- **Exportación de Kometa.** Escribe YAML compatible con Kometa/PMM —`url_poster`
-  (y `url_background` cuando hay un fondo preparado), indexado por id de TMDB— en
-  el directorio de assets de Kometa configurado, sin contactar con el servidor
-  multimedia. Tu instancia de Kometa existente aplica las carátulas en su próxima
-  ejecución. Volver a aplicar actualiza la entrada en su sitio en lugar de
-  duplicarla.
-- **Ambos.** Realiza la subida directa _y_ escribe el YAML de Kometa, registrando
-  cada resultado de forma independiente para que un fallo parcial sea visible.
-
-Una sola aplicación escribe **todas las ranuras preparadas** —serie, temporadas y
-episodios— con el método o los métodos elegidos. Para la subida directa, PosterPilot
-resuelve por número cada hijo de temporada y episodio en el servidor multimedia y
-sube a él; una ranura preparada cuya temporada o episodio no tenga un hijo
-coincidente en el servidor se omite y se informa, en lugar de hacer fallar toda la
-aplicación, y el fallo de un hijo nunca aborta el resto. La exportación de Kometa
-anida los pósters de temporada preparados bajo `seasons:` (indexados por número de
-temporada) y las tarjetas de título de episodio preparadas bajo `episodes:`
-(indexadas por número de episodio), junto a los `url_poster` / `url_background` a
-nivel de serie. Un **fondo** de temporada se aplica solo mediante el método directo;
-se omite del YAML.
-
-Cada aplicación —con éxito o con fallo— se registra con el elemento, la URL del
-asset, los métodos, el resultado y la marca de tiempo, de modo que el historial sea
-consultable y la reaplicación detectable.
+En lote congela todos los IDs y puede descubrir sin mutar para construir el plan;
+la ejecución no redescubre ni sustituye. Una temporada/episodio sin destino se omite
+y un fallo no aborta las demás ranuras.
 
 ### Cómo consume Kometa la exportación
 
-PosterPilot escribe un único archivo de metadatos (por defecto `posterpilot.yml`)
-en `KOMETA_ASSETS_DIR`, indexado por id de TMDB con entradas `url_poster` /
-`url_background`. Añade ese archivo a la configuración de tu biblioteca de Kometa
-(p. ej. bajo `metadata_path` / `metadata_files`) para que Kometa aplique las
-carátulas en su próxima ejecución.
+`posterpilot.yml` usa IDs TMDB y `url_poster` / `url_background`, con temporadas y
+episodios anidados. Inclúyelo en `metadata_files`; el
+[Gestor de Kometa](../kometa-config-sync/) puede hacer la vinculación.
 
-## Revertir
+## Verificación, historial y deshacer
 
-Cada carátula aplicada es reversible desde la vista de detalle del elemento:
+La cronología registra destino/ranura, procedencia, estado anterior, resultado y
+verificación exacta o de mejor esfuerzo. Fallo o evidencia no disponible nunca es
+éxito verificado.
 
-- **Revertir al original** revierte la carátula a nivel de serie **y cada temporada
-  y episodio aplicados** en una sola acción, restaurando lo que el servidor
-  multimedia tenía antes de que PosterPilot lo cambiara.
-- Cada grupo de temporada tiene su propio control **Revertir temporada** que
-  revierte únicamente el póster/fondo de esa temporada y las tarjetas de título de
-  sus episodios, dejando en su sitio la carátula a nivel de serie y la de las demás
-  temporadas.
+Previsualiza deshacer para una revisión disponible, temporada o elemento. Confirmar
+restaura solo la instantánea/valor congelado, verifica cuando puede y añade otra
+revisión. Un deshacer parcial conserva restauraciones exitosas. Consulta
+[Seguridad, verificación y deshacer](../safety/).
 
-Las reversiones vuelven a resolver por número los hijos de temporada y episodio, de
-la misma manera que lo hace la aplicación.
+## Fallos y reintentos
 
-## Conjuntos personalizados
+Los detalles del trabajo muestran éxito, fallo, omisión e interrupción por destino y
+errores saneados. **Reintentar fallos** crea trabajo solo para fallos reintentables y
+no repite éxitos. Configuración o plan inválido exige corrección y nueva vista previa.
 
-La vista de detalle del elemento tiene un **constructor** persistente y fijo con
-una ranura de póster y una ranura de fondo que juntas forman un "conjunto"
-personalizado:
+## FUN, colecciones y varios servidores
 
-- Al hacer clic en una candidata de póster, esta se dirige a la ranura de póster;
-  al hacer clic en una candidata de fondo, esta se dirige a la ranura de fondo,
-  automáticamente, según el tipo.
-- Cada ranura también puede rellenarse desde una **URL de imagen pegada** o un
-  **archivo de imagen subido**.
-- Aplicar el constructor aplica ambas piezas preparadas en una sola acción mediante
-  el método que elijas.
+FUN contiene selector de hasta tres opciones, modos ciego/cápsula, Poster Match,
+galería y sesiones por duración. Colecciones muestran miembros, procedencia,
+consistencia, cobertura y overrides. No autoaplican. Consulta
+[FUN y colecciones](../fun-collections/).
 
-:::note[Las subidas son solo para el servidor]
-Una carátula personalizada basada en URL puede aplicarse tanto mediante el servidor
-multimedia como mediante Kometa. Un **archivo subido** solo puede aplicarse
-mediante el servidor multimedia: una subida binaria no puede expresarse como una
-URL de YAML de Kometa, así que se omite de la exportación de Kometa y la limitación
-se hace visible en lugar de escribir una entrada inválida.
-:::
+Con varios servidores usa el selector; biblioteca, trabajos, Review, colecciones y
+automatizaciones permanecen aislados. Consulta
+[Migración multiservidor](../multi-server-migration/).
 
-## Acciones en lote
-
-Selecciona varios elementos y ejecuta el descubrimiento o la aplicación sobre la
-selección como una única tarea en segundo plano. La aplicación en lote con
-selección automática descubre (si es necesario), autoselecciona y aplica carátulas
-para cada elemento seleccionado, con progreso en vivo.
-
-La selección automática puntúa cada candidata de todos los proveedores habilitados
-—combinando la calidad del proveedor, la resolución y el ajuste de proporción— y
-elige el póster con mayor puntuación (y un fondo donde esté disponible) para cada
-elemento, la misma puntuación que impulsa la preselección sugerida en la vista del
-elemento. Los elementos ignorados quedan fuera de la selección.
-
-Antes de ejecutar una aplicación en lote, una **vista previa de simulación** resume
-exactamente lo que ocurriría —las subidas planeadas, las exportaciones de Kometa y
-cualquier elemento o ranura que se omitiría— para que puedas confirmar antes de que
-se escriba nada. La aplicación en lote procesa entonces los elementos de forma
-**concurrente** (limitada por el ajuste de concurrencia de aplicación), de modo que
-los lotes grandes terminan más rápido, con el mismo progreso en vivo y cancelación.
-
-## FUN: selector aleatorio de película/serie
-
-**FUN** es una sección opcional para experimentos de biblioteca (habilítala con el
-interruptor FUN en **Ajustes → Kometa y avanzado**, o con `FUN_ENABLED=true`).
-Hasta entonces permanece completamente oculta: sin entrada de navegación, y su
-página devuelve 404.
-
-Su primera herramienta responde a "¿qué vemos esta noche?": un clic saca un título
-aleatorio de tu biblioteca sincronizada y lo presenta dando protagonismo a la
-imagen —fondo, póster, géneros, valoración y sinopsis— con un enlace al elemento y
-un botón de **volver a sortear** que saca otro con los mismos filtros. Puedes
-acotar el sorteo por:
-
-- **Tipo** — películas, series o ambos.
-- **Género** — uno de los géneros de tu biblioteca, o todos.
-- **Rango de años** — un año de estreno mínimo y/o máximo opcional.
-- **Visto** — omite los títulos que ya has visto. El estado de visto se captura
-  durante la sincronización de la biblioteca (recuentos de reproducción de Plex;
-  banderas de reproducido de Jellyfin/Emby — una serie cuenta como vista solo
-  cuando todos los episodios se han reproducido).
-
-:::note
-En Jellyfin/Emby la bandera de reproducido necesita un contexto de usuario, así
-que inicia sesión con nombre de usuario/contraseña en lugar de una clave de API a
-secas: con solo una clave de API todo se sincroniza como no visto y el filtro de
-omitir vistos no tiene nada que excluir.
-:::
-
-## Panel y tareas
-
-El **Panel** es el centro de operaciones. Muestra las tarjetas de estadísticas de
-la biblioteca, el botón **Sincronizar** y cualquier tarea en ejecución con una
-**barra de progreso en vivo** (que se actualiza mediante Server-Sent Events, sin
-necesidad de actualizar) que puedes **cancelar**. La insignia de navegación junto a
-Panel refleja cuántas tareas están activas. Debajo, una tabla de **Tareas
-recientes** lista las últimas tareas con su tipo, los recuentos
-procesados/totales y el estado final. No hay una página de Tareas aparte: el
-progreso en vivo y el historial reciente viven ambos en el Panel.
-
-## Registro de actividad
-
-El registro de eventos granular vive en **Ajustes → Actividad**. Cada evento
-operativo se registra allí (y se replica en la consola del contenedor y en un
-archivo de registro rotativo). Puedes:
-
-- Filtrar por nivel — **Todos / Info / Aviso / Error**.
-- Recorrer el historial con **Cargar más**.
-- **Limpiar actividad** para vaciar la tabla de la app (esto no elimina el archivo
-  de registro en disco).
-
-La tabla está limitada a `EVENT_RETENTION` filas (por defecto `2000`); las filas más
-antiguas se podan automáticamente. Consulta
-[Configuración → Registro y registro de actividad](/posterpilot/es/configuration/#registro-y-registro-de-actividad)
-para los detalles del registro de archivo y la retención.
-</content>
+El registro detallado está en **Ajustes → Actividad**. Diagnóstico, automatización,
+copias y recuperación se explican en [Automatización y recuperación](../automation-recovery/).

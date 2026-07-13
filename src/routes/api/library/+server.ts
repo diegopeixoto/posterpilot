@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { countLibrary, listLibrary, LIBRARY_PAGE_SIZE } from '$lib/server/queries';
 import { parseLibraryFilter, parseOffset } from '$lib/library-filter';
 import { resolveConfig } from '$lib/server/config';
+import { getActiveServerInstance } from '$lib/server/server-instances';
 
 /**
  * A page of library items for the grid's infinite scroll. Same filter/sort params
@@ -10,9 +11,13 @@ import { resolveConfig } from '$lib/server/config';
  * knows when to stop.
  */
 export const GET: RequestHandler = async ({ url }) => {
-	const config = await resolveConfig();
+	const [config, activeServer] = await Promise.all([resolveConfig(), getActiveServerInstance()]);
 	const filter = parseLibraryFilter(url.searchParams);
-	const effective = { ...filter, sort: filter.sort ?? config.libraryDefaultSort };
+	const effective = {
+		...filter,
+		serverInstanceId: activeServer?.id ?? '__no_active_server__',
+		sort: filter.sort ?? config.libraryDefaultSort
+	};
 	const offset = parseOffset(url.searchParams.get('offset'));
 
 	const [items, total] = await Promise.all([

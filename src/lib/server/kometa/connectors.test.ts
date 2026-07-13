@@ -34,6 +34,9 @@ describe('kometa/connectors', () => {
 
 	it('exposes a non-empty set of secret paths and never throws on doc lookup', () => {
 		expect(SECRET_PATHS.size).toBeGreaterThan(0);
+		expect(SECRET_PATHS).toContain('webhooks.error');
+		expect(SECRET_PATHS).toContain('webhooks.run_start');
+		expect(SECRET_PATHS).toContain('webhooks.run_end');
 		for (const c of CONNECTORS) expect(() => connectorDoc(c.section)).not.toThrow();
 		expect(connectorDoc('__nope__')).toBeUndefined();
 	});

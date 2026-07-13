@@ -8,9 +8,9 @@
 
 ## 2. Config & secrets integration
 
-- [ ] 2.1 Add auth KV accessors (`getAuthMode`/`setAuthMode`, username, password hash, session version) to `config/index.ts` via existing `readKv`/`writeKv`, outside `AppConfig`/`ENV_MAP`/`WRITABLE_KEYS`
-- [ ] 2.2 `AUTH_MODE` env override precedence + `effectiveAuthMode()` with fail-open guard (mode on but no creds → `disabled`); ensure auth keys excluded from `publicConfig()`
-- [ ] 2.3 [Extra] Boot-time `.app-key` permission guard in `hooks.server.ts` startup path — warn (never fatal) if group- or world-readable
+- [x] 2.1 Add auth KV accessors (`getAuthMode`/`setAuthMode`, username, password hash, session version) to `config/index.ts` via existing `readKv`/`writeKv`, outside `AppConfig`/`ENV_MAP`/`WRITABLE_KEYS`
+- [x] 2.2 `AUTH_MODE` env override precedence + `effectiveAuthMode()` with fail-open guard (mode on but no creds → `disabled`); ensure auth keys excluded from `publicConfig()`
+- [x] 2.3 [Extra] Boot-time `.app-key` permission guard in `hooks.server.ts` startup path — warn (never fatal) if group- or world-readable
 
 ## 3. Request hook wiring
 

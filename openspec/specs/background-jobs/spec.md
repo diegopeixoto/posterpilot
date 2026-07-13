@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define asynchronous library operations, live progress reporting, cancellation, and persisted job history.
 
 ## Requirements
 

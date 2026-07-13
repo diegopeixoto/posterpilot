@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-poster-manager. Update Purpose after archive.
+Define Plex authentication, connection discovery, library browsing, and poster application through the Plex API.
 ## Requirements
 ### Requirement: Connect to a Plex server
 
@@ -92,4 +92,3 @@ After a Plex token is available, the system SHALL discover the user's Plex serve
 
 - **WHEN** the user selects a discovered local or remote connection
 - **THEN** the system runs a connection test against that URI and, on success, saves it as the active Plex base URL
-

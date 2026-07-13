@@ -27,6 +27,7 @@ describe('POST /api/kometa/config/preview', () => {
 			req({ libraries: ['1'], defaults: { '1': ['genre'] }, settings: {} })
 		);
 		expect(res.status).toBe(200);
+		expect(res.headers.get('cache-control')).toBe('private, no-store');
 		const body = (await res.json()) as { changes: { path: string; after: string }[] };
 		expect(body.changes[0].after).toBe('***');
 		// preview delegates to previewSync with the parsed selection (never runSync).

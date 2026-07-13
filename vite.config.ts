@@ -5,6 +5,11 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	server: {
+		watch: {
+			ignored: ['**/test-results/**', '**/playwright-report/**']
+		}
+	},
 	plugins: [
 		tailwindcss(),
 		// Compiles the message catalogs (project.inlang + messages/*.json) into the

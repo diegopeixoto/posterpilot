@@ -1,7 +1,7 @@
 # documentation Specification
 
 ## Purpose
-TBD - created by archiving change docs-site. Update Purpose after archive.
+Define the maintained documentation site, its installation/configuration/usage/contribution content, localization, and publication workflow.
 ## Requirements
 ### Requirement: Static documentation site
 
@@ -152,4 +152,3 @@ landing page.
 - **WHEN** a visitor reads the README
 - **THEN** it contains a documentation badge and a link to the published
   documentation site URL
-

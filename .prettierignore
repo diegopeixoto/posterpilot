@@ -4,6 +4,10 @@ build
 data
 drizzle
 bun.lock
+# Local agent/tooling state is not project source.
+.agents
+.codex
+AGENTS.md
 # Vendored Claude Code plugin files (not project source)
 .claude
 # Impeccable design-plugin local state + hook config (not project source)

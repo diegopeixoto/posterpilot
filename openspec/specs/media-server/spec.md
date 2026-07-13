@@ -1,7 +1,7 @@
 # media-server Specification
 
 ## Purpose
-TBD - created by archiving change multi-server-support. Update Purpose after archive.
+Define provider-neutral media-server capabilities and provider-specific connection, browsing, and artwork operations.
 ## Requirements
 ### Requirement: Media server provider interface
 
@@ -190,4 +190,3 @@ field, without affecting other children.
 - **WHEN** the media server returns an error while setting a child's image
 - **THEN** the provider reports that child's failure with the server's status, does not lock
   the field, and the failure does not prevent applying the other children
-

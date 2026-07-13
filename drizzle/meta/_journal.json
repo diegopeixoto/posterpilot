@@ -57,6 +57,13 @@
       "when": 1783031983126,
       "tag": "0007_first_puff_adder",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1783714563625,
+      "tag": "0008_melodic_purifiers",
+      "breakpoints": true
     }
   ]
 }

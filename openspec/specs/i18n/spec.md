@@ -1,7 +1,7 @@
 # i18n Specification
 
 ## Purpose
-TBD - created by archiving change i18n-localization. Update Purpose after archive.
+Define supported locales, externalized catalogs, request-time locale selection, language switching, and translation fallback behavior.
 ## Requirements
 ### Requirement: Supported locales
 
@@ -111,4 +111,3 @@ The system SHALL be translatable through a Weblate project configured against th
 
 - **WHEN** a would-be translator reads `CONTRIBUTING.md`
 - **THEN** a "Translators" section explains how to translate via Weblate, how new strings flow from the English source catalog, and how completed translations land back in the repository
-

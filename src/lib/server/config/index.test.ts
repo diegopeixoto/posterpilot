@@ -12,7 +12,9 @@ const h = vi.hoisted(() => ({
 vi.mock('$env/dynamic/private', () => ({ env: h.env }));
 vi.mock('drizzle-orm', () => ({
 	eq: (_col: unknown, val: string) => ({ __key: val }),
-	inArray: (_col: unknown, vals: string[]) => ({ __keys: vals })
+	inArray: (_col: unknown, vals: string[]) => ({ __keys: vals }),
+	// schema.ts uses `sql` only to describe partial indexes; this test never executes it.
+	sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })
 }));
 vi.mock('$lib/server/db', () => ({
 	db: {
@@ -52,7 +54,11 @@ import {
 	getKometaDefaultCollections,
 	setKometaDefaultCollections,
 	getKometaLastApplied,
-	setKometaLastApplied
+	setKometaLastApplied,
+	getCachedLibraries,
+	setCachedLibraries,
+	getIncludedSectionsForServer,
+	setIncludedSectionsForServer
 } from './index';
 
 beforeEach(() => {
@@ -65,6 +71,7 @@ describe('resolveConfig — Kometa keys', () => {
 		const c = await resolveConfig();
 		expect(c.kometaConfigPath).toBe('');
 		expect(c.kometaConfigMode).toBe('merge');
+		expect(c.kometaServerInstanceId).toBe('legacy-default');
 	});
 
 	it('env wins over persisted for the config path', async () => {
@@ -79,6 +86,42 @@ describe('resolveConfig — Kometa keys', () => {
 		expect((await resolveConfig()).kometaConfigMode).toBe('own');
 		h.store.set('kometaConfigMode', 'nonsense');
 		expect((await resolveConfig()).kometaConfigMode).toBe('merge');
+	});
+
+	it('resolves an explicit Kometa server binding with environment precedence', async () => {
+		h.store.set('kometaServerInstanceId', 'plex-db');
+		expect((await resolveConfig()).kometaServerInstanceId).toBe('plex-db');
+		h.env.KOMETA_SERVER_INSTANCE_ID = 'plex-env';
+		expect((await resolveConfig()).kometaServerInstanceId).toBe('plex-env');
+	});
+});
+
+describe('server-scoped library settings', () => {
+	it('isolates cached libraries with a legacy-only fallback', async () => {
+		h.store.set(
+			'cachedLibraries',
+			JSON.stringify([{ key: 'legacy', title: 'Legacy', type: 'movie' }])
+		);
+		expect(await getCachedLibraries('legacy-default')).toEqual([
+			{ key: 'legacy', title: 'Legacy', type: 'movie' }
+		]);
+		expect(await getCachedLibraries('server-b')).toEqual([]);
+
+		await setCachedLibraries([{ key: 'same', title: 'A', type: 'movie' }], 'server-a');
+		await setCachedLibraries([{ key: 'same', title: 'B', type: 'show' }], 'server-b');
+		expect((await getCachedLibraries('server-a'))[0].title).toBe('A');
+		expect((await getCachedLibraries('server-b'))[0].title).toBe('B');
+	});
+
+	it('isolates included sections and lets the environment override every scope', async () => {
+		await setIncludedSectionsForServer('server-a', ['movies', 'movies', ' shows ']);
+		await setIncludedSectionsForServer('server-b', ['anime']);
+		expect(await getIncludedSectionsForServer('server-a')).toEqual(['movies', 'shows']);
+		expect(await getIncludedSectionsForServer('server-b')).toEqual(['anime']);
+
+		h.env.INCLUDED_SECTIONS = 'global-one,global-two';
+		expect(await getIncludedSectionsForServer('server-a')).toEqual(['global-one', 'global-two']);
+		expect(await getIncludedSectionsForServer('server-b')).toEqual(['global-one', 'global-two']);
 	});
 });
 

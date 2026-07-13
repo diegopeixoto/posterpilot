@@ -1,36 +1,52 @@
-import { error, json } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { resolveConfig } from '$lib/server/config';
-import { applyToItem, getChildSelections } from '$lib/server/posters/service';
-import { getMediaItem } from '$lib/server/queries';
+import { enqueueJob } from '$lib/server/jobs/runner';
+import {
+	activeApplyServerInstanceId,
+	confirmDatabaseArtworkApply,
+	previewDatabaseArtworkApply,
+	resolveDatabaseApplyTargets
+} from '$lib/server/plans/apply-runtime';
+import { applyRouteError } from '$lib/server/plans/apply-route-error';
+import { maintenanceResponse } from '$lib/server/maintenance-http';
 
 export const POST: RequestHandler = async ({ params, request }) => {
 	const id = Number(params.id);
-	if (!Number.isFinite(id)) throw error(400, 'invalid id');
-	const item = await getMediaItem(id);
-	if (!item) throw error(404, 'item not found');
+	if (!Number.isInteger(id) || id <= 0) return json({ error: 'invalid_request' }, { status: 400 });
 
 	const body = (await request.json().catch(() => ({}))) as {
-		posterUrl?: string;
-		backgroundUrl?: string | null;
-		method?: 'plex' | 'kometa' | 'both';
-		/** When true, return the plan without writing anything (preview). */
-		dryRun?: boolean;
+		method?: 'plex' | 'server' | 'kometa' | 'both';
+		planId?: string;
+		digest?: string;
 	};
-	const posterUrl = body.posterUrl ?? item.selectedPosterUrl;
-	const backgroundUrl = body.backgroundUrl ?? item.selectedBackgroundUrl;
-	// Allow a granular-only apply (season/episode slots staged but no show poster).
-	const childCount = item.type === 'show' ? (await getChildSelections(item.id)).length : 0;
-	if (!posterUrl && !backgroundUrl && childCount === 0) throw error(400, 'nothing to apply');
+	if (body.planId || body.digest) {
+		const blocked = maintenanceResponse();
+		if (blocked) return blocked;
+	}
+	try {
+		const serverInstanceId = await activeApplyServerInstanceId();
+		if (body.planId || body.digest) {
+			if (!body.planId || !body.digest) {
+				return json({ error: 'plan_confirmation_required' }, { status: 400 });
+			}
+			return json(
+				await confirmDatabaseArtworkApply(
+					{ planId: body.planId, digest: body.digest, serverInstanceId, targetItemId: id },
+					enqueueJob
+				)
+			);
+		}
 
-	const config = await resolveConfig();
-	const outcomes = await applyToItem(item, {
-		posterUrl,
-		backgroundUrl,
-		method: body.method ?? config.defaultApplyMethod,
-		config,
-		// Only an explicit `true` enables dry-run — never coerce (e.g. the string "false").
-		dryRun: body.dryRun === true
-	});
-	return json({ outcomes });
+		const [target] = await resolveDatabaseApplyTargets([id], serverInstanceId);
+		return json(
+			await previewDatabaseArtworkApply({
+				context: { source: 'single' },
+				targets: [target],
+				selectionMode: 'stored',
+				method: body.method
+			})
+		);
+	} catch (error) {
+		return applyRouteError(error);
+	}
 };
