@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/diegopeixoto/posterpilot/compare/v0.8.0...v0.9.0) (2026-07-13)
+
+
+### Features
+
+* complete product improvement workflows ([bea65c4](https://github.com/diegopeixoto/posterpilot/commit/bea65c4d48c533e897893e6e48d84fe801727671))
+* complete product workflows and FUN experiences ([b2d0b2f](https://github.com/diegopeixoto/posterpilot/commit/b2d0b2f693776a7a251f3bb52e509584e31925e0))
+* run artwork undo on the durable job queue ([78699a7](https://github.com/diegopeixoto/posterpilot/commit/78699a7cf5264abe00a0b2736f3aac21e7c6b84c))
+
+
+### Bug Fixes
+
+* harden hydrated setup and accessible settings ([1f6eb12](https://github.com/diegopeixoto/posterpilot/commit/1f6eb1232d238df5966dd8833e169611598b8246))
+* harden restore maintenance gate, provider timeouts, and review focus ([0bc6348](https://github.com/diegopeixoto/posterpilot/commit/0bc6348eabacd9c0f82d8f1c603b8a6acc466dd7))
+* scope new-item automation events to each schedule library ([66f8d06](https://github.com/diegopeixoto/posterpilot/commit/66f8d0634f067d0b5959d9b89f140e187cc9ed84))
+
 ## [0.8.0](https://github.com/diegopeixoto/posterpilot/compare/v0.7.0...v0.8.0) (2026-07-07)
 
 
