@@ -1,5 +1,6 @@
 import type { ApplyPlanExecutionResult } from '$lib/server/plans/apply-executor';
 import type { FrozenApplyJobPayload } from '$lib/server/plans/apply-plan';
+import type { FrozenUndoJobPayload } from '$lib/server/artwork-revisions/undo-plan';
 import type { FrozenAutomationOccurrencePayload } from '$lib/server/automation/model';
 
 /** Immutable inputs accepted by the durable worker. */
@@ -25,7 +26,8 @@ export type JobPayload =
 			/** Present only for a failed-item retry of the same frozen occurrence. */
 			retryItemIds?: number[];
 	  }
-	| FrozenApplyJobPayload;
+	| FrozenApplyJobPayload
+	| FrozenUndoJobPayload;
 
 export type JobExecutionKind = JobPayload['kind'];
 export type PersistedJobType =
@@ -33,6 +35,7 @@ export type PersistedJobType =
 	| 'full_rescan'
 	| 'discover'
 	| 'apply'
+	| 'undo'
 	| 'retry'
 	| 'automation'
 	| 'diagnostics'

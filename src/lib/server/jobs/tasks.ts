@@ -16,6 +16,7 @@ import { shouldReprocessItem } from './incremental';
 import type { JobContext, JobPayload, JobTaskResult } from './types';
 import { resolveMediaServerInstance } from '$lib/server/server-instances';
 import { executeDatabaseFrozenApplyJob } from '$lib/server/plans/apply-runtime';
+import { executeFrozenArtworkUndoJob } from '$lib/server/artwork-revisions/undo-runtime';
 import { createCollectionRepository } from '$lib/server/collections/repository';
 import { reconcileOptionalNativeCollections } from '$lib/server/collections/native-sync';
 import { createDatabaseFullRescanArtworkObserver } from './full-rescan-artwork';
@@ -700,4 +701,63 @@ export async function runApplyJob(
 	});
 	await pruneEvents();
 	return result;
+}
+
+/**
+ * Execute a frozen undo plan on the durable worker. Undo restores byte-exact
+ * snapshots, so a failed operation is recorded as its own revision outcome rather
+ * than retried blindly; the job reports the mixed result and the timeline stays
+ * the source of truth.
+ */
+export async function runUndoJob(
+	ctx: JobContext,
+	payload: Extract<JobPayload, { kind: 'undo' }>
+): Promise<JobTaskResult> {
+	await ctx.setPhase('undo');
+	await ctx.setTotal(payload.plan.summary.operationCount);
+	await logEvent('info', 'apply', 'Artwork undo started', {
+		planId: payload.planId,
+		serverInstanceId: payload.plan.scope.serverInstanceId,
+		operations: payload.plan.summary.operationCount
+	});
+
+	const result = await executeFrozenArtworkUndoJob({
+		planId: payload.planId,
+		digest: payload.digest,
+		payload: payload.plan,
+		jobId: ctx.jobId,
+		initiator: 'job',
+		onProgress: (completed, operation) => ctx.progress(completed, operation.targetId)
+	});
+
+	for (const operation of result.operations) {
+		await ctx.recordOutcome({
+			serverInstanceId: operation.serverInstanceId,
+			mediaItemId: operation.target.kind === 'item' ? operation.target.mediaItemId : null,
+			destination: operation.destination,
+			kind: operation.slot.kind,
+			season: operation.slot.season,
+			episode: operation.slot.episode,
+			status: operation.status,
+			retryable: false,
+			result: { operationId: operation.operationId, revisionId: operation.revisionId },
+			errorCode: operation.errorCode
+		});
+	}
+
+	await logEvent('info', 'apply', 'Artwork undo finished', {
+		planId: payload.planId,
+		serverInstanceId: payload.plan.scope.serverInstanceId,
+		succeeded: result.summary.succeeded,
+		failed: result.summary.failed,
+		skipped: result.summary.skipped
+	});
+	return {
+		summary: {
+			processed: result.summary.total,
+			succeeded: result.summary.succeeded,
+			failed: result.summary.failed,
+			skipped: result.summary.skipped
+		}
+	};
 }

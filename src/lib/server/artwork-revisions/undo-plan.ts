@@ -97,6 +97,18 @@ export interface UndoPlanPayloadV1 {
 	summary: UndoPlanSummary;
 }
 
+/**
+ * The immutable input the durable worker executes. Confirmation consumes the plan
+ * and hands this frozen payload to the queue, so a restart resumes the same
+ * operations instead of losing them with the request that started them.
+ */
+export interface FrozenUndoJobPayload {
+	kind: 'undo';
+	planId: string;
+	digest: string;
+	plan: UndoPlanPayloadV1;
+}
+
 export interface BuildUndoPlanInput {
 	plannedAt: string;
 	scope: UndoPlanScope;

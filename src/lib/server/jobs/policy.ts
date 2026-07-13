@@ -1,4 +1,5 @@
 import { canonicalJsonDigest, hashCanonicalJson } from '$lib/server/plans/canonical-json';
+import type { UndoPlanOperation } from '$lib/server/artwork-revisions/undo-plan';
 import type { JobPayload, PersistedJobType } from './types';
 import { normalizeFrozenAutomationOccurrencePayload } from '$lib/server/automation/model';
 import { isSecretLikeKey, redactSensitiveText } from '$lib/server/sensitive-redaction';
@@ -8,12 +9,16 @@ const ACTIVE_MUTATION_TYPES = new Set<PersistedJobType>([
 	'full_rescan',
 	'discover',
 	'apply',
+	'undo',
 	'retry',
 	'automation',
 	'restore',
 	'collection_apply',
 	'cross_server_apply'
 ]);
+
+/** Kinds that write artwork slots, so two of them may only overlap on distinct slots. */
+const ARTWORK_MUTATION_KINDS = new Set<JobPayload['kind']>(['apply', 'undo']);
 
 const SAFE_REPLAY_TYPES = new Set<PersistedJobType>([
 	'sync',
@@ -121,7 +126,7 @@ export function normalizeJobPayload(payload: JobPayload): JobPayload {
 			...(retryItemIds ? { retryItemIds } : {})
 		};
 	}
-	if (payload.kind === 'apply') {
+	if (payload.kind === 'apply' || payload.kind === 'undo') {
 		// canonicalJsonDigest is also a strict JSON-domain validator and gives us a
 		// detached clone whose bytes cannot change when the caller mutates its input.
 		const canonical = canonicalJsonDigest(payload).canonicalJson;
@@ -160,6 +165,30 @@ function scopeFor(payload: JobPayload): JobResourceScope {
 					? [...payload.occurrence.itemIds]
 					: '*',
 			mutationKeys: '*'
+		};
+	}
+	if (payload.kind === 'undo') {
+		// An undo restores exactly the slots its frozen operations name. Scoping it by
+		// those slots (rather than the whole item) lets it be serialized against an
+		// apply that touches the same slot, while staying independent of unrelated work.
+		const itemIds = payload.plan.operations
+			.map((operation) => (operation.target.kind === 'item' ? operation.target.mediaItemId : null))
+			.filter((id): id is number => id !== null);
+		const targetKey = (target: UndoPlanOperation['target']) =>
+			target.kind === 'item' ? String(target.mediaItemId) : target.mediaCollectionId;
+		return {
+			global: false,
+			serverInstanceIds: [
+				...new Set(payload.plan.operations.map((operation) => operation.serverInstanceId))
+			].sort(),
+			librarySectionKeys: '*',
+			itemIds: itemIds.length ? [...new Set(itemIds)].sort((a, b) => a - b) : '*',
+			mutationKeys: payload.plan.operations
+				.map(
+					(operation) =>
+						`${operation.serverInstanceId}:${targetKey(operation.target)}:${operation.destination}:${operation.slot.kind}:${operation.slot.season ?? 'root'}:${operation.slot.episode ?? 'root'}`
+				)
+				.sort()
 		};
 	}
 	const crossServerSource =
@@ -222,7 +251,7 @@ export function describeJob(
 		mutating: ACTIVE_MUTATION_TYPES.has(persistedType),
 		safeToReplay:
 			persistedType === 'retry'
-				? normalizedPayload.kind !== 'apply'
+				? !ARTWORK_MUTATION_KINDS.has(normalizedPayload.kind)
 				: SAFE_REPLAY_TYPES.has(persistedType)
 	};
 }
@@ -251,7 +280,9 @@ export function relateJobs(a: JobDescriptor, b: JobDescriptor): JobRelationship 
 		aKind === 'sync' || bKind === 'sync' || aKind === 'automation' || bKind === 'automation';
 	if (eitherSync) return 'conflict';
 	if (!overlaps(a.scope.itemIds, b.scope.itemIds)) return 'independent';
-	if (aKind === 'apply' && bKind === 'apply') {
+	if (ARTWORK_MUTATION_KINDS.has(aKind) && ARTWORK_MUTATION_KINDS.has(bKind)) {
+		// Apply and undo both write artwork slots: they may run together only when no
+		// slot is shared, so an undo can never race an apply over the same destination.
 		return overlaps(a.scope.mutationKeys, b.scope.mutationKeys) ? 'conflict' : 'independent';
 	}
 	// Discovery mutates candidate state and apply mutates artwork/revisions; same-item

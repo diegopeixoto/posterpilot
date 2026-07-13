@@ -1,5 +1,7 @@
 <script lang="ts">
 	import ArtworkUndoDialog from '$lib/components/ArtworkUndoDialog.svelte';
+	import JobProgress from '$lib/components/JobProgress.svelte';
+	import type { PublicJobProgress } from '$lib/job-progress';
 	import { m } from '$lib/paraglide/messages';
 
 	type Revision = {
@@ -58,6 +60,7 @@
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let result = $state<{ succeeded: number; failed: number; skipped: number } | null>(null);
+	let undoJobId = $state<number | null>(null);
 	let selectedScopeLabel = $state(m.collection_undo_scope());
 
 	function date(value: string | Date): string {
@@ -130,23 +133,34 @@
 				body: JSON.stringify({ planId: preview.planId, digest: preview.digest })
 			});
 			const body = await response.json().catch(() => ({}));
-			if (!response.ok || !body.result?.summary) {
+			// A grouped undo runs on the durable worker: follow its job instead of
+			// waiting on a response that would time out for a large collection.
+			if (!response.ok || !body.job) {
 				error = m.collection_undo_error();
 				return;
 			}
-			result = {
-				succeeded: Number(body.result.summary.succeeded ?? 0),
-				failed: Number(body.result.summary.failed ?? 0),
-				skipped: Number(body.result.summary.skipped ?? 0)
-			};
+			undoJobId = Number(body.job.jobId);
 			open = false;
 			preview = null;
-			await onChanged?.();
 		} catch {
 			error = m.collection_undo_error();
 		} finally {
 			busy = false;
 		}
+	}
+
+	async function onUndoDone(status: string, progress: PublicJobProgress): Promise<void> {
+		undoJobId = null;
+		if (status === 'completed' || status === 'partial_failed') {
+			result = {
+				succeeded: progress.resultSummary.succeeded,
+				failed: progress.resultSummary.failed,
+				skipped: progress.resultSummary.skipped
+			};
+		} else {
+			error = m.collection_undo_error();
+		}
+		await onChanged?.();
 	}
 </script>
 
@@ -156,6 +170,9 @@
 	</h2>
 	<p class="mt-1 text-sm text-neutral-400">{m.collection_history_hint()}</p>
 	{#if error}<p class="mt-3 text-sm text-red-300" role="alert">{error}</p>{/if}
+	{#if undoJobId}
+		<div class="mt-3"><JobProgress jobId={undoJobId} onDone={onUndoDone} /></div>
+	{/if}
 	{#if result}
 		<p
 			class="mt-3 text-sm {result.failed > 0 ? 'text-amber-300' : 'text-emerald-300'}"

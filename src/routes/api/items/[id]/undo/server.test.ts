@@ -46,12 +46,10 @@ describe('/api/items/[id]/undo exact preview and confirmation', () => {
 			}
 		});
 		h.confirm.mockResolvedValue({
+			jobId: 42,
 			planId: 'undo-plan-1',
 			digest,
-			status: 'success',
-			summary: { total: 1, succeeded: 1, failed: 0, skipped: 0 },
-			operations: [],
-			groups: []
+			operationCount: 1
 		});
 	});
 
@@ -95,40 +93,23 @@ describe('/api/items/[id]/undo exact preview and confirmation', () => {
 		expect(parseActiveItemUndoScope({ scope: 'item' })).toEqual({ kind: 'item' });
 	});
 
-	it('PUT confirms only the supplied plan identity', async () => {
+	it('PUT confirms only the supplied plan identity and hands it to the worker', async () => {
 		const response = await PUT({
 			params: { id: '7' },
 			request: request('PUT', { planId: 'undo-plan-1', digest })
 		} as Parameters<typeof PUT>[0]);
 
-		expect(response.status).toBe(200);
-		expect(await response.json()).toMatchObject({ ok: true, result: { status: 'success' } });
+		// The plan is consumed and enqueued, so confirmation reports the job to follow
+		// rather than an outcome the request never waited for.
+		expect(response.status).toBe(202);
+		expect(await response.json()).toMatchObject({
+			ok: true,
+			job: { jobId: 42, planId: 'undo-plan-1', operationCount: 1 }
+		});
 		expect(h.confirm).toHaveBeenCalledWith({
 			mediaItemId: 7,
 			planId: 'undo-plan-1',
 			digest
-		});
-	});
-
-	it('reports partial execution as a sanitized multi-status result', async () => {
-		h.confirm.mockResolvedValue({
-			planId: 'undo-plan-1',
-			digest,
-			status: 'partial',
-			summary: { total: 2, succeeded: 1, failed: 1, skipped: 0 },
-			operations: [],
-			groups: []
-		});
-		const response = await PUT({
-			params: { id: '7' },
-			request: request('PUT', { planId: 'undo-plan-1', digest })
-		} as Parameters<typeof PUT>[0]);
-
-		expect(response.status).toBe(207);
-		expect(await response.json()).toMatchObject({
-			ok: false,
-			error: { code: 'undo_partial' },
-			result: { status: 'partial', summary: { succeeded: 1, failed: 1 } }
 		});
 	});
 

@@ -90,3 +90,5 @@ nada. Consulta el [Gestor de Kometa](../kometa-config-sync/).
 - Mantén la automatización orientada a revisión; ningún horario integrado autoaplica.
 
 Continúa con [Uso](../usage/) o [Automatización y recuperación](../automation-recovery/).
+
+La confirmación entrega el plan congelado a la cola de trabajos duradera, de modo que una restauración grande —una colección completa, por ejemplo— informa su progreso y se reanuda tras un reinicio en lugar de morir con la petición que la inició.

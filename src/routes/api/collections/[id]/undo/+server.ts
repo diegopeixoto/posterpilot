@@ -122,12 +122,14 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 					? await activeRevisionScope(params.id, stored.payload.scope.revisionId)
 					: null;
 		if (!scope) throw Object.assign(new Error(), { code: 'plan_scope_mismatch' });
-		const result = await confirmActiveItemArtworkUndo({
+		// A grouped collection undo can span every member, so it runs on the durable
+		// worker: the response carries the job to follow instead of a finished result.
+		const job = await confirmActiveItemArtworkUndo({
 			mediaItemId: scope.anchorItemId,
 			planId: body.planId,
 			digest: body.digest
 		});
-		return json({ ok: true, result });
+		return json({ ok: true, job }, { status: 202 });
 	} catch (error) {
 		return responseError(error);
 	}

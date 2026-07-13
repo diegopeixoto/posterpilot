@@ -11,6 +11,7 @@ import {
 	type ResolvedKometaServerBinding
 } from '$lib/server/kometa/server-binding';
 import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
+import { enqueueJobDetailed } from '$lib/server/jobs/runner';
 import { assertMutationsAllowed } from '$lib/server/maintenance';
 import { kometaOutputDirectory } from '$lib/server/plans/apply-destinations';
 import { createDatabaseApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
@@ -29,11 +30,13 @@ import {
 	createArtworkUndoExecutor,
 	type ArtworkUndoExecutionResult,
 	type ArtworkUndoExecutor,
+	type ExecuteArtworkUndoInput,
 	type UndoKometaMutationInput
 } from './undo-executor';
 import {
 	assertUndoPlanPayload,
 	UNDO_PLAN_KIND,
+	type FrozenUndoJobPayload,
 	type UndoPlanPayloadV1,
 	type UndoPlanScope,
 	type UndoPlanSlot
@@ -63,7 +66,14 @@ export interface ConfirmActiveItemArtworkUndoInput {
 	mediaItemId: number;
 	planId: string;
 	digest: string;
-	jobId?: number | null;
+}
+
+/** Confirmation hands the frozen plan to the durable queue and returns its job. */
+export interface ConfirmedArtworkUndoJob {
+	jobId: number;
+	planId: string;
+	digest: string;
+	operationCount: number;
 }
 
 export type ArtworkUndoRuntimeErrorCode =
@@ -103,8 +113,9 @@ interface UndoPlanInspector {
 
 export interface ArtworkUndoRuntimeDependencies {
 	plannerDependencies: ArtworkUndoPlannerDependencies;
-	executor: ArtworkUndoExecutor;
 	planStore: UndoPlanInspector;
+	/** Hands the consumed, frozen plan to the durable worker. */
+	enqueue(payload: FrozenUndoJobPayload): Promise<number>;
 	getActiveServerInstanceId(): Promise<string | null>;
 	getItem(mediaItemId: number, serverInstanceId: string): Promise<ActiveItemRecord | null>;
 	mutationsAllowed?(): void;
@@ -241,7 +252,7 @@ export function createArtworkUndoRuntime(dependencies: ArtworkUndoRuntimeDepende
 
 	async function confirm(
 		input: ConfirmActiveItemArtworkUndoInput
-	): Promise<ArtworkUndoExecutionResult> {
+	): Promise<ConfirmedArtworkUndoJob> {
 		mutationsAllowed();
 		const item = await activeItem(input.mediaItemId);
 		if (!validIdentifier(input.planId) || !/^[a-f0-9]{64}$/.test(input.digest)) {
@@ -272,13 +283,21 @@ export function createArtworkUndoRuntime(dependencies: ArtworkUndoRuntimeDepende
 		if (!planContainsItem(confirmed.payload, item.id)) {
 			throw new ArtworkUndoRuntimeError('plan_scope_mismatch');
 		}
-		return dependencies.executor({
+		// The plan is consumed here, so the frozen payload — not the plan id — is what
+		// the worker replays. A restart mid-undo therefore resumes the same operations
+		// instead of losing them with the request that started them.
+		const jobId = await dependencies.enqueue({
+			kind: 'undo',
 			planId: confirmed.planId,
 			digest: confirmed.digest,
-			payload: confirmed.payload,
-			jobId: input.jobId ?? null,
-			initiator: input.jobId ? 'job' : 'user'
+			plan: confirmed.payload
 		});
+		return {
+			jobId,
+			planId: confirmed.planId,
+			digest: confirmed.digest,
+			operationCount: confirmed.payload.summary.operationCount
+		};
 	}
 
 	return { preview, confirm };
@@ -367,15 +386,35 @@ export function createBoundKometaUndoAccess(dependencies: BoundKometaUndoAccessD
 }
 
 let liveRuntime: ReturnType<typeof createArtworkUndoRuntime> | null = null;
+let liveExecutor: ArtworkUndoExecutor | null = null;
 
-function runtime() {
-	if (liveRuntime) return liveRuntime;
+/** Shared executor wiring: confirmation enqueues, and the worker executes with it. */
+function executor(): ArtworkUndoExecutor {
+	if (liveExecutor) return liveExecutor;
 	const serverRegistry = createDatabaseApplyServerRegistry();
 	const snapshotStore = new ArtworkSnapshotStore(
 		resolveArtworkSnapshotDirectory(resolveDataPaths(env.DATABASE_URL, env.APP_KEY_FILE))
 	);
-	const snapshots = createArtworkSnapshotRepository(db, snapshotStore);
-	const ledger = createArtworkRevisionLedger(db);
+	const kometa = createBoundKometaUndoAccess({
+		loadConfig: resolveConfig,
+		resolveBinding: resolveKometaServerBinding,
+		read: readConfig,
+		write: writeConfigAtomic,
+		withLock: withConfigLock
+	});
+	liveExecutor = createArtworkUndoExecutor({
+		serverRegistry,
+		snapshots: createArtworkSnapshotRepository(db, snapshotStore),
+		ledger: createArtworkRevisionLedger(db),
+		readKometa: kometa.readKometa,
+		mutateKometa: kometa.mutateKometa
+	});
+	return liveExecutor;
+}
+
+function runtime() {
+	if (liveRuntime) return liveRuntime;
+	const serverRegistry = createDatabaseApplyServerRegistry();
 	const kometa = createBoundKometaUndoAccess({
 		loadConfig: resolveConfig,
 		resolveBinding: resolveKometaServerBinding,
@@ -391,14 +430,8 @@ function runtime() {
 	};
 	liveRuntime = createArtworkUndoRuntime({
 		plannerDependencies,
-		executor: createArtworkUndoExecutor({
-			serverRegistry,
-			snapshots,
-			ledger,
-			readKometa: kometa.readKometa,
-			mutateKometa: kometa.mutateKometa
-		}),
 		planStore: operationPlanStore,
+		enqueue: async (payload) => (await enqueueJobDetailed(payload, { trigger: 'undo' })).jobId,
 		getActiveServerInstanceId: async () => (await getActiveServerInstance())?.id ?? null,
 		getItem: async (mediaItemId, serverInstanceId) => {
 			const item = await getMediaItem(mediaItemId, serverInstanceId);
@@ -406,6 +439,13 @@ function runtime() {
 		}
 	});
 	return liveRuntime;
+}
+
+/** Execute a frozen undo job. Called by the durable worker, never by a request. */
+export function executeFrozenArtworkUndoJob(
+	input: ExecuteArtworkUndoInput
+): Promise<ArtworkUndoExecutionResult> {
+	return executor()(input);
 }
 
 export function previewActiveItemArtworkUndo(
@@ -416,6 +456,6 @@ export function previewActiveItemArtworkUndo(
 
 export function confirmActiveItemArtworkUndo(
 	input: ConfirmActiveItemArtworkUndoInput
-): Promise<ArtworkUndoExecutionResult> {
+): Promise<ConfirmedArtworkUndoJob> {
 	return runtime().confirm(input);
 }

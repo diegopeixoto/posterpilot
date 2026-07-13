@@ -95,6 +95,8 @@ export interface ExecuteArtworkUndoInput {
 	payload: UndoPlanPayloadV1;
 	jobId?: number | null;
 	initiator?: string;
+	/** Reported after each operation so the durable worker can publish progress. */
+	onProgress?(completed: number, operation: UndoPlanOperation): void | Promise<void>;
 }
 
 export interface ArtworkUndoOperationResult {
@@ -857,6 +859,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 					? await executeServerOperation(operation, groupId)
 					: await executeKometaOperation(operation, groupId);
 			results.push(result);
+			await input.onProgress?.(results.length, operation);
 		}
 
 		const groups: ArtworkUndoGroupResult[] = [];

@@ -20,7 +20,11 @@ export default ts.config(
 			'.svelte-kit/**',
 			'node_modules/**',
 			'drizzle/**',
-			'docs/**'
+			'docs/**',
+			// Playwright writes bundled vendor code into its reports and traces. Linting
+			// those artifacts fails the gate on any machine that has run the suite.
+			'playwright-report/**',
+			'test-results/**'
 		]
 	},
 	js.configs.recommended,

@@ -199,5 +199,11 @@ export function buildRetryPayloads(
 			}
 		];
 	}
+	if (parentPayload.kind === 'undo') {
+		// An undo restores the snapshot captured before one specific revision. Replaying
+		// a failed operation from the old plan could overwrite whatever the timeline
+		// holds now, so recovery goes through a fresh preview of the current history.
+		throw new JobRetryError('job_retry_unsupported_kind');
+	}
 	return buildApplyRetryPayloads(parentJobId, parentPayload, outcomes, plannedAt);
 }

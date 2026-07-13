@@ -468,6 +468,7 @@
 	"jobs_type_full_rescan": "完全再スキャン",
 	"jobs_type_discover": "アートワークを検索",
 	"jobs_type_apply": "アートワークを適用",
+	"jobs_type_undo": "アートワークを元に戻す",
 	"jobs_type_retry": "再試行",
 	"jobs_type_automation": "自動化",
 	"jobs_type_diagnostics": "診断",

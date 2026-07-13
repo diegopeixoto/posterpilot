@@ -62,7 +62,12 @@ describe('/api/collections/[id]/undo', () => {
 				}
 			}
 		});
-		h.confirm.mockResolvedValue({ summary: { succeeded: 2, failed: 0 } });
+		h.confirm.mockResolvedValue({
+			jobId: 42,
+			planId: 'undo-a',
+			digest: 'a'.repeat(64),
+			operationCount: 2
+		});
 	});
 
 	it('previews only a revision group bound to the active collection', async () => {
@@ -89,7 +94,9 @@ describe('/api/collections/[id]/undo', () => {
 		const response = await PUT(
 			event('PUT', { planId: 'undo-a', digest: 'a'.repeat(64) }) as Parameters<typeof PUT>[0]
 		);
-		expect(response.status).toBe(200);
+		// A grouped undo may span every member, so it is handed to the durable worker.
+		expect(response.status).toBe(202);
+		expect(await response.json()).toMatchObject({ ok: true, job: { jobId: 42 } });
 		expect(h.validatePlan).toHaveBeenCalledWith('undo-a', {
 			kind: 'artwork_undo',
 			digest: 'a'.repeat(64),
@@ -115,7 +122,7 @@ describe('/api/collections/[id]/undo', () => {
 		const response = await PUT(
 			event('PUT', { planId: 'undo-a', digest: 'a'.repeat(64) }) as Parameters<typeof PUT>[0]
 		);
-		expect(response.status).toBe(200);
+		expect(response.status).toBe(202);
 		expect(h.getRevision).toHaveBeenCalledWith('server-a', 'collection-a', 'revision-a');
 		expect(h.confirm).toHaveBeenCalledWith({
 			mediaItemId: 7,

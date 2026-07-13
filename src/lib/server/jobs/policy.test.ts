@@ -58,6 +58,63 @@ function crossServerApplyPayload(): JobPayload {
 	} as unknown as JobPayload;
 }
 
+function undoPayload(
+	slot: { kind: string; season: number | null; episode: number | null } = {
+		kind: 'poster',
+		season: null,
+		episode: null
+	},
+	mediaItemId = 22
+): JobPayload {
+	return {
+		kind: 'undo',
+		planId: 'undo-plan',
+		digest: 'b'.repeat(64),
+		plan: {
+			scope: { kind: 'item', serverInstanceId: 'destination-server', mediaItemId },
+			operations: [
+				{
+					id: 'op-1',
+					serverInstanceId: 'destination-server',
+					target: { kind: 'item', mediaItemId },
+					destination: 'server',
+					slot
+				}
+			],
+			summary: { operationCount: 1 }
+		}
+	} as unknown as JobPayload;
+}
+
+function applyPayloadForSlot(
+	slot: { kind: string; season: number | null; episode: number | null } = {
+		kind: 'poster',
+		season: null,
+		episode: null
+	},
+	mediaItemId = 22
+): JobPayload {
+	return {
+		kind: 'apply',
+		planId: 'apply-plan',
+		digest: 'c'.repeat(64),
+		plan: {
+			context: { source: 'single' },
+			scope: {
+				serverInstanceIds: ['destination-server'],
+				librarySectionKeys: ['destination-library'],
+				targetItemIds: [mediaItemId]
+			},
+			items: [
+				{
+					target: { serverInstanceId: 'destination-server', mediaItemId },
+					operations: [{ destination: 'server', slot }]
+				}
+			]
+		}
+	} as unknown as JobPayload;
+}
+
 describe('durable job policy', () => {
 	it('clones and deterministically normalizes item scopes', () => {
 		const source = {
@@ -209,5 +266,42 @@ describe('durable job policy', () => {
 		expect(result).not.toContain(accessKey);
 		expect(result).not.toContain(signature);
 		expect(result).toContain('retained');
+	});
+
+	it('scopes an undo by the exact slots its frozen operations restore', () => {
+		const undo = describeJob(undoPayload());
+		expect(undo.persistedType).toBe('undo');
+		expect(undo.mutating).toBe(true);
+		expect(undo.scope).toMatchObject({
+			serverInstanceIds: ['destination-server'],
+			itemIds: [22],
+			mutationKeys: ['destination-server:22:server:poster:root:root']
+		});
+	});
+
+	it('serializes an undo against an apply that writes the same slot', () => {
+		const undo = describeJob(undoPayload());
+		const sameSlot = describeJob(applyPayloadForSlot());
+		expect(relateJobs(undo, sameSlot)).toBe('conflict');
+
+		// A different slot on the same item never touches the same destination artwork.
+		const otherSlot = describeJob(
+			applyPayloadForSlot({ kind: 'background', season: null, episode: null })
+		);
+		expect(relateJobs(undo, otherSlot)).toBe('independent');
+	});
+
+	it('never replays an undo as a safe retry', () => {
+		const retried = describeJob(undoPayload(), { persistedType: 'retry' });
+		expect(retried.safeToReplay).toBe(false);
+	});
+
+	it('serializes an undo against discovery that refreshes the same item', () => {
+		expect(
+			relateJobs(
+				describeJob(undoPayload()),
+				describeJob({ kind: 'discover', serverInstanceId: 'destination-server', itemIds: [22] })
+			)
+		).toBe('conflict');
 	});
 });

@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import { jobAttempts, jobItemOutcomes, jobs } from '$lib/server/db/schema';
 import { assertMutationsAllowed } from '$lib/server/maintenance';
 import { assertApplyPlanPayload } from '$lib/server/plans/apply-plan-validation';
+import { assertUndoPlanPayload } from '$lib/server/artwork-revisions/undo-plan';
 import { canonicalJsonDigest } from '$lib/server/plans/canonical-json';
 import { automationStore } from '$lib/server/automation/runtime';
 import { notifyAutomationEvent } from '$lib/server/automation/scheduler-runtime';
@@ -18,7 +19,7 @@ import {
 	sanitizeJobErrorText,
 	type JobDescriptor
 } from './policy';
-import { runApplyJob, runAutomationJob, runDiscoverJob, runSyncJob } from './tasks';
+import { runApplyJob, runAutomationJob, runDiscoverJob, runSyncJob, runUndoJob } from './tasks';
 import type {
 	JobContext,
 	JobItemOutcomeInput,
@@ -84,6 +85,17 @@ function safePositiveInt(value: number | undefined, fallback: number): number {
 }
 
 function validatePayload(payload: JobPayload): void {
+	if (payload.kind === 'undo') {
+		assertUndoPlanPayload(payload.plan);
+		if (
+			!payload.planId?.trim() ||
+			payload.plan.summary.operationCount === 0 ||
+			canonicalJsonDigest(payload.plan).digest !== payload.digest
+		) {
+			throw new TypeError('Frozen undo job does not match its plan digest');
+		}
+		return;
+	}
 	if (payload.kind !== 'apply') return;
 	assertApplyPlanPayload(payload.plan);
 	if (
@@ -186,7 +198,10 @@ export async function enqueueJobDetailed(
 				payload: frozenPayload as unknown as Record<string, unknown>,
 				serverInstanceId,
 				librarySectionKey,
-				planId: frozenPayload.kind === 'apply' ? frozenPayload.planId : null,
+				planId:
+					frozenPayload.kind === 'apply' || frozenPayload.kind === 'undo'
+						? frozenPayload.planId
+						: null,
 				parentJobId: options.parentJobId ?? null,
 				initiator,
 				idempotencyKey: descriptor.idempotencyKey,
@@ -631,6 +646,8 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 		else if (payload.kind === 'discover') taskResult = await runDiscoverJob(ctx, payload);
 		else if (payload.kind === 'automation') {
 			taskResult = await runAutomationJob(ctx, payload);
+		} else if (payload.kind === 'undo') {
+			taskResult = await runUndoJob(ctx, payload);
 		} else {
 			taskResult = await runApplyJob(ctx, payload);
 			await persistApplyOutcomes(job, attempt, taskResult);

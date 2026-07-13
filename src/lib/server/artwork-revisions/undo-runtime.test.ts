@@ -5,7 +5,6 @@ vi.mock('$env/dynamic/private', () => ({ env: {} }));
 import type { AppConfig } from '$lib/server/config';
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { readKometaSlot } from '$lib/server/revisions/kometa-state';
-import type { ArtworkUndoExecutor } from './undo-executor';
 import { buildUndoPlan, type UndoPlanPayloadV1 } from './undo-plan';
 import type { ArtworkUndoPlannerDependencies, ArtworkUndoPreview } from './undo-planner';
 import {
@@ -82,21 +81,14 @@ function runtimeHarness(options: { planItemId?: number; activeServer?: string | 
 		digest: built.digest,
 		payload: built.payload
 	});
-	const execute = vi.fn().mockResolvedValue({
-		planId: 'undo-plan-1',
-		digest: built.digest,
-		status: 'success',
-		summary: { total: 1, succeeded: 1, failed: 0, skipped: 0 },
-		operations: [],
-		groups: []
-	});
+	const enqueue = vi.fn().mockResolvedValue(42);
 	const validate = vi.fn().mockResolvedValue({ payload: built.payload });
 	const getItem = vi.fn(async (id: number, serverInstanceId: string) =>
 		id === 7 && serverInstanceId === 'server-a' ? { id: 7, serverInstanceId: 'server-a' } : null
 	);
 	const dependencies: ArtworkUndoRuntimeDependencies = {
 		plannerDependencies: {} as ArtworkUndoPlannerDependencies,
-		executor: execute as unknown as ArtworkUndoExecutor,
+		enqueue,
 		planStore: { validate },
 		getActiveServerInstanceId: vi.fn().mockResolvedValue(options.activeServer ?? 'server-a'),
 		getItem,
@@ -109,7 +101,7 @@ function runtimeHarness(options: { planItemId?: number; activeServer?: string | 
 		built,
 		previewPlan,
 		confirmPlan,
-		execute,
+		enqueue,
 		validate,
 		getItem
 	};
@@ -124,12 +116,12 @@ describe('active-item artwork undo runtime', () => {
 		expect(harness.previewPlan).toHaveBeenCalledWith({
 			scope: { kind: 'item', serverInstanceId: 'server-a', mediaItemId: 7 }
 		});
-		expect(harness.execute).not.toHaveBeenCalled();
+		expect(harness.enqueue).not.toHaveBeenCalled();
 	});
 
-	it('validates plan ownership before consuming and executes the exact confirmed payload', async () => {
+	it('validates plan ownership before consuming and enqueues the exact confirmed payload', async () => {
 		const harness = runtimeHarness();
-		const result = await harness.runtime.confirm({
+		const job = await harness.runtime.confirm({
 			mediaItemId: 7,
 			planId: 'undo-plan-1',
 			digest: harness.built.digest
@@ -145,14 +137,13 @@ describe('active-item artwork undo runtime', () => {
 			digest: harness.built.digest,
 			serverInstanceId: 'server-a'
 		});
-		expect(harness.execute).toHaveBeenCalledWith({
+		expect(harness.enqueue).toHaveBeenCalledWith({
+			kind: 'undo',
 			planId: 'undo-plan-1',
 			digest: harness.built.digest,
-			payload: harness.built.payload,
-			jobId: null,
-			initiator: 'user'
+			plan: harness.built.payload
 		});
-		expect(result.status).toBe('success');
+		expect(job).toMatchObject({ jobId: 42, planId: 'undo-plan-1', digest: harness.built.digest });
 	});
 
 	it('rejects the wrong item or server before plan confirmation', async () => {
@@ -181,7 +172,7 @@ describe('active-item artwork undo runtime', () => {
 				scope: { kind: 'revision', revisionId: 'revision-1' }
 			})
 		).rejects.toMatchObject({ code: 'undo_scope_not_found' });
-		expect(harness.execute).not.toHaveBeenCalled();
+		expect(harness.enqueue).not.toHaveBeenCalled();
 	});
 
 	it('does not swallow stale or replay failures from exact confirmation', async () => {
@@ -198,7 +189,7 @@ describe('active-item artwork undo runtime', () => {
 				})
 			).rejects.toMatchObject({ code });
 		}
-		expect(harness.execute).not.toHaveBeenCalled();
+		expect(harness.enqueue).not.toHaveBeenCalled();
 	});
 });
 

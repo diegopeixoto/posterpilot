@@ -468,6 +468,7 @@
 	"jobs_type_full_rescan": "Full rescan",
 	"jobs_type_discover": "Find artwork",
 	"jobs_type_apply": "Apply artwork",
+	"jobs_type_undo": "Undo artwork",
 	"jobs_type_retry": "Retry",
 	"jobs_type_automation": "Automation",
 	"jobs_type_diagnostics": "Diagnostics",

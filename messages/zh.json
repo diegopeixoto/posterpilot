@@ -468,6 +468,7 @@
 	"jobs_type_full_rescan": "完整重新扫描",
 	"jobs_type_discover": "查找艺术图片",
 	"jobs_type_apply": "应用艺术图片",
+	"jobs_type_undo": "撤销封面",
 	"jobs_type_retry": "重试",
 	"jobs_type_automation": "自动化",
 	"jobs_type_diagnostics": "诊断",

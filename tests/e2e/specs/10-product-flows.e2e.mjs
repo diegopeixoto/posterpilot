@@ -59,7 +59,12 @@ test.describe
 			page.getByRole('status').filter({ hasText: t('manual_match_cleared_eligible') })
 		).toBeVisible();
 
-		await page.getByText(t('manual_match_history')).click();
+		// Target the summary itself: the enclosing <details> normalizes to the same text
+		// until the audit list renders, which made a plain text lookup ambiguous.
+		await page
+			.locator('summary')
+			.filter({ hasText: t('manual_match_history') })
+			.click();
 		await expect(page.getByText(t('manual_match_audit_cleared'), { exact: true })).toBeVisible();
 	});
 

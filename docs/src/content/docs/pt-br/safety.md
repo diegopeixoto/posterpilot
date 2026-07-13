@@ -95,3 +95,5 @@ ou reutilizados não gravam nada. Veja o [Gerenciador do Kometa](../kometa-confi
 
 Continue em [Uso](../usage/) ou no guia de
 [Automação e recuperação](../automation-recovery/).
+
+A confirmação entrega o plano congelado à fila de trabalhos durável, então um desfazer grande — uma coleção inteira, por exemplo — informa o progresso e é retomado após uma reinicialização, em vez de morrer junto com a requisição que o iniciou.

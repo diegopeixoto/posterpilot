@@ -138,7 +138,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	}
 };
 
-/** Confirm and execute only the exact single-use plan returned by POST. */
+/**
+ * Confirm the exact single-use plan returned by POST. The plan is consumed and
+ * handed to the durable worker, so the response carries the job to follow rather
+ * than the outcome: a long undo reports progress and survives a restart.
+ */
 export const PUT: RequestHandler = async ({ params, request }) => {
 	const mediaItemId = itemId(params.id);
 	if (mediaItemId === null) return failure('invalid_request', 400, 'id');
@@ -149,21 +153,8 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 	if (!planId || !digest) return failure('invalid_request', 400);
 	try {
 		assertMutationsAllowed();
-		const result = await confirmActiveItemArtworkUndo({
-			mediaItemId,
-			planId,
-			digest
-		});
-		if (result.status === 'success') return json({ ok: true, result });
-		const partial = result.status === 'partial';
-		return json(
-			{
-				ok: false,
-				error: { code: partial ? 'undo_partial' : 'undo_failed' },
-				result
-			},
-			{ status: partial ? 207 : 409 }
-		);
+		const job = await confirmActiveItemArtworkUndo({ mediaItemId, planId, digest });
+		return json({ ok: true, job }, { status: 202 });
 	} catch (error) {
 		return safeError(error);
 	}

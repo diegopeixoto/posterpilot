@@ -33,6 +33,7 @@
 	let method = $state<'plex' | 'kometa' | 'both'>(data.defaultApplyMethod);
 	let busy = $state(false);
 	let jobId = $state<number | null>(null);
+	let undoJobId = $state<number | null>(null);
 	let historyRefresh = $state(0);
 	let message = $state<string | null>(null);
 	// Whether the current message is an error (drives role="alert" + red styling).
@@ -305,6 +306,7 @@
 			finishingAdvance = false;
 			completionRetry = null;
 			jobId = null;
+			undoJobId = null;
 			undoPreview = null;
 			undoContextLabel = '';
 			undoAvailable = false;
@@ -561,12 +563,11 @@
 				})
 			});
 			const result = await res.json().catch(() => ({}));
-			if (result.result?.status === 'success') {
-				setMessage(m.item_undo_success());
-			} else if (result.result?.status === 'partial') {
-				setMessage(m.item_undo_partial(), true);
-			} else if (result.result) {
-				setMessage(m.item_undo_failed(), true);
+			// Confirmation consumes the plan and hands it to the durable worker, so the
+			// outcome arrives through job progress rather than from this response.
+			if (res.ok && result.job) {
+				undoJobId = result.job.jobId as number;
+				setMessage(m.item_working());
 			} else {
 				setMessage(
 					result?.error?.code === 'plan_stale' ? m.item_undo_stale() : m.item_undo_failed(),
@@ -575,15 +576,20 @@
 			}
 			undoPreview = null;
 			undoContextLabel = '';
-			if (result.result) {
-				await invalidateAll();
-				historyRefresh += 1;
-			}
 		} catch {
 			setMessage(m.item_msg_revert_failed({ error: m.item_error_network() }), true);
 		} finally {
 			undoBusy = false;
 		}
+	}
+
+	async function onUndoDone(status: string) {
+		undoJobId = null;
+		if (status === 'completed') setMessage(m.item_undo_success());
+		else if (status === 'partial_failed') setMessage(m.item_undo_partial(), true);
+		else setMessage(m.item_undo_failed(), true);
+		await invalidateAll();
+		historyRefresh += 1;
 	}
 
 	function previewUndoItem(): void {
@@ -1290,6 +1296,10 @@
 
 {#if jobId !== null}
 	<div class="mt-6 pb-28"><JobProgress {jobId} onDone={onApplyDone} /></div>
+{/if}
+
+{#if undoJobId}
+	<div class="mt-6 pb-28"><JobProgress jobId={undoJobId} onDone={onUndoDone} /></div>
 {/if}
 
 <ArtworkUndoDialog

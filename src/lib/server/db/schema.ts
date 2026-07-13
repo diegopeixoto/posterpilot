@@ -302,6 +302,7 @@ export const jobs = sqliteTable(
 				'full_rescan',
 				'discover',
 				'apply',
+				'undo',
 				'retry',
 				'automation',
 				'diagnostics',

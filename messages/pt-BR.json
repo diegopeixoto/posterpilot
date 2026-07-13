@@ -468,6 +468,7 @@
 	"jobs_type_full_rescan": "Varredura completa",
 	"jobs_type_discover": "Buscar artes",
 	"jobs_type_apply": "Aplicar artes",
+	"jobs_type_undo": "Desfazer arte",
 	"jobs_type_retry": "Nova tentativa",
 	"jobs_type_automation": "Automação",
 	"jobs_type_diagnostics": "Diagnóstico",

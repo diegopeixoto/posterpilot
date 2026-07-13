@@ -468,6 +468,7 @@
 	"jobs_type_full_rescan": "Reescaneo completo",
 	"jobs_type_discover": "Buscar arte",
 	"jobs_type_apply": "Aplicar arte",
+	"jobs_type_undo": "Deshacer arte",
 	"jobs_type_retry": "Reintento",
 	"jobs_type_automation": "Automatización",
 	"jobs_type_diagnostics": "Diagnóstico",

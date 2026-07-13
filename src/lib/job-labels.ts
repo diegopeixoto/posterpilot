@@ -34,6 +34,8 @@ export function jobTypeLabel(type: string): string {
 			return m.jobs_type_discover();
 		case 'apply':
 			return m.jobs_type_apply();
+		case 'undo':
+			return m.jobs_type_undo();
 		case 'retry':
 			return m.jobs_type_retry();
 		case 'automation':

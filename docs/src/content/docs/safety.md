@@ -76,6 +76,10 @@ a season, or the full item. The preview lists restorable operations and unavaila
 or already-restored slots. Confirmation restores the prior snapshot/value, verifies
 the result where supported, and appends a new undo revision.
 
+Confirmation hands the frozen plan to the durable job queue, so a large undo — a
+whole collection, say — reports progress and resumes after a restart instead of
+dying with the request that started it.
+
 Undo is scoped: restoring one season does not change the show poster or another
 season; restoring Kometa-managed metadata does not rewrite unrelated YAML. Mixed
 results remain visible and independently retryable.
