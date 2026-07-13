@@ -123,8 +123,6 @@ with the title and year revealed on hover.
 
 ![PosterPilot library wall with search, filter, sort, status controls, and a grid of movie posters](/posterpilot/screenshots/library.webp)
 
-![PosterPilot library wall with search, filter, sort, status controls, and a grid of movie posters](/posterpilot/screenshots/library.webp)
-
 ## Find covers
 
 Open an item to see its detail view: a backdrop hero with the item's logo (or its

@@ -23,6 +23,8 @@ Si cambian la selección, la ilustración actual, la pertenencia a la colección
 archivo de Kometa o cualquier entrada vinculada, la confirmación se rechaza. Solicita
 otra vista previa; no reutilices el token anterior.
 
+![Detalle de un título en PosterPilot con la confirmación de aplicación que muestra el plan exacto y congelado: dos subidas, ninguna exportación a Kometa y nada omitido](/posterpilot/screenshots/apply-exact-plan.webp)
+
 ## Qué se captura
 
 Antes de mutar, PosterPilot registra el estado anterior. Cuando el proveedor puede
@@ -69,6 +71,8 @@ cuando es posible y añade una revisión de deshacer.
 
 El alcance se respeta: una temporada no cambia la carátula de la serie ni otra
 temporada; Kometa no reescribe YAML ajeno. Los resultados mixtos siguen auditables.
+
+![Cronología del historial de arte de PosterPilot con una revisión aplicada y verificada, una entrada por destino y ranura, cada una con su propia acción de deshacer](/posterpilot/screenshots/item-artwork-history.webp)
 
 ## Seguridad de Kometa
 

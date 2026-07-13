@@ -54,6 +54,8 @@ the endpoint and token once. Send the token in
 `X-PosterPilot-Webhook-Token`. Rotating invalidates the previous token; disabling
 removes it. Treat the token as a secret and do not put it in a URL or log.
 
+![PosterPilot Automation settings with two review-only schedules and the occurrence history of past runs](/posterpilot/screenshots/settings-automation.webp)
+
 ## Diagnose before retrying
 
 Open **Settings → Diagnostics** to run independent, non-mutating checks for every
@@ -85,6 +87,8 @@ You can validate, export, or delete a bundle. Export requires a separate warning
 acknowledgement because a bundle can contain credentials and key material. Retention
 by maximum count and/or age applies only to unprotected valid bundles; manual and
 pre-restore safety backups are protected by default.
+
+![PosterPilot Backup and restore settings with retention limits and a verified, protected backup offering verify, export, and restore preview](/posterpilot/screenshots/settings-backup.webp)
 
 ## Restore workflow
 

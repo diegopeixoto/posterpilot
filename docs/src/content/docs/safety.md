@@ -25,6 +25,8 @@ If the selection, target artwork, collection membership, Kometa file, destinatio
 or another bound input changes after preview, confirmation is rejected. Request a
 fresh preview; do not retry an old confirmation token.
 
+![PosterPilot item detail with the apply confirmation showing the exact frozen plan: two uploads, no Kometa exports, nothing skipped](/posterpilot/screenshots/apply-exact-plan.webp)
+
 ## What is captured
 
 Before a planned mutation, PosterPilot records the prior state for the affected
@@ -77,6 +79,8 @@ the result where supported, and appends a new undo revision.
 Undo is scoped: restoring one season does not change the show poster or another
 season; restoring Kometa-managed metadata does not rewrite unrelated YAML. Mixed
 results remain visible and independently retryable.
+
+![PosterPilot artwork history timeline showing a verified applied revision with one entry per destination and slot, each with its own undo action](/posterpilot/screenshots/item-artwork-history.webp)
 
 ## Kometa configuration safety
 

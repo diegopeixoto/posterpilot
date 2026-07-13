@@ -52,6 +52,8 @@ escopo escolhido; filtros e views de revisão inválidos não atravessam servido
 Jobs e automações mantêm o servidor nomeado. Trabalho independente pode rodar em paralelo;
 capacidades de artwork são específicas por instância e versão.
 
+![Configurações de Servidor de mídia do PosterPilot listando dois servidores conectados, o Plex padrão ativo e um Jellyfin saudável, com ações de testar, desativar e desconectar](/posterpilot/screenshots/settings-servers.webp)
+
 ## Vínculo do Kometa
 
 Kometa é específico do Plex. Defina `KOMETA_SERVER_INSTANCE_ID` ou escolha uma instância

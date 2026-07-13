@@ -29,6 +29,8 @@ session history when enough alternatives exist; with a small pool it relaxes onl
 repeat avoidance, never your filters. Blind mode hides identity until reveal, and
 capsules expose their eligibility rule before drawing.
 
+![PosterPilot FUN night picker with library, media type, genre, year, runtime, and rating filters before drawing a title](/posterpilot/screenshots/fun-picker.webp)
+
 ## Poster Match
 
 Poster Match requires one title with at least two available poster candidates. Pick

@@ -48,6 +48,8 @@ Gere a credencial do webhook na automação. Endpoint e token são mostrados uma
 Envie o token no cabeçalho `X-PosterPilot-Webhook-Token`. Rotacionar invalida o token
 anterior; desativar o remove. Não coloque o token em URL ou log.
 
+![Configurações de Automação do PosterPilot com duas programações somente de revisão e o histórico de execuções anteriores](/posterpilot/screenshots/settings-automation.webp)
+
 ## Diagnosticar antes de repetir
 
 **Configurações → Diagnósticos** executa testes independentes e sem mutação para
@@ -76,6 +78,8 @@ No modo `.app-key`, a chave gerada entra no bundle. Com `APP_SECRET`, o segredo 
 É possível validar, exportar e excluir. Exportar exige confirmação porque o bundle
 pode conter credenciais/chaves. Retenção por quantidade e/ou idade só remove bundles
 válidos não protegidos; backups manuais e de segurança pré-restauração são protegidos.
+
+![Configurações de Backup e restauração do PosterPilot com limites de retenção e um backup verificado e protegido que oferece verificar, exportar e pré-visualizar a restauração](/posterpilot/screenshots/settings-backup.webp)
 
 ## Restaurar
 

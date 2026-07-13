@@ -38,6 +38,8 @@ PosterPilot 可管理多个 Plex、Jellyfin 和 Emby 实例，同时严格隔离
 
 启用两个以上实例时，使用外壳切换器或**设为活动**。页面、筛选和 Review 视图保持在所选范围。任务和自动化也绑定命名服务器；不同服务器的独立工作可并行。海报能力由每个实例及版本决定。
 
+![PosterPilot 媒体服务器设置页，列出两台已连接的服务器：处于活动状态的默认 Plex 与状态健康的 Jellyfin，并提供测试、停用和断开操作](/posterpilot/screenshots/settings-servers.webp)
+
 ## Kometa 绑定
 
 Kometa 仅适用于 Plex。设置 `KOMETA_SERVER_INSTANCE_ID` 或在设置中选择命名 Plex 实例。预览会验证绑定；Jellyfin／Emby 或隐式借用另一 Plex 凭据会被拒绝。

@@ -70,6 +70,8 @@ may run concurrently; overlapping work on one server is deduplicated or blocked.
 Capabilities are instance-specific, so a slot available on Plex may be unavailable
 on a Jellyfin/Emby version.
 
+![PosterPilot Media server settings listing two connected servers, the active Plex default and a healthy Jellyfin, with test, disable, and disconnect actions](/posterpilot/screenshots/settings-servers.webp)
+
 ## Kometa binding
 
 Kometa is Plex-specific. Set `KOMETA_SERVER_INSTANCE_ID` or choose the named Plex

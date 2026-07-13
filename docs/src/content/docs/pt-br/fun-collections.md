@@ -22,6 +22,8 @@ Novo sorteio mantém filtros e troca o seed. O histórico recente da sessão é 
 quando há alternativas; em conjuntos pequenos, apenas essa exclusão é relaxada. O modo
 cego esconde a identidade até revelar, e cápsulas exibem a regra antes do sorteio.
 
+![Escolhedor da noite do FUN no PosterPilot com filtros de biblioteca, tipo, gênero, ano, duração e avaliação antes de sortear um título](/posterpilot/screenshots/fun-picker.webp)
+
 ## Poster Match
 
 Requer um título com pelo menos dois pôsteres. Escolha entre duas imagens por rodada

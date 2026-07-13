@@ -51,6 +51,8 @@ Con dos instancias habilitadas usa el selector o **Hacer activo**. Páginas, fil
 vistas quedan en su alcance. Trabajos y horarios conservan el servidor; trabajo
 independiente puede ejecutarse en paralelo. Las capacidades dependen de cada instancia.
 
+![Ajustes de Servidor multimedia de PosterPilot con dos servidores conectados, el Plex predeterminado activo y un Jellyfin correcto, con acciones de probar, desactivar y desconectar](/posterpilot/screenshots/settings-servers.webp)
+
 ## Vinculación de Kometa
 
 Kometa es específico de Plex. Define `KOMETA_SERVER_INSTANCE_ID` o elige una instancia

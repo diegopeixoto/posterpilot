@@ -24,6 +24,8 @@ Se seleção, artwork atual, membros da coleção, arquivo do Kometa, destino ou
 dado vinculado mudar depois da prévia, a confirmação é recusada. Gere uma nova
 prévia; não reutilize um token antigo.
 
+![Detalhe de um título no PosterPilot com a confirmação de aplicação mostrando o plano exato e congelado: dois envios, nenhuma exportação para o Kometa e nada ignorado](/posterpilot/screenshots/apply-exact-plan.webp)
+
 ## O que é capturado
 
 Antes da mutação, o PosterPilot registra o estado anterior do slot. Quando o
@@ -73,6 +75,8 @@ verifica o resultado quando possível e acrescenta uma nova revisão de desfazer
 O escopo é preservado: desfazer uma temporada não muda a capa do seriado ou outra
 temporada; restaurar metadados do Kometa não reescreve YAML alheio. Resultados mistos
 continuam visíveis e podem ser tentados separadamente.
+
+![Linha do tempo do histórico de artes do PosterPilot com uma revisão aplicada e verificada, uma entrada por destino e slot, cada uma com sua própria ação de desfazer](/posterpilot/screenshots/item-artwork-history.webp)
 
 ## Segurança da configuração do Kometa
 

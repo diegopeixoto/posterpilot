@@ -22,6 +22,8 @@ Volver a sortear mantiene filtros y cambia la semilla. Se evita el historial rec
 cuando hay alternativas; en un conjunto pequeño solo se relaja esa exclusión. El modo
 ciego oculta la identidad hasta revelar y las cápsulas muestran su regla antes.
 
+![Selector de la noche de FUN en PosterPilot con filtros de biblioteca, tipo, género, año, duración y valoración antes de sortear un título](/posterpilot/screenshots/fun-picker.webp)
+
 ## Poster Match
 
 Requiere un título con al menos dos pósteres. Elige entre dos imágenes por ronda hasta

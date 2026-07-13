@@ -49,6 +49,8 @@ Genera la credencial en la automatización. El endpoint y el token se muestran u
 vez. Envía el token en `X-PosterPilot-Webhook-Token`. Rotarlo invalida el anterior;
 desactivarlo lo elimina. No lo incluyas en URL ni registros.
 
+![Ajustes de Automatización de PosterPilot con dos programaciones de solo revisión y el historial de ejecuciones anteriores](/posterpilot/screenshots/settings-automation.webp)
+
 ## Diagnosticar antes de reintentar
 
 **Ajustes → Diagnósticos** ejecuta pruebas independientes y no mutantes para
@@ -77,6 +79,8 @@ incluye y la restauración exige el mismo valor efectivo.
 Puedes validar, exportar o eliminar. Exportar requiere aceptar una advertencia porque
 el paquete puede contener credenciales. La retención por cantidad/edad solo elimina
 paquetes válidos no protegidos; las copias manuales y de seguridad están protegidas.
+
+![Ajustes de Copia de seguridad y restauración de PosterPilot con límites de retención y una copia verificada y protegida que ofrece verificar, exportar y previsualizar la restauración](/posterpilot/screenshots/settings-backup.webp)
 
 ## Restaurar
 
