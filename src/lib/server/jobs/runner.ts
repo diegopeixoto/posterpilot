@@ -662,13 +662,13 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 					eventIdentity: `job:${job.id}:sync_completed`,
 					librarySectionKeys: events.librarySectionKeys
 				}).catch(() => undefined);
-				if (events.newItemIds.length) {
+				if (events.newItems.length) {
 					await notifyAutomationEvent({
 						serverInstanceId: payload.serverInstanceId,
 						eventType: 'new_items',
 						eventIdentity: `job:${job.id}:new_items`,
 						librarySectionKeys: events.librarySectionKeys,
-						itemIds: events.newItemIds
+						items: events.newItems
 					}).catch(() => undefined);
 				}
 			}

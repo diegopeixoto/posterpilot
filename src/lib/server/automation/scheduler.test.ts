@@ -99,7 +99,7 @@ describe('automation scheduler', () => {
 				serverInstanceId: 'server-a',
 				eventType: 'new_items',
 				eventIdentity: 'sync:1:new',
-				itemIds: [2]
+				items: [{ id: 2, librarySectionKey: 'movies' }]
 			})
 		).resolves.toEqual(['event-occ']);
 		expect(deps.store.materializeEventOccurrence).toHaveBeenCalledTimes(1);
@@ -117,5 +117,85 @@ describe('automation scheduler', () => {
 		});
 		await scheduler.poll();
 		expect(deps.store.materializeDueOccurrences).not.toHaveBeenCalled();
+	});
+
+	it("narrows new-item events to each schedule's own libraries", async () => {
+		// One sync can create items in several libraries. The store rejects an occurrence
+		// carrying an item outside the schedule's scope, so a shared id list used to make
+		// a scoped automation throw — and abort the schedules queued behind it.
+		const deps = dependencies();
+		deps.store.pendingOccurrences = vi.fn().mockResolvedValue([]);
+		deps.store.list = vi.fn().mockResolvedValue([
+			{
+				id: 'movies-only',
+				enabled: true,
+				pausedAt: null,
+				triggerType: 'event',
+				eventType: 'new_items',
+				libraryScopes: ['movies']
+			},
+			{
+				id: 'shows-only',
+				enabled: true,
+				pausedAt: null,
+				triggerType: 'event',
+				eventType: 'new_items',
+				libraryScopes: ['shows']
+			}
+		]);
+		deps.store.materializeEventOccurrence = vi
+			.fn()
+			.mockImplementation(async ({ scheduleId }) => ({ id: `occ-${scheduleId}` }));
+		const scheduler = createAutomationScheduler({ store: deps.store, enqueue: deps.enqueue });
+
+		await expect(
+			scheduler.notifyEvent({
+				serverInstanceId: 'server-a',
+				eventType: 'new_items',
+				eventIdentity: 'sync:1:new',
+				librarySectionKeys: ['movies', 'shows'],
+				items: [
+					{ id: 2, librarySectionKey: 'movies' },
+					{ id: 5, librarySectionKey: 'shows' },
+					{ id: 9, librarySectionKey: 'movies' }
+				]
+			})
+		).resolves.toEqual(['occ-movies-only', 'occ-shows-only']);
+
+		expect(deps.store.materializeEventOccurrence).toHaveBeenCalledWith(
+			expect.objectContaining({ scheduleId: 'movies-only', itemIds: [2, 9] })
+		);
+		expect(deps.store.materializeEventOccurrence).toHaveBeenCalledWith(
+			expect.objectContaining({ scheduleId: 'shows-only', itemIds: [5] })
+		);
+	});
+
+	it('skips an eligible schedule whose libraries gained no new items', async () => {
+		const deps = dependencies();
+		deps.store.pendingOccurrences = vi.fn().mockResolvedValue([]);
+		deps.store.list = vi.fn().mockResolvedValue([
+			{
+				id: 'shows-only',
+				enabled: true,
+				pausedAt: null,
+				triggerType: 'event',
+				eventType: 'new_items',
+				libraryScopes: ['shows']
+			}
+		]);
+		deps.store.materializeEventOccurrence = vi.fn();
+		const scheduler = createAutomationScheduler({ store: deps.store, enqueue: deps.enqueue });
+
+		// The library was synced (so the schedule is eligible) but nothing new landed in it.
+		await expect(
+			scheduler.notifyEvent({
+				serverInstanceId: 'server-a',
+				eventType: 'new_items',
+				eventIdentity: 'sync:1:new',
+				librarySectionKeys: ['movies', 'shows'],
+				items: [{ id: 2, librarySectionKey: 'movies' }]
+			})
+		).resolves.toEqual([]);
+		expect(deps.store.materializeEventOccurrence).not.toHaveBeenCalled();
 	});
 });

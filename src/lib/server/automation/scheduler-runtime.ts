@@ -30,7 +30,7 @@ export function notifyAutomationEvent(input: {
 	serverInstanceId: string;
 	eventType: 'sync_completed' | 'new_items';
 	eventIdentity: string;
-	itemIds?: number[];
+	items?: Array<{ id: number; librarySectionKey: string }>;
 	librarySectionKeys?: string[];
 	occurredAt?: Date;
 }): Promise<string[]> {

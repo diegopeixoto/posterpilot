@@ -79,7 +79,8 @@ export interface JobTaskResult {
 	/** Internal, locale-neutral events emitted only after a user-initiated sync. */
 	automationEvents?: {
 		librarySectionKeys: string[];
-		newItemIds: number[];
+		/** Each new item with its library, so an event automation only sees its own scope. */
+		newItems: Array<{ id: number; librarySectionKey: string }>;
 	};
 }
 

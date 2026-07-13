@@ -187,7 +187,7 @@ export async function runSyncJob(
 	let processed = 0;
 	let succeeded = 0;
 	let failed = 0;
-	const newItemIds: number[] = [];
+	const newItems: Array<{ id: number; librarySectionKey: string }> = [];
 	for (const { sectionKey, item } of executionWork) {
 		if (ctx.isCancelled()) break;
 		await ctx.progress(processed, item.title);
@@ -236,7 +236,7 @@ export async function runSyncJob(
 		} else {
 			const [inserted] = await db.insert(mediaItems).values(base).returning();
 			itemId = inserted.id;
-			newItemIds.push(itemId);
+			newItems.push({ id: itemId, librarySectionKey: sectionKey });
 		}
 
 		let externalChanges = 0;
@@ -482,7 +482,7 @@ export async function runSyncJob(
 		},
 		automationEvents: {
 			librarySectionKeys: sections.map((section) => section.key),
-			newItemIds
+			newItems
 		}
 	};
 }

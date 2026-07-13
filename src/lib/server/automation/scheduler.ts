@@ -103,7 +103,8 @@ export function createAutomationScheduler(dependencies: AutomationSchedulerDepen
 		serverInstanceId: string;
 		eventType: 'sync_completed' | 'new_items';
 		eventIdentity: string;
-		itemIds?: number[];
+		/** Carries each item's library so a scoped schedule only ever sees its own. */
+		items?: Array<{ id: number; librarySectionKey: string }>;
 		librarySectionKeys?: string[];
 		occurredAt?: Date;
 	}): Promise<string[]> {
@@ -121,13 +122,23 @@ export function createAutomationScheduler(dependencies: AutomationSchedulerDepen
 		const occurredAt = new Date((input.occurredAt ?? clock()).getTime());
 		const ids: string[] = [];
 		for (const schedule of eligible) {
+			// One sync can create items across several libraries. The store rejects an
+			// occurrence carrying an item outside the schedule's libraries, so narrow the
+			// event to each schedule's own scope — and skip a schedule that got nothing.
+			let itemIds: number[] | undefined;
+			if (input.items) {
+				itemIds = input.items
+					.filter((item) => schedule.libraryScopes.includes(item.librarySectionKey))
+					.map((item) => item.id);
+				if (!itemIds.length) continue;
+			}
 			const occurrence = await dependencies.store.materializeEventOccurrence({
 				scheduleId: schedule.id,
 				serverInstanceId: input.serverInstanceId,
 				eventType: input.eventType,
 				eventIdentity: input.eventIdentity,
 				occurredAt,
-				itemIds: input.itemIds
+				itemIds
 			});
 			ids.push(occurrence.id);
 		}
