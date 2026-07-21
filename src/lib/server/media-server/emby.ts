@@ -210,7 +210,16 @@ export function embyLikeProvider(
 	}
 
 	async function readCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
-		const item = await getJson<RawEmbyItem>(`/Items/${encodeURIComponent(itemId)}`);
+		// Read the item through the userless list form `/Items?ids=…` rather than the
+		// single-item `/Items/{id}`: Jellyfin 10.11.x dropped the latter and answers it
+		// with HTTP 400, which would kill every apply that has a staged selection while
+		// planning. The list form still works with just an API key. `.Items[0]` is the
+		// requested item (empty array => item is gone => no artwork to compare against).
+		const listed = await getJson<RawEmbyItemsResponse>(
+			`/Items?ids=${encodeURIComponent(itemId)}`
+		);
+		const item = listed.Items?.[0];
+		if (!item) return null;
 		const imageType = kind === 'poster' ? ('Primary' as const) : ('Backdrop' as const);
 		const identity = kind === 'poster' ? item.ImageTags?.Primary : item.BackdropImageTags?.[0];
 		if (!identity) return null;
