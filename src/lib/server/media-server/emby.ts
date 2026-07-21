@@ -138,6 +138,11 @@ interface SystemInfo {
 	Version?: string;
 }
 
+interface RawEmbyUser {
+	Id?: string;
+	Policy?: { IsAdministrator?: boolean } | null;
+}
+
 /** Convert image bytes to a base64 string (the documented image POST body). */
 function toBase64(data: ArrayBuffer): string {
 	return Buffer.from(data).toString('base64');
@@ -163,6 +168,10 @@ export function embyLikeProvider(
 	const headers = authHeaders(apiKey, flavor);
 	const label = flavor === 'jellyfin' ? 'Jellyfin' : 'Emby';
 
+	// Resolved once per instance: `undefined` = not looked up yet, `null` = no user
+	// available (fall back to the userless list). See resolveLibraryUserId.
+	let cachedLibraryUserId: string | null | undefined;
+
 	// Every request aborts instead of hanging a worker when the server stalls
 	// mid-connection: metadata reads get the readCurrentArtwork budget, image
 	// transfers get a larger one for big files on slow links.
@@ -178,6 +187,26 @@ export function embyLikeProvider(
 			throw new Error(`${label} returned HTTP ${res.status} ${res.statusText} for ${path}`);
 		}
 		return (await res.json()) as T;
+	}
+
+	/**
+	 * Resolve a user id to read the library the way the Jellyfin UI does. A bare API key
+	 * is userless, so `/Items` returns every merged version (MergeVersions) as its own
+	 * item plus library extras; `/Users/{id}/Items` collapses the merges, hides extras,
+	 * and is the only form that carries UserData (watched). Prefer an administrator (sees
+	 * everything); cache the lookup. Returns null when no user resolves so listItems can
+	 * fall back to the userless list rather than fail the whole sync.
+	 */
+	async function resolveLibraryUserId(): Promise<string | null> {
+		if (cachedLibraryUserId !== undefined) return cachedLibraryUserId;
+		try {
+			const users = await getJson<RawEmbyUser[]>('/Users');
+			const chosen = users.find((user) => user.Policy?.IsAdministrator) ?? users[0];
+			cachedLibraryUserId = chosen?.Id ?? null;
+		} catch {
+			cachedLibraryUserId = null;
+		}
+		return cachedLibraryUserId;
 	}
 
 	/** POST raw image bytes (base64 body + image content-type) to an Images endpoint. */
@@ -284,13 +313,18 @@ export function embyLikeProvider(
 				Recursive: 'true',
 				IncludeItemTypes: 'Movie,Series',
 				Fields: 'ProviderIds,ProductionYear,DateLastModified,DateCreated',
-				// UserData (Played) is only attached when the token carries a user
-				// context (username/password login); with a bare API key the server
-				// omits it and items map to watched=false.
 				EnableUserData: 'true',
 				EnableImageTypes: 'Primary,Backdrop'
 			});
-			const res = await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`);
+			// Read through the user-scoped endpoint so the server collapses merged
+			// versions into one item, hides library extras, and attaches UserData
+			// (watched) — matching exactly what the user sees in the UI. Only a bare
+			// API key with no resolvable user falls back to the userless `/Items`.
+			const userId = await resolveLibraryUserId();
+			const path = userId
+				? `/Users/${encodeURIComponent(userId)}/Items?${params.toString()}`
+				: `/Items?${params.toString()}`;
+			const res = await getJson<RawEmbyItemsResponse>(path);
 			return mapItems(res, base, apiKey);
 		},
 
