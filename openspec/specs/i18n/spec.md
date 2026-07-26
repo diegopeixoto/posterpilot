@@ -5,12 +5,12 @@ Define supported locales, externalized catalogs, request-time locale selection, 
 ## Requirements
 ### Requirement: Supported locales
 
-The system SHALL support a fixed set of UI locales — English (`en`), Spanish (`es`), Simplified Chinese (`zh`), Japanese (`ja`), and Brazilian Portuguese (`pt-BR`) — with English as the base (source) locale and the default. The set of supported locales SHALL be the single source of truth used by both the locale resolver and the language switcher, so the two can never offer or resolve a locale that is not translated.
+The system SHALL support a fixed set of UI locales — English (`en`), Spanish (`es`), Simplified Chinese (`zh`), Japanese (`ja`), Brazilian Portuguese (`pt-BR`), and French (`fr`) — with English as the base (source) locale and the default. The set of supported locales SHALL be the single source of truth used by both the locale resolver and the language switcher, so the two can never offer or resolve a locale that is not translated.
 
 #### Scenario: All supported locales are selectable
 
 - **WHEN** the language switcher is rendered
-- **THEN** it offers exactly the supported locales — English, Spanish, Simplified Chinese, Japanese, and Brazilian Portuguese — each labeled in its own language
+- **THEN** it offers exactly the supported locales — English, Spanish, Simplified Chinese, Japanese, Brazilian Portuguese, and French — each labeled in its own language
 
 #### Scenario: English is the base locale
 
@@ -22,9 +22,14 @@ The system SHALL support a fixed set of UI locales — English (`en`), Spanish (
 - **WHEN** a locale value outside the supported set is supplied (e.g. via a stale setting or a crafted request)
 - **THEN** the system ignores it and continues resolving as if it were absent, never rendering an unsupported locale
 
+#### Scenario: French catalog at parity
+
+- **WHEN** a message key exists in the English catalog
+- **THEN** `messages/fr.json` contains a French translation for it, keeping all six catalogs at key parity
+
 ### Requirement: Externalized message catalogs
 
-The system SHALL store all user-facing UI strings in per-locale message catalogs (one JSON file per locale: `messages/en.json`, `messages/es.json`, `messages/zh.json`, `messages/ja.json`, `messages/pt-BR.json`), keyed by a stable message id, rather than hardcoded in components. The English catalog SHALL be the complete source catalog containing every message id. The UI SHALL reference messages only through the generated type-safe message functions, never by interpolating a raw catalog string at the call site.
+The system SHALL store all user-facing UI strings in per-locale message catalogs (one JSON file per locale: `messages/en.json`, `messages/es.json`, `messages/zh.json`, `messages/ja.json`, `messages/pt-BR.json`, `messages/fr.json`), keyed by a stable message id, rather than hardcoded in components. The English catalog SHALL be the complete source catalog containing every message id. The UI SHALL reference messages only through the generated type-safe message functions, never by interpolating a raw catalog string at the call site.
 
 #### Scenario: Source catalog is complete
 
