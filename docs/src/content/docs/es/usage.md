@@ -70,6 +70,11 @@ con póster/fondo y, para series, temporadas y title cards. Prepara una pieza, e
 completo o mezcla ranuras. La mejor sugerencia se marca, pero solo se prepara al
 aceptarla.
 
+Cada grupo de proveedor tiene su propio control **⟳ Volver a buscar** que repite el
+descubrimiento solo para ese proveedor, evitando la caché HTTP y reemplazando sus
+candidatas almacenadas sin tocar las de los demás. El grupo de ThePosterDB aparece
+expandido por defecto.
+
 El constructor fijo resume póster, fondo, temporadas y episodios. Una URL personalizada
 es una ranura normal. Una carga de archivo tiene vista previa/confirmación y solo puede
 ir al servidor directo, pues un binario no es una URL YAML de Kometa.
@@ -86,6 +91,10 @@ Elige método (inicia con `DEFAULT_APPLY_METHOD`):
 Primero genera la **vista previa exacta** de elementos, ranuras, candidatas, estado,
 destinos y omisiones. La confirmación separada usa un plan con caducidad, un solo uso
 y ligado a selecciones/huellas. Si algo cambia, no escribe y exige otra vista.
+Un plan sin advertencias — sin omisiones y con al menos una escritura — se aplica en
+un solo clic: PosterPilot emite la confirmación en la misma acción. Cualquier omisión
+recupera la confirmación explícita, y **Aplicar y siguiente** siempre conserva su
+diálogo.
 
 En lote congela todos los IDs y puede descubrir sin mutar para construir el plan;
 la ejecución no redescubre ni sustituye. Una temporada/episodio sin destino se omite
@@ -118,7 +127,8 @@ no repite éxitos. Configuración o plan inválido exige corrección y nueva vis
 
 FUN contiene selector de hasta tres opciones, modos ciego/cápsula, Poster Match,
 galería y sesiones por duración. Colecciones muestran miembros, procedencia,
-consistencia, cobertura y overrides. No autoaplican. Consulta
+consistencia, cobertura, overrides y una nueva búsqueda en todos los miembros en
+una sola acción. No autoaplican. Consulta
 [FUN y colecciones](../fun-collections/).
 
 Con varios servidores usa el selector; biblioteca, trabajos, Review, colecciones y

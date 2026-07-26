@@ -27,6 +27,10 @@ PosterPilot 会组合两种配置来源：
 
 `TMDB_KEY` 支持 v3 密钥或 v4 bearer/JWT。MediUX 与 TMDB 默认启用；Fanart.tv 需要 `FANART_KEY`；ThePosterDB 可选。一个提供方失败不会阻止其他提供方，并可保留已知候选标记为陈旧。
 
+ThePosterDB 无需账号即可使用，但它在部分页面会向匿名访问返回占位图而非真实海报。可**选择**登录以获取真实图片：在**元数据与提供方**中填写（启用 ThePosterDB 后显示字段），或设置 `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD`。密码与其他密钥一样在静态时加密保存；登录失败时该次运行会回退到匿名抓取，不会阻断发现。要恢复匿名抓取，请清空用户名（登录需要两者齐全）；已保存的密码目前没有删除控件——它仍加密保存在数据库中，重新填入用户名后会再次使用。
+
+![PosterPilot 提供方设置，已启用 ThePosterDB 并显示可选的用户名和密码字段](/posterpilot/screenshots/settings-providers.webp)
+
 在**元数据与提供方**中调整提供方优先级以及提供方、分辨率、宽高比权重。预览与执行使用同一确定性配置。`SUGGEST_PRESELECT` 显示最佳建议，但接受／暂存始终需要明确操作。
 
 ## Kometa 与应用方式
@@ -69,6 +73,8 @@ PosterPilot 会组合两种配置来源：
 | `PROVIDER_FANART` | 关 | 启用 Fanart.tv。 |
 | `PROVIDER_THEPOSTERDB` | 关 | 启用 ThePosterDB。 |
 | `FANART_KEY` | — | Fanart.tv 密钥。 |
+| `THEPOSTERDB_USERNAME` | — | 可选的 ThePosterDB 账号用户名或邮箱，用于登录抓取。 |
+| `THEPOSTERDB_PASSWORD` | — | 可选 ThePosterDB 账号的密码（密钥，加密保存）。 |
 | `MEDIUX_REQUEST_DELAY_MS` | `2000` | MediUX 请求间隔（毫秒）。 |
 | `MEDIUX_CONCURRENCY` | `5` | MediUX 并发数。 |
 | `HTTP_CACHE_TTL_DAYS` | `7` | HTTP 缓存天数。 |

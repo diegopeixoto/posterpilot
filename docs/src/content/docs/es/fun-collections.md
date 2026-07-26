@@ -53,6 +53,26 @@ El detalle muestra procedencia, miembros TMDB ausentes como contexto, ilustraci�
 actual/preparada, evidencia de proveedor/set/autor/idioma/familia y cobertura
 explicable. Procedencia desconocida no significa incompatibilidad deliberada.
 
+## Volver a buscar en toda la colección
+
+El detalle de una colección incluye **Volver a buscar en los proveedores** (⟳):
+repite el descubrimiento para cada miembro local en una pasada, evitando la caché
+HTTP en las consultas a proveedores de cada miembro. Los miembros se procesan de
+forma independiente — un fallo no detiene al resto — y el resultado se informa
+como recuento («3 de 5 miembros actualizados.»).
+
+Con ThePosterDB habilitado, la misma pasada busca además un **set de colección** de
+ThePosterDB: localiza la colección por nombre, prueba hasta seis sets de
+colaboradores, empareja sus pósteres con tus miembros locales (título exacto, luego
+inclusión de palabras, luego año de estreno) y conserva el set con mayor cobertura.
+Su ilustración se inyecta como un único diseño coordinado en los miembros
+emparejados, listo para las sugerencias de familia. A diferencia de la pasada por
+miembro, esta búsqueda de sets puede reutilizar páginas de la caché HTTP hasta
+que expiren (`HTTP_CACHE_TTL_DAYS`). Volver a buscar solo almacena candidatas;
+nada se aplica sin vista previa y confirmación.
+
+![Detalle de una colección en PosterPilot con el control de volver a buscar, el recuento de miembros actualizados y sugerencias de familias coordinadas recién descubiertas](/posterpilot/screenshots/collection-discover.webp)
+
 ## Sugerencias coordinadas y excepciones
 
 Las familias con evidencia verificable se ordenan por cobertura y puntuación. Cada

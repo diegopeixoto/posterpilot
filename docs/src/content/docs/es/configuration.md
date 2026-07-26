@@ -40,6 +40,19 @@ base de datos; consulta [Migración multiservidor](../multi-server-migration/).
 por defecto; Fanart.tv requiere `FANART_KEY`; ThePosterDB es opcional. Un proveedor
 fallido no bloquea a los demás y puede conservar candidatas conocidas como obsoletas.
 
+ThePosterDB funciona sin cuenta, pero en algunas páginas sirve una imagen de
+relleno a los visitantes anónimos en lugar de la ilustración real. Puedes iniciar
+sesión de forma **opcional** — en **Metadatos y proveedores** (los campos aparecen
+al habilitar ThePosterDB) o con `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD` —
+para obtener las imágenes reales. La contraseña se cifra en reposo como los demás
+secretos, y un inicio de sesión fallido vuelve al modo anónimo en esa ejecución en
+lugar de bloquear el descubrimiento. Para volver al modo anónimo, borra el
+usuario (iniciar sesión requiere ambos); la contraseña guardada aún no tiene
+control de eliminación — permanece cifrada y se reutiliza si vuelves a
+introducir el usuario.
+
+![Ajustes de proveedores de PosterPilot con ThePosterDB habilitado y sus campos opcionales de usuario y contraseña](/posterpilot/screenshots/settings-providers.webp)
+
 En **Metadatos y proveedores** puedes ordenar la prioridad y ajustar pesos de
 proveedor, resolución y proporción. La misma configuración determinista se usa en
 vista previa y ejecución. `SUGGEST_PRESELECT` muestra la mejor sugerencia, pero
@@ -101,6 +114,8 @@ admitidos son `en`, `es`, `zh`, `ja`, `pt-BR` y `fr`.
 | `PROVIDER_FANART` | desactivado | Habilita Fanart.tv. |
 | `PROVIDER_THEPOSTERDB` | desactivado | Habilita ThePosterDB. |
 | `FANART_KEY` | — | Clave Fanart.tv (secreto). |
+| `THEPOSTERDB_USERNAME` | — | Usuario o correo opcional de ThePosterDB para buscar con sesión iniciada. |
+| `THEPOSTERDB_PASSWORD` | — | Contraseña de la cuenta opcional de ThePosterDB (secreto, cifrada en reposo). |
 | `MEDIUX_REQUEST_DELAY_MS` | `2000` | Pausa entre solicitudes MediUX, ms. |
 | `MEDIUX_CONCURRENCY` | `5` | Solicitudes MediUX simultáneas. |
 | `HTTP_CACHE_TTL_DAYS` | `7` | TTL de respuestas HTTP en caché. |

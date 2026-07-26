@@ -69,6 +69,11 @@ por provedor e set, com pôster/background e, para seriados, temporadas e title 
 Prepare uma peça, use o set inteiro ou misture slots. A sugestão com maior score é
 marcada, mas só é preparada por ação explícita.
 
+Cada grupo de provedor tem seu próprio controle **⟳ Pesquisar novamente**, que
+repete a descoberta só para aquele provedor, ignorando o cache HTTP e substituindo
+os candidatos armazenados dele sem tocar nos dos demais. O grupo do ThePosterDB
+abre expandido por padrão.
+
 O builder fixo resume pôster, background, temporadas e episódios. URL personalizada
 entra como slot normal. Upload de arquivo faz prévia/confirmacão e só pode ir ao
 servidor direto, porque binário não vira URL YAML do Kometa.
@@ -85,6 +90,9 @@ Escolha o método (padrão `DEFAULT_APPLY_METHOD`):
 Primeiro gere a **prévia exata** com itens, slots, candidatos, estado atual, destinos
 e skips. A confirmação separada usa um plano expirável, de uso único e vinculado às
 seleções/fingerprints. Se algo mudar, nada é gravado e uma nova prévia é exigida.
+Um plano sem avisos — nenhum skip e pelo menos uma gravação — aplica em um único
+clique: o PosterPilot emite a confirmação na mesma ação. Qualquer skip traz de volta
+a confirmação explícita, e **Aplicar e seguir** sempre mantém seu diálogo.
 
 Em massa, a prévia congela todos os IDs e pode descobrir candidatos de forma não
 destrutiva; execução não redescobre nem troca escolhas. Temporada/episódio sem filho
@@ -117,7 +125,8 @@ retryable; não repete sucessos. Erro de configuração ou plano exige correçã
 
 O FUN opcional contém sorteio de até três opções, blind/cápsulas, Poster Match,
 galeria e sessões por duração. Coleções mostram membros, origem, consistência,
-cobertura de famílias e overrides. Nenhum deles aplica automaticamente. Veja
+cobertura de famílias, overrides e uma nova pesquisa em todos os membros em uma
+única ação. Nenhum deles aplica automaticamente. Veja
 [FUN e coleções](../fun-collections/).
 
 Com vários servidores, use o seletor; biblioteca, jobs, Revisão, coleções e automações

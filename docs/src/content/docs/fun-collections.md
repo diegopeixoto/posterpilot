@@ -68,6 +68,28 @@ The collection index includes groups with at least two local members. Detail sho
 - explainable consistency and coverage, with unknown provenance kept distinct from
   deliberate mismatch.
 
+## Re-search a whole collection
+
+The collection detail page has a **Re-search artwork providers** action (⟳) that
+re-runs discovery for every local member in one pass, bypassing the HTTP scrape
+cache for each member's provider lookups. Members are processed independently —
+one failure never stops the rest — and the result reports the outcome as a count
+("3 of 5 members re-searched.").
+
+When ThePosterDB is enabled, the same pass also looks for a matching ThePosterDB
+**collection set**: PosterPilot searches the site's collection listings for the
+collection by name, tries up to six contributor sets, matches each set's posters
+to your local members (exact title first, then token containment, then release
+year), and keeps the set that covers the most members. That winning set's artwork
+is injected as **one coordinated design across the matched members**, so the
+family suggestions below can offer it like any other verifiable evidence. Unlike
+the per-member pass, this set lookup can still reuse HTTP-cached pages until
+they expire (`HTTP_CACHE_TTL_DAYS`), so a set updated on the site moments ago
+may take a cache cycle to show up. Re-search only stores candidates — as
+everywhere else, nothing is applied without a preview and confirmation.
+
+![PosterPilot collection detail with the re-search control, its members-re-searched count, and freshly discovered coordinated family suggestions](/posterpilot/screenshots/collection-discover.webp)
+
 ## Coordinated suggestions and overrides
 
 When verifiable family evidence spans multiple members, PosterPilot ranks families

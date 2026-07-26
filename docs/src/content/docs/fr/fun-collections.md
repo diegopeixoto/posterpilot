@@ -79,6 +79,32 @@ La vue de détail montre :
 - une cohérence et une couverture explicables, la provenance inconnue restant
   distincte d'une discordance délibérée.
 
+## Relancer la recherche pour toute une collection
+
+La page de détail d'une collection propose une action **Relancer la recherche
+chez les fournisseurs** (⟳) qui relance la découverte pour chaque membre local
+en une seule passe, en contournant le cache HTTP pour les requêtes aux
+fournisseurs de chaque membre. Les membres sont traités indépendamment —
+l'échec de l'un n'arrête jamais les autres — et le résultat s'affiche sous
+forme de décompte (« 3 membres sur 5 recherchés à nouveau. »).
+
+Lorsque ThePosterDB est activé, la même passe cherche aussi un **set de
+collection** ThePosterDB correspondant : PosterPilot recherche la collection par
+son nom dans les listes de collections du site, essaie jusqu'à six sets de
+contributeurs, apparie les affiches de chaque set à vos membres locaux (titre
+exact d'abord, puis inclusion de mots, puis année de sortie) et retient le set
+qui couvre le plus de membres. Les visuels du set gagnant sont injectés comme
+**un seul design coordonné sur les membres appariés**, si bien que les
+suggestions de famille ci-dessous peuvent le proposer comme n'importe quel
+autre indice vérifiable. Contrairement à la passe par membre, cette recherche
+de set peut encore réutiliser des pages du cache HTTP jusqu'à leur expiration
+(`HTTP_CACHE_TTL_DAYS`) ; un set mis à jour sur le site à l'instant peut donc
+mettre un cycle de cache à apparaître. La relance ne fait que stocker des
+candidats — comme partout ailleurs, rien n'est appliqué sans aperçu ni
+confirmation.
+
+![Détail d'une collection dans PosterPilot avec la commande de relance de la recherche, le décompte des membres recherchés à nouveau et des suggestions de familles coordonnées fraîchement découvertes](/posterpilot/screenshots/collection-discover.webp)
+
 ## Suggestions coordonnées et remplacements
 
 Lorsque des indices de famille vérifiables couvrent plusieurs membres, PosterPilot
