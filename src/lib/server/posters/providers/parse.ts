@@ -105,12 +105,72 @@ export function parseFanart(json: unknown, mediaType: TmdbMediaType): ArtworkSet
 	return candidates.length ? [{ setId: 'fanarttv', author: null, candidates }] : [];
 }
 
-// ThePosterDB serves assets from /api/assets/<id>.
+// A poster page serves its images from the CDN, as
+// images.theposterdb.com/.../posters/optimized/<section>/<id>/<hash>.jpg
+const CDN_RE =
+	/https?:\/\/images\.theposterdb\.com\/[^\s"'\\)]*?\/posters\/optimized\/[^\s"'\\)]+?\.(?:jpg|webp|png)/gi;
+// Older/alternate download form, kept as a fallback.
 const ASSET_RE = /https?:\/\/theposterdb\.com\/api\/assets\/\d+/g;
+// A search page links each hit as `<a href=".../posters/<id>"…><strong>Title</strong> (Year)</a>`.
+const RESULT_RE = /\/posters\/(\d+)"[^>]*>([\s\S]*?)<\/a>/g;
+const RESULT_TITLE_RE = /<strong>([\s\S]*?)<\/strong>/;
+const RESULT_YEAR_RE = /\((\d{4})\)/;
 
-/** Extract poster asset URLs from a ThePosterDB page into one set. */
+/** Compare titles ignoring case, accents and punctuation ("WALL·E" === "Wall-E"). */
+function normalizeTitle(value: string): string {
+	return (
+		value
+			.normalize('NFKD')
+			// Combining marks only: \p{Diacritic} also matches standalone punctuation such
+			// as the middle dot in "WALL·E", which would collapse it to "walle" and stop it
+			// matching "Wall-E".
+			.replace(/\p{Mn}/gu, '')
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, ' ')
+			.trim()
+	);
+}
+
+/**
+ * The id of the search hit that actually matches the wanted title, or null.
+ *
+ * The top-ranked hit is not the answer: searching "Saving Private Ryan 1998" ranks
+ * the documentary "Making 'Saving Private Ryan' (2004)" first, whose page holds no
+ * posters. Prefer an exact title match on the right year; a hit that lists no year
+ * is acceptable (nothing disproves it), but a hit listing a DIFFERENT year is a
+ * different film — "Dune (1984)" is not "Dune (2021)" — and yields null rather
+ * than painting another film's artwork onto the library, which is worse than none.
+ */
+export function bestThePosterDbResultId(
+	html: string,
+	want: { title: string; year: number | null }
+): string | null {
+	const wanted = normalizeTitle(want.title);
+	if (!wanted) return null;
+	const matches: { id: string; year: string | null }[] = [];
+	for (const [, id, inner] of html.matchAll(RESULT_RE)) {
+		const title = inner.match(RESULT_TITLE_RE)?.[1];
+		if (!title || normalizeTitle(title) !== wanted) continue;
+		matches.push({ id, year: inner.match(RESULT_YEAR_RE)?.[1] ?? null });
+	}
+	if (!matches.length) return null;
+	if (!want.year) return matches[0].id;
+	const sameYear = matches.find((match) => match.year === String(want.year));
+	const yearless = matches.find((match) => match.year === null);
+	return (sameYear ?? yearless)?.id ?? null;
+}
+
+/** Extract poster URLs from a ThePosterDB poster page into one set. */
 export function parseThePosterDb(html: string): ArtworkSet[] {
-	const urls = Array.from(new Set(html.match(ASSET_RE) ?? []));
+	// The CDN serves each poster as both .webp and .jpg; collapse the pair (prefer
+	// .jpg) so one poster yields one candidate instead of two identical ones.
+	const byKey = new Map<string, string>();
+	for (const url of html.match(CDN_RE) ?? []) {
+		const key = url.replace(/\.(?:jpg|webp|png)$/i, '');
+		if (!byKey.has(key) || /\.jpg$/i.test(url)) byKey.set(key, url);
+	}
+	let urls = [...byKey.values()];
+	if (!urls.length) urls = Array.from(new Set(html.match(ASSET_RE) ?? []));
 	if (!urls.length) return [];
 	const candidates = urls.map((url) => ({
 		setId: 'theposterdb',

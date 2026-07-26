@@ -21,7 +21,6 @@ import {
 	parseAuthResult,
 	scopeEmbyCollectionMembers,
 	type AuthResult,
-	type RawEmbyItem,
 	type RawEmbyItemsResponse
 } from './emby-parse';
 import { defaultMediaServerCapabilities, mediaServerIdentity } from './capabilities';
@@ -257,7 +256,14 @@ export function embyLikeProvider(
 	}
 
 	async function readCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
-		const item = await getJson<RawEmbyItem>(`/Items/${encodeURIComponent(itemId)}`);
+		// Read the item through the userless list form `/Items?ids=…` rather than the
+		// single-item `/Items/{id}`: Jellyfin 10.11.x dropped the latter and answers it
+		// with HTTP 400, which would kill every apply that has a staged selection while
+		// planning. The list form still works with just an API key. `.Items[0]` is the
+		// requested item (empty array => item is gone => no artwork to compare against).
+		const listed = await getJson<RawEmbyItemsResponse>(`/Items?ids=${encodeURIComponent(itemId)}`);
+		const item = listed.Items?.[0];
+		if (!item) return null;
 		const imageType = kind === 'poster' ? ('Primary' as const) : ('Backdrop' as const);
 		const identity = kind === 'poster' ? item.ImageTags?.Primary : item.BackdropImageTags?.[0];
 		if (!identity) return null;
@@ -277,6 +283,54 @@ export function embyLikeProvider(
 			data: await response.arrayBuffer(),
 			contentType: response.headers.get('content-type')
 		};
+	}
+
+	/**
+	 * Apply a backdrop so the new image actually becomes the visible one. Jellyfin's
+	 * `POST /Items/{id}/Images/Backdrop` APPENDS, so the new backdrop lands behind the
+	 * existing one(s); Jellyfin/Infuse keep showing `BackdropImageTags[0]`, and the
+	 * post-write verification reads that same [0], sees it unchanged, and fails the
+	 * operation (`artwork_unchanged_after_write`).
+	 *
+	 * We clear every existing backdrop FIRST, then post the new one, so it is the only
+	 * (hence index 0) backdrop. Deletion is done by repeatedly removing index 0 rather
+	 * than iterating a captured list: Jellyfin returns `BackdropImageTags` ordered by
+	 * resolution, NOT by the internal index that `DELETE /Images/Backdrop/{i}` uses, so
+	 * deleting by a response-derived index removes the wrong image (it can delete the
+	 * freshly written high-res backdrop). Deleting index 0 N times is order-independent.
+	 */
+	async function postBackdropReplacing(
+		itemId: string,
+		data: ArrayBuffer,
+		contentType: string
+	): Promise<void> {
+		// The count read is as best-effort as the deletes below: a stale extra
+		// backdrop is cosmetic, failing the whole apply over a transient read is worse.
+		let remaining = 0;
+		try {
+			const before = await getJson<RawEmbyItemsResponse>(
+				`/Items?ids=${encodeURIComponent(itemId)}`
+			);
+			remaining = before.Items?.[0]?.BackdropImageTags?.length ?? 0;
+		} catch {
+			// remaining stays 0: skip pruning, still write the new backdrop.
+		}
+		while (remaining > 0) {
+			try {
+				const res = await fetch(`${base}/Items/${encodeURIComponent(itemId)}/Images/Backdrop/0`, {
+					method: 'DELETE',
+					headers,
+					signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
+				});
+				// 404 => already gone; a hard error => stop pruning but still write the new one
+				// below (a stale backdrop is cosmetic; failing the whole apply is worse).
+				if (!res.ok && res.status !== 404) break;
+			} catch {
+				break;
+			}
+			remaining -= 1;
+		}
+		await postImage(itemId, 'Backdrop', data, contentType);
 	}
 
 	async function deleteCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
@@ -421,7 +475,7 @@ export function embyLikeProvider(
 
 		async applyCollectionBackgroundUrl(collectionId: string, url: string): Promise<void> {
 			const { data, contentType } = await fetchImage(url);
-			await postImage(collectionId, 'Backdrop', data, contentType);
+			await postBackdropReplacing(collectionId, data, contentType);
 		},
 
 		async applyCollectionBackgroundBytes(
@@ -429,7 +483,7 @@ export function embyLikeProvider(
 			data,
 			contentType = 'image/jpeg'
 		): Promise<void> {
-			await postImage(collectionId, 'Backdrop', data, contentType);
+			await postBackdropReplacing(collectionId, data, contentType);
 		},
 
 		readCollectionArtwork: readCurrentArtwork,
@@ -477,11 +531,11 @@ export function embyLikeProvider(
 
 		async applyBackgroundUrl(itemId: string, url: string): Promise<void> {
 			const { data, contentType } = await fetchImage(url);
-			await postImage(itemId, 'Backdrop', data, contentType);
+			await postBackdropReplacing(itemId, data, contentType);
 		},
 
 		async applyBackgroundBytes(itemId, data, contentType = 'image/jpeg'): Promise<void> {
-			await postImage(itemId, 'Backdrop', data, contentType);
+			await postBackdropReplacing(itemId, data, contentType);
 		},
 
 		readArtwork: readCurrentArtwork,
