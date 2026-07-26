@@ -2,47 +2,44 @@
 
 ## [0.10.0](https://github.com/diegopeixoto/posterpilot/compare/v0.9.0...v0.10.0) (2026-07-26)
 
+This is the first PosterPilot release built with the community — every Jellyfin fix
+below started as a contributed PR, and a substantial share of the features were
+upstreamed from the [Bubu31/posterpilot](https://github.com/Bubu31/posterpilot) fork.
 
 ### Features
 
-* credit the maintainer and Aquarela in the app and docs footers ([5cdd391](https://github.com/diegopeixoto/posterpilot/commit/5cdd391f7bd4d482ac2bf47e6cc55ada9103524b))
-* discovery stability and per-provider controls ([c12256a](https://github.com/diegopeixoto/posterpilot/commit/c12256a37a7fa89729d126e136127de970e17af0))
-* discovery stability and per-provider controls ([4db99f3](https://github.com/diegopeixoto/posterpilot/commit/4db99f3e8c71ed3afeb7e7205038caaea1ab2697))
-* **i18n:** add French across the app and docs ([2d2427b](https://github.com/diegopeixoto/posterpilot/commit/2d2427b800d7fbdd2cbc14d181d38fe33d64f866))
-* **i18n:** add French across the app and docs ([bad5240](https://github.com/diegopeixoto/posterpilot/commit/bad5240d5d0a5894549c7b192c24a2c9f893f9b5))
-* **item:** apply warning-free plans in a single click ([40d8ac2](https://github.com/diegopeixoto/posterpilot/commit/40d8ac23754e13d90685c45edac58c7f344dea20))
-* **item:** apply warning-free plans in a single click ([4c21157](https://github.com/diegopeixoto/posterpilot/commit/4c2115769cda274d2604079642600cdf6feeb018))
-* **theposterdb:** account sessions, real sets, and collection set matching ([095d0b0](https://github.com/diegopeixoto/posterpilot/commit/095d0b0605c065e06bc78b837d620592d075c699))
-* **theposterdb:** account sessions, real sets, and collection set matching ([6ddcbdc](https://github.com/diegopeixoto/posterpilot/commit/6ddcbdc46383da9ad34c1e7e046cf274b784f251))
-* update docs and mantainer info ([16db5d1](https://github.com/diegopeixoto/posterpilot/commit/16db5d186cdb2c92b1039a3dceb52818b811524d))
-
+* **ThePosterDB, properly** — optional account sign-in (the site serves placeholder images to anonymous visitors; credentials are encrypted at rest and never required), real contributor sets with author attribution, and the group expanded by default on the item page. For collections, PosterPilot now finds ThePosterDB's own collection sets and matches them onto your members as one coordinated design. ([#48](https://github.com/diegopeixoto/posterpilot/pull/48), [#52](https://github.com/diegopeixoto/posterpilot/pull/52), [#53](https://github.com/diegopeixoto/posterpilot/pull/53))
+* **Re-search on demand** — a per-provider ⟳ button on every item's provider group, and a whole-collection re-search that reports how many members succeeded. Each provider also keeps a reserved share of the candidate list, so one high-scoring source can't crowd the others out. ([#50](https://github.com/diegopeixoto/posterpilot/pull/50), [#52](https://github.com/diegopeixoto/posterpilot/pull/52))
+* **One-click apply** — a single-item plan with nothing skipped applies in the same click. Any plan carrying a skip, and the apply-and-next flow, keep the confirmation dialog; the server-side preview/confirm contract is unchanged. ([#49](https://github.com/diegopeixoto/posterpilot/pull/49), [#51](https://github.com/diegopeixoto/posterpilot/pull/51))
+* **French** — the sixth UI language, across the whole app and the documentation site. ([#54](https://github.com/diegopeixoto/posterpilot/pull/54))
+* **Credits where due** — the app and docs footers now carry the version, maintainer, and Aquarela links. ([#47](https://github.com/diegopeixoto/posterpilot/pull/47))
 
 ### Bug Fixes
 
-* **apply:** trust ThePosterDB's CDN host for artwork bytes ([1698bb4](https://github.com/diegopeixoto/posterpilot/commit/1698bb4b8586835988f56aaeb2de3227e4d9095f))
-* **apply:** trust ThePosterDB's CDN host for artwork bytes ([db2d5d0](https://github.com/diegopeixoto/posterpilot/commit/db2d5d080fe8104fd14adcb0d2dd8661506a0800))
-* **db:** retry reads bounded on SQLITE_BUSY ([e0a7169](https://github.com/diegopeixoto/posterpilot/commit/e0a7169ebc7f746a40a45bdf6961563f0016b2e7))
-* **db:** retry reads bounded on SQLITE_BUSY ([dd13aff](https://github.com/diegopeixoto/posterpilot/commit/dd13aff61fc656d30c50501153ecf04448c52203)), closes [#56](https://github.com/diegopeixoto/posterpilot/issues/56)
-* **discovery:** queue the collection-set candidate injection ([d08d6d5](https://github.com/diegopeixoto/posterpilot/commit/d08d6d539149ad0eb18e8948c7984b596b5722b9))
-* **discovery:** queue the collection-set candidate injection ([ef4b604](https://github.com/diegopeixoto/posterpilot/commit/ef4b604d74d92fcddf8c7c41148523a46db9daf8))
-* **discovery:** serialize the full discovery lifecycle and staging writes ([cfd23c4](https://github.com/diegopeixoto/posterpilot/commit/cfd23c414b0babdc1516bb74ab0ce2e5d577f4b1))
-* **docs:** build without the app's generated tsconfig ([014180d](https://github.com/diegopeixoto/posterpilot/commit/014180d95df319103d19cac824b931a40ec938ce))
-* **jellyfin:** keep the backdrop prune best-effort when the count read fails ([55e4807](https://github.com/diegopeixoto/posterpilot/commit/55e480761e188257639b01e1a972ce9afc0461b5))
-* **jellyfin:** only scope the library read to an admin, retry lookup on error ([f21d369](https://github.com/diegopeixoto/posterpilot/commit/f21d36995ca74e21bf4effae10e4deabc4e04583))
-* **jellyfin:** read current artwork via /Items?ids= for Jellyfin 10.11.x ([a434ad3](https://github.com/diegopeixoto/posterpilot/commit/a434ad3e7714901b428001618f846cd178645836))
-* **jellyfin:** read current artwork via /Items?ids= for Jellyfin 10.11.x ([47a61fe](https://github.com/diegopeixoto/posterpilot/commit/47a61fe33c6d606d1f5e5ec150c9d18a19c8f552))
-* **jellyfin:** read the library via /Users/{id}/Items so merged versions collapse ([8be4658](https://github.com/diegopeixoto/posterpilot/commit/8be4658e0ac4aeaa3a7c33cff19c9ec71689066b))
-* **jellyfin:** read the library via /Users/{id}/Items so merged versions collapse ([3298bb5](https://github.com/diegopeixoto/posterpilot/commit/3298bb5bb44656218db1566f598e16882672c3c7))
-* **jellyfin:** replace the backdrop instead of appending on apply ([ad96d4a](https://github.com/diegopeixoto/posterpilot/commit/ad96d4aa254a650c2423c63922192bee37e982f7))
-* **jellyfin:** replace the backdrop instead of appending on apply ([7085863](https://github.com/diegopeixoto/posterpilot/commit/70858633ba12db66eb09cf8da9781b417e6cbb27))
-* **jellyfin:** resolve one user scope per collection snapshot ([a2249d2](https://github.com/diegopeixoto/posterpilot/commit/a2249d23b04bca55860cec19f863b1d76487f61d))
-* **jellyfin:** user-scope collection and season/episode reads ([0b073ac](https://github.com/diegopeixoto/posterpilot/commit/0b073ac75db359f4e70771f2fa5910a4c423b7de))
-* **jellyfin:** user-scope collection and season/episode reads ([8343af1](https://github.com/diegopeixoto/posterpilot/commit/8343af1c5e3db0ecd1aa7df3c92a6a204fc4eada))
-* **settings:** add a clear control for the ThePosterDB password ([0b61787](https://github.com/diegopeixoto/posterpilot/commit/0b617872277c9a64f971ac344a5927fbc11982cd))
-* **settings:** add a clear control for the ThePosterDB password ([cfada2b](https://github.com/diegopeixoto/posterpilot/commit/cfada2bf9bdca8d3b3d3951ff2b69d480ed73fd5)), closes [#57](https://github.com/diegopeixoto/posterpilot/issues/57)
-* **theposterdb:** open the matched set page — the search page has no posters ([4e1ad02](https://github.com/diegopeixoto/posterpilot/commit/4e1ad02e629b59faf036985c5a3b8c99cb4bccd9))
-* **theposterdb:** open the matched set page — the search page has no posters ([9c485b3](https://github.com/diegopeixoto/posterpilot/commit/9c485b3f049e06c96e1ae249184e32a912bd7fc9))
-* **theposterdb:** require the year to match when the wanted year is known ([8e87ea2](https://github.com/diegopeixoto/posterpilot/commit/8e87ea2a6482fe4cfae7818515c68a4660015147))
+* Applying artwork on Jellyfin 10.11.x failed with a generic error: the server dropped the single-item metadata endpoint. Artwork reads now use the list form 10.11 still serves. ([#38](https://github.com/diegopeixoto/posterpilot/pull/38))
+* Jellyfin backdrops were appended behind the existing one, so applies "succeeded" while the visible art never changed. Existing backdrops are now cleared first — order-safely, since Jellyfin's tag order does not match its delete index. ([#40](https://github.com/diegopeixoto/posterpilot/pull/40))
+* Merged-version movies appeared two or three times, library extras leaked in as movies, and watched state never arrived. The library — and collections, seasons, and episodes — are now read through the same user-scoped view the Jellyfin UI uses, resolved once per snapshot so mixed reads can't corrupt collection membership. ([#41](https://github.com/diegopeixoto/posterpilot/pull/41), [#45](https://github.com/diegopeixoto/posterpilot/pull/45))
+* ThePosterDB discovery always returned nothing: the search page contains no poster images. The matching set page is now opened instead, chosen by strict title *and* year so a remake never gets the wrong film's artwork. ([#42](https://github.com/diegopeixoto/posterpilot/pull/42))
+* Even then, every ThePosterDB apply was silently dropped: the site's image CDN wasn't on the trusted-host list. ([#48](https://github.com/diegopeixoto/posterpilot/pull/48))
+* Concurrent provider discovery could fail with "database is locked". The database now runs in WAL mode and every discovery write goes through a single write queue. ([#50](https://github.com/diegopeixoto/posterpilot/pull/50), [#53](https://github.com/diegopeixoto/posterpilot/pull/53))
+* Candidates from a provider you disabled (or whose credential is gone) no longer appear on the item page; re-enabling brings them back without re-searching. ([#50](https://github.com/diegopeixoto/posterpilot/pull/50))
+* The documentation site had failed to build since the Astro 7 upgrade; docs deploys work again. ([#47](https://github.com/diegopeixoto/posterpilot/pull/47))
+* Reads could briefly fail with a flashing error while a large sync was writing: reads now retry bounded on database contention, complementing the write queue. ([#58](https://github.com/diegopeixoto/posterpilot/pull/58))
+* A stored ThePosterDB password could not be removed from the settings page; a clear control now deletes it on save and returns the provider to anonymous mode. ([#59](https://github.com/diegopeixoto/posterpilot/pull/59))
+
+### Under the hood
+
+* Every new feature is documented — ThePosterDB accounts, collection discovery, re-search, and the one-click contract — in all six languages. ([#51](https://github.com/diegopeixoto/posterpilot/pull/51), [#55](https://github.com/diegopeixoto/posterpilot/pull/55))
+* Docs toolchain moved to Astro 7. ([#39](https://github.com/diegopeixoto/posterpilot/pull/39), [#43](https://github.com/diegopeixoto/posterpilot/pull/43))
+
+### Upgrading
+
+* No database migration. WAL mode is applied automatically and is reversible; ThePosterDB credentials are optional and everything works anonymously as before.
+
+### Contributors
+
+* [@nasspium](https://github.com/nasspium) — the entire Jellyfin 10.11 compatibility series and the ThePosterDB set-page fix ([#38](https://github.com/diegopeixoto/posterpilot/pull/38), [#40](https://github.com/diegopeixoto/posterpilot/pull/40), [#41](https://github.com/diegopeixoto/posterpilot/pull/41), [#42](https://github.com/diegopeixoto/posterpilot/pull/42)), each verified against a live server.
+* [@Bubu31](https://github.com/Bubu31) (with [@LeGrosBubu](https://github.com/LeGrosBubu)) — ThePosterDB accounts, real sets and collection matching, discovery stability, one-click apply, disabled-provider filtering, and the CDN trust fix, upstreamed from their fork with co-authorship ([#48](https://github.com/diegopeixoto/posterpilot/pull/48)–[#53](https://github.com/diegopeixoto/posterpilot/pull/53)). They also independently found and fixed the Jellyfin bugs above.
 
 ## [0.9.0](https://github.com/diegopeixoto/posterpilot/compare/v0.8.0...v0.9.0) (2026-07-13)
 
