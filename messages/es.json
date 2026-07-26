@@ -912,6 +912,7 @@
 	"setup_emby_choose": "Emby",
 	"setup_plex_choose": "Plex",
 	"footer_disclaimer": "Sin afiliación ni respaldo de Plex, Jellyfin, Emby, TMDB, MediUX, Fanart.tv o ThePosterDB. Las marcas pertenecen a sus dueños.",
+	"footer_aquarela": "Una app de Aquarela",
 	"item_msg_applied": "Carátula aplicada",
 	"item_msg_apply_failed": "No se pudo aplicar a {target}: {error}",
 	"apply_target_server": "el servidor de medios",
