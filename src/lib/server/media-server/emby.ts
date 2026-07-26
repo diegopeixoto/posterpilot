@@ -214,6 +214,26 @@ export function embyLikeProvider(
 		return cachedLibraryUserId;
 	}
 
+	/**
+	 * Path for an `/Items`-style list read under an already-resolved user scope.
+	 * Pure so multi-read flows (listNativeCollections) can pin one scope for
+	 * every read of an invocation instead of re-resolving per call.
+	 */
+	function itemsListPathFor(userId: string | null, query: string): string {
+		return userId ? `/Users/${encodeURIComponent(userId)}/Items?${query}` : `/Items?${query}`;
+	}
+
+	/**
+	 * Path for an `/Items`-style list read. Reads go through the user-scoped
+	 * endpoint so the server collapses merged versions into one item, hides
+	 * library extras, and attaches UserData (watched) — matching exactly what
+	 * the user sees in the UI. Only a bare API key with no resolvable user
+	 * falls back to the userless `/Items`.
+	 */
+	async function itemsListPath(query: string): Promise<string> {
+		return itemsListPathFor(await resolveLibraryUserId(), query);
+	}
+
 	/** POST raw image bytes (base64 body + image content-type) to an Images endpoint. */
 	async function postImage(
 		itemId: string,
@@ -376,15 +396,7 @@ export function embyLikeProvider(
 				EnableUserData: 'true',
 				EnableImageTypes: 'Primary,Backdrop'
 			});
-			// Read through the user-scoped endpoint so the server collapses merged
-			// versions into one item, hides library extras, and attaches UserData
-			// (watched) — matching exactly what the user sees in the UI. Only a bare
-			// API key with no resolvable user falls back to the userless `/Items`.
-			const userId = await resolveLibraryUserId();
-			const path = userId
-				? `/Users/${encodeURIComponent(userId)}/Items?${params.toString()}`
-				: `/Items?${params.toString()}`;
-			const res = await getJson<RawEmbyItemsResponse>(path);
+			const res = await getJson<RawEmbyItemsResponse>(await itemsListPath(params.toString()));
 			return mapItems(res, base, apiKey);
 		},
 
@@ -392,6 +404,14 @@ export function embyLikeProvider(
 			const selectedLibraryKeys = [...new Set(libraryKeys.filter((key) => key.length > 0))];
 			if (selectedLibraryKeys.length === 0) return [];
 
+			// Every read here is user-scoped like listItems: the snapshots feed a
+			// member-id intersection against the library sync, so both sides must see
+			// the same collapsed ids or merged-version members silently drop out.
+			// Resolved ONCE for the whole invocation — failed lookups are deliberately
+			// not cached (retry on the next call), so per-read resolution could mix
+			// userless and user-scoped reads mid-snapshot and the intersection would
+			// compare ids from two different views.
+			const libraryUserId = await resolveLibraryUserId();
 			const librarySnapshots = await Promise.all(
 				selectedLibraryKeys.map(async (libraryKey) => {
 					const libraryParams = new URLSearchParams({
@@ -403,7 +423,9 @@ export function embyLikeProvider(
 					});
 					return {
 						libraryKey,
-						response: await getJson<RawEmbyItemsResponse>(`/Items?${libraryParams.toString()}`)
+						response: await getJson<RawEmbyItemsResponse>(
+							itemsListPathFor(libraryUserId, libraryParams.toString())
+						)
 					};
 				})
 			);
@@ -415,7 +437,9 @@ export function embyLikeProvider(
 				Fields: 'ProductionYear',
 				EnableImageTypes: 'Primary,Backdrop'
 			});
-			const boxSets = await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`);
+			const boxSets = await getJson<RawEmbyItemsResponse>(
+				itemsListPathFor(libraryUserId, params.toString())
+			);
 			const collections: ServerNativeCollection[] = [];
 			for (const boxSet of boxSets.Items ?? []) {
 				if (!boxSet.Id) continue;
@@ -426,7 +450,9 @@ export function embyLikeProvider(
 					Fields: 'ProductionYear',
 					GroupItemsIntoCollections: 'false'
 				});
-				const members = await getJson<RawEmbyItemsResponse>(`/Items?${memberParams.toString()}`);
+				const members = await getJson<RawEmbyItemsResponse>(
+					itemsListPathFor(libraryUserId, memberParams.toString())
+				);
 				const scopedMembers = scopeEmbyCollectionMembers(members, libraryMembership);
 				if (scopedMembers.libraryKeys.length === 0) continue;
 				const collection = mapNativeCollection(
@@ -486,8 +512,10 @@ export function embyLikeProvider(
 				Fields: 'DateLastModified',
 				EnableImageTypes: 'Primary,Backdrop'
 			});
+			// User-scoped like listItems so merged episode versions collapse and the
+			// children match what the UI shows for the show.
 			return mapChildren(
-				await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`),
+				await getJson<RawEmbyItemsResponse>(await itemsListPath(params.toString())),
 				base,
 				apiKey
 			);
@@ -501,7 +529,7 @@ export function embyLikeProvider(
 				EnableImageTypes: 'Primary,Backdrop'
 			});
 			return mapChildren(
-				await getJson<RawEmbyItemsResponse>(`/Items?${params.toString()}`),
+				await getJson<RawEmbyItemsResponse>(await itemsListPath(params.toString())),
 				base,
 				apiKey
 			);
