@@ -344,8 +344,8 @@ langue préférée quand il désigne une locale prise en charge, puis (2) l'en-t
 `Accept-Language` de la requête, puis (3) l'anglais. Définissez une langue
 préférée avec `APP_LANGUAGE`, via la page Paramètres, ou avec le sélecteur de
 langue de l'en-tête. Les locales prises en charge sont l'anglais (`en`),
-l'espagnol (`es`), le chinois simplifié (`zh`), le japonais (`ja`) et le
-portugais brésilien (`pt-BR`). Une valeur absente ou non prise en charge retombe
+l'espagnol (`es`), le chinois simplifié (`zh`), le japonais (`ja`), le
+portugais brésilien (`pt-BR`) et le français (`fr`). Une valeur absente ou non prise en charge retombe
 sur `Accept-Language`, puis sur l'anglais — jamais une erreur, jamais une clé
 brute.
 
@@ -407,7 +407,7 @@ l'environnement, ils prennent la priorité et sont verrouillés dans l'interface
 | `ADDRESS_HEADER`          | —                                | —                                      | En-tête portant la véritable IP du client derrière un proxy (p. ex. `x-forwarded-for`) pour le mode `local`. |
 | `XFF_DEPTH`               | —                                | —                                      | Nombre de proxys de confiance devant l'application (adapter-node), associé à `ADDRESS_HEADER`.    |
 | `MAX_UPLOAD_MB`           | —                                | `15`                                   | Taille maximale d'un téléversement d'affiche personnalisée, en Mo (rejeté avec `413` au-delà).    |
-| `APP_LANGUAGE`            | Langue                           | — (auto)                               | Locale d'interface préférée : `en`, `es`, `zh`, `ja` ou `pt-BR`.                                  |
+| `APP_LANGUAGE`            | Langue                           | — (auto)                               | Locale d'interface préférée : `en`, `es`, `zh`, `ja`, `pt-BR` ou `fr`.                                  |
 | `LOG_DIR`                 | —                                | `/data/logs` (Docker)                  | Dossier du fichier journal rotatif `posterpilot.log` (~5 Mo × 5 fichiers).                        |
 | `EVENT_RETENTION`         | —                                | `2000`                                 | Nombre maximal de lignes du journal d'activité conservées en base (les plus anciennes sont purgées). |
 | `DATABASE_URL`            | —                                | `file:/data/posterpilot.db` (Docker)   | URL de fichier libsql pour la base de données SQLite.                                             |
