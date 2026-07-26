@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { env } from '$env/dynamic/private';
 import { resolveDataPaths } from '$lib/server/data-paths';
+import { withBusyRetry } from './busy-retry';
 import { processPendingRestore } from './pending-restore';
 import * as schema from './schema';
 
@@ -32,7 +33,14 @@ if (restoreBootResult.status === 'rejected' || restoreBootResult.status === 'rol
 // and even the client's own `timeout` option (which is supposed to apply to every
 // connection it opens) didn't hold up under genuinely concurrent writers in testing. Set
 // here anyway as a harmless secondary safety net for any write path serializeWrite misses.
-export const databaseClient = createClient({ url: dataPaths.databaseUrl, timeout: 5000 });
+//
+// withBusyRetry is the read-side complement of that write queue: reads never go through
+// serializeWrite and have no busy timeout for the same reason the pragma doesn't stick, so
+// during a sync's write bursts they can hit SQLITE_BUSY and 500 (issue #56). The wrapper
+// retries the individual statement a few times with a small backoff instead.
+export const databaseClient = withBusyRetry(
+	createClient({ url: dataPaths.databaseUrl, timeout: 5000 })
+);
 
 export const db = drizzle(databaseClient, { schema });
 
