@@ -145,4 +145,16 @@ describe('bestThePosterDbResultId', () => {
 		expect(bestThePosterDbResultId(html, { title: 'Saving Private Ryan', year: 1998 })).toBeNull();
 		expect(bestThePosterDbResultId('<html>no hits</html>', { title: 'X', year: null })).toBeNull();
 	});
+
+	it('returns null when the only same-title hit lists a different year (a remake is another film)', () => {
+		const html = hit('1', 'Dune', '1984');
+		expect(bestThePosterDbResultId(html, { title: 'Dune', year: 2021 })).toBeNull();
+	});
+
+	it('accepts a hit that lists no year when the wanted year has no exact match', () => {
+		const yearless = (id: string, title: string) =>
+			`<a href="https://theposterdb.com/posters/${id}" class="x"><strong>${title}</strong></a>`;
+		const html = hit('1', 'Dune', '1984') + yearless('3', 'Dune');
+		expect(bestThePosterDbResultId(html, { title: 'Dune', year: 2021 })).toBe('3');
+	});
 });

@@ -136,9 +136,10 @@ function normalizeTitle(value: string): string {
  *
  * The top-ranked hit is not the answer: searching "Saving Private Ryan 1998" ranks
  * the documentary "Making 'Saving Private Ryan' (2004)" first, whose page holds no
- * posters. Prefer an exact title match on the right year, then the same title on any
- * year. Nothing matching yields null — a mismatched set would paint another film's
- * artwork onto the library, which is worse than none.
+ * posters. Prefer an exact title match on the right year; a hit that lists no year
+ * is acceptable (nothing disproves it), but a hit listing a DIFFERENT year is a
+ * different film — "Dune (1984)" is not "Dune (2021)" — and yields null rather
+ * than painting another film's artwork onto the library, which is worse than none.
  */
 export function bestThePosterDbResultId(
 	html: string,
@@ -153,10 +154,10 @@ export function bestThePosterDbResultId(
 		matches.push({ id, year: inner.match(RESULT_YEAR_RE)?.[1] ?? null });
 	}
 	if (!matches.length) return null;
-	const sameYear = want.year
-		? matches.find((match) => match.year === String(want.year))
-		: undefined;
-	return (sameYear ?? matches[0]).id;
+	if (!want.year) return matches[0].id;
+	const sameYear = matches.find((match) => match.year === String(want.year));
+	const yearless = matches.find((match) => match.year === null);
+	return (sameYear ?? yearless)?.id ?? null;
 }
 
 /** Extract poster URLs from a ThePosterDB poster page into one set. */
