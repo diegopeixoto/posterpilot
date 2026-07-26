@@ -20,7 +20,11 @@ import type {
 } from '$lib/server/plans/apply-executor';
 import type { ApplyPlanOperation } from '$lib/server/plans/apply-plan';
 import { sha256Bytes } from '$lib/server/revisions/verification';
-import { createArtworkApplyCoordinator, type ArtworkApplyCoordinator } from './apply-coordinator';
+import {
+	createArtworkApplyCoordinator,
+	trustedProviderArtworkUrl,
+	type ArtworkApplyCoordinator
+} from './apply-coordinator';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore } from './snapshot-store';
 import { createArtworkSnapshotRepository, type ArtworkSnapshotRepository } from './snapshots';
@@ -595,5 +599,45 @@ describe('ArtworkApplyCoordinator', () => {
 			}
 		});
 		expect(await database.select().from(artworkRevisions)).toHaveLength(2);
+	});
+});
+
+describe('trustedProviderArtworkUrl', () => {
+	it('trusts each provider only on its actual asset hosts', () => {
+		expect(trustedProviderArtworkUrl('https://api.mediux.pro/assets/1', 'mediux')).toBe(true);
+		expect(trustedProviderArtworkUrl('https://image.tmdb.org/t/p/original/1.jpg', 'tmdb')).toBe(
+			true
+		);
+		expect(trustedProviderArtworkUrl('https://assets.fanart.tv/fanart/1.jpg', 'fanarttv')).toBe(
+			true
+		);
+	});
+
+	it('trusts the ThePosterDB CDN, where set-page candidates actually live', () => {
+		// Regression: set-page candidates are stored on images.theposterdb.com — an
+		// allowlist with only the apex hosts silently drops every ThePosterDB apply.
+		expect(
+			trustedProviderArtworkUrl(
+				'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/1/a.jpg',
+				'theposterdb'
+			)
+		).toBe(true);
+		// The apex hosts stay trusted for the legacy /api/assets fallback candidates.
+		expect(trustedProviderArtworkUrl('https://theposterdb.com/api/assets/1', 'theposterdb')).toBe(
+			true
+		);
+		expect(
+			trustedProviderArtworkUrl('https://www.theposterdb.com/api/assets/1', 'theposterdb')
+		).toBe(true);
+	});
+
+	it('rejects mismatched providers, non-https, and unknown providers', () => {
+		expect(trustedProviderArtworkUrl('https://image.tmdb.org/t/p/original/1.jpg', 'mediux')).toBe(
+			false
+		);
+		expect(trustedProviderArtworkUrl('http://api.mediux.pro/assets/1', 'mediux')).toBe(false);
+		expect(trustedProviderArtworkUrl('https://api.mediux.pro/assets/1', 'unknown')).toBe(false);
+		expect(trustedProviderArtworkUrl('https://api.mediux.pro/assets/1', null)).toBe(false);
+		expect(trustedProviderArtworkUrl('not-a-url', 'mediux')).toBe(false);
 	});
 });

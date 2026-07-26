@@ -72,7 +72,8 @@ async function defaultFetchArtworkBytes(url: string): Promise<ArrayBuffer | null
 	}
 }
 
-function trustedProviderArtworkUrl(url: string, provider: string | null): boolean {
+/** Exported for direct unit testing of the per-provider artwork host allowlist. */
+export function trustedProviderArtworkUrl(url: string, provider: string | null): boolean {
 	if (!provider) return false;
 	let parsed: URL;
 	try {
@@ -88,7 +89,14 @@ function trustedProviderArtworkUrl(url: string, provider: string | null): boolea
 		case 'tmdb':
 			return host === 'image.tmdb.org';
 		case 'theposterdb':
-			return host === 'theposterdb.com' || host === 'www.theposterdb.com';
+			// Candidates parsed from a set page live on the asset CDN
+			// (images.theposterdb.com); the apex hosts stay trusted for the legacy
+			// /api/assets fallback candidates.
+			return (
+				host === 'images.theposterdb.com' ||
+				host === 'theposterdb.com' ||
+				host === 'www.theposterdb.com'
+			);
 		case 'fanarttv':
 			return host === 'fanart.tv' || host.endsWith('.fanart.tv');
 		default:
