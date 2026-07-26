@@ -15,7 +15,8 @@
 	import {
 		canConfirmApplyAndNext,
 		canRetryApplyNextCompletion,
-		isFullySuccessfulApply
+		isFullySuccessfulApply,
+		shouldAutoConfirmApply
 	} from '$lib/review-apply-next';
 	import {
 		isEditableReviewTarget,
@@ -709,7 +710,15 @@
 				body: JSON.stringify({ method })
 			});
 			if (!res.ok) throw new Error(String(res.status));
-			applyPreview = await res.json();
+			const preview = (await res.json()) as typeof applyPreview;
+			applyPreview = preview;
+			if (!shouldAdvance && shouldAutoConfirmApply(preview)) {
+				// Warning-free single-item plan: a second click has nothing to surface.
+				// Hand off to apply(), which manages its own busy window.
+				busy = false;
+				await apply();
+				return;
+			}
 			confirmApply = true;
 		} catch {
 			advanceAfterApply = false;
