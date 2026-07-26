@@ -1,0 +1,101 @@
+---
+title: PosterPilot
+description: Application web auto-hébergée pour parcourir votre médiathèque, trouver des visuels de couverture auprès de plusieurs fournisseurs et les appliquer à Plex/Jellyfin/Emby et/ou via du YAML Kometa.
+template: splash
+hero:
+  tagline: Parcourez votre médiathèque, trouvez de meilleurs visuels et appliquez-les — directement sur votre serveur multimédia ou sous forme de YAML prêt pour Kometa.
+  actions:
+    - text: Commencer
+      link: /posterpilot/fr/installation/
+      icon: right-arrow
+      variant: primary
+    - text: Voir sur GitHub
+      link: https://github.com/diegopeixoto/posterpilot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+PosterPilot est une application web auto-hébergée qui parcourt une médiathèque
+([Plex](https://www.plex.tv/), [Jellyfin](https://jellyfin.org/) ou
+[Emby](https://emby.media/) — un seul serveur actif à la fois), trouve des visuels
+de couverture auprès de plusieurs fournisseurs et applique le visuel choisi à votre
+serveur multimédia — directement via son API et/ou en exportant du YAML compatible
+[Kometa](https://kometa.wiki/)/PMM. Elle s'exécute comme un unique conteneur Docker
+sur un Mac ou sur un serveur Unraid.
+
+Un assistant de configuration guidé vous accompagne lors de la première
+installation, du choix de la langue à la connexion de votre serveur, de votre clé
+TMDB et de vos fournisseurs, en passant par la sélection des médiathèques et une
+première synchronisation — et pour Plex, il inclut une connexion par code PIN et la
+découverte des connexions, pour ne jamais avoir à chercher un jeton ou une URL.
+
+![Mur de la médiathèque PosterPilot avec des contrôles de filtre et de tri au-dessus d'une grille d'affiches de films](/posterpilot/screenshots/library.webp)
+
+## Ce qu'il fait
+
+<CardGrid stagger>
+	<Card title="Synchronisez votre médiathèque" icon="seti:db">
+		Synchronisez vos médiathèques de films et de séries et résolvez chaque titre vers un id TMDB afin
+		que les fournisseurs de visuels puissent être interrogés avec précision.
+	</Card>
+	<Card title="Trouvez des visuels" icon="seti:image">
+		Lancez la recherche auprès des fournisseurs activés — MediUX, Fanart.tv, TMDB et ThePosterDB — et
+		comparez les candidats d'affiche et d'arrière-plan regroupés par fournisseur et par set. Utilisez
+		un set entier, mélangez des éléments de plusieurs fournisseurs ou assemblez un set personnalisé à
+		partir d'une URL collée ou d'un fichier téléversé.
+	</Card>
+	<Card title="Appliquez des visuels" icon="approve-check">
+		Appliquez le visuel choisi via l'API du serveur multimédia (téléverse et verrouille le champ,
+		instantanément) et/ou via un export YAML Kometa que votre instance Kometa consomme à sa prochaine
+		exécution.
+	</Card>
+	<Card title="Restez dans votre langue" icon="translate">
+		L'interface est proposée en anglais, espagnol, chinois simplifié, japonais et portugais du
+		Brésil, avec un repli vers l'anglais clé par clé — le tout géré via Weblate.
+	</Card>
+</CardGrid>
+
+Les opérations à l'échelle de la médiathèque s'exécutent comme des tâches en
+arrière-plan avec une progression en direct via Server-Sent Events, affichée
+directement sur le tableau de bord. Un journal d'**Activité** granulaire
+(Paramètres → Activité) et un journal sur fichier rotatif enregistrent chaque
+événement opérationnel, et un vérificateur de mises à jour avec une fenêtre
+« Nouveautés » signale les nouvelles versions.
+
+## Où aller ensuite
+
+<CardGrid>
+	<LinkCard
+		title="Installation"
+		href="/posterpilot/fr/installation/"
+		description="Exécutez PosterPilot avec Docker Compose sur un Mac ou Unraid à l'aide de l'image officielle GHCR."
+	/>
+	<LinkCard
+		title="Configuration"
+		href="/posterpilot/fr/configuration/"
+		description="Connectez un serveur multimédia, définissez votre clé TMDB, activez les fournisseurs de visuels et découvrez la référence complète des variables d'environnement."
+	/>
+	<LinkCard
+		title="Utilisation"
+		href="/posterpilot/fr/usage/"
+		description="Synchronisez une médiathèque, trouvez des visuels, appliquez-les, créez des sets personnalisés et filtrez le mur de la médiathèque."
+	/>
+	<LinkCard
+		title="Contribuer"
+		href="/posterpilot/fr/contributing/"
+		description="Configurez le projet en local et exécutez les contrôles de qualité avant de soumettre une modification."
+	/>
+</CardGrid>
+
+## Stack
+
+- **SvelteKit** (TypeScript) sur **Bun**, compilé avec `adapter-node`
+- **SQLite + Drizzle ORM** (libsql) pour le cache de la médiathèque, les
+  candidats, l'historique, les tâches et les paramètres
+- **Tailwind CSS v4**, une interface sombre qui met les images en avant
+- Une file de tâches en processus avec **Server-Sent Events** pour la progression
+  en direct
+
+PosterPilot est publié sous la [licence MIT](https://github.com/diegopeixoto/posterpilot/blob/main/LICENSE).

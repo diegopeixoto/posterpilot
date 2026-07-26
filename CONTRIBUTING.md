@@ -61,7 +61,7 @@ Help translate the UI into your language! No coding required.
 
 **Source of truth.** Every user-facing string lives in a per-locale JSON catalog
 under `messages/` — one file per language (`messages/en.json`, `es.json`,
-`zh.json`, `ja.json`, `pt-BR.json`), keyed by a stable message id. English
+`zh.json`, `ja.json`, `pt-BR.json`, `fr.json`), keyed by a stable message id. English
 (`messages/en.json`) is the complete **source** catalog; the others hold
 translations and may be partial. Any id missing or left empty in a target locale
 falls back to its English text, so a partial translation never shows a raw key.

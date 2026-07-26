@@ -8,7 +8,7 @@ a seção de Tradutores do
 [`CONTRIBUTING.md`](https://github.com/diegopeixoto/posterpilot/blob/main/CONTRIBUTING.md#translators).
 
 A interface é localizada em inglês (o padrão), espanhol, chinês simplificado,
-japonês e português do Brasil, com **fallback para o inglês por chave**, de modo que qualquer
+japonês, português do Brasil e francês, com **fallback para o inglês por chave**, de modo que qualquer
 string deixada sem tradução sempre mostra um inglês legível — nunca uma chave bruta.
 
 ## Fonte da verdade
@@ -21,6 +21,7 @@ um arquivo por idioma, indexado por um id de mensagem estável:
 - `messages/zh.json` — chinês simplificado
 - `messages/ja.json` — japonês
 - `messages/pt-BR.json` — português do Brasil
+- `messages/fr.json` — francês
 
 Os outros catálogos contêm traduções e podem ser parciais. Qualquer id ausente ou deixado
 vazio em uma localidade de destino recai para o seu texto em inglês. Novas strings em inglês adicionadas

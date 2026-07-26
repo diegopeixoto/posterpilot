@@ -3,7 +3,7 @@
 // both the server and the client.
 
 /** The fixed set of supported UI locales; English is the base/default. */
-export const SUPPORTED_LOCALES = ['en', 'es', 'zh', 'ja', 'pt-BR'] as const;
+export const SUPPORTED_LOCALES = ['en', 'es', 'zh', 'ja', 'pt-BR', 'fr'] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 /** The base (source) locale and last-resort fallback. */
@@ -15,7 +15,8 @@ export const LOCALE_NAMES: Record<Locale, string> = {
 	es: 'Español',
 	zh: '简体中文',
 	ja: '日本語',
-	'pt-BR': 'Português (BR)'
+	'pt-BR': 'Português (BR)',
+	fr: 'Français'
 };
 
 /** True when `value` names one of the supported locales. */

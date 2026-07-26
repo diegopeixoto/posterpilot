@@ -8,7 +8,7 @@
 #   File mask:        messages/*.json
 #   Monolingual base: messages/en.json   (English is the source language)
 #   Source language:  en
-#   Translation langs: es, zh, ja, pt-BR
+#   Translation langs: es, zh, ja, pt-BR, fr
 #   Repository:       this git repo; Weblate pushes translations back via git.
 
 [weblate]

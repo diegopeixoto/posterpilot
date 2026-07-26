@@ -14,6 +14,7 @@ describe('normalizeLocale', () => {
 		expect(normalizeLocale('ES')).toBe('es');
 		expect(normalizeLocale('pt-BR')).toBe('pt-BR');
 		expect(normalizeLocale('pt-br')).toBe('pt-BR');
+		expect(normalizeLocale('fr')).toBe('fr');
 	});
 
 	it('matches a regioned tag to its base language', () => {
@@ -22,10 +23,11 @@ describe('normalizeLocale', () => {
 		expect(normalizeLocale('zh-CN')).toBe('zh');
 		expect(normalizeLocale('ja-JP')).toBe('ja');
 		expect(normalizeLocale('pt')).toBe('pt-BR');
+		expect(normalizeLocale('fr-CA')).toBe('fr');
 	});
 
 	it('returns null for unsupported / malformed values', () => {
-		expect(normalizeLocale('fr')).toBeNull();
+		expect(normalizeLocale('de')).toBeNull();
 		expect(normalizeLocale('de-DE')).toBeNull();
 		expect(normalizeLocale('')).toBeNull();
 		expect(normalizeLocale('   ')).toBeNull();
@@ -37,7 +39,7 @@ describe('normalizeLocale', () => {
 describe('isSupportedLocale', () => {
 	it('recognizes exactly the supported set', () => {
 		for (const loc of SUPPORTED_LOCALES) expect(isSupportedLocale(loc)).toBe(true);
-		expect(isSupportedLocale('fr')).toBe(false);
+		expect(isSupportedLocale('de')).toBe(false);
 		expect(isSupportedLocale('en-US')).toBe(false); // exact tag, not normalized
 		expect(isSupportedLocale(42)).toBe(false);
 	});
@@ -45,8 +47,8 @@ describe('isSupportedLocale', () => {
 
 describe('parseAcceptLanguage', () => {
 	it('returns supported locales ordered by q-value', () => {
-		expect(parseAcceptLanguage('es,en;q=0.8,fr;q=0.5')).toEqual(['es', 'en']);
-		expect(parseAcceptLanguage('fr;q=0.9,ja;q=0.7,de;q=0.5')).toEqual(['ja']);
+		expect(parseAcceptLanguage('es,en;q=0.8,de;q=0.5')).toEqual(['es', 'en']);
+		expect(parseAcceptLanguage('fr;q=0.9,ja;q=0.7,de;q=0.5')).toEqual(['fr', 'ja']);
 	});
 
 	it('normalizes regioned tags and dedupes', () => {
@@ -56,7 +58,7 @@ describe('parseAcceptLanguage', () => {
 
 	it('drops wildcard and unsupported entries; empty when none match', () => {
 		expect(parseAcceptLanguage('*')).toEqual([]);
-		expect(parseAcceptLanguage('fr,de')).toEqual([]);
+		expect(parseAcceptLanguage('it,de')).toEqual([]);
 		expect(parseAcceptLanguage('')).toEqual([]);
 		expect(parseAcceptLanguage(null)).toEqual([]);
 	});
@@ -76,12 +78,12 @@ describe('resolveLocale precedence', () => {
 
 	it('falls back to English when neither yields a supported locale', () => {
 		expect(resolveLocale(null, null)).toBe(BASE_LOCALE);
-		expect(resolveLocale(null, 'fr,de')).toBe('en');
+		expect(resolveLocale(null, 'it,de')).toBe('en');
 		expect(resolveLocale(undefined, undefined)).toBe('en');
 	});
 
 	it('ignores an unsupported setting and uses the header instead', () => {
-		expect(resolveLocale('fr', 'es')).toBe('es');
-		expect(resolveLocale('klingon', 'fr,de')).toBe('en');
+		expect(resolveLocale('de', 'es')).toBe('es');
+		expect(resolveLocale('klingon', 'it,de')).toBe('en');
 	});
 });
