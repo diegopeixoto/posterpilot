@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.10.0](https://github.com/diegopeixoto/posterpilot/compare/v0.9.0...v0.10.0) (2026-07-26)
+
+This is the first PosterPilot release built with the community — every Jellyfin fix
+below started as a contributed PR, and a substantial share of the features were
+upstreamed from the [Bubu31/posterpilot](https://github.com/Bubu31/posterpilot) fork.
+
+### Features
+
+* **ThePosterDB, properly** — optional account sign-in (the site serves placeholder images to anonymous visitors; credentials are encrypted at rest and never required), real contributor sets with author attribution, and the group expanded by default on the item page. For collections, PosterPilot now finds ThePosterDB's own collection sets and matches them onto your members as one coordinated design. ([#48](https://github.com/diegopeixoto/posterpilot/pull/48), [#52](https://github.com/diegopeixoto/posterpilot/pull/52), [#53](https://github.com/diegopeixoto/posterpilot/pull/53))
+* **Re-search on demand** — a per-provider ⟳ button on every item's provider group, and a whole-collection re-search that reports how many members succeeded. Each provider also keeps a reserved share of the candidate list, so one high-scoring source can't crowd the others out. ([#50](https://github.com/diegopeixoto/posterpilot/pull/50), [#52](https://github.com/diegopeixoto/posterpilot/pull/52))
+* **One-click apply** — a single-item plan with nothing skipped applies in the same click. Any plan carrying a skip, and the apply-and-next flow, keep the confirmation dialog; the server-side preview/confirm contract is unchanged. ([#49](https://github.com/diegopeixoto/posterpilot/pull/49), [#51](https://github.com/diegopeixoto/posterpilot/pull/51))
+* **French** — the sixth UI language, across the whole app and the documentation site. ([#54](https://github.com/diegopeixoto/posterpilot/pull/54))
+* **Credits where due** — the app and docs footers now carry the version, maintainer, and Aquarela links. ([#47](https://github.com/diegopeixoto/posterpilot/pull/47))
+
+### Bug Fixes
+
+* Applying artwork on Jellyfin 10.11.x failed with a generic error: the server dropped the single-item metadata endpoint. Artwork reads now use the list form 10.11 still serves. ([#38](https://github.com/diegopeixoto/posterpilot/pull/38))
+* Jellyfin backdrops were appended behind the existing one, so applies "succeeded" while the visible art never changed. Existing backdrops are now cleared first — order-safely, since Jellyfin's tag order does not match its delete index. ([#40](https://github.com/diegopeixoto/posterpilot/pull/40))
+* Merged-version movies appeared two or three times, library extras leaked in as movies, and watched state never arrived. The library — and collections, seasons, and episodes — are now read through the same user-scoped view the Jellyfin UI uses, resolved once per snapshot so mixed reads can't corrupt collection membership. ([#41](https://github.com/diegopeixoto/posterpilot/pull/41), [#45](https://github.com/diegopeixoto/posterpilot/pull/45))
+* ThePosterDB discovery always returned nothing: the search page contains no poster images. The matching set page is now opened instead, chosen by strict title *and* year so a remake never gets the wrong film's artwork. ([#42](https://github.com/diegopeixoto/posterpilot/pull/42))
+* Even then, every ThePosterDB apply was silently dropped: the site's image CDN wasn't on the trusted-host list. ([#48](https://github.com/diegopeixoto/posterpilot/pull/48))
+* Concurrent provider discovery could fail with "database is locked". The database now runs in WAL mode and every discovery write goes through a single write queue. ([#50](https://github.com/diegopeixoto/posterpilot/pull/50), [#53](https://github.com/diegopeixoto/posterpilot/pull/53))
+* Candidates from a provider you disabled (or whose credential is gone) no longer appear on the item page; re-enabling brings them back without re-searching. ([#50](https://github.com/diegopeixoto/posterpilot/pull/50))
+* The documentation site had failed to build since the Astro 7 upgrade; docs deploys work again. ([#47](https://github.com/diegopeixoto/posterpilot/pull/47))
+* Reads could briefly fail with a flashing error while a large sync was writing: reads now retry bounded on database contention, complementing the write queue. ([#58](https://github.com/diegopeixoto/posterpilot/pull/58))
+* A stored ThePosterDB password could not be removed from the settings page; a clear control now deletes it on save and returns the provider to anonymous mode. ([#59](https://github.com/diegopeixoto/posterpilot/pull/59))
+
+### Under the hood
+
+* Every new feature is documented — ThePosterDB accounts, collection discovery, re-search, and the one-click contract — in all six languages. ([#51](https://github.com/diegopeixoto/posterpilot/pull/51), [#55](https://github.com/diegopeixoto/posterpilot/pull/55))
+* Docs toolchain moved to Astro 7. ([#39](https://github.com/diegopeixoto/posterpilot/pull/39), [#43](https://github.com/diegopeixoto/posterpilot/pull/43))
+
+### Upgrading
+
+* No database migration. WAL mode is applied automatically and is reversible; ThePosterDB credentials are optional and everything works anonymously as before.
+
+### Contributors
+
+* [@nasspium](https://github.com/nasspium) — the entire Jellyfin 10.11 compatibility series and the ThePosterDB set-page fix ([#38](https://github.com/diegopeixoto/posterpilot/pull/38), [#40](https://github.com/diegopeixoto/posterpilot/pull/40), [#41](https://github.com/diegopeixoto/posterpilot/pull/41), [#42](https://github.com/diegopeixoto/posterpilot/pull/42)), each verified against a live server.
+* [@Bubu31](https://github.com/Bubu31) (with [@LeGrosBubu](https://github.com/LeGrosBubu)) — ThePosterDB accounts, real sets and collection matching, discovery stability, one-click apply, disabled-provider filtering, and the CDN trust fix, upstreamed from their fork with co-authorship ([#48](https://github.com/diegopeixoto/posterpilot/pull/48)–[#53](https://github.com/diegopeixoto/posterpilot/pull/53)). They also independently found and fixed the Jellyfin bugs above.
+
 ## [0.9.0](https://github.com/diegopeixoto/posterpilot/compare/v0.8.0...v0.9.0) (2026-07-13)
 
 
