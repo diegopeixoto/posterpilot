@@ -53,6 +53,26 @@ O detalhe mostra origem, membros TMDB indisponíveis como contexto, artwork atua
 preparada, evidências de provedor/set/autor/idioma/família e cobertura explicável.
 Origem desconhecida não é tratada como incompatibilidade deliberada.
 
+## Pesquisar novamente a coleção inteira
+
+O detalhe de uma coleção traz a ação **Pesquisar novamente nos provedores** (⟳):
+repete a descoberta para cada membro local em uma única passada, ignorando o cache
+HTTP nas consultas a provedores de cada membro. Os membros são processados de
+forma independente — uma falha não interrompe os demais — e o resultado é
+informado como contagem ("3 de 5 membros atualizados.").
+
+Com o ThePosterDB habilitado, a mesma passada também procura um **set de coleção**
+do ThePosterDB: localiza a coleção pelo nome nas listagens do site, testa até seis
+sets de colaboradores, casa os pôsteres de cada set com seus membros locais
+(título exato primeiro, depois inclusão de palavras, depois ano de lançamento) e
+mantém o set com maior cobertura. A artwork do set vencedor é injetada como um
+único design coordenado nos membros casados, pronta para as sugestões de família.
+Ao contrário da passada por membro, essa busca de sets ainda pode reutilizar
+páginas do cache HTTP até expirarem (`HTTP_CACHE_TTL_DAYS`). Pesquisar novamente
+só armazena candidatos; nada é aplicado sem prévia e confirmação.
+
+![Detalhe de uma coleção no PosterPilot com o controle de pesquisar novamente, a contagem de membros atualizados e sugestões de famílias coordenadas recém-descobertas](/posterpilot/screenshots/collection-discover.webp)
+
 ## Sugestões coordenadas e exceções
 
 Quando evidências verificáveis cobrem vários membros, famílias são ordenadas por

@@ -27,6 +27,10 @@ PosterPilot は 2 つの設定元を組み合わせます。
 
 `TMDB_KEY` は v3 キーまたは v4 bearer/JWT に対応します。MediUX と TMDB は既定で有効、Fanart.tv は `FANART_KEY` が必要、ThePosterDB は任意です。1 プロバイダーの失敗は他を止めず、既知候補を古い状態として保持できます。
 
+ThePosterDB はアカウントなしで動作しますが、一部のページでは匿名アクセスに実際のポスターの代わりにプレースホルダー画像を返します。実画像を取得するには、**任意で**サインインできます — **メタデータとプロバイダー**（ThePosterDB を有効にするとフィールドが表示）または `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD` で設定します。パスワードは他のシークレットと同様に保存時に暗号化され、サインインに失敗した場合はその実行を匿名スクレイピングにフォールバックし、検索を止めません。匿名スクレイピングに戻すにはユーザー名を空にします（サインインには両方が必要です）。保存済みパスワードには削除操作がまだなく、暗号化されたままデータベースに残り、ユーザー名を再入力すると再び使われます。
+
+![ThePosterDB を有効にし、任意のユーザー名とパスワードのフィールドを表示した PosterPilot のプロバイダー設定](/posterpilot/screenshots/settings-providers.webp)
+
 **メタデータとプロバイダー**で優先順と、プロバイダー／解像度／縦横比の重みを調整します。プレビューと実行は同じ決定的設定を使います。`SUGGEST_PRESELECT` は候補を表示しますが、ステージは常に明示操作です。
 
 ## Kometa と適用方法
@@ -69,6 +73,8 @@ PosterPilot は 2 つの設定元を組み合わせます。
 | `PROVIDER_FANART` | 無効 | Fanart.tv を有効化。 |
 | `PROVIDER_THEPOSTERDB` | 無効 | ThePosterDB を有効化。 |
 | `FANART_KEY` | — | Fanart.tv キー（シークレット）。 |
+| `THEPOSTERDB_USERNAME` | — | サインインしてスクレイピングするための任意の ThePosterDB ユーザー名またはメール。 |
+| `THEPOSTERDB_PASSWORD` | — | 任意の ThePosterDB アカウントのパスワード（シークレット、暗号化保存）。 |
 | `MEDIUX_REQUEST_DELAY_MS` | `2000` | MediUX 要求間隔（ms）。 |
 | `MEDIUX_CONCURRENCY` | `5` | MediUX 同時要求数。 |
 | `HTTP_CACHE_TTL_DAYS` | `7` | HTTP キャッシュ日数。 |

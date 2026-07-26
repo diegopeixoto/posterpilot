@@ -29,15 +29,16 @@ Si une valeur n'est définie à aucun des deux endroits, la valeur par défaut
 documentée (le cas échéant) s'applique, ou la fonctionnalité qui en dépend reste
 non configurée jusqu'à ce que vous la renseigniez.
 
-Les secrets (le jeton Plex, les clés API Jellyfin/Emby, la clé TMDB et la clé
-Fanart.tv) ne sont jamais renvoyés au navigateur après leur enregistrement et
-sont caviardés dans les journaux — la page Paramètres indique seulement qu'un
-secret _est défini_.
+Les secrets (le jeton Plex, les clés API Jellyfin/Emby, la clé TMDB, la clé
+Fanart.tv et le mot de passe du compte ThePosterDB) ne sont jamais renvoyés au
+navigateur après leur enregistrement et sont caviardés dans les journaux — la
+page Paramètres indique seulement qu'un secret _est défini_.
 
 ## Secrets et chiffrement
 
 Ces mêmes secrets — le jeton Plex, les clés API / jetons d'accès Jellyfin et
-Emby, la clé TMDB et la clé Fanart.tv — sont **chiffrés au repos** en
+Emby, la clé TMDB, la clé Fanart.tv et le mot de passe du compte ThePosterDB —
+sont **chiffrés au repos** en
 AES-256-GCM avant d'être écrits dans la base de données SQLite. Chaque valeur
 stockée est auto-descriptive (elle porte le préfixe `enc:v1:`), ce qui permet à
 PosterPilot de distinguer les valeurs chiffrées de l'ancien texte en clair.
@@ -225,13 +226,41 @@ indépendamment, dans les paramètres ou via sa variable d'environnement.
 | **MediUX**      | activé     | non                  | Sets d'affiches/arrière-plans collectés, avec attribution du contributeur.         |
 | **TMDB**        | activé     | réutilise `TMDB_KEY` | Affiches et arrière-plans issus du point de terminaison d'images de TMDB.          |
 | **Fanart.tv**   | désactivé  | `FANART_KEY`         | Affiches, arrière-plans et logos issus de l'API Fanart.tv.                         |
-| **ThePosterDB** | désactivé  | non                  | Sets communautaires d'affiches/arrière-plans collectés, avec limitation de débit et cache. |
+| **ThePosterDB** | désactivé  | non                  | Sets communautaires d'affiches/arrière-plans collectés, avec limitation de débit et cache. Connexion facultative à un compte (ci-dessous). |
 
 Fanart.tv est le seul fournisseur à clé : s'il est activé mais qu'aucune
 `FANART_KEY` n'est configurée, la découverte l'ignore et signale l'absence
 d'identifiant au lieu de faire échouer toute l'exécution. Une panne, un délai
 dépassé ou une réponse inexploitable chez un fournisseur n'empêche jamais les
 autres de renvoyer des candidats.
+
+### Compte ThePosterDB (facultatif)
+
+ThePosterDB fonctionne sans compte — la collecte anonyme reste le comportement
+par défaut et aucun identifiant n'est jamais requis. Le hic est de leur côté :
+sur certaines pages, ThePosterDB sert une image de substitution aux visiteurs
+anonymes à la place du vrai visuel, si bien qu'une découverte anonyme peut
+revenir avec des couvertures qui ne sont pas l'affiche réelle. Vous connecter
+avec un compte ThePosterDB (gratuit) permet à PosterPilot de récupérer les
+véritables fichiers.
+
+Saisissez les identifiants dans **Paramètres → Métadonnées et fournisseurs** —
+les champs nom d'utilisateur et mot de passe apparaissent une fois ThePosterDB
+activé — ou définissez `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD`. Le mot
+de passe est un secret comme les autres : chiffré au repos en AES-256-GCM et
+jamais renvoyé au navigateur (laissez le champ du mot de passe vide pour
+conserver la valeur stockée). Pour revenir à la collecte anonyme, **videz le nom
+d'utilisateur** — la connexion exige les deux, donc la découverte redevient
+anonyme dès que le nom d'utilisateur disparaît. Notez que seul le nom
+d'utilisateur est effacé : le mot de passe stocké n'a pas encore de commande de
+suppression, reste chiffré dans la base de données et sera réutilisé si vous
+ressaisissez le nom d'utilisateur. Une connexion échouée — mauvais mot de passe,
+site injoignable — retombe sur la collecte anonyme pour cette exécution au lieu
+de faire échouer la découverte. La session est mise en cache en mémoire et renouvelée
+automatiquement à son expiration, et un changement d'identifiants prend effet à
+la découverte suivante, sans redémarrage.
+
+![Paramètres des fournisseurs de PosterPilot avec ThePosterDB activé et ses champs facultatifs de nom d'utilisateur et de mot de passe](/posterpilot/screenshots/settings-providers.webp)
 
 ## Performance et réglages
 
@@ -393,6 +422,8 @@ l'environnement, ils prennent la priorité et sont verrouillés dans l'interface
 | `PROVIDER_FANART`         | Fournisseur Fanart.tv            | désactivé                              | Active le fournisseur Fanart.tv (requiert `FANART_KEY`).                                          |
 | `PROVIDER_THEPOSTERDB`    | Fournisseur ThePosterDB          | désactivé                              | Active le fournisseur ThePosterDB.                                                                |
 | `FANART_KEY`              | Clé Fanart.tv (secret)           | —                                      | Clé API Fanart.tv (le seul fournisseur à clé).                                                    |
+| `THEPOSTERDB_USERNAME`    | Nom d'utilisateur ThePosterDB    | —                                      | Nom d'utilisateur ou e-mail facultatif du compte ThePosterDB pour la collecte connectée.          |
+| `THEPOSTERDB_PASSWORD`    | Mot de passe ThePosterDB (secret) | —                                     | Mot de passe du compte ThePosterDB facultatif (chiffré au repos).                                 |
 | `MEDIUX_REQUEST_DELAY_MS` | Délai des requêtes MediUX        | `2000`                                 | Délai entre les requêtes MediUX, en millisecondes (limitation de débit).                          |
 | `MEDIUX_CONCURRENCY`      | Concurrence MediUX               | `5`                                    | Nombre maximal de requêtes MediUX simultanées.                                                    |
 | `HTTP_CACHE_TTL_DAYS`     | TTL du cache HTTP                | `7`                                    | Durée de réutilisation des réponses HTTP en cache (collectes), en jours.                          |

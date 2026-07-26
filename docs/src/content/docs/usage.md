@@ -140,8 +140,16 @@ shows), genres, and overview, plus the top-billed cast.
   also presents season-poster sets and title-card sets.
 - Provider sections, individual set cards, and (for shows) season groups are
   **collapsible**. On first load the first provider and its first set are expanded
-  and everything else is collapsed; your collapsed/expanded choices persist in the
-  browser across reloads and as you move between items.
+  — and so is the ThePosterDB group when it has results, since it arrives as a
+  single flattened set — while everything else is collapsed; your
+  collapsed/expanded choices persist in the browser across reloads and as you move
+  between items.
+- Each provider group header carries its own **⟳ re-search** control
+  ("Re-search MediUX", "Re-search ThePosterDB", …). It re-runs discovery for just
+  that provider and bypasses the HTTP scrape cache, so you get genuinely fresh
+  results instead of the copy cached for `HTTP_CACHE_TTL_DAYS`. The fresh run
+  replaces that provider's stored candidates; every other provider's candidates
+  are left untouched.
 - When **suggested artwork** is enabled, the highest-scored candidate for each slot
   is clearly marked for an explicit stage/accept action; it is not silently saved.
   Candidates are scored on provider quality, resolution, and aspect-fit; tune the
@@ -191,6 +199,11 @@ selection, destination, current artwork, and source state:
   the entry in place rather than duplicating it.
 - **Both.** Performs the direct upload _and_ writes the Kometa YAML, recording each
   outcome independently so a partial failure is visible.
+
+A warning-free plan applies in a single click: when the preview carries no
+skipped targets and at least one write, PosterPilot issues the confirmation for
+you in the same action. Any skip brings back the explicit confirmation step, and
+**Apply and next** always keeps its dialog.
 
 A single apply writes **every staged slot** — show, seasons, and episodes — with
 the chosen method(s). For direct upload, PosterPilot resolves each season and
@@ -281,8 +294,9 @@ motion starts the gallery paused. See [FUN experiments and collections](../fun-c
 
 **Collections** groups local members from native server or TMDB collection identity,
 strictly inside the active server. Detail pages show provenance, unavailable members,
-current/staged artwork, explainable consistency, coordinated family coverage, and
-per-member overrides. Staging a family never applies it. See
+current/staged artwork, explainable consistency, coordinated family coverage,
+per-member overrides, and a one-action **re-search across every member**. Staging a
+family never applies it. See
 [FUN experiments and collections](../fun-collections/#collections-and-franchises).
 
 ## Dashboard and jobs

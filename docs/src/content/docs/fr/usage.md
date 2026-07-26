@@ -170,9 +170,18 @@ synopsis, ainsi que les têtes d'affiche.
   de saisons et les sets de cartes-titres.
 - Les sections de fournisseurs, les cartes de sets individuelles et (pour les
   séries) les groupes de saisons sont **repliables**. Au premier chargement, le
-  premier fournisseur et son premier set sont dépliés et tout le reste est
-  replié ; vos choix de pliage/dépliage persistent dans le navigateur d'un
-  rechargement à l'autre et lorsque vous passez d'un élément à l'autre.
+  premier fournisseur et son premier set sont dépliés — tout comme le groupe
+  ThePosterDB lorsqu'il a des résultats, puisqu'il arrive sous la forme d'un set
+  unique aplati — tandis que tout le reste est replié ; vos choix de
+  pliage/dépliage persistent dans le navigateur d'un rechargement à l'autre et
+  lorsque vous passez d'un élément à l'autre.
+- L'en-tête de chaque groupe de fournisseur porte sa propre commande de
+  **relance ⟳** (« Relancer la recherche MediUX », « Relancer la recherche
+  ThePosterDB », …). Elle relance la découverte pour ce seul fournisseur et
+  contourne le cache HTTP des collectes, si bien que vous obtenez des résultats
+  réellement frais au lieu de la copie mise en cache pendant
+  `HTTP_CACHE_TTL_DAYS`. La nouvelle exécution remplace les candidats stockés de
+  ce fournisseur ; ceux de tous les autres fournisseurs restent intacts.
 - Lorsque les **visuels suggérés** sont activés, le candidat le mieux noté pour
   chaque emplacement est clairement signalé en vue d'une action explicite de
   préparation/acceptation ; il n'est pas enregistré en silence. Les candidats
@@ -235,6 +244,12 @@ l'état de la source :
 - **Les deux.** Effectue le téléversement direct _et_ écrit le YAML Kometa, en
   enregistrant chaque résultat indépendamment afin qu'un échec partiel soit
   visible.
+
+Un plan sans avertissement s'applique en un seul clic : lorsque l'aperçu ne
+comporte aucune cible ignorée et au moins une écriture, PosterPilot émet la
+confirmation pour vous dans la même action. La moindre omission fait revenir
+l'étape de confirmation explicite, et **Appliquer et suivant** conserve toujours
+sa boîte de dialogue.
 
 Une seule application écrit **chaque emplacement préparé** — série, saisons et
 épisodes — avec la ou les méthodes choisies. Pour le téléversement direct,
@@ -345,7 +360,8 @@ Avec la réduction des animations, la galerie démarre en pause. Voir
 native du serveur ou de TMDB, strictement au sein du serveur actif. Les pages de
 détail montrent la provenance, les membres indisponibles, les visuels
 actuels/préparés, une cohérence explicable, une couverture coordonnée de la
-famille et des surcharges par membre. Préparer une famille ne l'applique jamais.
+famille, des surcharges par membre et une **relance de la recherche sur tous les
+membres** en une seule action. Préparer une famille ne l'applique jamais.
 Voir [Expériences FUN et collections](/posterpilot/fr/fun-collections/).
 
 ## Tableau de bord et tâches

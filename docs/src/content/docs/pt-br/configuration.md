@@ -40,6 +40,18 @@ servidor padrão protegido. Servidores adicionais ficam no banco; consulte
 Fanart.tv requer `FANART_KEY`; ThePosterDB é opcional. A falha de um provedor não
 bloqueia os demais e pode manter candidatos conhecidos marcados como desatualizados.
 
+O ThePosterDB funciona sem conta, mas em algumas páginas ele serve uma imagem de
+preenchimento a visitantes anônimos no lugar da artwork real. Você pode fazer login
+de forma **opcional** — em **Metadados e provedores** (os campos aparecem ao
+habilitar o ThePosterDB) ou com `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD` —
+para obter as imagens reais. A senha é criptografada em repouso como os demais
+segredos, e um login que falha volta ao modo anônimo naquela execução em vez de
+bloquear a descoberta. Para voltar ao modo anônimo, limpe o usuário (o login
+exige os dois); a senha guardada ainda não tem controle de remoção — permanece
+criptografada e volta a ser usada se você reinserir o usuário.
+
+![Configurações de provedores do PosterPilot com o ThePosterDB habilitado e seus campos opcionais de usuário e senha](/posterpilot/screenshots/settings-providers.webp)
+
 Em **Metadados e provedores**, ordene a prioridade e ajuste pesos de provedor,
 resolução e proporção. A mesma configuração determinística vale na prévia e execução.
 `SUGGEST_PRESELECT` mostra a melhor sugestão, mas aceitar/preparar é sempre explícito.
@@ -98,6 +110,8 @@ suportados são `en`, `es`, `zh`, `ja`, `pt-BR` e `fr`.
 | `PROVIDER_FANART` | desligado | Habilita Fanart.tv. |
 | `PROVIDER_THEPOSTERDB` | desligado | Habilita ThePosterDB. |
 | `FANART_KEY` | — | Chave Fanart.tv (segredo). |
+| `THEPOSTERDB_USERNAME` | — | Usuário ou e-mail opcional do ThePosterDB para buscar com login. |
+| `THEPOSTERDB_PASSWORD` | — | Senha da conta opcional do ThePosterDB (segredo, criptografada em repouso). |
 | `MEDIUX_REQUEST_DELAY_MS` | `2000` | Intervalo entre requisições MediUX, ms. |
 | `MEDIUX_CONCURRENCY` | `5` | Requisições MediUX simultâneas. |
 | `HTTP_CACHE_TTL_DAYS` | `7` | TTL do cache HTTP em dias. |

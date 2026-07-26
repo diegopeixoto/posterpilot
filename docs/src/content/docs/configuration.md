@@ -27,14 +27,16 @@ UI — so the source of truth is unambiguous.
 If a value is set in neither place, the documented default (if any) applies, or
 the feature that depends on it stays unconfigured until you set it.
 
-Secrets (the Plex token, the Jellyfin/Emby API keys, the TMDB credential, and the
-Fanart.tv key) are never echoed back to the browser after they are saved and are
-redacted from logs — the Settings page only indicates that a secret _is set_.
+Secrets (the Plex token, the Jellyfin/Emby API keys, the TMDB credential, the
+Fanart.tv key, and the ThePosterDB account password) are never echoed back to the
+browser after they are saved and are redacted from logs — the Settings page only
+indicates that a secret _is set_.
 
 ## Secrets and encryption
 
 Those same secrets — the Plex token, the Jellyfin and Emby API keys / access
-tokens, the TMDB credential, and the Fanart.tv key — are **encrypted at rest** with
+tokens, the TMDB credential, the Fanart.tv key, and the ThePosterDB account
+password — are **encrypted at rest** with
 AES-256-GCM before they are written to the SQLite database. Each stored value is
 self-describing (it carries an `enc:v1:` prefix), so PosterPilot can tell encrypted
 values from legacy plaintext.
@@ -196,12 +198,37 @@ environment variable.
 | **MediUX**      | on      | no                | Scraped poster/background sets with uploader attribution.       |
 | **TMDB**        | on      | reuses `TMDB_KEY` | Posters and backdrops from the TMDB images endpoint.            |
 | **Fanart.tv**   | off     | `FANART_KEY`      | Posters, backgrounds, and logos from the Fanart.tv API.         |
-| **ThePosterDB** | off     | no                | Scraped community poster/background sets, throttled and cached. |
+| **ThePosterDB** | off     | no                | Scraped community poster/background sets, throttled and cached. Optional account sign-in (below). |
 
 Fanart.tv is the only keyed provider: if it is enabled but no `FANART_KEY` is
 configured, discovery skips it and surfaces the missing-credential condition
 rather than failing the whole run. A failure, timeout, or unparseable response
 from one provider never prevents the others from returning candidates.
+
+### ThePosterDB account (optional)
+
+ThePosterDB works without an account — anonymous scraping stays the default and
+no credentials are ever required. The catch is on their side: ThePosterDB serves
+a placeholder image instead of the real artwork to anonymous visitors on some
+pages, so anonymous discovery can come back with covers that are not the actual
+poster. Signing in with a (free) ThePosterDB account lets PosterPilot fetch the
+real assets.
+
+Enter the credentials in **Settings → Metadata & providers** — the username and
+password fields appear once ThePosterDB is enabled — or set
+`THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD`. The password is a secret like
+the others: AES-256-GCM encrypted at rest and never echoed back to the browser
+(leave the password field blank to keep the stored value). To return to
+anonymous scraping, **clear the username** — sign-in needs both, so discovery
+goes anonymous as soon as the username is gone. Note that this clears only the
+username: the stored password has no removal control yet, stays encrypted in the
+database, and is used again if you re-enter the username. A failed sign-in —
+wrong password, site unreachable — falls back to anonymous scraping for that run
+instead of failing discovery.
+The session is cached in memory and renewed automatically when it expires, and
+changed credentials take effect on the next discovery without a restart.
+
+![PosterPilot provider settings with ThePosterDB enabled and its optional account username and password fields](/posterpilot/screenshots/settings-providers.webp)
 
 ## Performance and tuning
 
@@ -339,6 +366,8 @@ and are locked in the UI.
 | `PROVIDER_FANART`         | Fanart.tv provider        | off                                   | Enable the Fanart.tv provider (requires `FANART_KEY`).                                        |
 | `PROVIDER_THEPOSTERDB`    | ThePosterDB provider      | off                                   | Enable the ThePosterDB provider.                                                              |
 | `FANART_KEY`              | Fanart.tv key (secret)    | —                                     | Fanart.tv API key (the only keyed provider).                                                  |
+| `THEPOSTERDB_USERNAME`    | ThePosterDB username      | —                                     | Optional ThePosterDB account username or email for signed-in scraping.                        |
+| `THEPOSTERDB_PASSWORD`    | ThePosterDB password (secret) | —                                 | Password for the optional ThePosterDB account (encrypted at rest).                            |
 | `MEDIUX_REQUEST_DELAY_MS` | MediUX request delay      | `2000`                                | Delay between MediUX requests, in milliseconds (throttling).                                  |
 | `MEDIUX_CONCURRENCY`      | MediUX concurrency        | `5`                                   | Max concurrent MediUX requests.                                                               |
 | `HTTP_CACHE_TTL_DAYS`     | HTTP cache TTL            | `7`                                   | How long cached HTTP responses (scrapes) are reused, in days.                                 |
