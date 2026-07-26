@@ -49,6 +49,8 @@ vi.mock('$lib/server/db', () => ({
 
 import {
 	resolveConfig,
+	publicConfig,
+	saveSettings,
 	getKometaManagedLibraries,
 	setKometaManagedLibraries,
 	getKometaDefaultCollections,
@@ -122,6 +124,20 @@ describe('server-scoped library settings', () => {
 		h.env.INCLUDED_SECTIONS = 'global-one,global-two';
 		expect(await getIncludedSectionsForServer('server-a')).toEqual(['global-one', 'global-two']);
 		expect(await getIncludedSectionsForServer('server-b')).toEqual(['global-one', 'global-two']);
+	});
+});
+
+describe('saveSettings — clearing the ThePosterDB password', () => {
+	it('an explicit empty save deletes the stored secret and unsets the public flag', async () => {
+		await saveSettings({ thePosterDbPassword: 'hunter2' });
+		// Stored encrypted, and reported as set (never echoed back).
+		expect(h.store.get('thePosterDbPassword')).toMatch(/^enc:v1:/);
+		expect((await publicConfig()).thePosterDbPasswordSet).toBe(true);
+
+		await saveSettings({ thePosterDbPassword: '' });
+		expect(h.store.has('thePosterDbPassword')).toBe(false);
+		expect((await resolveConfig()).thePosterDbPassword).toBeNull();
+		expect((await publicConfig()).thePosterDbPasswordSet).toBe(false);
 	});
 });
 

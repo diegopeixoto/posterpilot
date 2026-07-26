@@ -599,6 +599,8 @@
 	"settings_theposterdb_username_placeholder": "你的 ThePosterDB 用户名或邮箱",
 	"settings_theposterdb_password": "ThePosterDB 密码",
 	"settings_theposterdb_password_placeholder_unset": "你的 ThePosterDB 账号密码",
+	"settings_theposterdb_password_clear": "清除已保存的密码",
+	"settings_theposterdb_password_clear_pending": "保存时将删除已保存的密码——再次点击可保留。",
 	"settings_libraries_to_sync": "要同步的媒体库",
 	"settings_libraries_connect_first": "连接服务器并保存以选择媒体库。",
 	"settings_libraries_hint": "取消勾选不想同步的媒体库。",

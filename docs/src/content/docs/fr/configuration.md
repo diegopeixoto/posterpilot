@@ -251,10 +251,12 @@ de passe est un secret comme les autres : chiffré au repos en AES-256-GCM et
 jamais renvoyé au navigateur (laissez le champ du mot de passe vide pour
 conserver la valeur stockée). Pour revenir à la collecte anonyme, **videz le nom
 d'utilisateur** — la connexion exige les deux, donc la découverte redevient
-anonyme dès que le nom d'utilisateur disparaît. Notez que seul le nom
-d'utilisateur est effacé : le mot de passe stocké n'a pas encore de commande de
-suppression, reste chiffré dans la base de données et sera réutilisé si vous
-ressaisissez le nom d'utilisateur. Une connexion échouée — mauvais mot de passe,
+anonyme dès que le nom d'utilisateur disparaît. Vider le nom d'utilisateur
+conserve le mot de passe stocké — toujours chiffré, réutilisé si vous
+ressaisissez le nom d'utilisateur — donc pour supprimer le secret lui-même,
+utilisez la commande **Effacer le mot de passe stocké** sous le champ du mot de
+passe : la valeur chiffrée est supprimée à l'enregistrement, et la découverte
+repart sans le moindre identifiant. Une connexion échouée — mauvais mot de passe,
 site injoignable — retombe sur la collecte anonyme pour cette exécution au lieu
 de faire échouer la découverte. La session est mise en cache en mémoire et renouvelée
 automatiquement à son expiration, et un changement d'identifiants prend effet à

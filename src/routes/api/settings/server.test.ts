@@ -96,6 +96,15 @@ describe('POST /api/settings artwork ranking', () => {
 		expect(h.saveSettings).not.toHaveBeenCalled();
 	});
 
+	it('forwards an explicit empty ThePosterDB password so the stored secret is cleared', async () => {
+		const response = await POST({
+			request: request({ thePosterDbPassword: '' })
+		} as Parameters<typeof POST>[0]);
+		expect(response.status).toBe(200);
+		// saveSettings deletes the settings row for empty values → password unset.
+		expect(h.saveSettings).toHaveBeenCalledWith({ thePosterDbPassword: '' });
+	});
+
 	it('persists the regular configuration and complete ranking together', async () => {
 		const response = await POST({
 			request: request({ defaultApplyMethod: 'plex', ranking: validRanking })

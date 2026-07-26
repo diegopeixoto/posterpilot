@@ -599,6 +599,8 @@
 	"settings_theposterdb_username_placeholder": "ThePosterDB のユーザー名またはメールアドレス",
 	"settings_theposterdb_password": "ThePosterDB のパスワード",
 	"settings_theposterdb_password_placeholder_unset": "ThePosterDB アカウントのパスワード",
+	"settings_theposterdb_password_clear": "保存済みパスワードを削除",
+	"settings_theposterdb_password_clear_pending": "保存時に保存済みパスワードが削除されます——もう一度押すと保持されます。",
 	"settings_libraries_to_sync": "同期するライブラリ",
 	"settings_libraries_connect_first": "サーバーを接続して保存し、ライブラリを選択します。",
 	"settings_libraries_hint": "同期しないライブラリのチェックを外します。",

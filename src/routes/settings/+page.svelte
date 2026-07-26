@@ -166,6 +166,7 @@
 	let fanartKey = $state('');
 	let thePosterDbUsername = $state(initialData.config.thePosterDbUsername ?? '');
 	let thePosterDbPassword = $state('');
+	let thePosterDbPasswordClear = $state(false);
 
 	type RankingProvider = 'mediux' | 'theposterdb' | 'fanarttv' | 'tmdb';
 	let providerPriority = $state<RankingProvider[]>([...initialData.ranking.providerPriority]);
@@ -282,6 +283,8 @@
 			if (tmdbKey) payload.tmdbKey = tmdbKey;
 			if (fanartKey) payload.fanartKey = fanartKey;
 			if (thePosterDbPassword) payload.thePosterDbPassword = thePosterDbPassword;
+			// An explicit empty value deletes the stored secret (saveSettings clears the key).
+			else if (thePosterDbPasswordClear) payload.thePosterDbPassword = '';
 
 			const response = await fetch('/api/settings', {
 				method: 'POST',
@@ -295,6 +298,7 @@
 			tmdbKey = '';
 			fanartKey = '';
 			thePosterDbPassword = '';
+			thePosterDbPasswordClear = false;
 			saved = true;
 			toasts.success(m.settings_saved());
 			await invalidateAll();
@@ -401,6 +405,7 @@
 			bind:fanartKey
 			bind:thePosterDbUsername
 			bind:thePosterDbPassword
+			bind:thePosterDbPasswordClear
 		/>
 	{:else if tab === 'advanced'}
 		<AdvancedSettings

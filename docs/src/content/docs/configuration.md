@@ -220,9 +220,11 @@ password fields appear once ThePosterDB is enabled — or set
 the others: AES-256-GCM encrypted at rest and never echoed back to the browser
 (leave the password field blank to keep the stored value). To return to
 anonymous scraping, **clear the username** — sign-in needs both, so discovery
-goes anonymous as soon as the username is gone. Note that this clears only the
-username: the stored password has no removal control yet, stays encrypted in the
-database, and is used again if you re-enter the username. A failed sign-in —
+goes anonymous as soon as the username is gone. Clearing the username keeps the
+stored password — still encrypted, reused if you re-enter the username — so to
+delete the secret itself, use the **Clear stored password** control under the
+password field: the encrypted value is deleted when you save, and discovery is
+back to having no credentials at all. A failed sign-in —
 wrong password, site unreachable — falls back to anonymous scraping for that run
 instead of failing discovery.
 The session is cached in memory and renewed automatically when it expires, and
