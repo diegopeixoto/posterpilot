@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db } from './db';
+import { serializeWrite } from './db/write-queue';
 import { events } from './db/schema';
 import { resolveConfig } from './config';
 import { formatEventLine, type EventLevel } from './events-format';
@@ -36,13 +37,15 @@ export async function logEvent(
 
 	try {
 		const scope = eventScope(context);
-		await db.insert(events).values({
-			...scope,
-			level,
-			type,
-			message,
-			context: sanitizedContext === undefined ? null : safeJson(sanitizedContext)
-		});
+		await serializeWrite(() =>
+			db.insert(events).values({
+				...scope,
+				level,
+				type,
+				message,
+				context: sanitizedContext === undefined ? null : safeJson(sanitizedContext)
+			})
+		);
 		if (++sinceLastPrune >= PRUNE_EVERY) {
 			sinceLastPrune = 0;
 			await pruneEvents();
@@ -90,8 +93,10 @@ function eventScope(context: unknown): {
 export async function pruneEvents(keep?: number): Promise<void> {
 	try {
 		const cap = keep ?? (await resolveConfig()).eventRetention ?? EVENT_RETENTION;
-		await db.run(
-			sql`delete from events where id not in (select id from events order by id desc limit ${cap})`
+		await serializeWrite(() =>
+			db.run(
+				sql`delete from events where id not in (select id from events order by id desc limit ${cap})`
+			)
 		);
 	} catch (e) {
 		console.error(`[error] system: failed to prune events`, e);

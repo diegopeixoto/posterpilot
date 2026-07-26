@@ -117,6 +117,55 @@ function publicFamily(family: CollectionFamilySuggestion): PublicCollectionFamil
 	};
 }
 
+// Keep the collection page bounded while the item detail remains the full
+// candidate browser. Every shown option is independently stageable.
+const MAX_CANDIDATES_PER_MEMBER_KIND = 8;
+// A single high-scoring provider (MediUX's default score weight outranks
+// ThePosterDB's) can otherwise fill every slot for a title before a lower-scoring
+// provider is ever considered. Reserve a minimum number of slots per provider so
+// every provider that found something stays visible, up to the overall cap.
+const RESERVED_SLOTS_PER_PROVIDER = 2;
+
+function selectMemberCandidates(
+	candidates: CollectionSuggestionCandidate[]
+): CollectionSuggestionCandidate[] {
+	// `candidates` arrives pre-sorted (score desc, with stable tiebreakers) for this
+	// member+kind. Reserve each provider's best few first, then fill any remaining
+	// slots by score regardless of provider, and finally restore score order so the
+	// UI still reads best-first.
+	const byProvider = new Map<string, CollectionSuggestionCandidate[]>();
+	for (const candidate of candidates) {
+		const list = byProvider.get(candidate.provider);
+		if (list) {
+			list.push(candidate);
+		} else {
+			byProvider.set(candidate.provider, [candidate]);
+		}
+	}
+	const reservedIds = new Set<number>();
+	for (const list of byProvider.values()) {
+		for (const candidate of list.slice(0, RESERVED_SLOTS_PER_PROVIDER)) {
+			reservedIds.add(candidate.candidateId);
+		}
+	}
+	const selectedIds = new Set<number>();
+	const selected: CollectionSuggestionCandidate[] = [];
+	for (const candidate of candidates) {
+		if (selected.length >= MAX_CANDIDATES_PER_MEMBER_KIND) break;
+		if (!reservedIds.has(candidate.candidateId)) continue;
+		selected.push(candidate);
+		selectedIds.add(candidate.candidateId);
+	}
+	for (const candidate of candidates) {
+		if (selected.length >= MAX_CANDIDATES_PER_MEMBER_KIND) break;
+		if (selectedIds.has(candidate.candidateId)) continue;
+		selected.push(candidate);
+		selectedIds.add(candidate.candidateId);
+	}
+	const rank = new Map(candidates.map((candidate, index) => [candidate.candidateId, index]));
+	return selected.sort((a, b) => (rank.get(a.candidateId) ?? 0) - (rank.get(b.candidateId) ?? 0));
+}
+
 export function createCollectionSuggestionStore(
 	database: Database,
 	getRanking: () => Promise<CollectionSuggestionRanking>
@@ -196,14 +245,24 @@ export function createCollectionSuggestionStore(
 		for (const member of workspace.collection.localMembers) {
 			byMember.set(member.id, { mediaItemId: member.id, poster: [], background: [] });
 		}
+		const grouped = new Map<
+			number,
+			{ poster: CollectionSuggestionCandidate[]; background: CollectionSuggestionCandidate[] }
+		>();
 		for (const candidate of workspace.rankedCandidates) {
-			const member = byMember.get(candidate.mediaItemId);
-			if (!member) continue;
-			// Keep the collection page bounded while the item detail remains the full
-			// candidate browser. Every shown option is independently stageable.
-			if (member[candidate.kind].length < 8) {
-				member[candidate.kind].push(publicCandidate(candidate));
+			if (!byMember.has(candidate.mediaItemId)) continue;
+			let entry = grouped.get(candidate.mediaItemId);
+			if (!entry) {
+				entry = { poster: [], background: [] };
+				grouped.set(candidate.mediaItemId, entry);
 			}
+			entry[candidate.kind].push(candidate);
+		}
+		for (const [mediaItemId, entry] of grouped) {
+			const member = byMember.get(mediaItemId);
+			if (!member) continue;
+			member.poster = selectMemberCandidates(entry.poster).map(publicCandidate);
+			member.background = selectMemberCandidates(entry.background).map(publicCandidate);
 		}
 		return {
 			families: workspace.families.map(publicFamily),

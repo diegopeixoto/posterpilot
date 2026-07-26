@@ -348,6 +348,7 @@
 	"item_cast": "演员",
 	"item_set_count": "{provider} · {count} 组",
 	"item_set_count_one": "{provider} · {count} 组",
+	"item_refresh_provider": "重新搜索 {provider}",
 	"item_set_by": "作者",
 	"item_set_unattributed": "未署名套组",
 	"item_use_set": "使用此套组",

@@ -348,6 +348,7 @@
 	"item_cast": "キャスト",
 	"item_set_count": "{provider} · {count} セット",
 	"item_set_count_one": "{provider} · {count} セット",
+	"item_refresh_provider": "{provider} を再検索",
 	"item_set_by": "作成者",
 	"item_set_unattributed": "作成者不明のセット",
 	"item_use_set": "このセットを使用",

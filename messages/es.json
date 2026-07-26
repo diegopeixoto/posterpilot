@@ -348,6 +348,7 @@
 	"item_cast": "Reparto",
 	"item_set_count": "{provider} · {count} sets",
 	"item_set_count_one": "{provider} · {count} set",
+	"item_refresh_provider": "Volver a buscar en {provider}",
 	"item_set_by": "por",
 	"item_set_unattributed": "Set sin atribución",
 	"item_use_set": "Usar este set",

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { serializeWrite } from '$lib/server/db/write-queue';
 import {
 	childSelections,
 	mediaItems,
@@ -37,19 +38,26 @@ export async function discoverForItem(
 	}
 	const runId = randomUUID();
 	const startedAt = new Date();
-	await db.insert(providerDiscoveryRuns).values({
-		id: runId,
-		serverInstanceId: item.serverInstanceId,
-		mediaItemId: item.id,
-		tmdbId: item.tmdbId,
-		mediaType: item.mediaType,
-		status: 'running',
-		startedAt
+	// The whole discovery lifecycle goes through the write queue — run-start and
+	// run-completion included — so a queued provider write can never contend with
+	// this module's own bookkeeping.
+	await serializeWrite(async () => {
+		await db.insert(providerDiscoveryRuns).values({
+			id: runId,
+			serverInstanceId: item.serverInstanceId,
+			mediaItemId: item.id,
+			tmdbId: item.tmdbId,
+			mediaType: item.mediaType,
+			status: 'running',
+			startedAt
+		});
+		await db
+			.update(mediaItems)
+			.set({ discoveryStatus: 'running', discoveryStartedAt: startedAt, updatedAt: startedAt })
+			.where(
+				and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id))
+			);
 	});
-	await db
-		.update(mediaItems)
-		.set({ discoveryStatus: 'running', discoveryStartedAt: startedAt, updatedAt: startedAt })
-		.where(and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id)));
 
 	const weights = await getScoreWeights();
 	let attempted = 0;
@@ -66,16 +74,18 @@ export async function discoverForItem(
 				eq(posterCandidates.provider, provider.id)
 			);
 			if (availability !== 'available') {
-				await db.update(posterCandidates).set({ active: false, stale: true }).where(scope);
-				await db.insert(providerDiscoveryOutcomes).values({
-					runId,
-					serverInstanceId: item.serverInstanceId,
-					mediaItemId: item.id,
-					provider: provider.id,
-					status: availability,
-					candidateCount: 0,
-					startedAt: providerStarted,
-					completedAt: new Date()
+				await serializeWrite(async () => {
+					await db.update(posterCandidates).set({ active: false, stale: true }).where(scope);
+					await db.insert(providerDiscoveryOutcomes).values({
+						runId,
+						serverInstanceId: item.serverInstanceId,
+						mediaItemId: item.id,
+						provider: provider.id,
+						status: availability,
+						candidateCount: 0,
+						startedAt: providerStarted,
+						completedAt: new Date()
+					});
 				});
 				return;
 			}
@@ -112,31 +122,33 @@ export async function discoverForItem(
 						};
 					})
 				);
-				await db.transaction(async (tx) => {
-					const [outcome] = await tx
-						.insert(providerDiscoveryOutcomes)
-						.values({
-							runId,
-							serverInstanceId: item.serverInstanceId,
-							mediaItemId: item.id,
-							provider: provider.id,
-							status: candidates.length ? 'succeeded' : 'empty',
-							candidateCount: candidates.length,
-							latencyMs: Date.now() - providerStarted.getTime(),
-							lastSuccessAt: new Date(),
-							startedAt: providerStarted,
-							completedAt: new Date()
-						})
-						.returning({ id: providerDiscoveryOutcomes.id });
-					await tx.delete(posterCandidates).where(scope);
-					if (candidates.length) {
-						await tx
-							.insert(posterCandidates)
-							.values(
-								candidates.map((candidate) => ({ ...candidate, providerOutcomeId: outcome.id }))
-							);
-					}
-				});
+				await serializeWrite(() =>
+					db.transaction(async (tx) => {
+						const [outcome] = await tx
+							.insert(providerDiscoveryOutcomes)
+							.values({
+								runId,
+								serverInstanceId: item.serverInstanceId,
+								mediaItemId: item.id,
+								provider: provider.id,
+								status: candidates.length ? 'succeeded' : 'empty',
+								candidateCount: candidates.length,
+								latencyMs: Date.now() - providerStarted.getTime(),
+								lastSuccessAt: new Date(),
+								startedAt: providerStarted,
+								completedAt: new Date()
+							})
+							.returning({ id: providerDiscoveryOutcomes.id });
+						await tx.delete(posterCandidates).where(scope);
+						if (candidates.length) {
+							await tx
+								.insert(posterCandidates)
+								.values(
+									candidates.map((candidate) => ({ ...candidate, providerOutcomeId: outcome.id }))
+								);
+						}
+					})
+				);
 				succeeded += 1;
 			} catch (error) {
 				failures += 1;
@@ -144,23 +156,25 @@ export async function discoverForItem(
 					.select({ id: posterCandidates.id })
 					.from(posterCandidates)
 					.where(and(scope, eq(posterCandidates.active, true)));
-				await db.update(posterCandidates).set({ stale: true }).where(scope);
 				const rawError = error instanceof Error ? error.message : String(error);
 				const safeError = redact(rawError, config).slice(0, 500);
 				const timedOut = /timed?\s*out|abort/i.test(rawError);
-				await db.insert(providerDiscoveryOutcomes).values({
-					runId,
-					serverInstanceId: item.serverInstanceId,
-					mediaItemId: item.id,
-					provider: provider.id,
-					status: timedOut ? 'timed_out' : 'failed',
-					candidateCount: retained.length,
-					retainedStaleCandidates: retained.length > 0,
-					latencyMs: Date.now() - providerStarted.getTime(),
-					errorCode: timedOut ? 'provider_timeout' : 'provider_failed',
-					error: safeError,
-					startedAt: providerStarted,
-					completedAt: new Date()
+				await serializeWrite(async () => {
+					await db.update(posterCandidates).set({ stale: true }).where(scope);
+					await db.insert(providerDiscoveryOutcomes).values({
+						runId,
+						serverInstanceId: item.serverInstanceId,
+						mediaItemId: item.id,
+						provider: provider.id,
+						status: timedOut ? 'timed_out' : 'failed',
+						candidateCount: retained.length,
+						retainedStaleCandidates: retained.length > 0,
+						latencyMs: Date.now() - providerStarted.getTime(),
+						errorCode: timedOut ? 'provider_timeout' : 'provider_failed',
+						error: safeError,
+						startedAt: providerStarted,
+						completedAt: new Date()
+					});
 				});
 				await logEvent('warn', 'provider', `${provider.id} discovery failed for "${item.title}"`, {
 					provider: provider.id,
@@ -194,20 +208,24 @@ export async function discoverForItem(
 				? 'succeeded'
 				: 'empty';
 	const completedAt = new Date();
-	await db
-		.update(providerDiscoveryRuns)
-		.set({ status: runStatus, completedAt })
-		.where(eq(providerDiscoveryRuns.id, runId));
-	await db
-		.update(mediaItems)
-		.set({
-			hasCandidates: activeCandidates.length > 0,
-			hasMediux: activeCandidates.some((candidate) => candidate.provider === 'mediux'),
-			discoveryStatus,
-			discoveryCompletedAt: completedAt,
-			updatedAt: completedAt
-		})
-		.where(and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id)));
+	await serializeWrite(async () => {
+		await db
+			.update(providerDiscoveryRuns)
+			.set({ status: runStatus, completedAt })
+			.where(eq(providerDiscoveryRuns.id, runId));
+		await db
+			.update(mediaItems)
+			.set({
+				hasCandidates: activeCandidates.length > 0,
+				hasMediux: activeCandidates.some((candidate) => candidate.provider === 'mediux'),
+				discoveryStatus,
+				discoveryCompletedAt: completedAt,
+				updatedAt: completedAt
+			})
+			.where(
+				and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id))
+			);
+	});
 
 	if (activeCandidates.length) {
 		await logEvent(
@@ -279,7 +297,7 @@ export async function selectCandidate(
 	if (Object.hasOwn(selection, 'backgroundCandidateId')) {
 		patch.selectedBackgroundCandidateId = selection.backgroundCandidateId ?? null;
 	}
-	await db.update(mediaItems).set(patch).where(eq(mediaItems.id, itemId));
+	await serializeWrite(() => db.update(mediaItems).set(patch).where(eq(mediaItems.id, itemId)));
 }
 
 /**
@@ -298,32 +316,34 @@ export async function selectChild(
 	const { kind, season, episode } = slot;
 	const episodeMatch =
 		episode === null ? isNull(childSelections.episode) : eq(childSelections.episode, episode);
-	await db
-		.delete(childSelections)
-		.where(
-			and(
-				eq(childSelections.serverInstanceId, serverInstanceId),
-				eq(childSelections.mediaItemId, itemId),
-				eq(childSelections.kind, kind),
-				eq(childSelections.season, season),
-				episodeMatch
-			)
-		);
-	if (url) {
-		await db.insert(childSelections).values({
-			serverInstanceId,
-			mediaItemId: itemId,
-			kind,
-			season,
-			episode,
-			url,
-			updatedAt: changedAt
-		});
-	}
-	await db
-		.update(mediaItems)
-		.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
-		.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
+	await serializeWrite(async () => {
+		await db
+			.delete(childSelections)
+			.where(
+				and(
+					eq(childSelections.serverInstanceId, serverInstanceId),
+					eq(childSelections.mediaItemId, itemId),
+					eq(childSelections.kind, kind),
+					eq(childSelections.season, season),
+					episodeMatch
+				)
+			);
+		if (url) {
+			await db.insert(childSelections).values({
+				serverInstanceId,
+				mediaItemId: itemId,
+				kind,
+				season,
+				episode,
+				url,
+				updatedAt: changedAt
+			});
+		}
+		await db
+			.update(mediaItems)
+			.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
+			.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
+	});
 }
 
 /**
@@ -342,37 +362,39 @@ export async function selectChildrenBulk(
 ): Promise<void> {
 	if (!slots.length) return;
 	const serverInstanceId = await requireItemServerInstanceId(itemId);
-	await db.transaction(async (tx) => {
-		const changedAt = new Date();
-		for (const s of slots) {
-			const episodeMatch =
-				s.episode === null
-					? isNull(childSelections.episode)
-					: eq(childSelections.episode, s.episode);
+	await serializeWrite(() =>
+		db.transaction(async (tx) => {
+			const changedAt = new Date();
+			for (const s of slots) {
+				const episodeMatch =
+					s.episode === null
+						? isNull(childSelections.episode)
+						: eq(childSelections.episode, s.episode);
+				await tx
+					.delete(childSelections)
+					.where(
+						and(
+							eq(childSelections.serverInstanceId, serverInstanceId),
+							eq(childSelections.mediaItemId, itemId),
+							eq(childSelections.kind, s.kind),
+							eq(childSelections.season, s.season),
+							episodeMatch
+						)
+					);
+				await tx.insert(childSelections).values({
+					serverInstanceId,
+					mediaItemId: itemId,
+					kind: s.kind,
+					season: s.season,
+					episode: s.episode,
+					url: s.url,
+					updatedAt: changedAt
+				});
+			}
 			await tx
-				.delete(childSelections)
-				.where(
-					and(
-						eq(childSelections.serverInstanceId, serverInstanceId),
-						eq(childSelections.mediaItemId, itemId),
-						eq(childSelections.kind, s.kind),
-						eq(childSelections.season, s.season),
-						episodeMatch
-					)
-				);
-			await tx.insert(childSelections).values({
-				serverInstanceId,
-				mediaItemId: itemId,
-				kind: s.kind,
-				season: s.season,
-				episode: s.episode,
-				url: s.url,
-				updatedAt: changedAt
-			});
-		}
-		await tx
-			.update(mediaItems)
-			.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
-			.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
-	});
+				.update(mediaItems)
+				.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
+				.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
+		})
+	);
 }
