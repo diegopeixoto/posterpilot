@@ -38,19 +38,26 @@ export async function discoverForItem(
 	}
 	const runId = randomUUID();
 	const startedAt = new Date();
-	await db.insert(providerDiscoveryRuns).values({
-		id: runId,
-		serverInstanceId: item.serverInstanceId,
-		mediaItemId: item.id,
-		tmdbId: item.tmdbId,
-		mediaType: item.mediaType,
-		status: 'running',
-		startedAt
+	// The whole discovery lifecycle goes through the write queue — run-start and
+	// run-completion included — so a queued provider write can never contend with
+	// this module's own bookkeeping.
+	await serializeWrite(async () => {
+		await db.insert(providerDiscoveryRuns).values({
+			id: runId,
+			serverInstanceId: item.serverInstanceId,
+			mediaItemId: item.id,
+			tmdbId: item.tmdbId,
+			mediaType: item.mediaType,
+			status: 'running',
+			startedAt
+		});
+		await db
+			.update(mediaItems)
+			.set({ discoveryStatus: 'running', discoveryStartedAt: startedAt, updatedAt: startedAt })
+			.where(
+				and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id))
+			);
 	});
-	await db
-		.update(mediaItems)
-		.set({ discoveryStatus: 'running', discoveryStartedAt: startedAt, updatedAt: startedAt })
-		.where(and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id)));
 
 	const weights = await getScoreWeights();
 	let attempted = 0;
@@ -201,20 +208,24 @@ export async function discoverForItem(
 				? 'succeeded'
 				: 'empty';
 	const completedAt = new Date();
-	await db
-		.update(providerDiscoveryRuns)
-		.set({ status: runStatus, completedAt })
-		.where(eq(providerDiscoveryRuns.id, runId));
-	await db
-		.update(mediaItems)
-		.set({
-			hasCandidates: activeCandidates.length > 0,
-			hasMediux: activeCandidates.some((candidate) => candidate.provider === 'mediux'),
-			discoveryStatus,
-			discoveryCompletedAt: completedAt,
-			updatedAt: completedAt
-		})
-		.where(and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id)));
+	await serializeWrite(async () => {
+		await db
+			.update(providerDiscoveryRuns)
+			.set({ status: runStatus, completedAt })
+			.where(eq(providerDiscoveryRuns.id, runId));
+		await db
+			.update(mediaItems)
+			.set({
+				hasCandidates: activeCandidates.length > 0,
+				hasMediux: activeCandidates.some((candidate) => candidate.provider === 'mediux'),
+				discoveryStatus,
+				discoveryCompletedAt: completedAt,
+				updatedAt: completedAt
+			})
+			.where(
+				and(eq(mediaItems.serverInstanceId, item.serverInstanceId), eq(mediaItems.id, item.id))
+			);
+	});
 
 	if (activeCandidates.length) {
 		await logEvent(
@@ -286,7 +297,7 @@ export async function selectCandidate(
 	if (Object.hasOwn(selection, 'backgroundCandidateId')) {
 		patch.selectedBackgroundCandidateId = selection.backgroundCandidateId ?? null;
 	}
-	await db.update(mediaItems).set(patch).where(eq(mediaItems.id, itemId));
+	await serializeWrite(() => db.update(mediaItems).set(patch).where(eq(mediaItems.id, itemId)));
 }
 
 /**
@@ -305,32 +316,34 @@ export async function selectChild(
 	const { kind, season, episode } = slot;
 	const episodeMatch =
 		episode === null ? isNull(childSelections.episode) : eq(childSelections.episode, episode);
-	await db
-		.delete(childSelections)
-		.where(
-			and(
-				eq(childSelections.serverInstanceId, serverInstanceId),
-				eq(childSelections.mediaItemId, itemId),
-				eq(childSelections.kind, kind),
-				eq(childSelections.season, season),
-				episodeMatch
-			)
-		);
-	if (url) {
-		await db.insert(childSelections).values({
-			serverInstanceId,
-			mediaItemId: itemId,
-			kind,
-			season,
-			episode,
-			url,
-			updatedAt: changedAt
-		});
-	}
-	await db
-		.update(mediaItems)
-		.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
-		.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
+	await serializeWrite(async () => {
+		await db
+			.delete(childSelections)
+			.where(
+				and(
+					eq(childSelections.serverInstanceId, serverInstanceId),
+					eq(childSelections.mediaItemId, itemId),
+					eq(childSelections.kind, kind),
+					eq(childSelections.season, season),
+					episodeMatch
+				)
+			);
+		if (url) {
+			await db.insert(childSelections).values({
+				serverInstanceId,
+				mediaItemId: itemId,
+				kind,
+				season,
+				episode,
+				url,
+				updatedAt: changedAt
+			});
+		}
+		await db
+			.update(mediaItems)
+			.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
+			.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
+	});
 }
 
 /**
@@ -349,37 +362,39 @@ export async function selectChildrenBulk(
 ): Promise<void> {
 	if (!slots.length) return;
 	const serverInstanceId = await requireItemServerInstanceId(itemId);
-	await db.transaction(async (tx) => {
-		const changedAt = new Date();
-		for (const s of slots) {
-			const episodeMatch =
-				s.episode === null
-					? isNull(childSelections.episode)
-					: eq(childSelections.episode, s.episode);
+	await serializeWrite(() =>
+		db.transaction(async (tx) => {
+			const changedAt = new Date();
+			for (const s of slots) {
+				const episodeMatch =
+					s.episode === null
+						? isNull(childSelections.episode)
+						: eq(childSelections.episode, s.episode);
+				await tx
+					.delete(childSelections)
+					.where(
+						and(
+							eq(childSelections.serverInstanceId, serverInstanceId),
+							eq(childSelections.mediaItemId, itemId),
+							eq(childSelections.kind, s.kind),
+							eq(childSelections.season, s.season),
+							episodeMatch
+						)
+					);
+				await tx.insert(childSelections).values({
+					serverInstanceId,
+					mediaItemId: itemId,
+					kind: s.kind,
+					season: s.season,
+					episode: s.episode,
+					url: s.url,
+					updatedAt: changedAt
+				});
+			}
 			await tx
-				.delete(childSelections)
-				.where(
-					and(
-						eq(childSelections.serverInstanceId, serverInstanceId),
-						eq(childSelections.mediaItemId, itemId),
-						eq(childSelections.kind, s.kind),
-						eq(childSelections.season, s.season),
-						episodeMatch
-					)
-				);
-			await tx.insert(childSelections).values({
-				serverInstanceId,
-				mediaItemId: itemId,
-				kind: s.kind,
-				season: s.season,
-				episode: s.episode,
-				url: s.url,
-				updatedAt: changedAt
-			});
-		}
-		await tx
-			.update(mediaItems)
-			.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
-			.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
-	});
+				.update(mediaItems)
+				.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
+				.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
+		})
+	);
 }
