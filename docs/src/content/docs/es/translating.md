@@ -8,7 +8,7 @@ refleja la sección de traductores de
 [`CONTRIBUTING.md`](https://github.com/diegopeixoto/posterpilot/blob/main/CONTRIBUTING.md#translators).
 
 La interfaz está localizada en inglés (el predeterminado), español, chino
-simplificado, japonés y portugués de Brasil, con **reserva al inglés por clave**
+simplificado, japonés, portugués de Brasil y francés, con **reserva al inglés por clave**
 para que cualquier cadena dejada sin traducir muestre siempre un inglés legible,
 nunca una clave en bruto.
 
@@ -22,6 +22,7 @@ Cada cadena de cara al usuario vive en un catálogo JSON por locale bajo
 - `messages/zh.json` — chino simplificado
 - `messages/ja.json` — japonés
 - `messages/pt-BR.json` — portugués de Brasil
+- `messages/fr.json` — francés
 
 Los demás catálogos contienen traducciones y pueden ser parciales. Cualquier id que
 falte o se deje vacío en un locale de destino recurre a su texto en inglés. Las

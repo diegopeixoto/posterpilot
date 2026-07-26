@@ -81,7 +81,7 @@ Stored credentials and API keys are **encrypted at rest** (zero-setup with an
 auto-generated key, or your own `APP_SECRET`). A metadata-rich item page (backdrop
 hero, cast, artwork grouped into sets), a Notion-style filtered/sorted library wall
 with a per-item **ignore** list, an in-app **Activity** log, and a UI localized
-into five languages round it out. Library-wide work runs as background jobs with
+into six languages round it out. Library-wide work runs as background jobs with
 live progress (SSE) right on the Dashboard — repeat syncs are **incremental** and
 bulk apply runs **concurrently** — and an update checker plus **What's New** modal
 surface new releases.
@@ -153,7 +153,7 @@ for the complete reference:
 | `PROVIDER_MEDIUX` / `_TMDB` / `_FANART` / `_THEPOSTERDB` | per-provider on/off toggles                                       |
 | `DEFAULT_APPLY_METHOD`                                   | default apply method: `plex`, `kometa`, or `both` (default)       |
 | `INCLUDED_SECTIONS`                                      | library section keys to sync (empty = all movie/show libraries)   |
-| `APP_LANGUAGE`                                           | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`              |
+| `APP_LANGUAGE`                                           | UI locale: `en` (default), `es`, `zh`, `ja`, `pt-BR`, `fr`        |
 | `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)         |
 | `KOMETA_CONFIG_PATH`                                     | path to Kometa's own `config.yml` to manage (empty = feature off) |
 | `KOMETA_CONFIG_MODE`                                     | `merge` (default, surgical) or `own` (regenerate the whole file)  |

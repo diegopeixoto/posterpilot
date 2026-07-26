@@ -49,7 +49,8 @@ export default defineConfig({
 				es: { label: 'Español', lang: 'es' },
 				zh: { label: '简体中文', lang: 'zh' },
 				ja: { label: '日本語', lang: 'ja' },
-				'pt-br': { label: 'Português (BR)', lang: 'pt-BR' }
+				'pt-br': { label: 'Português (BR)', lang: 'pt-BR' },
+				fr: { label: 'Français', lang: 'fr' }
 			},
 			logo: {
 				light: './src/assets/logo-light.png',
@@ -83,12 +84,19 @@ export default defineConfig({
 						es: 'Primeros pasos',
 						zh: '从这里开始',
 						ja: 'はじめに',
-						'pt-BR': 'Comece aqui'
+						'pt-BR': 'Comece aqui',
+						fr: 'Premiers pas'
 					},
 					items: [
 						{
 							label: 'Overview',
-							translations: { es: 'Resumen', zh: '概览', ja: '概要', 'pt-BR': 'Visão geral' },
+							translations: {
+								es: 'Resumen',
+								zh: '概览',
+								ja: '概要',
+								'pt-BR': 'Visão geral',
+								fr: 'Aperçu'
+							},
 							link: '/'
 						},
 						{
@@ -97,7 +105,8 @@ export default defineConfig({
 								es: 'Instalación',
 								zh: '安装',
 								ja: 'インストール',
-								'pt-BR': 'Instalação'
+								'pt-BR': 'Instalação',
+								fr: 'Installation'
 							},
 							link: '/installation/'
 						},
@@ -107,20 +116,27 @@ export default defineConfig({
 								es: 'Configuración',
 								zh: '配置',
 								ja: '設定',
-								'pt-BR': 'Configuração'
+								'pt-BR': 'Configuração',
+								fr: 'Configuration'
 							},
 							link: '/configuration/'
 						},
 						{
 							label: 'Usage',
-							translations: { es: 'Uso', zh: '使用', ja: '使い方', 'pt-BR': 'Uso' },
+							translations: {
+								es: 'Uso',
+								zh: '使用',
+								ja: '使い方',
+								'pt-BR': 'Uso',
+								fr: 'Utilisation'
+							},
 							link: '/usage/'
 						}
 					]
 				},
 				{
 					label: 'Guides',
-					translations: { es: 'Guías', zh: '指南', ja: 'ガイド', 'pt-BR': 'Guias' },
+					translations: { es: 'Guías', zh: '指南', ja: 'ガイド', 'pt-BR': 'Guias', fr: 'Guides' },
 					items: [
 						{
 							label: 'Safety and undo',
@@ -128,7 +144,8 @@ export default defineConfig({
 								es: 'Seguridad y deshacer',
 								zh: '安全与撤销',
 								ja: '安全性と元に戻す',
-								'pt-BR': 'Segurança e desfazer'
+								'pt-BR': 'Segurança e desfazer',
+								fr: 'Sécurité et annulation'
 							},
 							link: '/safety/'
 						},
@@ -138,7 +155,8 @@ export default defineConfig({
 								es: 'Automatización y recuperación',
 								zh: '自动化与恢复',
 								ja: '自動化と復旧',
-								'pt-BR': 'Automação e recuperação'
+								'pt-BR': 'Automação e recuperação',
+								fr: 'Automatisation et récupération'
 							},
 							link: '/automation-recovery/'
 						},
@@ -148,7 +166,8 @@ export default defineConfig({
 								es: 'FUN y colecciones',
 								zh: 'FUN 与合集',
 								ja: 'FUN とコレクション',
-								'pt-BR': 'FUN e coleções'
+								'pt-BR': 'FUN e coleções',
+								fr: 'FUN et collections'
 							},
 							link: '/fun-collections/'
 						},
@@ -158,7 +177,8 @@ export default defineConfig({
 								es: 'Migración multiservidor',
 								zh: '多服务器迁移',
 								ja: '複数サーバー移行',
-								'pt-BR': 'Migração multi-servidor'
+								'pt-BR': 'Migração multi-servidor',
+								fr: 'Migration multi-serveurs'
 							},
 							link: '/multi-server-migration/'
 						},
@@ -168,7 +188,8 @@ export default defineConfig({
 								es: 'Gestor de Kometa',
 								zh: 'Kometa 管理器',
 								ja: 'Kometa マネージャー',
-								'pt-BR': 'Gerenciador do Kometa'
+								'pt-BR': 'Gerenciador do Kometa',
+								fr: 'Gestionnaire Kometa'
 							},
 							link: '/kometa-config-sync/'
 						}
@@ -176,7 +197,13 @@ export default defineConfig({
 				},
 				{
 					label: 'Project',
-					translations: { es: 'Proyecto', zh: '项目', ja: 'プロジェクト', 'pt-BR': 'Projeto' },
+					translations: {
+						es: 'Proyecto',
+						zh: '项目',
+						ja: 'プロジェクト',
+						'pt-BR': 'Projeto',
+						fr: 'Projet'
+					},
 					items: [
 						{
 							label: 'Contributing',
@@ -184,13 +211,20 @@ export default defineConfig({
 								es: 'Contribuir',
 								zh: '贡献',
 								ja: 'コントリビューション',
-								'pt-BR': 'Contribuindo'
+								'pt-BR': 'Contribuindo',
+								fr: 'Contribuer'
 							},
 							link: '/contributing/'
 						},
 						{
 							label: 'Translating',
-							translations: { es: 'Traducir', zh: '翻译', ja: '翻訳', 'pt-BR': 'Tradução' },
+							translations: {
+								es: 'Traducir',
+								zh: '翻译',
+								ja: '翻訳',
+								'pt-BR': 'Tradução',
+								fr: 'Traduire'
+							},
 							link: '/translating/'
 						}
 					]

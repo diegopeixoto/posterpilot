@@ -8,8 +8,8 @@ the Translators section of
 [`CONTRIBUTING.md`](https://github.com/diegopeixoto/posterpilot/blob/main/CONTRIBUTING.md#translators).
 
 The UI is localized into English (the default), Spanish, Simplified Chinese,
-Japanese, and Brazilian Portuguese, with **per-key English fallback** so any
-string left untranslated always shows readable English — never a raw key.
+Japanese, Brazilian Portuguese, and French, with **per-key English fallback** so
+any string left untranslated always shows readable English — never a raw key.
 
 ## Source of truth
 
@@ -21,6 +21,7 @@ one file per language, keyed by a stable message id:
 - `messages/zh.json` — Simplified Chinese
 - `messages/ja.json` — Japanese
 - `messages/pt-BR.json` — Brazilian Portuguese
+- `messages/fr.json` — French
 
 The other catalogs hold translations and may be partial. Any id missing or left
 empty in a target locale falls back to its English text. New English strings added

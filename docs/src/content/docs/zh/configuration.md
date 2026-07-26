@@ -79,7 +79,7 @@ PosterPilot 会组合两种配置来源：
 | `FUN_ENABLED` | 关 | 显示 FUN 工具。 |
 | `THUMB_CACHE_TTL_DAYS` | `30` | 缩略图缓存有效天数。 |
 | `THUMB_CACHE_MAX_MB` | `512` | 缩略图缓存上限 MB。 |
-| `APP_LANGUAGE` | 自动 | `en`、`es`、`zh`、`ja`、`pt-BR`。 |
+| `APP_LANGUAGE` | 自动 | `en`、`es`、`zh`、`ja`、`pt-BR`、`fr`。 |
 | `AUTH_MODE` | `disabled` | `disabled`、`local`、`enabled`；覆盖界面。 |
 | `ADDRESS_HEADER` | — | 代理后的真实 IP 请求头。 |
 | `XFF_DEPTH` | — | 可信代理数量。 |

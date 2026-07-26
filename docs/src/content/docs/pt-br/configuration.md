@@ -72,7 +72,7 @@ sorteio de três opções, Poster Match, galeria e planejador de sessão.
 ## Idioma
 
 O idioma usa `APP_LANGUAGE`, depois `Accept-Language`, depois inglês. Os locales
-suportados são `en`, `es`, `zh`, `ja` e `pt-BR`.
+suportados são `en`, `es`, `zh`, `ja`, `pt-BR` e `fr`.
 
 ## Referência completa de variáveis de ambiente
 
@@ -108,7 +108,7 @@ suportados são `en`, `es`, `zh`, `ja` e `pt-BR`.
 | `FUN_ENABLED` | desligado | Exibe as ferramentas FUN. |
 | `THUMB_CACHE_TTL_DAYS` | `30` | Dias de validade das miniaturas em cache. |
 | `THUMB_CACHE_MAX_MB` | `512` | Limite do cache de miniaturas em MB. |
-| `APP_LANGUAGE` | automático | `en`, `es`, `zh`, `ja` ou `pt-BR`. |
+| `APP_LANGUAGE` | automático | `en`, `es`, `zh`, `ja`, `pt-BR` ou `fr`. |
 | `AUTH_MODE` | `disabled` | `disabled`, `local` ou `enabled`; substitui/bloqueia a UI. |
 | `ADDRESS_HEADER` | — | Header do IP real atrás de proxy, por exemplo `x-forwarded-for`. |
 | `XFF_DEPTH` | — | Número de proxies confiáveis. |

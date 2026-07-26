@@ -79,7 +79,7 @@ PosterPilot は 2 つの設定元を組み合わせます。
 | `FUN_ENABLED` | 無効 | FUN ツールを表示。 |
 | `THUMB_CACHE_TTL_DAYS` | `30` | サムネイル有効日数。 |
 | `THUMB_CACHE_MAX_MB` | `512` | サムネイルキャッシュ上限 MB。 |
-| `APP_LANGUAGE` | 自動 | `en`、`es`、`zh`、`ja`、`pt-BR`。 |
+| `APP_LANGUAGE` | 自動 | `en`、`es`、`zh`、`ja`、`pt-BR`、`fr`。 |
 | `AUTH_MODE` | `disabled` | `disabled`、`local`、`enabled`。UI より優先。 |
 | `ADDRESS_HEADER` | — | プロキシ配下の実 IP ヘッダー。 |
 | `XFF_DEPTH` | — | 信頼するプロキシ数。 |

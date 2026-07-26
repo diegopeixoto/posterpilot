@@ -292,8 +292,8 @@ The UI language is resolved per request: (1) the preferred-language setting when
 it names a supported locale, then (2) the request's `Accept-Language` header, then
 (3) English. Set a preferred language with `APP_LANGUAGE`, via the Settings page, or
 with the header language switcher. Supported locales are English (`en`), Spanish
-(`es`), Simplified Chinese (`zh`), Japanese (`ja`), and Brazilian Portuguese
-(`pt-BR`). An unset or unsupported value falls through to `Accept-Language`, then
+(`es`), Simplified Chinese (`zh`), Japanese (`ja`), Brazilian Portuguese
+(`pt-BR`), and French (`fr`). An unset or unsupported value falls through to `Accept-Language`, then
 English — never an error and never a raw key.
 
 ## Logging and activity log
@@ -353,7 +353,7 @@ and are locked in the UI.
 | `ADDRESS_HEADER`          | —                         | —                                     | Header carrying the real client IP behind a proxy (e.g. `x-forwarded-for`) for `local` mode.  |
 | `XFF_DEPTH`               | —                         | —                                     | Number of trusted proxies in front of the app (adapter-node), paired with `ADDRESS_HEADER`.   |
 | `MAX_UPLOAD_MB`           | —                         | `15`                                  | Max size of a custom-poster upload, in MB (rejected with `413` above it).                     |
-| `APP_LANGUAGE`                | Language                  | — (auto)                              | Preferred UI locale: `en`, `es`, `zh`, `ja`, or `pt-BR`.                                      |
+| `APP_LANGUAGE`                | Language                  | — (auto)                              | Preferred UI locale: `en`, `es`, `zh`, `ja`, `pt-BR`, or `fr`.                                      |
 | `LOG_DIR`                 | —                         | `/data/logs` (Docker)                 | Folder for the rotating `posterpilot.log` file (~5 MB × 5 files).                             |
 | `EVENT_RETENTION`         | —                         | `2000`                                | Max number of activity-log rows kept in the database (older rows are pruned).                 |
 | `DATABASE_URL`            | —                         | `file:/data/posterpilot.db` (Docker)  | libsql file URL for the SQLite database.                                                      |

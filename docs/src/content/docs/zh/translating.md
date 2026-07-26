@@ -8,7 +8,7 @@ description: 通过 Weblate 帮助将 PosterPilot 界面翻译成你的语言—
 的 Translators 部分。
 
 界面已本地化为英语（默认）、西班牙语、简体中文、
-日语和巴西葡萄牙语，并带有 **按键的英语回退**，因此任何
+日语、巴西葡萄牙语和法语，并带有 **按键的英语回退**，因此任何
 未翻译的字符串始终会显示可读的英语——绝不会显示原始键。
 
 ## 真实来源
@@ -21,6 +21,7 @@ description: 通过 Weblate 帮助将 PosterPilot 界面翻译成你的语言—
 - `messages/zh.json` — 简体中文
 - `messages/ja.json` — 日语
 - `messages/pt-BR.json` — 巴西葡萄牙语
+- `messages/fr.json` — 法语
 
 其他目录保存翻译，且可能不完整。在目标区域设置中缺失或
 留空的任何 id 都会回退到其英语文本。添加到 `en.json` 的新英语字符串
