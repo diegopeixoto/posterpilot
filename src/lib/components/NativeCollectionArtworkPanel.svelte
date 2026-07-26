@@ -7,12 +7,16 @@
 	type Candidate = {
 		id: string;
 		kind: Kind;
-		provider: 'tmdb';
+		provider: 'tmdb' | 'theposterdb';
 		language: string | null;
 		width: number | null;
 		height: number | null;
 		score: number;
 	};
+
+	function candidateProviderLabel(provider: Candidate['provider']): string {
+		return provider === 'theposterdb' ? 'ThePosterDB' : 'TMDB';
+	}
 	type Workspace = {
 		collection: {
 			id: string;
@@ -481,7 +485,9 @@
 									<span
 										class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pt-6 pb-2 text-[10px] text-neutral-200"
 									>
-										TMDB{candidate.language ? ` · ${candidate.language}` : ''}
+										{candidateProviderLabel(candidate.provider)}{candidate.language
+											? ` · ${candidate.language}`
+											: ''}
 									</span>
 									{#if selected[entry.kind] === candidate.id}
 										<span class="badge badge-mediux absolute top-2 right-2">

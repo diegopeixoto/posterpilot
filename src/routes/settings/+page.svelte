@@ -164,6 +164,8 @@
 	let providerFanart = $state(initialData.config.providerFanart);
 	let providerThePosterDb = $state(initialData.config.providerThePosterDb);
 	let fanartKey = $state('');
+	let thePosterDbUsername = $state(initialData.config.thePosterDbUsername ?? '');
+	let thePosterDbPassword = $state('');
 
 	type RankingProvider = 'mediux' | 'theposterdb' | 'fanarttv' | 'tmdb';
 	let providerPriority = $state<RankingProvider[]>([...initialData.ranking.providerPriority]);
@@ -260,6 +262,7 @@
 				providerTmdb: String(providerTmdb),
 				providerFanart: String(providerFanart),
 				providerThePosterDb: String(providerThePosterDb),
+				thePosterDbUsername,
 				includedSections: allSelected ? [] : [...selectedSections],
 				ranking: {
 					providerPriority,
@@ -278,6 +281,7 @@
 			if (embyApiKey) payload.embyApiKey = embyApiKey;
 			if (tmdbKey) payload.tmdbKey = tmdbKey;
 			if (fanartKey) payload.fanartKey = fanartKey;
+			if (thePosterDbPassword) payload.thePosterDbPassword = thePosterDbPassword;
 
 			const response = await fetch('/api/settings', {
 				method: 'POST',
@@ -290,6 +294,7 @@
 			embyApiKey = '';
 			tmdbKey = '';
 			fanartKey = '';
+			thePosterDbPassword = '';
 			saved = true;
 			toasts.success(m.settings_saved());
 			await invalidateAll();
@@ -386,6 +391,7 @@
 		<ProviderSettings
 			tmdbKeySet={data.config.tmdbKeySet}
 			fanartKeySet={data.config.fanartKeySet}
+			thePosterDbPasswordSet={data.config.thePosterDbPasswordSet}
 			{env}
 			bind:tmdbKey
 			bind:providerMediux
@@ -393,6 +399,8 @@
 			bind:providerFanart
 			bind:providerThePosterDb
 			bind:fanartKey
+			bind:thePosterDbUsername
+			bind:thePosterDbPassword
 		/>
 	{:else if tab === 'advanced'}
 		<AdvancedSettings

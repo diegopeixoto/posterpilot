@@ -61,6 +61,15 @@ export interface AppConfig {
 	/** Fanart.tv API key (the only keyed provider); null when unset. */
 	fanartKey: string | null;
 	/**
+	 * Optional ThePosterDB account credentials. ThePosterDB serves a placeholder image
+	 * instead of real artwork to anonymous requests on some pages, so when these are set
+	 * discovery signs in first (the session is cached in-memory, see
+	 * posters/providers/theposterdb-session). When unset, discovery scrapes anonymously
+	 * exactly as before — the provider never requires them.
+	 */
+	thePosterDbUsername: string | null;
+	thePosterDbPassword: string | null;
+	/**
 	 * Preferred UI locale (one of the supported locales) or null when unset.
 	 * Highest-precedence input to UI locale resolution; null falls back to the
 	 * request's Accept-Language, then English.
@@ -87,7 +96,14 @@ export interface AppConfig {
 }
 
 /** Config keys that are secrets — never returned to the client, redacted in logs. */
-const SECRET_KEYS = ['plexToken', 'jellyfinApiKey', 'embyApiKey', 'tmdbKey', 'fanartKey'] as const;
+const SECRET_KEYS = [
+	'plexToken',
+	'jellyfinApiKey',
+	'embyApiKey',
+	'tmdbKey',
+	'fanartKey',
+	'thePosterDbPassword'
+] as const;
 type ConfigKey = keyof AppConfig;
 
 /** Settings key -> environment variable name. Env always overrides persisted settings. */
@@ -115,6 +131,8 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	providerFanart: 'PROVIDER_FANART',
 	providerThePosterDb: 'PROVIDER_THEPOSTERDB',
 	fanartKey: 'FANART_KEY',
+	thePosterDbUsername: 'THEPOSTERDB_USERNAME',
+	thePosterDbPassword: 'THEPOSTERDB_PASSWORD',
 	// APP_LANGUAGE, not LANGUAGE: the bare `LANGUAGE` var is a standard POSIX locale
 	// setting commonly present on Linux/Docker hosts, which would silently lock the
 	// UI language. Namespacing it avoids that collision.
@@ -184,6 +202,8 @@ const WRITABLE_KEYS: ConfigKey[] = [
 	'providerFanart',
 	'providerThePosterDb',
 	'fanartKey',
+	'thePosterDbUsername',
+	'thePosterDbPassword',
 	'language',
 	'applyConcurrency',
 	'suggestPreselect',
@@ -298,6 +318,8 @@ export async function resolveConfig(): Promise<AppConfig> {
 			DEFAULTS.providerThePosterDb
 		),
 		fanartKey: rawValue('fanartKey', persisted) ?? null,
+		thePosterDbUsername: rawValue('thePosterDbUsername', persisted) ?? null,
+		thePosterDbPassword: rawValue('thePosterDbPassword', persisted) ?? null,
 		// Validate against the supported locales; an absent/unsupported value is
 		// treated as unset (null) so resolution falls through to Accept-Language.
 		language: normalizeLocale(rawValue('language', persisted)),
@@ -669,6 +691,8 @@ export interface PublicConfig {
 	providerFanart: boolean;
 	providerThePosterDb: boolean;
 	fanartKeySet: boolean;
+	thePosterDbUsername: string | null;
+	thePosterDbPasswordSet: boolean;
 	/** Preferred UI locale (one of the supported locales) or null when unset. */
 	language: string | null;
 	/** Folder for the rotating log file (read-only; env/default). */
@@ -722,6 +746,8 @@ export async function publicConfig(serverInstanceId?: string): Promise<PublicCon
 		providerFanart: c.providerFanart,
 		providerThePosterDb: c.providerThePosterDb,
 		fanartKeySet: c.fanartKey !== null,
+		thePosterDbUsername: c.thePosterDbUsername,
+		thePosterDbPasswordSet: c.thePosterDbPassword !== null,
 		language: c.language,
 		logDir: c.logDir,
 		eventRetention: c.eventRetention,

@@ -1,6 +1,15 @@
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import type { CapabilitySupport } from '$lib/server/media-server';
-import type { NativeCollectionArtworkCandidate } from './native-artwork-candidates';
+import type {
+	NativeCollectionArtworkCandidate,
+	NativeCollectionArtworkProvider
+} from './native-artwork-candidates';
+
+/** Asset host allowlist per provider — the same rule the plan validator re-checks below. */
+const TRUSTED_CANDIDATE_HOSTS: Record<NativeCollectionArtworkProvider, string> = {
+	tmdb: 'image.tmdb.org',
+	theposterdb: 'images.theposterdb.com'
+};
 
 export const NATIVE_COLLECTION_ARTWORK_PLAN_KIND = 'native_collection_artwork_apply' as const;
 const NATIVE_COLLECTION_ARTWORK_PLAN_VERSION = 1 as const;
@@ -18,7 +27,7 @@ export interface FrozenNativeCollectionCurrentArtwork {
 
 export interface FrozenNativeCollectionCandidate {
 	id: string;
-	provider: 'tmdb';
+	provider: NativeCollectionArtworkProvider;
 	providerAssetId: string;
 	tmdbCollectionId: string;
 	kind: 'poster' | 'background';
@@ -208,7 +217,7 @@ function candidate(value: unknown): value is FrozenNativeCollectionCandidate {
 	}
 	return (
 		SHA256.test(String(value.id)) &&
-		value.provider === 'tmdb' &&
+		(value.provider === 'tmdb' || value.provider === 'theposterdb') &&
 		typeof value.providerAssetId === 'string' &&
 		/^[1-9]\d*$/.test(String(value.tmdbCollectionId)) &&
 		(value.kind === 'poster' || value.kind === 'background') &&
@@ -218,7 +227,7 @@ function candidate(value: unknown): value is FrozenNativeCollectionCandidate {
 		typeof value.score === 'number' &&
 		Number.isFinite(value.score) &&
 		url.protocol === 'https:' &&
-		url.hostname === 'image.tmdb.org' &&
+		url.hostname === TRUSTED_CANDIDATE_HOSTS[value.provider] &&
 		SHA256.test(String(value.fingerprint)) &&
 		SHA256.test(String(value.contentFingerprint)) &&
 		typeof value.contentType === 'string' &&
@@ -320,7 +329,7 @@ export interface PublicNativeCollectionArtworkPreview {
 		id: string;
 		kind: 'poster' | 'background';
 		candidateId: string;
-		provider: 'tmdb';
+		provider: NativeCollectionArtworkProvider;
 		language: string | null;
 		expectedOverwrite: boolean;
 		currentState: FrozenNativeCollectionCurrentArtwork['state'];

@@ -5,7 +5,8 @@ const SECRET_FIELDS = [
 	'jellyfinApiKey',
 	'embyApiKey',
 	'tmdbKey',
-	'fanartKey'
+	'fanartKey',
+	'thePosterDbPassword'
 ] as const;
 
 /** Redact known configured secret values without importing runtime environment state. */

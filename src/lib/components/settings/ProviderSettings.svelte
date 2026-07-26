@@ -10,6 +10,9 @@
 		providerThePosterDb = $bindable(),
 		fanartKey = $bindable(),
 		fanartKeySet,
+		thePosterDbUsername = $bindable(),
+		thePosterDbPassword = $bindable(),
+		thePosterDbPasswordSet,
 		env
 	}: {
 		tmdbKey: string;
@@ -20,6 +23,9 @@
 		providerThePosterDb: boolean;
 		fanartKey: string;
 		fanartKeySet: boolean;
+		thePosterDbUsername: string;
+		thePosterDbPassword: string;
+		thePosterDbPasswordSet: boolean;
 		env: Record<string, boolean>;
 	} = $props();
 </script>
@@ -65,6 +71,47 @@
 			<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
 		</label>
 	</div>
+	{#if providerThePosterDb}
+		<div class="mt-3 space-y-2 rounded-md border border-neutral-800 p-3">
+			<p class="text-xs text-neutral-400">{m.settings_theposterdb_auth_hint()}</p>
+			<div>
+				<label for="thePosterDbUsername" class="mb-1 block text-sm font-medium"
+					>{m.settings_theposterdb_username()}</label
+				>
+				<input
+					id="thePosterDbUsername"
+					type="text"
+					autocomplete="off"
+					bind:value={thePosterDbUsername}
+					disabled={env.thePosterDbUsername}
+					placeholder={m.settings_theposterdb_username_placeholder()}
+					class="input w-full disabled:opacity-50"
+				/>
+				{#if env.thePosterDbUsername}<p class="mt-1 text-xs text-amber-400">
+						{m.settings_set_from_env()}
+					</p>{/if}
+			</div>
+			<div>
+				<label for="thePosterDbPassword" class="mb-1 block text-sm font-medium"
+					>{m.settings_theposterdb_password()}</label
+				>
+				<input
+					id="thePosterDbPassword"
+					type="password"
+					autocomplete="off"
+					bind:value={thePosterDbPassword}
+					disabled={env.thePosterDbPassword}
+					placeholder={thePosterDbPasswordSet
+						? m.settings_secret_placeholder_set()
+						: m.settings_theposterdb_password_placeholder_unset()}
+					class="input w-full disabled:opacity-50"
+				/>
+				{#if env.thePosterDbPassword}<p class="mt-1 text-xs text-amber-400">
+						{m.settings_set_from_env()}
+					</p>{/if}
+			</div>
+		</div>
+	{/if}
 	<div class="mt-3">
 		<label for="fanartKey" class="mb-1 block text-sm font-medium">{m.settings_fanart_key()}</label>
 		<input

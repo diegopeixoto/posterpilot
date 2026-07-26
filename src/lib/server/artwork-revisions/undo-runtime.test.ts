@@ -218,6 +218,8 @@ function config(serverInstanceId: string | null = 'server-a'): AppConfig {
 		providerFanart: false,
 		providerThePosterDb: false,
 		fanartKey: null,
+		thePosterDbUsername: null,
+		thePosterDbPassword: null,
 		language: null,
 		logDir: '/logs',
 		eventRetention: 100,

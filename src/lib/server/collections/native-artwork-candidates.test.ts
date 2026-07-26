@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
 import {
+	buildThePosterDbCollectionArtworkCandidates,
 	nativeCollectionCandidateSetFingerprint,
 	parseTmdbCollectionArtworkCandidates
 } from './native-artwork-candidates';
@@ -45,5 +46,74 @@ describe('native collection TMDB artwork candidates', () => {
 		expect(candidates).toHaveLength(1);
 		expect(candidates[0]).toMatchObject({ width: null, height: null });
 		expect(parseTmdbCollectionArtworkCandidates(input, '../42', DEFAULT_SCORE_WEIGHTS)).toEqual([]);
+	});
+});
+
+describe('native collection ThePosterDB artwork candidates', () => {
+	function set(setId: string, author: string, url: string) {
+		return {
+			setId,
+			author,
+			candidates: [
+				{ setId, setAuthor: author, url, kind: 'poster' as const, season: null, episode: null }
+			]
+		};
+	}
+
+	it('converts poster-only sets, deduplicates by url, and drops non-poster/season entries', () => {
+		const sets = [
+			set(
+				'theposterdb-1',
+				'creator-a',
+				'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/1/a.webp'
+			),
+			set(
+				'theposterdb-1',
+				'creator-a',
+				'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/1/a.webp'
+			),
+			set(
+				'theposterdb-2',
+				'creator-b',
+				'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/2/b.webp'
+			),
+			{
+				setId: 'theposterdb-3',
+				author: 'creator-c',
+				candidates: [
+					{
+						setId: 'theposterdb-3',
+						setAuthor: 'creator-c',
+						url: 'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/3/c.webp',
+						kind: 'poster' as const,
+						season: 1,
+						episode: null
+					}
+				]
+			}
+		];
+		const candidates = buildThePosterDbCollectionArtworkCandidates(
+			sets,
+			'900',
+			DEFAULT_SCORE_WEIGHTS
+		);
+		expect(candidates).toHaveLength(2);
+		expect(candidates.every((c) => c.provider === 'theposterdb')).toBe(true);
+		expect(candidates.every((c) => c.kind === 'poster')).toBe(true);
+		expect(candidates.every((c) => c.tmdbCollectionId === '900')).toBe(true);
+		expect(candidates.every((c) => c.width === null && c.height === null)).toBe(true);
+	});
+
+	it('rejects an invalid collection id', () => {
+		const sets = [
+			set(
+				'theposterdb-1',
+				'creator-a',
+				'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/1/a.webp'
+			)
+		];
+		expect(
+			buildThePosterDbCollectionArtworkCandidates(sets, '../900', DEFAULT_SCORE_WEIGHTS)
+		).toEqual([]);
 	});
 });

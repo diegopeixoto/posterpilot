@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
-import { parseTmdbCollectionArtworkCandidates } from './native-artwork-candidates';
+import {
+	buildThePosterDbCollectionArtworkCandidates,
+	parseTmdbCollectionArtworkCandidates
+} from './native-artwork-candidates';
 import {
 	assertNativeCollectionArtworkPlan,
 	buildNativeCollectionArtworkPlan
@@ -39,6 +42,33 @@ function backgroundCandidate() {
 			DEFAULT_SCORE_WEIGHTS
 		)[0],
 		contentFingerprint: 'f'.repeat(64),
+		contentType: 'image/jpeg'
+	};
+}
+
+function thePosterDbCandidate() {
+	return {
+		...buildThePosterDbCollectionArtworkCandidates(
+			[
+				{
+					setId: 'theposterdb-1',
+					author: 'creator',
+					candidates: [
+						{
+							setId: 'theposterdb-1',
+							setAuthor: 'creator',
+							url: 'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/1/a.webp',
+							kind: 'poster',
+							season: null,
+							episode: null
+						}
+					]
+				}
+			],
+			'900',
+			DEFAULT_SCORE_WEIGHTS
+		)[0],
+		contentFingerprint: 'd'.repeat(64),
 		contentType: 'image/jpeg'
 	};
 }
@@ -96,5 +126,41 @@ describe('native collection artwork plan', () => {
 		expect(() =>
 			assertNativeCollectionArtworkPlan({ ...payload, sourceFingerprint: 'f'.repeat(64) })
 		).toThrow('invalid_native_collection_plan');
+	});
+
+	it('accepts a ThePosterDB poster candidate on its own asset host', () => {
+		const payload = buildNativeCollectionArtworkPlan({
+			plannedAt: '2026-07-11T12:00:00.000Z',
+			target: target(),
+			slots: [
+				{
+					kind: 'poster',
+					capability: 'supported',
+					current: { state: 'absent', fingerprint: null, artworkVersion: 0 },
+					candidate: thePosterDbCandidate()
+				}
+			]
+		});
+		expect(payload.operations[0].candidate.provider).toBe('theposterdb');
+		expect(payload.operations[0].candidate.url).toContain('images.theposterdb.com');
+		expect(() => assertNativeCollectionArtworkPlan(payload)).not.toThrow();
+	});
+
+	it('rejects a candidate whose url does not match its own provider host allowlist', () => {
+		const payload = buildNativeCollectionArtworkPlan({
+			plannedAt: '2026-07-11T12:00:00.000Z',
+			target: target(),
+			slots: [
+				{
+					kind: 'poster',
+					capability: 'supported',
+					current: { state: 'absent', fingerprint: null, artworkVersion: 0 },
+					candidate: { ...thePosterDbCandidate(), url: 'https://evil.example.com/a.webp' }
+				}
+			]
+		});
+		expect(() => assertNativeCollectionArtworkPlan(payload)).toThrow(
+			'invalid_native_collection_plan'
+		);
 	});
 });

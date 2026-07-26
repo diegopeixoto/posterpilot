@@ -10,6 +10,7 @@ import { resolveConfig } from '$lib/server/config';
 import { resolveDataPaths } from '$lib/server/data-paths';
 import { db } from '$lib/server/db';
 import { assertMutationsAllowed } from '$lib/server/maintenance';
+import { logEvent } from '$lib/server/events';
 import { getScoreWeights } from '$lib/server/posters/score-weights';
 import { createDatabaseApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
 import { operationPlanStore } from '$lib/server/plans/operation-plan-store';
@@ -20,8 +21,10 @@ import {
 	type PreviewNativeCollectionArtworkInput
 } from './native-artwork-service';
 import { loadNativeCollectionArtworkContext } from './native-artwork-context';
+import type { NativeCollectionArtworkCandidate } from './native-artwork-candidates';
 import {
 	fetchNativeCollectionCandidateBytes,
+	fetchThePosterDbNativeCollectionArtworkCandidates,
 	fetchTmdbNativeCollectionArtworkCandidates
 } from './native-artwork-source';
 import {
@@ -52,12 +55,54 @@ function runtime(): NativeArtworkRuntime {
 		planStore: operationPlanStore,
 		snapshots,
 		ledger,
-		async loadCandidates(tmdbCollectionId) {
+		async loadCandidates(tmdbCollectionId, collectionName) {
 			const [config, weights] = await Promise.all([resolveConfig(), getScoreWeights()]);
 			if (!config.providerTmdb || !config.tmdbKey) {
 				throw new Error('native_collection_tmdb_unavailable');
 			}
-			return fetchTmdbNativeCollectionArtworkCandidates(tmdbCollectionId, config.tmdbKey, weights);
+			const tmdbCandidates = await fetchTmdbNativeCollectionArtworkCandidates(
+				tmdbCollectionId,
+				config.tmdbKey,
+				weights
+			);
+			// Best-effort: ThePosterDB has no collection-id mapping (title-search only), so a
+			// search miss, auth failure, or markup mismatch here must never take down the
+			// TMDB candidates this runs alongside. Runs whenever the provider is enabled —
+			// account credentials only upgrade the scrape to an authenticated session.
+			let thePosterDbCandidates: NativeCollectionArtworkCandidate[] = [];
+			if (config.providerThePosterDb) {
+				try {
+					thePosterDbCandidates = await fetchThePosterDbNativeCollectionArtworkCandidates(
+						collectionName,
+						tmdbCollectionId,
+						weights,
+						config
+					);
+					await logEvent(
+						'info',
+						'native_collection_discover',
+						`ThePosterDB collection search for "${collectionName}" found ${thePosterDbCandidates.length} candidate(s)`,
+						{ collectionName, tmdbCollectionId }
+					);
+				} catch (err) {
+					thePosterDbCandidates = [];
+					await logEvent(
+						'warn',
+						'native_collection_discover',
+						`ThePosterDB collection search failed for "${collectionName}"`,
+						{
+							collectionName,
+							tmdbCollectionId,
+							error: err instanceof Error ? err.message : String(err)
+						}
+					);
+				}
+			}
+			// Combine and re-sort by score so a strong ThePosterDB match isn't buried
+			// at the end of the (horizontally scrolling) candidate row behind TMDB's.
+			return [...tmdbCandidates, ...thePosterDbCandidates].sort(
+				(left, right) => right.score - left.score
+			);
 		},
 		loadCandidateBytes: fetchNativeCollectionCandidateBytes
 	});
