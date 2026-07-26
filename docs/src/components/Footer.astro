@@ -4,10 +4,10 @@
 // star count, and the current app version (read from the root package.json at
 // build time).
 import Default from '@astrojs/starlight/components/Footer.astro';
-import pkg from '../../../package.json';
 
 const repoUrl = 'https://github.com/diegopeixoto/posterpilot';
-const version = pkg.version;
+// Injected by `vite.define` in astro.config.mjs — see the comment there.
+const version = __APP_VERSION__;
 const year = new Date().getFullYear();
 ---
 
