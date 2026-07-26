@@ -599,6 +599,8 @@
 	"settings_theposterdb_username_placeholder": "Votre nom d'utilisateur ou e-mail ThePosterDB",
 	"settings_theposterdb_password": "Mot de passe ThePosterDB",
 	"settings_theposterdb_password_placeholder_unset": "Le mot de passe de votre compte ThePosterDB",
+	"settings_theposterdb_password_clear": "Effacer le mot de passe stocké",
+	"settings_theposterdb_password_clear_pending": "Le mot de passe stocké sera supprimé à l'enregistrement — cliquez à nouveau pour le conserver.",
 	"settings_libraries_to_sync": "Médiathèques à synchroniser",
 	"settings_libraries_connect_first": "Connectez un serveur et enregistrez pour choisir les médiathèques.",
 	"settings_libraries_hint": "Décochez celles que vous ne voulez pas synchroniser.",

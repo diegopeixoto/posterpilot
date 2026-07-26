@@ -47,9 +47,10 @@ al habilitar ThePosterDB) o con `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD` 
 para obtener las imágenes reales. La contraseña se cifra en reposo como los demás
 secretos, y un inicio de sesión fallido vuelve al modo anónimo en esa ejecución en
 lugar de bloquear el descubrimiento. Para volver al modo anónimo, borra el
-usuario (iniciar sesión requiere ambos); la contraseña guardada aún no tiene
-control de eliminación — permanece cifrada y se reutiliza si vuelves a
-introducir el usuario.
+usuario (iniciar sesión requiere ambos); la contraseña guardada permanece
+cifrada y se reutiliza si vuelves a introducir el usuario, salvo que la
+elimines con el control **Borrar la contraseña guardada** bajo el campo de
+contraseña, que borra el secreto al guardar.
 
 ![Ajustes de proveedores de PosterPilot con ThePosterDB habilitado y sus campos opcionales de usuario y contraseña](/posterpilot/screenshots/settings-providers.webp)
 

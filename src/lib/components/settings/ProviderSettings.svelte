@@ -13,6 +13,7 @@
 		thePosterDbUsername = $bindable(),
 		thePosterDbPassword = $bindable(),
 		thePosterDbPasswordSet,
+		thePosterDbPasswordClear = $bindable(),
 		env
 	}: {
 		tmdbKey: string;
@@ -26,6 +27,7 @@
 		thePosterDbUsername: string;
 		thePosterDbPassword: string;
 		thePosterDbPasswordSet: boolean;
+		thePosterDbPasswordClear: boolean;
 		env: Record<string, boolean>;
 	} = $props();
 </script>
@@ -100,6 +102,7 @@
 					type="password"
 					autocomplete="off"
 					bind:value={thePosterDbPassword}
+					oninput={() => (thePosterDbPasswordClear = false)}
 					disabled={env.thePosterDbPassword}
 					placeholder={thePosterDbPasswordSet
 						? m.settings_secret_placeholder_set()
@@ -109,6 +112,23 @@
 				{#if env.thePosterDbPassword}<p class="mt-1 text-xs text-amber-400">
 						{m.settings_set_from_env()}
 					</p>{/if}
+				{#if thePosterDbPasswordSet && !env.thePosterDbPassword && thePosterDbPassword === ''}
+					<button
+						type="button"
+						aria-pressed={thePosterDbPasswordClear}
+						onclick={() => (thePosterDbPasswordClear = !thePosterDbPasswordClear)}
+						class="btn mt-1.5 px-2 py-0.5 text-xs {thePosterDbPasswordClear
+							? 'bg-red-900/50 text-red-300 hover:bg-red-900/70'
+							: 'btn-ghost'}"
+					>
+						{m.settings_theposterdb_password_clear()}
+					</button>
+					{#if thePosterDbPasswordClear}
+						<p class="mt-1 text-xs text-red-300" role="status">
+							{m.settings_theposterdb_password_clear_pending()}
+						</p>
+					{/if}
+				{/if}
 			</div>
 		</div>
 	{/if}

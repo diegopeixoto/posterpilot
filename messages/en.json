@@ -599,6 +599,8 @@
 	"settings_theposterdb_username_placeholder": "Your ThePosterDB username or email",
 	"settings_theposterdb_password": "ThePosterDB password",
 	"settings_theposterdb_password_placeholder_unset": "Your ThePosterDB account password",
+	"settings_theposterdb_password_clear": "Clear stored password",
+	"settings_theposterdb_password_clear_pending": "The stored password will be removed when you save — select again to keep it.",
 	"settings_libraries_to_sync": "Libraries to sync",
 	"settings_libraries_connect_first": "Connect a server and save to choose libraries.",
 	"settings_libraries_hint": "Uncheck any you don't want synced.",

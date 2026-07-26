@@ -27,7 +27,7 @@ PosterPilot 会组合两种配置来源：
 
 `TMDB_KEY` 支持 v3 密钥或 v4 bearer/JWT。MediUX 与 TMDB 默认启用；Fanart.tv 需要 `FANART_KEY`；ThePosterDB 可选。一个提供方失败不会阻止其他提供方，并可保留已知候选标记为陈旧。
 
-ThePosterDB 无需账号即可使用，但它在部分页面会向匿名访问返回占位图而非真实海报。可**选择**登录以获取真实图片：在**元数据与提供方**中填写（启用 ThePosterDB 后显示字段），或设置 `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD`。密码与其他密钥一样在静态时加密保存；登录失败时该次运行会回退到匿名抓取，不会阻断发现。要恢复匿名抓取，请清空用户名（登录需要两者齐全）；已保存的密码目前没有删除控件——它仍加密保存在数据库中，重新填入用户名后会再次使用。
+ThePosterDB 无需账号即可使用，但它在部分页面会向匿名访问返回占位图而非真实海报。可**选择**登录以获取真实图片：在**元数据与提供方**中填写（启用 ThePosterDB 后显示字段），或设置 `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD`。密码与其他密钥一样在静态时加密保存；登录失败时该次运行会回退到匿名抓取，不会阻断发现。要恢复匿名抓取，请清空用户名（登录需要两者齐全）；已保存的密码仍加密保存在数据库中，重新填入用户名后会再次使用——如需删除，请使用密码字段下方的**清除已保存的密码**控件，保存后即会移除该密钥。
 
 ![PosterPilot 提供方设置，已启用 ThePosterDB 并显示可选的用户名和密码字段](/posterpilot/screenshots/settings-providers.webp)
 

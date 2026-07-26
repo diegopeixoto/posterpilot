@@ -47,8 +47,9 @@ habilitar o ThePosterDB) ou com `THEPOSTERDB_USERNAME` / `THEPOSTERDB_PASSWORD` 
 para obter as imagens reais. A senha é criptografada em repouso como os demais
 segredos, e um login que falha volta ao modo anônimo naquela execução em vez de
 bloquear a descoberta. Para voltar ao modo anônimo, limpe o usuário (o login
-exige os dois); a senha guardada ainda não tem controle de remoção — permanece
-criptografada e volta a ser usada se você reinserir o usuário.
+exige os dois); a senha guardada permanece criptografada e volta a ser usada se
+você reinserir o usuário, a menos que você a remova com o controle **Limpar a
+senha guardada** sob o campo de senha, que apaga o segredo ao salvar.
 
 ![Configurações de provedores do PosterPilot com o ThePosterDB habilitado e seus campos opcionais de usuário e senha](/posterpilot/screenshots/settings-providers.webp)
 
