@@ -24,12 +24,36 @@ afterEach(() => {
 describe('listItems reads the library the way the user sees it', () => {
 	it('collapses merged versions, drops extras, and reports watched via /Users/{id}/Items', async () => {
 		const bareItems = [
-			{ Id: 'a', Name: 'Merged Movie', Type: 'Movie', ProductionYear: 2024, UserData: { Played: false } },
-			{ Id: 'a-alt', Name: 'Merged Movie', Type: 'Movie', ProductionYear: 2024, UserData: { Played: false } },
-			{ Id: 'extra', Name: 'Deleted Scene', Type: 'Movie', ProductionYear: 2024, UserData: { Played: false } }
+			{
+				Id: 'a',
+				Name: 'Merged Movie',
+				Type: 'Movie',
+				ProductionYear: 2024,
+				UserData: { Played: false }
+			},
+			{
+				Id: 'a-alt',
+				Name: 'Merged Movie',
+				Type: 'Movie',
+				ProductionYear: 2024,
+				UserData: { Played: false }
+			},
+			{
+				Id: 'extra',
+				Name: 'Deleted Scene',
+				Type: 'Movie',
+				ProductionYear: 2024,
+				UserData: { Played: false }
+			}
 		];
 		const userItems = [
-			{ Id: 'a', Name: 'Merged Movie', Type: 'Movie', ProductionYear: 2024, UserData: { Played: true } }
+			{
+				Id: 'a',
+				Name: 'Merged Movie',
+				Type: 'Movie',
+				ProductionYear: 2024,
+				UserData: { Played: true }
+			}
 		];
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(input instanceof Request ? input.url : input.toString());
@@ -95,5 +119,56 @@ describe('listItems reads the library the way the user sees it', () => {
 		expect(items.map((item) => item.id)).toEqual(['x']);
 		const paths = fetchMock.mock.calls.map((call) => new URL(String(call[0])).pathname);
 		expect(paths).toContain('/Items');
+	});
+
+	it('falls back to the userless list when only restricted users exist', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(input instanceof Request ? input.url : input.toString());
+			if (url.pathname === '/Users') {
+				// A restricted user sees a subset of the library; scoping to them would
+				// silently prune items, so the userless list is the safer read.
+				return json([{ Id: 'guest', Name: 'Guest', Policy: { IsAdministrator: false } }]);
+			}
+			if (url.pathname === '/Items') {
+				return json({ Items: [{ Id: 'x', Name: 'Solo', Type: 'Movie', ProductionYear: 2020 }] });
+			}
+			throw new Error(`Unexpected request: ${url.pathname}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		const items = await provider.listItems('lib-1');
+
+		expect(items.map((item) => item.id)).toEqual(['x']);
+		const paths = fetchMock.mock.calls.map((call) => new URL(String(call[0])).pathname);
+		expect(paths).not.toContain('/Users/guest/Items');
+	});
+
+	it('retries user resolution after a transient /Users failure instead of pinning the fallback', async () => {
+		let usersHealthy = false;
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(input instanceof Request ? input.url : input.toString());
+			if (url.pathname === '/Users') {
+				if (!usersHealthy) return new Response('restarting', { status: 503 });
+				return json([{ Id: 'admin', Name: 'Nass', Policy: { IsAdministrator: true } }]);
+			}
+			if (url.pathname === '/Users/admin/Items') {
+				return json({ Items: [{ Id: 'a', Name: 'Solo', Type: 'Movie', ProductionYear: 2020 }] });
+			}
+			if (url.pathname === '/Items') {
+				return json({ Items: [{ Id: 'a', Name: 'Solo', Type: 'Movie', ProductionYear: 2020 }] });
+			}
+			throw new Error(`Unexpected request: ${url.pathname}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await provider.listItems('lib-1'); // /Users down: userless fallback for this call
+		usersHealthy = true;
+		await provider.listItems('lib-1'); // must retry the lookup, not reuse the failure
+
+		const paths = fetchMock.mock.calls.map((call) => new URL(String(call[0])).pathname);
+		expect(paths.filter((path) => path === '/Users')).toHaveLength(2);
+		expect(paths).toContain('/Users/admin/Items');
 	});
 });

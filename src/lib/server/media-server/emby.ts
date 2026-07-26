@@ -193,18 +193,24 @@ export function embyLikeProvider(
 	 * Resolve a user id to read the library the way the Jellyfin UI does. A bare API key
 	 * is userless, so `/Items` returns every merged version (MergeVersions) as its own
 	 * item plus library extras; `/Users/{id}/Items` collapses the merges, hides extras,
-	 * and is the only form that carries UserData (watched). Prefer an administrator (sees
-	 * everything); cache the lookup. Returns null when no user resolves so listItems can
-	 * fall back to the userless list rather than fail the whole sync.
+	 * and is the only form that carries UserData (watched). Only an administrator is
+	 * eligible: an admin sees every library, while a restricted user's smaller view
+	 * would silently prune items from the sync, so with no admin the userless list is
+	 * the safer read. Returns null when no admin resolves so listItems can fall back
+	 * to the userless list rather than fail the whole sync.
+	 *
+	 * Only a completed `/Users` lookup is cached. A transient failure (server
+	 * restarting, timeout) must not pin the userless view for the lifetime of this
+	 * instance — flipping between the scoped and userless views across syncs would
+	 * churn merged-version items in and out of the database.
 	 */
 	async function resolveLibraryUserId(): Promise<string | null> {
 		if (cachedLibraryUserId !== undefined) return cachedLibraryUserId;
 		try {
 			const users = await getJson<RawEmbyUser[]>('/Users');
-			const chosen = users.find((user) => user.Policy?.IsAdministrator) ?? users[0];
-			cachedLibraryUserId = chosen?.Id ?? null;
+			cachedLibraryUserId = users.find((user) => user.Policy?.IsAdministrator)?.Id ?? null;
 		} catch {
-			cachedLibraryUserId = null;
+			return null;
 		}
 		return cachedLibraryUserId;
 	}
