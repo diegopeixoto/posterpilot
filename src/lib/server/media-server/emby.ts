@@ -250,9 +250,7 @@ export function embyLikeProvider(
 		// with HTTP 400, which would kill every apply that has a staged selection while
 		// planning. The list form still works with just an API key. `.Items[0]` is the
 		// requested item (empty array => item is gone => no artwork to compare against).
-		const listed = await getJson<RawEmbyItemsResponse>(
-			`/Items?ids=${encodeURIComponent(itemId)}`
-		);
+		const listed = await getJson<RawEmbyItemsResponse>(`/Items?ids=${encodeURIComponent(itemId)}`);
 		const item = listed.Items?.[0];
 		if (!item) return null;
 		const imageType = kind === 'poster' ? ('Primary' as const) : ('Backdrop' as const);
