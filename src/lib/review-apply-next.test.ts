@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	canConfirmApplyAndNext,
 	canRetryApplyNextCompletion,
-	isFullySuccessfulApply
+	isFullySuccessfulApply,
+	shouldAutoConfirmApply
 } from './review-apply-next';
 
 describe('Apply and next client decisions', () => {
@@ -48,5 +49,25 @@ describe('Apply and next client decisions', () => {
 		expect(canRetryApplyNextCompletion('job_not_completed')).toBe(true);
 		expect(canRetryApplyNextCompletion('selection_changed')).toBe(false);
 		expect(canRetryApplyNextCompletion('job_not_verified')).toBe(false);
+	});
+});
+
+describe('One-click apply decision', () => {
+	const preview = (skipCount: number, server: number, kometa: number) => ({
+		planId: 'plan-1',
+		digest: 'digest-1',
+		summary: { skipCount, destinations: { server, kometa } }
+	});
+
+	it('auto-confirms only a warning-free plan with at least one write', () => {
+		expect(shouldAutoConfirmApply(preview(0, 1, 0))).toBe(true);
+		expect(shouldAutoConfirmApply(preview(0, 0, 1))).toBe(true);
+	});
+
+	it('keeps the dialog when anything is skipped or nothing would be written', () => {
+		expect(shouldAutoConfirmApply(preview(1, 1, 0))).toBe(false);
+		expect(shouldAutoConfirmApply(preview(0, 0, 0))).toBe(false);
+		expect(shouldAutoConfirmApply({ ...preview(0, 1, 0), digest: null })).toBe(false);
+		expect(shouldAutoConfirmApply(null)).toBe(false);
 	});
 });

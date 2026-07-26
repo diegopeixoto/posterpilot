@@ -24,3 +24,12 @@ export function canConfirmApplyAndNext(
 export function canRetryApplyNextCompletion(code: string | null): boolean {
 	return code === null || code === 'internal_error' || code === 'job_not_completed';
 }
+
+/**
+ * A plain single-item apply skips the confirmation dialog only when the
+ * materialized plan is warning-free: a confirmable plan id/digest, nothing
+ * skipped, and at least one destination write — the same predicate that gates
+ * apply-and-next, under a purpose-named alias. Any skip keeps the dialog so the
+ * user sees what would not happen before anything is written.
+ */
+export const shouldAutoConfirmApply = canConfirmApplyAndNext;
