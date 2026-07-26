@@ -21,4 +21,16 @@ describe('providerAvailability', () => {
 	it('requires the shared TMDB credential when TMDB artwork is enabled', () => {
 		expect(providerAvailability('tmdb', { ...config, tmdbKey: null })).toBe('missing_credential');
 	});
+
+	it('never requires ThePosterDB credentials — anonymous scraping stays available', () => {
+		// Credentials only upgrade the scrape to an authenticated session; their absence
+		// must not gate the provider (see posters/providers/theposterdb.ts).
+		const enabled = {
+			...config,
+			providerThePosterDb: true,
+			thePosterDbUsername: null,
+			thePosterDbPassword: null
+		};
+		expect(providerAvailability('theposterdb', enabled)).toBe('available');
+	});
 });

@@ -38,6 +38,7 @@
 	);
 	let familyBusy = $state<string | null>(null);
 	let memberBusy = $state<string | null>(null);
+	let discoverBusy = $state(false);
 	let actionMessage = $state('');
 	let actionFailed = $state(false);
 
@@ -281,6 +282,42 @@
 			memberBusy = null;
 		}
 	}
+
+	async function forceRediscoverMembers() {
+		if (familyBusy || memberBusy || discoverBusy) return;
+		discoverBusy = true;
+		actionFailed = false;
+		actionMessage = m.collection_discover_running();
+		try {
+			const response = await fetch(
+				`/api/collections/${encodeURIComponent(data.collection.id)}/discover`,
+				{
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					// No provider scope: the route falls through to every enabled provider
+					// (the same scope a normal per-item discovery uses).
+					body: JSON.stringify({ forceRefresh: true })
+				}
+			);
+			if (!response.ok) throw new Error('failed');
+			const result = (await response.json()) as {
+				total: number;
+				succeeded: number;
+				failed: number;
+			};
+			await invalidateAll();
+			actionFailed = result.total > 0 && result.succeeded === 0;
+			actionMessage = m.collection_discover_done({
+				succeeded: result.succeeded,
+				total: result.total
+			});
+		} catch {
+			actionFailed = true;
+			actionMessage = m.collection_discover_failed();
+		} finally {
+			discoverBusy = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -335,6 +372,18 @@
 			</p>
 		</div>
 	</header>
+
+	<div class="mt-4">
+		<button
+			type="button"
+			class="btn btn-ghost"
+			disabled={discoverBusy || familyBusy !== null || memberBusy !== null}
+			onclick={forceRediscoverMembers}
+		>
+			<span aria-hidden="true" class="inline-block {discoverBusy ? 'animate-spin' : ''}">⟳</span>
+			{m.collection_discover_refresh()}
+		</button>
+	</div>
 
 	<div
 		class={`mt-4 min-h-6 text-sm ${actionFailed ? 'text-red-300' : 'text-emerald-300'}`}

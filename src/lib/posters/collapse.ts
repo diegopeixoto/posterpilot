@@ -29,7 +29,9 @@ export interface SeedGroup {
 /**
  * Default expanded keys for a fresh item: the first provider and its first set are
  * expanded; everything else (other providers, other sets, all season groups) stays
- * collapsed.
+ * collapsed. ThePosterDB is always expanded too, wherever it falls in provider order —
+ * it's flattened into a single set per item (see posters/sets.ts), so there's never more
+ * than one card to show and no reason to hide it behind an extra click.
  */
 export function defaultExpanded(groups: SeedGroup[]): Set<string> {
 	const expanded = new Set<string>();
@@ -37,6 +39,11 @@ export function defaultExpanded(groups: SeedGroup[]): Set<string> {
 	if (first) {
 		expanded.add(providerKey(first.provider));
 		if (first.sets[0]) expanded.add(setKey(first.sets[0].setId));
+	}
+	const thePosterDb = groups.find((g) => g.provider === 'theposterdb');
+	if (thePosterDb) {
+		expanded.add(providerKey(thePosterDb.provider));
+		if (thePosterDb.sets[0]) expanded.add(setKey(thePosterDb.sets[0].setId));
 	}
 	return expanded;
 }

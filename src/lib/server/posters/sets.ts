@@ -50,6 +50,22 @@ export function groupByProvider(candidates: PosterCandidate[]): ProviderGroup[] 
 	}
 	return order.map((provider) => ({
 		provider,
-		sets: groupCandidatesBySet(byProvider.get(provider)!)
+		sets: groupProviderCandidates(provider, byProvider.get(provider)!)
 	}));
+}
+
+/**
+ * ThePosterDB's real per-set/per-author setId (see providers/parse.ts) matters for
+ * cross-title matching: collections/suggestions.ts groups a franchise-spanning creator
+ * set across members by that real setId. On a single item's review page, though, each of
+ * those "sets" is almost always exactly one poster, so splitting them into a dozen
+ * single-poster "by <author>" cards adds clicks without adding useful signal — show them
+ * as one flat, unattributed list here instead, same as before ThePosterDB had real setIds.
+ * Every other provider keeps the normal per-setId grouping.
+ */
+function groupProviderCandidates(provider: string, candidates: PosterCandidate[]): CandidateSet[] {
+	if (provider === 'theposterdb') {
+		return [{ setId: 'theposterdb', author: null, candidates }];
+	}
+	return groupCandidatesBySet(candidates);
 }

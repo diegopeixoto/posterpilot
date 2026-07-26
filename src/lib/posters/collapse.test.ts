@@ -26,4 +26,18 @@ describe('defaultExpanded', () => {
 	it('returns an empty set when there are no providers', () => {
 		expect(defaultExpanded([]).size).toBe(0);
 	});
+
+	it('also expands theposterdb even when it is not the first provider', () => {
+		const expanded = defaultExpanded([
+			{ provider: 'mediux', sets: [{ setId: 'a' }] },
+			{ provider: 'tmdb', sets: [{ setId: 'b' }] },
+			{ provider: 'theposterdb', sets: [{ setId: 'theposterdb' }] }
+		]);
+		expect([...expanded].sort()).toEqual(['p:mediux', 'p:theposterdb', 's:a', 's:theposterdb']);
+	});
+
+	it('does not fail when theposterdb is present but has no sets', () => {
+		const expanded = defaultExpanded([{ provider: 'theposterdb', sets: [] }]);
+		expect([...expanded]).toEqual(['p:theposterdb']);
+	});
 });

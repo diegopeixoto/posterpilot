@@ -101,7 +101,8 @@ export async function createSupportBundle(includeTitles = false) {
 		config.jellyfinApiKey,
 		config.embyApiKey,
 		config.tmdbKey,
-		config.fanartKey
+		config.fanartKey,
+		config.thePosterDbPassword
 	].filter((value): value is string => Boolean(value));
 	for (const server of servers) {
 		if (!server.credentialSet) continue;

@@ -102,7 +102,10 @@ export interface NativeCollectionArtworkServiceDependencies {
 	planStore: NativeArtworkPlanStore;
 	snapshots: NativeSnapshots;
 	ledger: NativeLedger;
-	loadCandidates(tmdbCollectionId: string): Promise<NativeCollectionArtworkCandidate[]>;
+	loadCandidates(
+		tmdbCollectionId: string,
+		collectionName: string
+	): Promise<NativeCollectionArtworkCandidate[]>;
 	loadCandidateBytes(
 		candidate: NativeCollectionArtworkCandidate
 	): Promise<NativeCollectionCandidateBytes>;
@@ -132,7 +135,7 @@ export type NativeCollectionCandidateSourceReason =
 export interface PublicNativeCollectionArtworkCandidate {
 	id: string;
 	kind: NativeCollectionArtworkKind;
-	provider: 'tmdb';
+	provider: NativeCollectionArtworkCandidate['provider'];
 	language: string | null;
 	width: number | null;
 	height: number | null;
@@ -462,7 +465,7 @@ export function createNativeCollectionArtworkService(
 		if (!loaded.linkedTmdbCollectionId) candidateReason = 'member_identity_incomplete';
 		else {
 			try {
-				candidates = await dependencies.loadCandidates(loaded.linkedTmdbCollectionId);
+				candidates = await dependencies.loadCandidates(loaded.linkedTmdbCollectionId, loaded.name);
 				if (!candidates.length) candidateReason = 'no_candidates';
 			} catch {
 				candidateReason = 'provider_unavailable';
@@ -496,7 +499,10 @@ export function createNativeCollectionArtworkService(
 			serviceError('native_collection_candidate_source_unavailable');
 		}
 		try {
-			return await dependencies.loadCandidates(bound.context.linkedTmdbCollectionId);
+			return await dependencies.loadCandidates(
+				bound.context.linkedTmdbCollectionId,
+				bound.context.name
+			);
 		} catch {
 			serviceError('native_collection_candidate_source_unavailable');
 		}

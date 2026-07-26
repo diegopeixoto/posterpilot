@@ -22,5 +22,7 @@ src/lib/paraglide
 docs
 # Brand/design assets
 artwork
+# Test fixtures are verbatim scraped markup — reformatting would change what parsers see
+src/**/__fixtures__
 # Generated and owned by release-please
 CHANGELOG.md

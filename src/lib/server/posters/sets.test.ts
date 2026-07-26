@@ -73,4 +73,34 @@ describe('groupByProvider', () => {
 		]);
 		expect(groups).toHaveLength(2);
 	});
+
+	it('flattens theposterdb into one unattributed set instead of one per creator set', () => {
+		// Each ThePosterDB "set" is real (see providers/parse.ts) and matters for
+		// collection-level family matching, but on a single item's review page it's almost
+		// always exactly one poster per set — grouping by setId here would mean one card per
+		// contributor for what the user experiences as one flat list of poster options.
+		const groups = groupByProvider([
+			cand({
+				provider: 'theposterdb',
+				setId: 'theposterdb-13035',
+				setAuthor: 'MBF',
+				url: 'p1'
+			}),
+			cand({
+				provider: 'theposterdb',
+				setId: 'theposterdb-254',
+				setAuthor: 'cinemoire',
+				url: 'p2'
+			}),
+			cand({ provider: 'mediux', setId: 'a', setAuthor: 'someone', url: 'm1' })
+		]);
+		const tpdb = groups.find((g) => g.provider === 'theposterdb')!;
+		expect(tpdb.sets).toHaveLength(1);
+		expect(tpdb.sets[0].author).toBeNull();
+		expect(tpdb.sets[0].candidates.map((c) => c.url)).toEqual(['p1', 'p2']);
+		// Other providers are unaffected — still grouped normally by their own setId.
+		const mediux = groups.find((g) => g.provider === 'mediux')!;
+		expect(mediux.sets).toHaveLength(1);
+		expect(mediux.sets[0].author).toBe('someone');
+	});
 });

@@ -1,13 +1,15 @@
 import { scorePoster, type ScoreWeights } from '$lib/server/posters/score';
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { tmdbImageUrl } from '$lib/server/tmdb/metadata';
+import type { ArtworkSet } from '$lib/server/posters/providers/types';
 
 export type NativeCollectionArtworkKind = 'poster' | 'background';
+export type NativeCollectionArtworkProvider = 'tmdb' | 'theposterdb';
 
 export interface NativeCollectionArtworkCandidate {
 	id: string;
 	tmdbCollectionId: string;
-	provider: 'tmdb';
+	provider: NativeCollectionArtworkProvider;
 	providerAssetId: string;
 	kind: NativeCollectionArtworkKind;
 	language: string | null;
@@ -134,6 +136,61 @@ export function parseTmdbCollectionArtworkCandidates(
 			)
 			.slice(0, MAX_CANDIDATES_PER_KIND);
 	return [...byKind('poster'), ...byKind('background')];
+}
+
+const MAX_THEPOSTERDB_CANDIDATES = 24;
+
+/**
+ * Convert ThePosterDB "Collections"-section poster sets (same card markup as a
+ * title page, already parsed by `parseThePosterDbAssets`) into native collection
+ * artwork candidates. ThePosterDB never exposes a backdrop/background asset on
+ * these pages, so this only ever produces `poster` candidates.
+ */
+export function buildThePosterDbCollectionArtworkCandidates(
+	sets: ArtworkSet[],
+	tmdbCollectionId: string,
+	weights: ScoreWeights
+): NativeCollectionArtworkCandidate[] {
+	if (!/^[1-9]\d*$/.test(tmdbCollectionId)) return [];
+	const seenUrls = new Set<string>();
+	const parsed: NativeCollectionArtworkCandidate[] = [];
+	for (const set of sets) {
+		for (const item of set.candidates) {
+			if (item.kind !== 'poster' || item.season !== null || item.episode !== null) continue;
+			if (seenUrls.has(item.url)) continue;
+			seenUrls.add(item.url);
+			const candidateIdentity = {
+				provider: 'theposterdb' as const,
+				tmdbCollectionId,
+				providerAssetId: item.url,
+				kind: 'poster' as const,
+				language: null,
+				width: null,
+				height: null,
+				url: item.url
+			};
+			parsed.push({
+				id: hashCanonicalJson({
+					provider: candidateIdentity.provider,
+					tmdbCollectionId,
+					providerAssetId: candidateIdentity.providerAssetId,
+					kind: candidateIdentity.kind
+				}),
+				...candidateIdentity,
+				score: scorePoster(candidateIdentity, weights),
+				previewUrl: item.url,
+				fingerprint: hashCanonicalJson(candidateIdentity)
+			});
+		}
+	}
+	return parsed
+		.sort(
+			(left, right) =>
+				right.score - left.score ||
+				left.providerAssetId.localeCompare(right.providerAssetId) ||
+				left.id.localeCompare(right.id)
+		)
+		.slice(0, MAX_THEPOSTERDB_CANDIDATES);
 }
 
 export function nativeCollectionCandidateSetFingerprint(
