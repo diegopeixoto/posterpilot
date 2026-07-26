@@ -251,14 +251,24 @@ export function embyLikeProvider(
 		data: ArrayBuffer,
 		contentType: string
 	): Promise<void> {
-		const before = await getJson<RawEmbyItemsResponse>(`/Items?ids=${encodeURIComponent(itemId)}`);
-		let remaining = before.Items?.[0]?.BackdropImageTags?.length ?? 0;
+		// The count read is as best-effort as the deletes below: a stale extra
+		// backdrop is cosmetic, failing the whole apply over a transient read is worse.
+		let remaining = 0;
+		try {
+			const before = await getJson<RawEmbyItemsResponse>(
+				`/Items?ids=${encodeURIComponent(itemId)}`
+			);
+			remaining = before.Items?.[0]?.BackdropImageTags?.length ?? 0;
+		} catch {
+			// remaining stays 0: skip pruning, still write the new backdrop.
+		}
 		while (remaining > 0) {
 			try {
-				const res = await fetch(
-					`${base}/Items/${encodeURIComponent(itemId)}/Images/Backdrop/0`,
-					{ method: 'DELETE', headers, signal: AbortSignal.timeout(JSON_TIMEOUT_MS) }
-				);
+				const res = await fetch(`${base}/Items/${encodeURIComponent(itemId)}/Images/Backdrop/0`, {
+					method: 'DELETE',
+					headers,
+					signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
+				});
 				// 404 => already gone; a hard error => stop pruning but still write the new one
 				// below (a stale backdrop is cosmetic; failing the whole apply is worse).
 				if (!res.ok && res.status !== 404) break;

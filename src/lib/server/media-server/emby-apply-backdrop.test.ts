@@ -17,7 +17,7 @@ import { embyLikeProvider } from './emby';
 function installStatefulBackdropServer(itemId: string, initial: string[]) {
 	// Response order (resolution-sorted) is deliberately the REVERSE of insertion order,
 	// so any "delete by the index I saw in the response" logic would hit the wrong image.
-	let backdrops = [...initial];
+	const backdrops = [...initial];
 	const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = new URL(input instanceof Request ? input.url : input.toString());
 		const method = init?.method ?? 'GET';
@@ -64,5 +64,26 @@ describe('applyBackground replaces instead of appending', () => {
 		await provider.applyBackgroundBytes!('item-2', new Uint8Array([1]).buffer, 'image/jpeg');
 
 		expect(backdrops()).toEqual(['new']);
+	});
+
+	it('still writes the backdrop when the count read fails, skipping the prune', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = new URL(input instanceof Request ? input.url : input.toString());
+			const method = init?.method ?? 'GET';
+			if (url.pathname === '/Items') {
+				return new Response('boom', { status: 500 });
+			}
+			if (method === 'POST' && url.pathname === '/Items/item-3/Images/Backdrop') {
+				return new Response(null, { status: 204 });
+			}
+			throw new Error(`Unexpected ${method} ${url.pathname}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await provider.applyBackgroundBytes!('item-3', new Uint8Array([1]).buffer, 'image/jpeg');
+
+		const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+		expect(posts).toHaveLength(1);
 	});
 });
