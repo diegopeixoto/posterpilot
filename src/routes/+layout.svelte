@@ -391,6 +391,24 @@
 			{m.app_name()}
 		</a>
 		<span class="text-neutral-600">·</span> v{data.version}
+		<span class="text-neutral-600">·</span>
+		<a
+			href="https://github.com/diegopeixoto"
+			target="_blank"
+			rel="noopener"
+			class="whitespace-nowrap hover:text-neutral-200"
+		>
+			© {new Date().getFullYear()} Diego Peixoto
+		</a>
+		<span class="text-neutral-600">·</span>
+		<a
+			href="https://aquarela.io"
+			target="_blank"
+			rel="noopener"
+			class="whitespace-nowrap hover:text-neutral-200"
+		>
+			{m.footer_aquarela()}
+		</a>
 		<p class="mx-auto mt-1 max-w-2xl text-neutral-400">{m.footer_disclaimer()}</p>
 	</footer>
 </div>

@@ -1,6 +1,26 @@
 // @ts-check
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+
+// The repo-root tsconfig extends SvelteKit's generated .svelte-kit/tsconfig.json.
+// Vite (fatal since astro 7) parses every tsconfig it meets walking up from docs/,
+// so a docs-only environment — CI, a fresh clone — dies on the missing extends
+// target. Stub it when absent; any app command (check/dev/build) regenerates the
+// real file over the stub.
+const sveltekitTsconfig = new URL('../.svelte-kit/tsconfig.json', import.meta.url);
+if (!existsSync(sveltekitTsconfig)) {
+	mkdirSync(new URL('../.svelte-kit/', import.meta.url), { recursive: true });
+	writeFileSync(sveltekitTsconfig, '{}\n');
+}
+
+// The app version shown in the footer, read here (node context) and injected via
+// `define` rather than imported from the component: importing the root package.json
+// puts a repo-root file in vite's module graph, whose tsconfig extends the generated
+// .svelte-kit/tsconfig.json — absent on CI, and a fatal error since astro 7.
+const appVersion = JSON.parse(
+	readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+).version;
 
 // https://astro.build/config
 export default defineConfig({
@@ -9,6 +29,11 @@ export default defineConfig({
 	// origin and set `base` to '/' (or remove it).
 	site: 'https://diegopeixoto.github.io',
 	base: '/posterpilot',
+	vite: {
+		define: {
+			__APP_VERSION__: JSON.stringify(appVersion)
+		}
+	},
 	integrations: [
 		starlight({
 			title: 'PosterPilot',

@@ -21,7 +21,6 @@ import {
 	parseAuthResult,
 	scopeEmbyCollectionMembers,
 	type AuthResult,
-	type RawEmbyItem,
 	type RawEmbyItemsResponse
 } from './emby-parse';
 import { defaultMediaServerCapabilities, mediaServerIdentity } from './capabilities';

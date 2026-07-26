@@ -4,10 +4,10 @@
 // star count, and the current app version (read from the root package.json at
 // build time).
 import Default from '@astrojs/starlight/components/Footer.astro';
-import pkg from '../../../package.json';
 
 const repoUrl = 'https://github.com/diegopeixoto/posterpilot';
-const version = pkg.version;
+// Injected by `vite.define` in astro.config.mjs — see the comment there.
+const version = __APP_VERSION__;
 const year = new Date().getFullYear();
 ---
 
@@ -32,6 +32,8 @@ const year = new Date().getFullYear();
 	</a>
 	<span aria-hidden="true">·</span>
 	<a href={`${repoUrl}/releases`}>v{version}</a>
+	<span aria-hidden="true">·</span>
+	<a href="https://aquarela.io" rel="noopener external">An app from Aquarela</a>
 </div>
 
 <script>
@@ -66,6 +68,8 @@ const year = new Date().getFullYear();
 
 	.pp-credits {
 		display: flex;
+		/* Wrap whole entries on narrow screens instead of breaking inside a link. */
+		flex-wrap: wrap;
 		justify-content: center;
 		align-items: center;
 		gap: 0.5rem;
@@ -77,6 +81,7 @@ const year = new Date().getFullYear();
 	.pp-credits a {
 		color: inherit;
 		text-decoration: none;
+		white-space: nowrap;
 	}
 
 	.pp-credits a:hover {
