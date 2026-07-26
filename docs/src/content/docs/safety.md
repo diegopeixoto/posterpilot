@@ -25,7 +25,14 @@ If the selection, target artwork, collection membership, Kometa file, destinatio
 or another bound input changes after preview, confirmation is rejected. Request a
 fresh preview; do not retry an old confirmation token.
 
-![PosterPilot item detail with the apply confirmation showing the exact frozen plan: two uploads, no Kometa exports, nothing skipped](/posterpilot/screenshots/apply-exact-plan.webp)
+For a single item whose previewed plan is warning-free — nothing skipped and at
+least one write — PosterPilot issues the confirmation itself in the same click, so
+steps 2–3 happen without a separate dialog. Any skipped target, an empty plan,
+apply-and-next, and collection operations keep the explicit confirmation step. The
+server-side contract is identical either way: the plan is still previewed,
+short-lived, single-use, and executed frozen.
+
+![PosterPilot item detail with the apply confirmation showing the exact frozen plan — shown whenever a plan needs review before anything is written](/posterpilot/screenshots/apply-exact-plan.webp)
 
 ## What is captured
 

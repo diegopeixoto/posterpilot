@@ -24,7 +24,15 @@ Se seleção, artwork atual, membros da coleção, arquivo do Kometa, destino ou
 dado vinculado mudar depois da prévia, a confirmação é recusada. Gere uma nova
 prévia; não reutilize um token antigo.
 
-![Detalhe de um título no PosterPilot com a confirmação de aplicação mostrando o plano exato e congelado: dois envios, nenhuma exportação para o Kometa e nada ignorado](/posterpilot/screenshots/apply-exact-plan.webp)
+Para um único título cujo plano pré-visualizado está livre de avisos — nada
+ignorado e pelo menos uma gravação — o PosterPilot emite a confirmação por conta
+própria no mesmo clique, e os passos 2–3 acontecem sem um diálogo separado.
+Qualquer item ignorado, um plano vazio, o fluxo "aplicar e avançar" e as operações
+de coleção mantêm a etapa de confirmação explícita. O contrato do lado do servidor
+é idêntico nos dois casos: o plano continua sendo pré-visualizado, expira, é de uso
+único e é executado congelado.
+
+![Detalhe de um título no PosterPilot com a confirmação de aplicação mostrando o plano exato e congelado — exibida sempre que o plano exige revisão antes de gravar](/posterpilot/screenshots/apply-exact-plan.webp)
 
 ## O que é capturado
 

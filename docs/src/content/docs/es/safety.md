@@ -23,7 +23,15 @@ Si cambian la selección, la ilustración actual, la pertenencia a la colección
 archivo de Kometa o cualquier entrada vinculada, la confirmación se rechaza. Solicita
 otra vista previa; no reutilices el token anterior.
 
-![Detalle de un título en PosterPilot con la confirmación de aplicación que muestra el plan exacto y congelado: dos subidas, ninguna exportación a Kometa y nada omitido](/posterpilot/screenshots/apply-exact-plan.webp)
+Para un único título cuyo plan previsualizado no tiene avisos — nada omitido y al
+menos una escritura — PosterPilot emite la confirmación por sí mismo en el mismo
+clic, de modo que los pasos 2–3 ocurren sin un diálogo separado. Cualquier omisión,
+un plan vacío, «aplicar y siguiente» y las operaciones de colección mantienen el
+paso de confirmación explícito. El contrato del servidor es idéntico en ambos
+casos: el plan sigue previsualizándose, caduca, es de un solo uso y se ejecuta
+congelado.
+
+![Detalle de un título en PosterPilot con la confirmación de aplicación que muestra el plan exacto y congelado — se muestra siempre que un plan requiere revisión antes de escribir](/posterpilot/screenshots/apply-exact-plan.webp)
 
 ## Qué se captura
 
