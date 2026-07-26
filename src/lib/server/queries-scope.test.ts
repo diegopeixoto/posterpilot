@@ -11,6 +11,23 @@ vi.mock('$lib/server/db', async () => {
 	return { db, migrateDb: async () => {} };
 });
 
+// getItemDetail resolves the config to hide candidates from disabled providers.
+// The real config module loads $env at import time, so stub it with a mutable
+// provider toggle the availability test below can flip.
+const providerConfig = vi.hoisted(() => ({
+	current: {
+		providerMediux: true,
+		providerTmdb: true,
+		providerFanart: true,
+		providerThePosterDb: true,
+		tmdbKey: 'tmdb-key',
+		fanartKey: 'fanart-key'
+	}
+}));
+vi.mock('$lib/server/config', () => ({
+	resolveConfig: async () => providerConfig.current
+}));
+
 import { db } from '$lib/server/db';
 import { eq } from 'drizzle-orm';
 import {
@@ -148,6 +165,32 @@ describe('server-scoped queries', () => {
 		expect(detail?.item).toMatchObject({ hasCurrentPoster: true, hasCurrentBackground: true });
 		expect(detail?.item).not.toHaveProperty('currentPosterUrl');
 		expect(detail?.item).not.toHaveProperty('currentBackgroundUrl');
+	});
+
+	it('hides stored candidates from providers the user has since disabled', async () => {
+		try {
+			let detail = await getItemDetail(itemA, 'server-a');
+			expect(detail?.candidates.map((candidate) => candidate.provider).sort()).toEqual([
+				'fanarttv',
+				'tmdb'
+			]);
+
+			providerConfig.current.providerFanart = false;
+			detail = await getItemDetail(itemA, 'server-a');
+			expect(detail?.candidates.map((candidate) => candidate.provider)).toEqual(['tmdb']);
+
+			providerConfig.current.providerMediux = false;
+			providerConfig.current.providerTmdb = false;
+			providerConfig.current.providerThePosterDb = false;
+			detail = await getItemDetail(itemA, 'server-a');
+			expect(detail?.candidates).toEqual([]);
+			expect(detail?.providerGroups).toEqual([]);
+		} finally {
+			providerConfig.current.providerMediux = true;
+			providerConfig.current.providerTmdb = true;
+			providerConfig.current.providerFanart = true;
+			providerConfig.current.providerThePosterDb = true;
+		}
 	});
 
 	it('isolates dashboard, job, and event reads and scoped deletion', async () => {

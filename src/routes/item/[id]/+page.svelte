@@ -457,12 +457,19 @@
 		await persistSelection();
 	}
 
-	async function discover() {
+	async function discover(opts: { providers?: string[]; forceRefresh?: boolean } = {}) {
 		if (busy) return;
 		busy = true;
 		setMessage('');
 		try {
-			const res = await fetch(`/api/items/${data.item.id}/discover`, { method: 'POST' });
+			const res = await fetch(`/api/items/${data.item.id}/discover`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					forceRefresh: opts.forceRefresh ?? false,
+					providers: opts.providers
+				})
+			});
 			const result = await res.json().catch(() => ({}));
 			if (!res.ok || result.error) {
 				setMessage(m.item_msg_discovery_failed({ error: m.api_error_generic() }), true);
@@ -479,6 +486,11 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	/** Re-check a single provider, bypassing its normal cache — e.g. "force re-search ThePosterDB". */
+	async function refreshProvider(providerId: string) {
+		await discover({ providers: [providerId], forceRefresh: true });
 	}
 
 	async function uploadPoster() {
@@ -1053,7 +1065,11 @@
 			{/if}
 
 			<div class="mt-4 flex flex-wrap items-center gap-2">
-				<button onclick={discover} disabled={busy || !data.item.resolved} class="btn btn-subtle">
+				<button
+					onclick={() => discover()}
+					disabled={busy || !data.item.resolved}
+					class="btn btn-subtle"
+				>
 					{busy ? m.item_working() : m.item_find_covers()}
 				</button>
 				{#if suggestions.ids.size > 0}
@@ -1145,26 +1161,38 @@
 		{#each data.providerGroups as group (group.provider)}
 			{@const pKey = providerKey(group.provider)}
 			<div>
-				<button
-					type="button"
-					onclick={() => toggle(pKey)}
-					aria-expanded={isExpanded(pKey)}
-					aria-label={isExpanded(pKey) ? m.item_collapse() : m.item_expand()}
-					class="section-title flex w-full items-center gap-2"
-				>
-					{@render chevron(isExpanded(pKey))}
-					<span>
-						{group.sets.length === 1
-							? m.item_set_count_one({
-									provider: providerLabel(group.provider),
-									count: group.sets.length
-								})
-							: m.item_set_count({
-									provider: providerLabel(group.provider),
-									count: group.sets.length
-								})}
-					</span>
-				</button>
+				<div class="flex items-center gap-2">
+					<button
+						type="button"
+						onclick={() => toggle(pKey)}
+						aria-expanded={isExpanded(pKey)}
+						aria-label={isExpanded(pKey) ? m.item_collapse() : m.item_expand()}
+						class="section-title flex flex-1 items-center gap-2"
+					>
+						{@render chevron(isExpanded(pKey))}
+						<span>
+							{group.sets.length === 1
+								? m.item_set_count_one({
+										provider: providerLabel(group.provider),
+										count: group.sets.length
+									})
+								: m.item_set_count({
+										provider: providerLabel(group.provider),
+										count: group.sets.length
+									})}
+						</span>
+					</button>
+					<button
+						type="button"
+						onclick={() => refreshProvider(group.provider)}
+						disabled={busy}
+						class="btn btn-ghost shrink-0 px-2 py-1 text-sm"
+						aria-label={m.item_refresh_provider({ provider: providerLabel(group.provider) })}
+						title={m.item_refresh_provider({ provider: providerLabel(group.provider) })}
+					>
+						<span aria-hidden="true" class="inline-block {busy ? 'animate-spin' : ''}">⟳</span>
+					</button>
+				</div>
 
 				{#if isExpanded(pKey)}
 					<div class="mt-2 space-y-4">

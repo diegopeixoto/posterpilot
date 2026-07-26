@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { serializeWrite } from '$lib/server/db/write-queue';
 import {
 	childSelections,
 	mediaItems,
@@ -66,16 +67,18 @@ export async function discoverForItem(
 				eq(posterCandidates.provider, provider.id)
 			);
 			if (availability !== 'available') {
-				await db.update(posterCandidates).set({ active: false, stale: true }).where(scope);
-				await db.insert(providerDiscoveryOutcomes).values({
-					runId,
-					serverInstanceId: item.serverInstanceId,
-					mediaItemId: item.id,
-					provider: provider.id,
-					status: availability,
-					candidateCount: 0,
-					startedAt: providerStarted,
-					completedAt: new Date()
+				await serializeWrite(async () => {
+					await db.update(posterCandidates).set({ active: false, stale: true }).where(scope);
+					await db.insert(providerDiscoveryOutcomes).values({
+						runId,
+						serverInstanceId: item.serverInstanceId,
+						mediaItemId: item.id,
+						provider: provider.id,
+						status: availability,
+						candidateCount: 0,
+						startedAt: providerStarted,
+						completedAt: new Date()
+					});
 				});
 				return;
 			}
@@ -112,31 +115,33 @@ export async function discoverForItem(
 						};
 					})
 				);
-				await db.transaction(async (tx) => {
-					const [outcome] = await tx
-						.insert(providerDiscoveryOutcomes)
-						.values({
-							runId,
-							serverInstanceId: item.serverInstanceId,
-							mediaItemId: item.id,
-							provider: provider.id,
-							status: candidates.length ? 'succeeded' : 'empty',
-							candidateCount: candidates.length,
-							latencyMs: Date.now() - providerStarted.getTime(),
-							lastSuccessAt: new Date(),
-							startedAt: providerStarted,
-							completedAt: new Date()
-						})
-						.returning({ id: providerDiscoveryOutcomes.id });
-					await tx.delete(posterCandidates).where(scope);
-					if (candidates.length) {
-						await tx
-							.insert(posterCandidates)
-							.values(
-								candidates.map((candidate) => ({ ...candidate, providerOutcomeId: outcome.id }))
-							);
-					}
-				});
+				await serializeWrite(() =>
+					db.transaction(async (tx) => {
+						const [outcome] = await tx
+							.insert(providerDiscoveryOutcomes)
+							.values({
+								runId,
+								serverInstanceId: item.serverInstanceId,
+								mediaItemId: item.id,
+								provider: provider.id,
+								status: candidates.length ? 'succeeded' : 'empty',
+								candidateCount: candidates.length,
+								latencyMs: Date.now() - providerStarted.getTime(),
+								lastSuccessAt: new Date(),
+								startedAt: providerStarted,
+								completedAt: new Date()
+							})
+							.returning({ id: providerDiscoveryOutcomes.id });
+						await tx.delete(posterCandidates).where(scope);
+						if (candidates.length) {
+							await tx
+								.insert(posterCandidates)
+								.values(
+									candidates.map((candidate) => ({ ...candidate, providerOutcomeId: outcome.id }))
+								);
+						}
+					})
+				);
 				succeeded += 1;
 			} catch (error) {
 				failures += 1;
@@ -144,23 +149,25 @@ export async function discoverForItem(
 					.select({ id: posterCandidates.id })
 					.from(posterCandidates)
 					.where(and(scope, eq(posterCandidates.active, true)));
-				await db.update(posterCandidates).set({ stale: true }).where(scope);
 				const rawError = error instanceof Error ? error.message : String(error);
 				const safeError = redact(rawError, config).slice(0, 500);
 				const timedOut = /timed?\s*out|abort/i.test(rawError);
-				await db.insert(providerDiscoveryOutcomes).values({
-					runId,
-					serverInstanceId: item.serverInstanceId,
-					mediaItemId: item.id,
-					provider: provider.id,
-					status: timedOut ? 'timed_out' : 'failed',
-					candidateCount: retained.length,
-					retainedStaleCandidates: retained.length > 0,
-					latencyMs: Date.now() - providerStarted.getTime(),
-					errorCode: timedOut ? 'provider_timeout' : 'provider_failed',
-					error: safeError,
-					startedAt: providerStarted,
-					completedAt: new Date()
+				await serializeWrite(async () => {
+					await db.update(posterCandidates).set({ stale: true }).where(scope);
+					await db.insert(providerDiscoveryOutcomes).values({
+						runId,
+						serverInstanceId: item.serverInstanceId,
+						mediaItemId: item.id,
+						provider: provider.id,
+						status: timedOut ? 'timed_out' : 'failed',
+						candidateCount: retained.length,
+						retainedStaleCandidates: retained.length > 0,
+						latencyMs: Date.now() - providerStarted.getTime(),
+						errorCode: timedOut ? 'provider_timeout' : 'provider_failed',
+						error: safeError,
+						startedAt: providerStarted,
+						completedAt: new Date()
+					});
 				});
 				await logEvent('warn', 'provider', `${provider.id} discovery failed for "${item.title}"`, {
 					provider: provider.id,

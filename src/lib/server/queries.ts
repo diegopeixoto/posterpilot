@@ -29,6 +29,9 @@ import {
 	type MediaItem
 } from './db/schema';
 import { groupByProvider, groupCandidatesBySet } from './posters/sets';
+import { PROVIDERS } from './posters/providers';
+import { providerAvailability } from './posters/providers/availability';
+import { resolveConfig } from './config';
 import { rankFunItems, type PickFilter } from './fun-pick';
 import {
 	buildPublicJobProgress,
@@ -719,17 +722,27 @@ export async function setItemIgnored(
 export async function getItemDetail(id: number, serverInstanceId?: string) {
 	const item = await getMediaItem(id, serverInstanceId);
 	if (!item) return null;
-	const candidates = await db
-		.select()
-		.from(posterCandidates)
-		.where(
-			and(
-				eq(posterCandidates.serverInstanceId, item.serverInstanceId),
-				eq(posterCandidates.mediaItemId, id),
-				eq(posterCandidates.active, true)
-			)
-		)
-		.orderBy(posterCandidates.id);
+	// A provider can be disabled in settings without re-running discovery, which would
+	// leave its stored candidates active. Hide them at display time so the item page
+	// only ever shows sources the user currently has enabled.
+	const config = await resolveConfig();
+	const enabledProviders = PROVIDERS.filter(
+		(p) => providerAvailability(p.id, config) === 'available'
+	).map((p) => p.id);
+	const candidates = enabledProviders.length
+		? await db
+				.select()
+				.from(posterCandidates)
+				.where(
+					and(
+						eq(posterCandidates.serverInstanceId, item.serverInstanceId),
+						eq(posterCandidates.mediaItemId, id),
+						eq(posterCandidates.active, true),
+						inArray(posterCandidates.provider, enabledProviders)
+					)
+				)
+				.orderBy(posterCandidates.id)
+		: [];
 	const history = await db
 		.select()
 		.from(appliedPosters)

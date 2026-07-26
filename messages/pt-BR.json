@@ -348,6 +348,7 @@
 	"item_cast": "Elenco",
 	"item_set_count": "{provider} · {count} conjuntos",
 	"item_set_count_one": "{provider} · {count} conjunto",
+	"item_refresh_provider": "Pesquisar novamente em {provider}",
 	"item_set_by": "por",
 	"item_set_unattributed": "Conjunto sem atribuição",
 	"item_use_set": "Usar este conjunto",

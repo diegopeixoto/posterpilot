@@ -266,6 +266,31 @@ describe('collection suggestion store', () => {
 		).rejects.toMatchObject({ code: 'collection_suggestion_stale' });
 	});
 
+	it('reserves per-provider slots so a lower-scoring provider is not crowded out', async () => {
+		const extraMediux = Array.from(
+			{ length: 10 },
+			(_, index) =>
+				`(${500 + index}, 'server-a', 1, 'mediux', 'set-extra-${index}', 'mediux-uploader', NULL, 'en', 'https://api.mediux.pro/assets/extra-${index}', 'poster', NULL, NULL, 2000, 3000, 1, 0)`
+		).join(',\n');
+		await client.executeMultiple(`
+			INSERT INTO poster_candidates
+				(id, server_instance_id, media_item_id, provider, set_id, set_author, design_family,
+				 language, url, kind, season, episode, width, height, active, stale)
+			VALUES
+				${extraMediux},
+				(600, 'server-a', 1, 'theposterdb', 'theposterdb-9001', 'tpdb-creator', NULL, NULL,
+				 'https://theposterdb.com/assets/600', 'poster', NULL, NULL, 2000, 3000, 1, 0);
+		`);
+
+		const workspace = await store.getWorkspace('server-a', 'collection-a');
+		const memberOne = workspace?.members.find((member) => member.mediaItemId === 1);
+		expect(memberOne?.poster).toHaveLength(8);
+		expect(memberOne?.poster.some((candidate) => candidate.provider === 'theposterdb')).toBe(true);
+		expect(memberOne?.poster.filter((candidate) => candidate.provider === 'mediux')).toHaveLength(
+			7
+		);
+	});
+
 	it('serves candidate preview sources only inside the selected collection scope', async () => {
 		await expect(store.getCandidatePreviewSource('server-a', 'collection-a', 101)).resolves.toBe(
 			'https://api.mediux.pro/assets/101'
