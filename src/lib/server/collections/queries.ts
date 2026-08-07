@@ -188,6 +188,7 @@ export function createCollectionQueries(database: Database) {
 				selectedPosterCandidateId: mediaItems.selectedPosterCandidateId,
 				selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId,
 				selectionUpdatedAt: mediaItems.selectionUpdatedAt,
+				selectionRevision: mediaItems.selectionRevision,
 				artworkVersion: mediaItems.artworkVersion
 			})
 			.from(mediaCollections)
@@ -269,7 +270,7 @@ export function createCollectionQueries(database: Database) {
 					hasCurrentPoster: Boolean(row.currentPoster),
 					hasStagedPoster: Boolean(row.selectedPoster),
 					artworkVersion: row.artworkVersion ?? 0,
-					selectionVersion: row.selectionUpdatedAt?.getTime() ?? 0,
+					selectionVersion: row.selectionRevision ?? 0,
 					hasBackground: Boolean(row.currentBackground || row.selectedBackground),
 					hasCurrentBackground: Boolean(row.currentBackground),
 					staged: Boolean(row.selectedPoster || row.selectedBackground)
@@ -521,7 +522,7 @@ export function createCollectionQueries(database: Database) {
 						available: poster.stagedAvailable,
 						candidateId: row.selectedPosterCandidateId,
 						provenance: poster.stagedFamily,
-						version: row.selectionUpdatedAt?.getTime() ?? 0
+						version: row.selectionRevision ?? 0
 					},
 					consistency: posterState.get(row.itemId!) ?? 'unknown_provenance'
 				},
@@ -531,7 +532,7 @@ export function createCollectionQueries(database: Database) {
 						available: background.stagedAvailable,
 						candidateId: row.selectedBackgroundCandidateId,
 						provenance: background.stagedFamily,
-						version: row.selectionUpdatedAt?.getTime() ?? 0
+						version: row.selectionRevision ?? 0
 					},
 					consistency: backgroundState.get(row.itemId!) ?? 'unknown_provenance'
 				}

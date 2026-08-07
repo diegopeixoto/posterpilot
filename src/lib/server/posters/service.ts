@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { serializeWrite } from '$lib/server/db/write-queue';
 import {
-	childSelections,
 	mediaItems,
 	posterCandidates,
 	providerDiscoveryOutcomes,
@@ -22,6 +21,11 @@ import {
 	type AutomaticArtworkSelection,
 	type AutomaticSelectionInputs
 } from './automatic-selection';
+import {
+	createArtworkSelectionStore,
+	type ChildArtworkSelection,
+	type RootArtworkSelectionPatch
+} from './selection-store';
 
 /** Discover per provider without erasing last-known-good data when one source fails. */
 export async function discoverForItem(
@@ -265,43 +269,15 @@ export async function autoSelectArtwork(
 	return selectAutomaticArtwork(rows, { ...inputs, weights });
 }
 
-async function requireItemServerInstanceId(itemId: number): Promise<string> {
-	const [item] = await db
-		.select({ serverInstanceId: mediaItems.serverInstanceId })
-		.from(mediaItems)
-		.where(eq(mediaItems.id, itemId))
-		.limit(1);
-	if (!item) throw new Error(`Media item ${itemId} was not found`);
-	return item.serverInstanceId;
-}
-
-export interface ArtworkSelectionPatch {
-	posterUrl?: string | null;
-	backgroundUrl?: string | null;
-	posterCandidateId?: number | null;
-	backgroundCandidateId?: number | null;
-}
+const artworkSelectionStore = createArtworkSelectionStore(db);
 
 /** Record only the supplied pending slots, preserving every omitted selection. */
 export async function selectCandidate(
+	serverInstanceId: string,
 	itemId: number,
-	selection: ArtworkSelectionPatch
+	selection: RootArtworkSelectionPatch
 ): Promise<void> {
-	const patch: Partial<typeof mediaItems.$inferInsert> = {
-		selectionUpdatedAt: new Date(),
-		updatedAt: new Date()
-	};
-	if (Object.hasOwn(selection, 'posterUrl')) patch.selectedPosterUrl = selection.posterUrl ?? null;
-	if (Object.hasOwn(selection, 'backgroundUrl')) {
-		patch.selectedBackgroundUrl = selection.backgroundUrl ?? null;
-	}
-	if (Object.hasOwn(selection, 'posterCandidateId')) {
-		patch.selectedPosterCandidateId = selection.posterCandidateId ?? null;
-	}
-	if (Object.hasOwn(selection, 'backgroundCandidateId')) {
-		patch.selectedBackgroundCandidateId = selection.backgroundCandidateId ?? null;
-	}
-	await serializeWrite(() => db.update(mediaItems).set(patch).where(eq(mediaItems.id, itemId)));
+	await serializeWrite(() => artworkSelectionStore.stageRoot(serverInstanceId, itemId, selection));
 }
 
 /**
@@ -311,43 +287,11 @@ export async function selectCandidate(
  * slot before inserting (libsql has no portable partial-index upsert target).
  */
 export async function selectChild(
+	serverInstanceId: string,
 	itemId: number,
-	slot: { kind: 'poster' | 'background' | 'title_card'; season: number; episode: number | null },
-	url: string | null
+	selection: ChildArtworkSelection
 ): Promise<void> {
-	const serverInstanceId = await requireItemServerInstanceId(itemId);
-	const changedAt = new Date();
-	const { kind, season, episode } = slot;
-	const episodeMatch =
-		episode === null ? isNull(childSelections.episode) : eq(childSelections.episode, episode);
-	await serializeWrite(async () => {
-		await db
-			.delete(childSelections)
-			.where(
-				and(
-					eq(childSelections.serverInstanceId, serverInstanceId),
-					eq(childSelections.mediaItemId, itemId),
-					eq(childSelections.kind, kind),
-					eq(childSelections.season, season),
-					episodeMatch
-				)
-			);
-		if (url) {
-			await db.insert(childSelections).values({
-				serverInstanceId,
-				mediaItemId: itemId,
-				kind,
-				season,
-				episode,
-				url,
-				updatedAt: changedAt
-			});
-		}
-		await db
-			.update(mediaItems)
-			.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
-			.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
-	});
+	await serializeWrite(() => artworkSelectionStore.stageChild(serverInstanceId, itemId, selection));
 }
 
 /**
@@ -356,49 +300,11 @@ export async function selectChild(
  * atomic, rather than issuing two statements per slot across separate commits.
  */
 export async function selectChildrenBulk(
+	serverInstanceId: string,
 	itemId: number,
-	slots: {
-		kind: 'poster' | 'background' | 'title_card';
-		season: number;
-		episode: number | null;
-		url: string;
-	}[]
+	selections: ChildArtworkSelection[]
 ): Promise<void> {
-	if (!slots.length) return;
-	const serverInstanceId = await requireItemServerInstanceId(itemId);
 	await serializeWrite(() =>
-		db.transaction(async (tx) => {
-			const changedAt = new Date();
-			for (const s of slots) {
-				const episodeMatch =
-					s.episode === null
-						? isNull(childSelections.episode)
-						: eq(childSelections.episode, s.episode);
-				await tx
-					.delete(childSelections)
-					.where(
-						and(
-							eq(childSelections.serverInstanceId, serverInstanceId),
-							eq(childSelections.mediaItemId, itemId),
-							eq(childSelections.kind, s.kind),
-							eq(childSelections.season, s.season),
-							episodeMatch
-						)
-					);
-				await tx.insert(childSelections).values({
-					serverInstanceId,
-					mediaItemId: itemId,
-					kind: s.kind,
-					season: s.season,
-					episode: s.episode,
-					url: s.url,
-					updatedAt: changedAt
-				});
-			}
-			await tx
-				.update(mediaItems)
-				.set({ selectionUpdatedAt: changedAt, updatedAt: changedAt })
-				.where(and(eq(mediaItems.id, itemId), eq(mediaItems.serverInstanceId, serverInstanceId)));
-		})
+		artworkSelectionStore.stageChildren(serverInstanceId, itemId, selections)
 	);
 }

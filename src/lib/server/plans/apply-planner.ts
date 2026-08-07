@@ -24,7 +24,10 @@ import type {
 	AutomaticSelectionInputs
 } from '$lib/server/posters/automatic-selection';
 import type { ScoreWeights } from '$lib/server/posters/score';
-import { canonicalizeProviderArtworkUrl } from '$lib/server/tmdb/artwork-url';
+import {
+	canonicalizeProviderArtworkUrl,
+	storedArtworkMatchesCandidate
+} from '$lib/server/tmdb/artwork-url';
 
 export type ApplyMethodInput = ApplyPlanMethod | 'plex';
 
@@ -430,23 +433,24 @@ export function freezeApplyStoredSelection(
 	stored: PlannerStoredSelection,
 	data: ApplyPlannerItemData
 ): FrozenArtworkSelection {
-	// Resolve provenance against the exact persisted URL before canonicalizing it.
-	// This prevents a providerless/custom URL from becoming trusted based on shape alone.
+	// Resolve provenance under the persisted provider's own URL rules. Explicit custom
+	// selections never inherit a candidate; only legacy providerless TMDB URLs may
+	// recover across preview/original variants.
+	const matchesSelection = (candidate: PlannerCandidateSnapshot) =>
+		applySlotKey(candidate.slot) === applySlotKey(stored.slot) &&
+		storedArtworkMatchesCandidate({
+			storedUrl: stored.url,
+			storedProvider: stored.provider,
+			candidateUrl: candidate.url,
+			candidateProvider: candidate.provider
+		});
 	const matchedById =
 		stored.candidateId === null
 			? null
 			: data.candidates.find(
-					(candidate) =>
-						candidate.candidateId === stored.candidateId &&
-						candidate.url === stored.url &&
-						applySlotKey(candidate.slot) === applySlotKey(stored.slot)
+					(candidate) => candidate.candidateId === stored.candidateId && matchesSelection(candidate)
 				);
-	const matched =
-		matchedById ??
-		data.candidates.find(
-			(candidate) =>
-				candidate.url === stored.url && applySlotKey(candidate.slot) === applySlotKey(stored.slot)
-		);
+	const matched = matchedById ?? data.candidates.find(matchesSelection);
 	if (matched) return freezeApplyCandidateSelection(matched, 'stored', data.item.identity);
 
 	const url = canonicalizeProviderArtworkUrl(stored.url, stored.provider);

@@ -53,6 +53,7 @@ beforeEach(async () => {
 			selected_poster_candidate_id integer,
 			selected_background_candidate_id integer,
 			selection_updated_at integer,
+			selection_revision integer DEFAULT 0 NOT NULL,
 			artwork_version integer NOT NULL,
 			source_removed_at integer
 		);

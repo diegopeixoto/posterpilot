@@ -48,6 +48,23 @@ function same(a: unknown, b: unknown): boolean {
 	return canonicalJson(a) === canonicalJson(b);
 }
 
+function validSelectionRevision(identity: import('./apply-plan').ApplyItemIdentity): boolean {
+	return (
+		!Object.hasOwn(identity, 'selectionRevision') ||
+		(Number.isSafeInteger(identity.selectionRevision) && identity.selectionRevision >= 0)
+	);
+}
+
+function sameFrozenIdentity(
+	current: import('./apply-plan').ApplyItemIdentity,
+	planned: import('./apply-plan').ApplyItemIdentity
+): boolean {
+	if (Object.hasOwn(planned, 'selectionRevision')) return same(current, planned);
+	if (current.selectionRevision !== 0) return false;
+	const { selectionRevision: _selectionRevision, ...legacyCurrent } = current;
+	return same(legacyCurrent, planned);
+}
+
 function sortedUnique(values: string[]): string[] {
 	return [...new Set(values)].sort();
 }
@@ -210,7 +227,12 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 		const itemKey = `${item.target.serverInstanceId}:${item.target.mediaItemId}`;
 		if (itemKeys.has(itemKey)) failInvalid('Duplicate frozen apply target');
 		itemKeys.add(itemKey);
-		if (!item.target.serverInstanceId || !Number.isInteger(item.target.mediaItemId)) {
+		if (
+			!item.target.serverInstanceId ||
+			!Number.isInteger(item.target.mediaItemId) ||
+			!validSelectionRevision(item.target) ||
+			!validSelectionRevision(item.selectionFrom)
+		) {
 			failInvalid('Invalid frozen apply target');
 		}
 		if (!/^[0-9a-f]{64}$/.test(item.sourceFingerprint)) {
@@ -272,6 +294,9 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 		}
 
 		const selectionFingerprint = hashCanonicalJson({
+			...(Object.hasOwn(item.selectionFrom, 'selectionRevision')
+				? { selectionRevision: item.selectionFrom.selectionRevision }
+				: {}),
 			selectionUpdatedAt: item.selectionFrom.selectionUpdatedAt,
 			discoveryFingerprint: item.discovery.fingerprint,
 			selections: item.selections
@@ -424,8 +449,8 @@ export async function assertApplyPlanFresh(
 		]);
 		if (!target || !selectionFrom) failStale('A frozen apply item is no longer available');
 		if (
-			!same(target.item.identity, plannedItem.target) ||
-			!same(selectionFrom.item.identity, plannedItem.selectionFrom)
+			!sameFrozenIdentity(target.item.identity, plannedItem.target) ||
+			!sameFrozenIdentity(selectionFrom.item.identity, plannedItem.selectionFrom)
 		) {
 			failStale('A frozen apply item or pending selection changed');
 		}

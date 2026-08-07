@@ -132,6 +132,8 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 				selectedBackgroundUrl: mediaItems.selectedBackgroundUrl,
 				selectedPosterCandidateId: mediaItems.selectedPosterCandidateId,
 				selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId,
+				selectedPosterProvider: mediaItems.selectedPosterProvider,
+				selectedBackgroundProvider: mediaItems.selectedBackgroundProvider,
 				hasCandidates: mediaItems.hasCandidates,
 				hasMediux: mediaItems.hasMediux,
 				ignored: mediaItems.ignored,
@@ -250,13 +252,15 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 					mediaItemId: item.id,
 					kind: 'poster',
 					url: item.selectedPosterUrl,
-					candidateId: item.selectedPosterCandidateId
+					candidateId: item.selectedPosterCandidateId,
+					provider: item.selectedPosterProvider
 				}),
 				selectedBackgroundPreviewUrl: resolveStagedArtworkPreview(own, {
 					mediaItemId: item.id,
 					kind: 'background',
 					url: item.selectedBackgroundUrl,
-					candidateId: item.selectedBackgroundCandidateId
+					candidateId: item.selectedBackgroundCandidateId,
+					provider: item.selectedBackgroundProvider
 				}),
 				hasCurrentPoster: item.hasCurrentPoster === 1,
 				hasCurrentBackground: item.hasCurrentBackground === 1

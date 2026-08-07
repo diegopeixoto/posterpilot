@@ -46,6 +46,7 @@ function identity(
 		mediaType: 'movie',
 		updatedAt: NOW.toISOString(),
 		selectionUpdatedAt: NOW.toISOString(),
+		selectionRevision: 1,
 		...overrides
 	};
 }

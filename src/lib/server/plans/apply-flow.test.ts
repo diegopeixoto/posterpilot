@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('$lib/server/db', () => ({ db: {} }));
 import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
 import { selectAutomaticArtwork } from '$lib/server/posters/automatic-selection';
-import { canonicalJsonDigest } from './canonical-json';
+import { canonicalJsonDigest, hashCanonicalJson } from './canonical-json';
 import { confirmApplyPlan, exactApplyPreviewResponse } from './apply-api';
 import { executeFrozenApplyPlan, type ApplyPlanExecutorDependencies } from './apply-executor';
 import {
@@ -21,6 +21,7 @@ import {
 	type ApplyPlannerItemData,
 	type PlannerCandidateSnapshot
 } from './apply-planner';
+import { assertApplyPlanFresh, assertApplyPlanPayload } from './apply-plan-validation';
 import {
 	OperationPlanError,
 	type CreateOperationPlanInput,
@@ -42,7 +43,8 @@ function data(mediaItemId: number): ApplyPlannerItemData {
 		tvdbId: null,
 		mediaType: 'movie' as const,
 		updatedAt: '2026-07-10T11:00:00.000Z',
-		selectionUpdatedAt: '2026-07-10T11:01:00.000Z'
+		selectionUpdatedAt: '2026-07-10T11:01:00.000Z',
+		selectionRevision: 1
 	};
 	const candidate = (id: number, slot: ApplySlot): PlannerCandidateSnapshot => ({
 		candidateId: id,
@@ -213,7 +215,68 @@ function setup() {
 	return { items, planner, store, loadItemData, resolveDestinationSlots };
 }
 
+function asLegacyRevisionlessPlan(payload: ApplyPlanPayloadV1): ApplyPlanPayloadV1 {
+	const legacy = structuredClone(payload);
+	if (legacy.context.source === 'cross_server') {
+		Reflect.deleteProperty(legacy.context.sourceItem, 'selectionRevision');
+	}
+	for (const item of legacy.items) {
+		Reflect.deleteProperty(item.target, 'selectionRevision');
+		Reflect.deleteProperty(item.selectionFrom, 'selectionRevision');
+		for (const operation of item.operations) {
+			Reflect.deleteProperty(operation.target, 'selectionRevision');
+		}
+		item.selectionFingerprint = hashCanonicalJson({
+			selectionUpdatedAt: item.selectionFrom.selectionUpdatedAt,
+			discoveryFingerprint: item.discovery.fingerprint,
+			selections: item.selections
+		});
+		item.sourceFingerprint = hashCanonicalJson({
+			target: item.target,
+			selectionFrom: item.selectionFrom,
+			selectionFingerprint: item.selectionFingerprint,
+			currentStateFingerprint: item.currentStateFingerprint,
+			operations: item.operations.map((operation) => operation.id),
+			skips: item.skips
+		});
+	}
+	legacy.sourceFingerprint = hashCanonicalJson({
+		context: legacy.context,
+		defaults: legacy.defaults,
+		items: legacy.items.map((item) => item.sourceFingerprint)
+	});
+	return legacy;
+}
+
 describe('frozen apply flow', () => {
+	it('accepts a revisionless v1 payload only while the migrated selection revision is zero', async () => {
+		const fixture = setup();
+		fixture.items[0].item.identity.selectionRevision = 0;
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'server'
+		});
+		const legacy = asLegacyRevisionlessPlan(preview.payload);
+
+		expect(() => assertApplyPlanPayload(legacy)).not.toThrow();
+		await expect(
+			assertApplyPlanFresh(legacy, {
+				loadItemData: fixture.loadItemData,
+				resolveDestinationSlots: fixture.resolveDestinationSlots
+			})
+		).resolves.toBeUndefined();
+
+		fixture.items[0].item.identity.selectionRevision = 1;
+		await expect(
+			assertApplyPlanFresh(legacy, {
+				loadItemData: fixture.loadItemData,
+				resolveDestinationSlots: fixture.resolveDestinationSlots
+			})
+		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
 	it('executes exactly the per-item/per-slot operations returned by preview', async () => {
 		const fixture = setup();
 		fixture.items[0].candidates[0].provider = 'tmdb';

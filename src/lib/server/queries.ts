@@ -771,13 +771,15 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 		mediaItemId: item.id,
 		kind: 'poster',
 		url: item.selectedPosterUrl,
-		candidateId: item.selectedPosterCandidateId
+		candidateId: item.selectedPosterCandidateId,
+		provider: item.selectedPosterProvider
 	});
 	const selectedBackgroundCandidate = findStagedArtworkCandidate(loadedCandidates, {
 		mediaItemId: item.id,
 		kind: 'background',
 		url: item.selectedBackgroundUrl,
-		candidateId: item.selectedBackgroundCandidateId
+		candidateId: item.selectedBackgroundCandidateId,
+		provider: item.selectedBackgroundProvider
 	});
 	const history = await db
 		.select()

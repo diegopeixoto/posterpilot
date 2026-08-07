@@ -102,7 +102,12 @@ export const mediaItems = sqliteTable(
 		selectedBackgroundUrl: text('selected_background_url'),
 		selectedPosterCandidateId: integer('selected_poster_candidate_id'),
 		selectedBackgroundCandidateId: integer('selected_background_candidate_id'),
+		/** Durable server-owned provenance for the pending root artwork selections. */
+		selectedPosterProvider: text('selected_poster_provider'),
+		selectedBackgroundProvider: text('selected_background_provider'),
 		selectionUpdatedAt: integer('selection_updated_at', { mode: 'timestamp' }),
+		/** Monotonic CAS token; timestamps are persisted at second precision. */
+		selectionRevision: integer('selection_revision').notNull().default(0),
 		/** TMDB display metadata, populated during sync; null until enriched. */
 		overview: text('overview'),
 		tagline: text('tagline'),

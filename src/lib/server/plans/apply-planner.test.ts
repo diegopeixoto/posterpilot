@@ -60,6 +60,7 @@ function identity(
 		mediaType: 'movie',
 		updatedAt: '2026-07-10T11:00:00.000Z',
 		selectionUpdatedAt: '2026-07-10T11:05:00.000Z',
+		selectionRevision: 1,
 		...overrides
 	};
 }
@@ -365,6 +366,14 @@ describe('unified apply planner', () => {
 	it('preserves a custom TMDB-shaped staged URL byte-for-byte in the plan', async () => {
 		const data = itemData('server-a', 18, { candidates: [] });
 		const customUrl = 'https://image.tmdb.org/t/p/w500/custom-poster.jpg';
+		data.candidates = [
+			candidate(
+				data.item.identity,
+				181,
+				{ kind: 'poster', season: null, episode: null },
+				{ provider: 'tmdb', providerAssetId: '/custom-poster.jpg', url: customUrl }
+			)
+		];
 		data.storedSelections = [
 			{
 				slot: { kind: 'poster', season: null, episode: null },
@@ -384,6 +393,7 @@ describe('unified apply planner', () => {
 		});
 
 		expect(preview.payload.items[0].selections[0]).toMatchObject({
+			candidateId: null,
 			provider: 'custom',
 			url: customUrl
 		});

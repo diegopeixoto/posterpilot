@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	canonicalizeProviderArtworkUrl,
 	canonicalizeTmdbArtworkUrl,
-	equivalentProviderArtworkUrls
+	equivalentProviderArtworkUrls,
+	storedArtworkMatchesCandidate
 } from './artwork-url';
 
 describe('TMDB artwork URL canonicalization', () => {
@@ -78,6 +79,35 @@ describe('TMDB artwork URL canonicalization', () => {
 				'https://image.tmdb.org/t/p/original/poster.jpg',
 				'custom'
 			)
+		).toBe(false);
+	});
+
+	it('recovers only provider-compatible stored provenance', () => {
+		const storedUrl = 'https://image.tmdb.org/t/p/w500/poster.jpg';
+		const candidateUrl = 'https://image.tmdb.org/t/p/original/poster.jpg';
+		expect(
+			storedArtworkMatchesCandidate({
+				storedUrl,
+				storedProvider: null,
+				candidateUrl,
+				candidateProvider: 'tmdb'
+			})
+		).toBe(true);
+		expect(
+			storedArtworkMatchesCandidate({
+				storedUrl,
+				storedProvider: 'custom',
+				candidateUrl: storedUrl,
+				candidateProvider: 'tmdb'
+			})
+		).toBe(false);
+		expect(
+			storedArtworkMatchesCandidate({
+				storedUrl: 'https://images.example/poster.jpg',
+				storedProvider: 'mediux',
+				candidateUrl: 'https://images.example/poster.jpg',
+				candidateProvider: 'fanarttv'
+			})
 		).toBe(false);
 	});
 });

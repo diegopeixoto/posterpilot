@@ -1,3 +1,5 @@
+import { storedArtworkMatchesCandidate } from '$lib/server/tmdb/artwork-url';
+
 export type RootArtworkKind = 'poster' | 'background';
 
 export interface ArtworkPreviewCandidate {
@@ -6,6 +8,7 @@ export interface ArtworkPreviewCandidate {
 	url: string;
 	previewUrl: string | null;
 	kind: 'poster' | 'background' | 'season' | 'title_card';
+	provider: string;
 }
 
 export interface StagedArtworkSelection {
@@ -13,6 +16,7 @@ export interface StagedArtworkSelection {
 	kind: RootArtworkKind;
 	url: string | null;
 	candidateId: number | null;
+	provider: string | null;
 }
 
 /**
@@ -28,7 +32,12 @@ export function findStagedArtworkCandidate<T extends ArtworkPreviewCandidate>(
 	const matchesSelection = (candidate: T) =>
 		candidate.mediaItemId === selection.mediaItemId &&
 		candidate.kind === selection.kind &&
-		candidate.url === selection.url;
+		storedArtworkMatchesCandidate({
+			storedUrl: selection.url as string,
+			storedProvider: selection.provider,
+			candidateUrl: candidate.url,
+			candidateProvider: candidate.provider
+		});
 	const matchedById =
 		selection.candidateId === null
 			? null

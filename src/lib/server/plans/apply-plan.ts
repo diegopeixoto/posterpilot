@@ -27,6 +27,7 @@ export interface ApplyItemIdentity {
 	mediaType: 'movie' | 'tv' | null;
 	updatedAt: string | null;
 	selectionUpdatedAt: string | null;
+	selectionRevision: number;
 }
 
 export type ExactExternalMatch =
@@ -404,6 +405,7 @@ function buildItem(
 	operations.sort(compareOperations);
 	skips.sort(compareSkips);
 	const selectionFingerprint = hashCanonicalJson({
+		selectionRevision: input.selectionFrom.selectionRevision,
 		selectionUpdatedAt: input.selectionFrom.selectionUpdatedAt,
 		discoveryFingerprint: input.discovery.fingerprint,
 		selections

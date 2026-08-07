@@ -1,5 +1,6 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
+import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
 import * as schema from '$lib/server/db/schema';
 import {
 	collectionMemberships,
@@ -283,7 +284,8 @@ export function createCollectionSuggestionStore(
 				mediaItemId: posterCandidates.mediaItemId,
 				url: posterCandidates.url,
 				previewUrl: posterCandidates.previewUrl,
-				kind: posterCandidates.kind
+				kind: posterCandidates.kind,
+				provider: posterCandidates.provider
 			})
 			.from(posterCandidates)
 			.innerJoin(
@@ -344,7 +346,8 @@ export function createCollectionSuggestionStore(
 					id: posterCandidates.id,
 					mediaItemId: posterCandidates.mediaItemId,
 					url: posterCandidates.url,
-					kind: posterCandidates.kind
+					kind: posterCandidates.kind,
+					provider: posterCandidates.provider
 				})
 				.from(posterCandidates)
 				.innerJoin(
@@ -389,7 +392,8 @@ export function createCollectionSuggestionStore(
 					!candidate ||
 					candidate.mediaItemId !== selection.mediaItemId ||
 					candidate.kind !== selection.kind ||
-					candidate.url !== selection.url
+					candidate.url !== selection.url ||
+					candidate.provider !== selection.provider
 				) {
 					throw new CollectionSuggestionStoreError('collection_suggestion_stale');
 				}
@@ -403,17 +407,20 @@ export function createCollectionSuggestionStore(
 			}
 			const changedAt = new Date();
 			for (const [mediaItemId, selections] of byMember) {
-				const patch: Partial<typeof mediaItems.$inferInsert> = {
+				const patch: SQLiteUpdateSetSource<typeof mediaItems> = {
 					selectionUpdatedAt: changedAt,
+					selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
 					updatedAt: changedAt
 				};
 				for (const selection of selections) {
 					if (selection.kind === 'poster') {
 						patch.selectedPosterUrl = selection.url;
 						patch.selectedPosterCandidateId = selection.candidateId;
+						patch.selectedPosterProvider = selection.provider;
 					} else {
 						patch.selectedBackgroundUrl = selection.url;
 						patch.selectedBackgroundCandidateId = selection.candidateId;
+						patch.selectedBackgroundProvider = selection.provider;
 					}
 				}
 				await tx
@@ -494,13 +501,17 @@ export function createCollectionSuggestionStore(
 						? {
 								selectedPosterUrl: candidate.url,
 								selectedPosterCandidateId: candidate.id,
+								selectedPosterProvider: candidate.provider,
 								selectionUpdatedAt: changedAt,
+								selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
 								updatedAt: changedAt
 							}
 						: {
 								selectedBackgroundUrl: candidate.url,
 								selectedBackgroundCandidateId: candidate.id,
+								selectedBackgroundProvider: candidate.provider,
 								selectionUpdatedAt: changedAt,
+								selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
 								updatedAt: changedAt
 							}
 				)
@@ -529,13 +540,17 @@ export function createCollectionSuggestionStore(
 						? {
 								selectedPosterUrl: null,
 								selectedPosterCandidateId: null,
+								selectedPosterProvider: null,
 								selectionUpdatedAt: changedAt,
+								selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
 								updatedAt: changedAt
 							}
 						: {
 								selectedBackgroundUrl: null,
 								selectedBackgroundCandidateId: null,
+								selectedBackgroundProvider: null,
 								selectionUpdatedAt: changedAt,
+								selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
 								updatedAt: changedAt
 							}
 				)

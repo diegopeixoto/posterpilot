@@ -59,7 +59,10 @@ beforeEach(async () => {
 			selected_background_url text,
 			selected_poster_candidate_id integer,
 			selected_background_candidate_id integer,
+			selected_poster_provider text,
+			selected_background_provider text,
 			selection_updated_at integer,
+			selection_revision integer DEFAULT 0 NOT NULL,
 			artwork_version integer NOT NULL,
 			source_removed_at integer,
 			updated_at integer NOT NULL
@@ -186,13 +189,19 @@ describe('collection suggestion store', () => {
 				poster: mediaItems.selectedPosterCandidateId,
 				posterUrl: mediaItems.selectedPosterUrl,
 				background: mediaItems.selectedBackgroundCandidateId,
-				backgroundUrl: mediaItems.selectedBackgroundUrl
+				backgroundUrl: mediaItems.selectedBackgroundUrl,
+				posterProvider: mediaItems.selectedPosterProvider,
+				backgroundProvider: mediaItems.selectedBackgroundProvider,
+				selectionRevision: mediaItems.selectionRevision
 			})
 			.from(mediaItems);
 		expect(rows.find((row) => row.id === 1)).toMatchObject({
 			poster: 101,
 			posterUrl: 'https://api.mediux.pro/assets/101',
-			background: 102
+			background: 102,
+			posterProvider: 'mediux',
+			backgroundProvider: 'mediux',
+			selectionRevision: 1
 		});
 		expect(rows.find((row) => row.id === 2)).toMatchObject({
 			poster: 201,
@@ -220,12 +229,16 @@ describe('collection suggestion store', () => {
 		const selection = {
 			selectedPosterUrl: mediaItems.selectedPosterUrl,
 			selectedPosterCandidateId: mediaItems.selectedPosterCandidateId,
-			selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId
+			selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId,
+			selectedPosterProvider: mediaItems.selectedPosterProvider,
+			selectionRevision: mediaItems.selectionRevision
 		};
 		let [item] = await database.select(selection).from(mediaItems).where(eq(mediaItems.id, 1));
 		expect(item).toMatchObject({
 			selectedPosterCandidateId: 103,
-			selectedBackgroundCandidateId: 102
+			selectedBackgroundCandidateId: 102,
+			selectedPosterProvider: 'mediux',
+			selectionRevision: 2
 		});
 
 		await store.clearMemberSelection({
@@ -238,7 +251,9 @@ describe('collection suggestion store', () => {
 		expect(item).toMatchObject({
 			selectedPosterUrl: null,
 			selectedPosterCandidateId: null,
-			selectedBackgroundCandidateId: 102
+			selectedBackgroundCandidateId: 102,
+			selectedPosterProvider: null,
+			selectionRevision: 3
 		});
 	});
 

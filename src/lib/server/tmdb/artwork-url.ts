@@ -50,3 +50,29 @@ export function equivalentProviderArtworkUrls(
 		canonicalizeProviderArtworkUrl(right, provider)
 	);
 }
+
+/**
+ * Decide whether a persisted selection can safely inherit one candidate's provenance.
+ * Explicit custom selections never inherit a candidate, even when their URL is identical.
+ * Legacy providerless TMDB selections may recover across preview/original URL variants;
+ * providerless selections for every other provider require byte-identical URLs.
+ */
+export function storedArtworkMatchesCandidate(input: {
+	storedUrl: string;
+	storedProvider: string | null;
+	candidateUrl: string;
+	candidateProvider: string;
+}): boolean {
+	if (input.storedProvider === 'custom') return false;
+	if (input.storedProvider !== null && input.storedProvider !== input.candidateProvider) {
+		return false;
+	}
+	if (input.storedProvider === null && input.candidateProvider !== 'tmdb') {
+		return input.storedUrl === input.candidateUrl;
+	}
+	return equivalentProviderArtworkUrls(
+		input.storedUrl,
+		input.candidateUrl,
+		input.storedProvider ?? input.candidateProvider
+	);
+}

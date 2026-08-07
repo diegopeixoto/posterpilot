@@ -94,7 +94,8 @@ function operation(input: {
 			tvdbId: null,
 			mediaType: 'movie',
 			updatedAt: NOW.toISOString(),
-			selectionUpdatedAt: NOW.toISOString()
+			selectionUpdatedAt: NOW.toISOString(),
+			selectionRevision: 1
 		},
 		targetId: input.targetId ?? `source-${mediaItemId}`,
 		slot,
