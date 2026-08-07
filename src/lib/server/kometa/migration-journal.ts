@@ -1,11 +1,13 @@
 import type { KometaMigrationPlanPayload } from './migration-plan';
 import { assertKometaMigrationPlanPayload } from './migration-plan';
+import { kometaFileFingerprint } from './plan';
 
 const KOMETA_MIGRATION_JOURNAL_KIND = 'kometa_split_migration_journal' as const;
 const KOMETA_MIGRATION_JOURNAL_VERSION = 1 as const;
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+const MISSING_FILE_FINGERPRINT = kometaFileFingerprint(null);
 
 export type KometaMigrationStatus =
 	| 'prepared'
@@ -16,6 +18,7 @@ export type KometaMigrationStatus =
 	| 'completed'
 	| 'failed'
 	| 'recovery_required'
+	| 'abandoned'
 	| 'rollback_prepared'
 	| 'rolled_back';
 
@@ -115,6 +118,7 @@ const STATUSES = new Set<KometaMigrationStatus>([
 	'completed',
 	'failed',
 	'recovery_required',
+	'abandoned',
 	'rollback_prepared',
 	'rolled_back'
 ]);
@@ -209,11 +213,10 @@ export function assertKometaMigrationJournal(
 	if (value.status === 'awaiting_manual_wiring' && value.payload.config.activation !== 'manual') {
 		throw new TypeError('Only a manual migration can await wiring');
 	}
-	if (
-		value.status === 'completed' ||
-		value.status === 'rollback_prepared' ||
-		value.status === 'rolled_back'
-	) {
+	const rollbackStatus = value.status === 'rollback_prepared' || value.status === 'rolled_back';
+	const activatedTerminal =
+		value.status === 'completed' || (rollbackStatus && value.checkpoints.baselinePersisted);
+	if (activatedTerminal) {
 		if (!value.checkpoints.movieVerified || !value.checkpoints.showVerified) {
 			throw new TypeError('Activated migration is missing split verification');
 		}
@@ -232,13 +235,21 @@ export function assertKometaMigrationJournal(
 			throw new TypeError('Activated migration has invalid activation evidence');
 		}
 	}
-	if (value.status === 'rollback_prepared' || value.status === 'rolled_back') {
+	if (rollbackStatus) {
 		if (
 			value.payload.config.activation !== 'managed' ||
-			value.backups.config === null ||
-			value.activationEvidence?.type !== 'verified_config'
+			(value.backups.config === null &&
+				value.payload.config.sourceFingerprint !== MISSING_FILE_FINGERPRINT) ||
+			!value.checkpoints.movieVerified ||
+			!value.checkpoints.showVerified
 		) {
-			throw new TypeError('Rollback checkpoint requires an activated managed migration');
+			throw new TypeError('Rollback checkpoint requires a recoverable managed migration');
+		}
+		if (
+			!value.checkpoints.baselinePersisted &&
+			(value.completedAt !== null || value.activationEvidence?.type === 'user_acknowledged')
+		) {
+			throw new TypeError('Recovery rollback cannot carry a completed activation baseline');
 		}
 	}
 	if (value.status === 'rollback_prepared' && value.rolledBackAt !== null) {
@@ -246,6 +257,12 @@ export function assertKometaMigrationJournal(
 	}
 	if (value.status === 'rolled_back' && !value.rolledBackAt) {
 		throw new TypeError('Rolled-back migration is missing its timestamp');
+	}
+	if (
+		value.status === 'abandoned' &&
+		(value.lastFailure === null || value.completedAt !== null || value.rolledBackAt !== null)
+	) {
+		throw new TypeError('Abandoned migration must preserve one incomplete failure');
 	}
 }
 

@@ -18,6 +18,10 @@ import {
 	normalizeKometaMetadataPathPrefix
 } from '$lib/server/kometa/reference-path';
 import { LEGACY_SERVER_INSTANCE_ID } from '$lib/server/server-instances/legacy';
+import {
+	assertKometaMigrationControlLease,
+	type KometaMigrationControlLease
+} from '$lib/server/kometa/migration-control-lock';
 
 export type { KometaSnapshot, KometaSnapshotScope };
 
@@ -412,14 +416,17 @@ function scopedSettingsKey(base: string, serverInstanceId: string): string {
  * the "Libraries to sync" checklist instantly without a network round-trip.
  */
 export async function getCachedLibraries(
-	serverInstanceId: string = LEGACY_SERVER_INSTANCE_ID
+	serverInstanceId: string = LEGACY_SERVER_INSTANCE_ID,
+	database: SettingsDatabaseReader = db
 ): Promise<CachedLibrary[]> {
-	const scoped = await readKv(scopedSettingsKey(CACHED_LIBRARIES_KEY, serverInstanceId));
+	const scoped = await readKv(scopedSettingsKey(CACHED_LIBRARIES_KEY, serverInstanceId), database);
 	// Preserve the existing one-server installation cache until it is refreshed once
 	// under the new scoped key. Never expose that fallback to a different instance.
 	const value =
 		scoped ??
-		(serverInstanceId === LEGACY_SERVER_INSTANCE_ID ? await readKv(CACHED_LIBRARIES_KEY) : null);
+		(serverInstanceId === LEGACY_SERVER_INSTANCE_ID
+			? await readKv(CACHED_LIBRARIES_KEY, database)
+			: null);
 	if (!value) return [];
 	try {
 		const arr = JSON.parse(value);
@@ -483,13 +490,20 @@ const KOMETA_MANAGED_LIBRARIES_KEY = 'kometaManagedLibraries';
 const KOMETA_DEFAULT_COLLECTIONS_KEY = 'kometaDefaultCollections';
 const KOMETA_MANAGED_SETTINGS_KEY = 'kometaManagedSettings';
 
-async function readKv(key: string): Promise<string | null> {
-	const row = (await db.select().from(settings).where(eq(settings.key, key)).limit(1))[0];
+export type SettingsDatabaseReader = Pick<typeof db, 'select'>;
+type SettingsDatabaseWriter = Pick<typeof db, 'delete' | 'insert'>;
+
+async function readKv(key: string, database: SettingsDatabaseReader = db): Promise<string | null> {
+	const row = (await database.select().from(settings).where(eq(settings.key, key)).limit(1))[0];
 	return row?.value ?? null;
 }
 
-async function writeKv(key: string, value: string): Promise<void> {
-	await db
+async function writeKv(
+	key: string,
+	value: string,
+	database: Pick<typeof db, 'insert'> = db
+): Promise<void> {
+	await database
 		.insert(settings)
 		.values({ key, value })
 		.onConflictDoUpdate({ target: settings.key, set: { value } });
@@ -506,8 +520,10 @@ function parseStringArray(raw: string | null): string[] {
 }
 
 /** Section keys the user has marked as managed in Kometa's config. */
-export async function getKometaManagedLibraries(): Promise<string[]> {
-	return parseStringArray(await readKv(KOMETA_MANAGED_LIBRARIES_KEY));
+export async function getKometaManagedLibraries(
+	database: SettingsDatabaseReader = db
+): Promise<string[]> {
+	return parseStringArray(await readKv(KOMETA_MANAGED_LIBRARIES_KEY, database));
 }
 
 export async function setKometaManagedLibraries(sectionKeys: string[]): Promise<void> {
@@ -548,15 +564,12 @@ export async function getKometaManagedSettings(): Promise<Record<string, string>
 	}
 }
 
-export async function setKometaManagedSettings(values: Record<string, string>): Promise<void> {
-	await writeKv(KOMETA_MANAGED_SETTINGS_KEY, JSON.stringify(values));
-}
-
 /** The exact-scope last-applied snapshot used to compute safe removals. */
 export async function getKometaLastApplied(
-	scope: KometaSnapshotScope
+	scope: KometaSnapshotScope,
+	database: SettingsDatabaseReader = db
 ): Promise<KometaSnapshot | null> {
-	const raw = await readKv(kometaLastAppliedSettingKey(scope));
+	const raw = await readKv(kometaLastAppliedSettingKey(scope), database);
 	return raw === null ? null : parseKometaLastApplied(raw, scope);
 }
 
@@ -565,6 +578,16 @@ export async function setKometaLastApplied(
 	scope: KometaSnapshotScope
 ): Promise<void> {
 	await writeKv(kometaLastAppliedSettingKey(scope), serializeKometaLastApplied(scope, snapshot));
+}
+
+export interface KometaConfigMutationStateCommit {
+	managedSettings: Record<string, string>;
+	structured?: {
+		managedLibraries: string[];
+		defaultCollections: Record<string, string[]>;
+		lastApplied: KometaSnapshot;
+		scope: KometaSnapshotScope;
+	};
 }
 
 // ── Optional authentication (internal KV, not WRITABLE_KEYS) ───────────────────
@@ -663,27 +686,40 @@ export {
 } from '$lib/server/posters/score-weights';
 
 /** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
-export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
+export async function saveSettings(
+	values: Partial<Record<ConfigKey, string>>,
+	controlLease?: KometaMigrationControlLease
+): Promise<void> {
 	const entries = Object.entries(values).filter(([k]) => WRITABLE_KEYS.includes(k as ConfigKey));
 	const encKey = getEncryptionKey();
-	for (const [key, value] of entries) {
-		// `.` is the persisted representation of an explicit empty Kometa-visible
-		// prefix. A truly missing row retains the safer `config` default.
-		const normalizedValue =
-			key === 'kometaMetadataPathPrefix' && value !== undefined
-				? normalizeKometaMetadataPathPrefix(value) || '.'
-				: value;
-		if (normalizedValue === '' || normalizedValue === undefined) {
-			await db.delete(settings).where(eq(settings.key, key));
-		} else {
-			// Secrets are encrypted at rest; everything else is stored verbatim.
-			const stored = isSecretKey(key) ? encryptSecret(normalizedValue, encKey) : normalizedValue;
-			await db
-				.insert(settings)
-				.values({ key, value: stored })
-				.onConflictDoUpdate({ target: settings.key, set: { value: stored } });
+	const persist = async (database: SettingsDatabaseWriter): Promise<void> => {
+		for (const [key, value] of entries) {
+			// `.` is the persisted representation of an explicit empty Kometa-visible
+			// prefix. A truly missing row retains the safer `config` default.
+			const normalizedValue =
+				key === 'kometaMetadataPathPrefix' && value !== undefined
+					? normalizeKometaMetadataPathPrefix(value) || '.'
+					: value;
+			if (normalizedValue === '' || normalizedValue === undefined) {
+				await database.delete(settings).where(eq(settings.key, key));
+			} else {
+				// Secrets are encrypted at rest; everything else is stored verbatim.
+				const stored = isSecretKey(key) ? encryptSecret(normalizedValue, encKey) : normalizedValue;
+				await database
+					.insert(settings)
+					.values({ key, value: stored })
+					.onConflictDoUpdate({ target: settings.key, set: { value: stored } });
+			}
 		}
+	};
+	if (controlLease) {
+		await db.transaction(async (tx) => {
+			await assertKometaMigrationControlLease(tx, controlLease);
+			await persist(tx);
+		});
+		return;
 	}
+	await persist(db);
 }
 
 /**

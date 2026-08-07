@@ -181,22 +181,31 @@ describe('server management domain service', () => {
 
 	it('persists replacement details only after a successful test', async () => {
 		const { service, store } = fixture({ ok: true, serverName: 'Updated' });
-		await service.update('server-1', {
-			baseUrl: 'http://new-plex:32400/',
-			credential: 'replacement-token'
-		});
+		const writeFence = vi.fn(async () => undefined);
+		await service.update(
+			'server-1',
+			{
+				baseUrl: 'http://new-plex:32400/',
+				credential: 'replacement-token'
+			},
+			writeFence
+		);
 
-		expect(store.update).toHaveBeenCalledWith('server-1', {
-			baseUrl: 'http://new-plex:32400',
-			credential: 'replacement-token',
-			connectionStatus: 'healthy',
-			lastTestedAt: NOW,
-			capabilities: expect.objectContaining({
-				posterWrite: 'supported',
-				currentImageRetrieval: 'supported',
-				artworkDelete: 'unsupported'
-			})
-		});
+		expect(store.update).toHaveBeenCalledWith(
+			'server-1',
+			{
+				baseUrl: 'http://new-plex:32400',
+				credential: 'replacement-token',
+				connectionStatus: 'healthy',
+				lastTestedAt: NOW,
+				capabilities: expect.objectContaining({
+					posterWrite: 'supported',
+					currentImageRetrieval: 'supported',
+					artworkDelete: 'unsupported'
+				})
+			},
+			writeFence
+		);
 	});
 
 	it('tests before enabling and leaves the instance disabled on failure', async () => {
@@ -220,6 +229,10 @@ describe('server management domain service', () => {
 
 		await service.disconnect('server-1', true);
 		expect(store.disconnect).toHaveBeenCalledWith('server-1');
+
+		const writeFence = vi.fn(async () => undefined);
+		await service.disconnect('server-1', true, writeFence);
+		expect(store.disconnect).toHaveBeenLastCalledWith('server-1', writeFence);
 	});
 
 	it('refuses to update or re-enable disconnected history', async () => {

@@ -5,6 +5,7 @@
 		ROLLBACK_DISCLOSURE_BATCH_SIZE,
 		disclosureState,
 		nextDisclosureLimit,
+		reconciledMigrationFeedback,
 		shouldDiscardFrozenPreview
 	} from './kometa-migration-view-state';
 
@@ -17,6 +18,7 @@
 		| 'completed'
 		| 'failed'
 		| 'recovery_required'
+		| 'abandoned'
 		| 'rollback_prepared'
 		| 'rolled_back';
 	type Activation = 'managed' | 'manual';
@@ -61,8 +63,15 @@
 		};
 		canResume: boolean;
 		canRestartPreview: boolean;
+		canAbandon: boolean;
 		requiresAcknowledgment: boolean;
 		canRollback: boolean;
+		recoveryGuidance:
+			| 'manual_safe_to_abandon'
+			| 'source_safe_to_abandon'
+			| 'proposed_safe_to_rollback'
+			| 'divergent_manual_intervention'
+			| null;
 	};
 	type FileChange = {
 		operation: 'add' | 'unchanged' | 'normalize_key';
@@ -143,28 +152,33 @@
 	};
 
 	let {
+		locale,
 		required,
 		reason,
 		migration,
 		stateError = null,
-		mutationDisabled = false,
+		mutationDisabledMessage = null,
 		onChanged
 	}: {
+		locale: string;
 		required: boolean;
 		reason: 'active_legacy_reference' | 'unknown_config_with_legacy_file' | null;
 		migration: MigrationState | null;
 		stateError?: 'journal_unreadable' | null;
-		mutationDisabled?: boolean;
+		mutationDisabledMessage?: string | null;
 		onChanged: () => void | Promise<void>;
 	} = $props();
 
 	let preview = $state<MigrationPreview | null>(null);
 	let rollbackPreview = $state<RollbackPreview | null>(null);
+	let previewMigrationVersion = $state<string | null>(null);
+	let rollbackMigrationVersion = $state<string | null>(null);
 	let busyAction = $state<
 		| 'preview'
 		| 'confirm'
 		| 'cancel-preview'
 		| 'resume'
+		| 'abandon'
 		| 'acknowledge'
 		| 'rollback-preview'
 		| 'rollback'
@@ -176,6 +190,8 @@
 	let acceptAmbiguous = $state(false);
 	let acknowledgeManual = $state(false);
 	let confirmRollback = $state(false);
+	let confirmAbandon = $state(false);
+	let abandonMigrationVersion = $state<string | null>(null);
 	let panelHeading = $state<HTMLElement | null>(null);
 	let previewHeading = $state<HTMLElement | null>(null);
 	let previewButton = $state<HTMLButtonElement | null>(null);
@@ -190,6 +206,7 @@
 
 	const ambiguousCount = $derived(preview?.display.ambiguous.length ?? 0);
 	const isBusy = $derived(busyAction !== null);
+	const mutationDisabled = $derived(mutationDisabledMessage !== null);
 	const ambiguousDisclosure = $derived(
 		disclosureState(
 			ambiguousVisibleLimit,
@@ -277,15 +294,41 @@
 
 	function clearMigrationPreview(): void {
 		preview = null;
+		previewMigrationVersion = null;
 		acceptAmbiguous = false;
 		resetMigrationDisclosure();
 	}
 
 	function clearRollbackPreview(): void {
 		rollbackPreview = null;
+		rollbackMigrationVersion = null;
 		confirmRollback = false;
 		resetRollbackDisclosure();
 	}
+
+	function migrationVersion(value: MigrationState | null): string {
+		return value ? `${value.migrationId}\u0000${value.status}\u0000${value.updatedAt}` : 'none';
+	}
+
+	// A refresh after confirmation can expose a durable journal checkpoint even
+	// when the request itself failed. Never leave that consumed preview actionable.
+	$effect(() => {
+		const currentVersion = migrationVersion(migration);
+		if (preview && previewMigrationVersion !== null && previewMigrationVersion !== currentVersion) {
+			clearMigrationPreview();
+		}
+		if (
+			rollbackPreview &&
+			rollbackMigrationVersion !== null &&
+			rollbackMigrationVersion !== currentVersion
+		) {
+			clearRollbackPreview();
+		}
+		if (abandonMigrationVersion !== currentVersion) {
+			confirmAbandon = false;
+			abandonMigrationVersion = currentVersion;
+		}
+	});
 
 	function requestErrorCode(error: unknown): string {
 		return error instanceof MigrationRequestError ? error.code : 'kometa_migration_request_failed';
@@ -301,15 +344,46 @@
 		queueMicrotask(() => panelHeading?.focus());
 	}
 
+	function reconciledSuccessNotice(
+		action: typeof busyAction,
+		status: 'completed' | 'awaiting_manual_wiring' | 'rolled_back' | 'abandoned'
+	): string {
+		if (status === 'rolled_back') return m.kometa_migration_rolled_back_notice();
+		if (status === 'abandoned') return m.kometa_migration_abandoned_notice();
+		if (action === 'resume') return m.kometa_migration_resumed_notice();
+		if (action === 'acknowledge') return m.kometa_migration_acknowledged_notice();
+		return m.kometa_migration_started_notice();
+	}
+
 	async function captureMutationError(error: unknown): Promise<string> {
 		const code = requestErrorCode(error);
-		errorCode = code;
+		const previousVersion = migrationVersion(migration);
+		const action = busyAction;
+		let refreshed = false;
 		// A failed response may still follow a durably recorded checkpoint. Refresh so
 		// recovery/resume controls reflect the journal without asking for a page reload.
 		try {
 			await onChanged();
+			refreshed = true;
 		} catch {
 			// Keep the bounded action error; never replace it with a client refresh detail.
+		}
+		const reconciled = refreshed
+			? reconciledMigrationFeedback(
+					previousVersion,
+					migrationVersion(migration),
+					migration
+						? { status: migration.status, hasLastFailure: migration.lastFailure !== null }
+						: null
+				)
+			: null;
+		if (reconciled === 'failure') {
+			errorCode = null;
+		} else if (reconciled !== null) {
+			errorCode = null;
+			notice = reconciledSuccessNotice(action, reconciled);
+		} else {
+			errorCode = code;
 		}
 		queueMicrotask(() => panelHeading?.focus());
 		return code;
@@ -364,6 +438,7 @@
 			const nextPreview = await post<MigrationPreview>('/api/kometa/migration/preview', undefined, [
 				'preview'
 			]);
+			previewMigrationVersion = migrationVersion(migration);
 			preview = nextPreview;
 			resetMigrationDisclosure();
 			queueMicrotask(() => previewHeading?.focus());
@@ -448,6 +523,26 @@
 		}
 	}
 
+	async function abandonMigration(): Promise<void> {
+		if (isBusy || mutationDisabled || !migration?.canAbandon || !confirmAbandon) return;
+		busyAction = 'abandon';
+		clearFeedback();
+		try {
+			await post<MigrationState>(
+				'/api/kometa/migration/abandon',
+				{ migrationId: migration.migrationId },
+				['migration', 'state']
+			);
+			confirmAbandon = false;
+			notice = m.kometa_migration_abandoned_notice();
+			await refreshAndFocus();
+		} catch (error) {
+			await captureMutationError(error);
+		} finally {
+			busyAction = null;
+		}
+	}
+
 	async function acknowledgeMigration(): Promise<void> {
 		if (
 			isBusy ||
@@ -489,6 +584,7 @@
 				undefined,
 				['preview', 'rollback']
 			);
+			rollbackMigrationVersion = migrationVersion(migration);
 			rollbackPreview = nextPreview;
 			resetRollbackDisclosure();
 			queueMicrotask(() => previewHeading?.focus());
@@ -553,7 +649,7 @@
 
 	function dateLabel(value: string): string {
 		try {
-			return new Intl.DateTimeFormat(undefined, {
+			return new Intl.DateTimeFormat(locale, {
 				dateStyle: 'medium',
 				timeStyle: 'short'
 			}).format(new Date(value));
@@ -580,6 +676,8 @@
 				return m.kometa_migration_status_failed();
 			case 'recovery_required':
 				return m.kometa_migration_status_recovery_required();
+			case 'abandoned':
+				return m.kometa_migration_status_abandoned();
 			case 'rollback_prepared':
 				return m.kometa_migration_rollback_title();
 			case 'rolled_back':
@@ -605,6 +703,8 @@
 				return m.kometa_migration_status_failed_hint();
 			case 'recovery_required':
 				return m.kometa_migration_status_recovery_required_hint();
+			case 'abandoned':
+				return m.kometa_migration_status_abandoned_hint();
 			case 'rollback_prepared':
 				return m.kometa_migration_rollback_hint();
 			case 'rolled_back':
@@ -624,6 +724,7 @@
 			case 'plan_expired':
 			case 'plan_consumed':
 			case 'plan_digest_mismatch':
+			case 'migration_evidence_changed':
 				return m.kometa_migration_error_stale();
 			case 'kometa_migration_in_progress':
 				return m.kometa_migration_error_in_progress();
@@ -633,12 +734,31 @@
 				return m.kometa_migration_error_scope_changed();
 			case 'kometa_migration_ambiguous_confirmation_required':
 				return m.kometa_migration_error_ambiguous_confirmation();
+			case 'kometa_migration_config_incompatible':
+				return m.kometa_migration_error_config_incompatible();
 			case 'kometa_migration_manual_ack_mismatch':
 				return m.kometa_migration_error_manual_mismatch();
+			case 'kometa_migration_abandon_unavailable':
+				return m.kometa_migration_error_abandon_unavailable();
 			case 'kometa_migration_rollback_unavailable':
 				return m.kometa_migration_error_rollback_unavailable();
 			default:
 				return m.kometa_migration_error_generic();
+		}
+	}
+
+	function recoveryGuidanceMessage(guidance: MigrationState['recoveryGuidance']): string | null {
+		switch (guidance) {
+			case 'manual_safe_to_abandon':
+				return m.kometa_migration_recovery_manual_hint();
+			case 'source_safe_to_abandon':
+				return m.kometa_migration_recovery_source_hint();
+			case 'proposed_safe_to_rollback':
+				return m.kometa_migration_recovery_proposed_hint();
+			case 'divergent_manual_intervention':
+				return m.kometa_migration_recovery_divergent_hint();
+			default:
+				return null;
 		}
 	}
 
@@ -894,9 +1014,9 @@
 			</div>
 		</div>
 
-		{#if !stateError && mutationDisabled && (required || migration?.canResume || migration?.requiresAcknowledgment)}
+		{#if !stateError && mutationDisabledMessage && (required || migration?.canResume || migration?.canAbandon || migration?.requiresAcknowledgment || migration?.canRollback || migration?.canRestartPreview)}
 			<p class="mt-3 text-xs text-amber-300" role="status">
-				{m.kometa_migration_save_settings_first()}
+				{mutationDisabledMessage}
 			</p>
 		{/if}
 
@@ -987,9 +1107,9 @@
 							<p class="font-medium text-neutral-200">
 								{mediaKindLabel(kind as MediaKind)}
 							</p>
-							<p class="mt-2 text-neutral-500">{m.kometa_migration_physical_file()}</p>
+							<p class="mt-2 text-neutral-400">{m.kometa_migration_physical_file()}</p>
 							<p class="break-all font-mono text-neutral-300">{file.physicalPath}</p>
-							<p class="mt-2 text-neutral-500">{m.kometa_migration_config_reference()}</p>
+							<p class="mt-2 text-neutral-400">{m.kometa_migration_config_reference()}</p>
 							<p class="break-all font-mono text-neutral-300">{file.configReference}</p>
 						</div>
 					{/each}
@@ -999,6 +1119,9 @@
 			{#if migration.lastFailure}
 				<div class="mt-3 rounded-lg border border-red-900/70 bg-red-950/30 p-3" role="alert">
 					<p class="text-sm font-medium text-red-200">{m.kometa_migration_last_failure()}</p>
+					<p class="mt-1 text-xs text-red-200">
+						{errorMessage(migration.lastFailure.code)}
+					</p>
 					<p class="mt-1 text-xs text-red-300">
 						{m.kometa_migration_failure_detail({
 							phase: migration.lastFailure.phase,
@@ -1006,6 +1129,38 @@
 							date: dateLabel(migration.lastFailure.at)
 						})}
 					</p>
+				</div>
+			{/if}
+
+			{#if migration.recoveryGuidance}
+				<div class="mt-3 rounded-lg border border-amber-900/70 bg-amber-950/25 p-3" role="status">
+					<p class="text-sm font-medium text-amber-100">
+						{m.kometa_migration_recovery_title()}
+					</p>
+					<p class="mt-1 text-xs text-amber-200">
+						{recoveryGuidanceMessage(migration.recoveryGuidance)}
+					</p>
+					{#if migration.canAbandon}
+						<label class="mt-3 flex max-w-3xl items-start gap-2 text-xs text-neutral-200">
+							<input
+								type="checkbox"
+								bind:checked={confirmAbandon}
+								disabled={isBusy || mutationDisabled}
+								class="mt-0.5"
+							/>
+							<span>{m.kometa_migration_abandon_confirm()}</span>
+						</label>
+						<button
+							type="button"
+							class="btn btn-ghost mt-3 min-h-11"
+							disabled={isBusy || mutationDisabled || !confirmAbandon}
+							onclick={abandonMigration}
+						>
+							{busyAction === 'abandon'
+								? m.kometa_migration_abandoning()
+								: m.kometa_migration_abandon_action()}
+						</button>
+					{/if}
 				</div>
 			{/if}
 
@@ -1022,7 +1177,7 @@
 					</ol>
 					<pre
 						class="mt-3 max-h-72 overflow-auto rounded-lg border border-neutral-800 bg-black/60 p-3 text-xs whitespace-pre-wrap text-neutral-200">{migration.manualSnippet}</pre>
-					<p class="mt-2 font-mono text-[11px] text-neutral-500">
+					<p class="mt-2 font-mono text-[11px] text-neutral-400">
 						{m.kometa_migration_fingerprint({
 							fingerprint: shortFingerprint(migration.manualSnippetFingerprint)
 						})}
@@ -1046,18 +1201,17 @@
 							? m.kometa_migration_acknowledging()
 							: m.kometa_migration_acknowledge_action()}
 					</button>
-					<p class="mt-2 text-[11px] text-neutral-500">
+					<p class="mt-2 text-[11px] text-neutral-400">
 						{m.kometa_migration_manual_not_verified()}
 					</p>
 				</div>
 			{/if}
 		{/if}
 
-		<div class="sr-only" aria-live="polite" aria-atomic="true">
-			{#if busyAction}{m.kometa_migration_working()}{/if}
-			{#if notice}{notice}{/if}
-			{#if disclosureAnnouncement}{disclosureAnnouncement}{/if}
-		</div>
+		<p class="sr-only" aria-live="polite" aria-atomic="true">
+			{busyAction ? m.kometa_migration_working() : ''}
+		</p>
+		<p class="sr-only" aria-live="polite" aria-atomic="true">{disclosureAnnouncement}</p>
 		{#if errorCode}<p class="mt-3 text-sm text-red-300" role="alert">
 				{errorMessage(errorCode)}
 			</p>{/if}
@@ -1179,7 +1333,7 @@
 											{item.destination.mappingId}
 										</span>
 									</div>
-									<p class="mt-1 text-neutral-500">
+									<p class="mt-1 text-neutral-400">
 										{m.kometa_migration_evidence({ evidence: evidenceLabel(item.evidence) })}
 										{#if item.slots.length}
 											· {m.kometa_migration_slots({
@@ -1229,7 +1383,7 @@
 							<div class="flex items-start justify-between gap-3">
 								<div>
 									<h4 class="text-sm font-medium text-neutral-100">{file.filename}</h4>
-									<p class="mt-1 break-all font-mono text-[11px] text-neutral-500">
+									<p class="mt-1 break-all font-mono text-[11px] text-neutral-400">
 										{file.physicalPath}
 									</p>
 								</div>
@@ -1329,7 +1483,7 @@
 							<div
 								class="flex items-baseline justify-between gap-3 border-b border-neutral-800/70 pb-1"
 							>
-								<dt class="text-neutral-500">
+								<dt class="text-neutral-400">
 									{fingerprintLabel(label as keyof MigrationPreview['fingerprints'])}
 								</dt>
 								<dd class="font-mono text-neutral-300">{shortFingerprint(fingerprint)}</dd>
@@ -1363,7 +1517,7 @@
 							? m.kometa_migration_cancelling()
 							: m.kometa_migration_cancel_preview()}
 					</button>
-					<p class="text-xs text-neutral-500">{m.kometa_migration_cancel_hint()}</p>
+					<p class="text-xs text-neutral-400">{m.kometa_migration_cancel_hint()}</p>
 				</div>
 			</div>
 		{/if}
@@ -1398,7 +1552,7 @@
 							<li class="flex flex-wrap gap-x-2 font-mono text-xs">
 								<span class="font-sans text-red-300">{operationLabel(change.op)}</span>
 								<span class="break-all text-neutral-300">{change.path}</span>
-								{#if change.before != null}<span class="text-neutral-500">{change.before}</span
+								{#if change.before != null}<span class="text-neutral-400">{change.before}</span
 									>{/if}
 								{#if change.after != null}<span class="text-neutral-400">→ {change.after}</span
 									>{/if}
@@ -1463,7 +1617,7 @@
 							? m.kometa_migration_cancelling()
 							: m.kometa_migration_cancel_preview()}
 					</button>
-					<p class="self-center text-xs text-neutral-500">
+					<p class="self-center text-xs text-neutral-400">
 						{m.kometa_migration_cancel_hint()}
 					</p>
 				</div>

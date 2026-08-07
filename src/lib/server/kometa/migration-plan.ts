@@ -131,6 +131,8 @@ export interface KometaMigrationPlanPayload {
 	evidenceFingerprint: string;
 	/** Ownership state restored together with config.yml during an explicit rollback. */
 	previousSnapshot: KometaSnapshot | null;
+	/** Exact deep snapshot-and-presence identity observed when the preview was built. */
+	previousSnapshotFingerprint: string;
 	/** Frozen ownership baseline installed only after activation succeeds. */
 	nextSnapshot: KometaSnapshot;
 	/** Safe, exact instructions for an unmanaged config. Does not contain provider URLs. */
@@ -141,6 +143,10 @@ export interface KometaMigrationPlanPayload {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function kometaMigrationBaselineFingerprint(snapshot: KometaSnapshot | null): string {
+	return hashCanonicalJson({ snapshot });
 }
 
 function assertString(value: unknown, label: string): asserts value is string {
@@ -367,6 +373,13 @@ export function assertKometaMigrationPlanPayload(
 	assertFingerprint(payload.evidenceFingerprint, 'evidenceFingerprint');
 	if (payload.previousSnapshot !== null && !isRecord(payload.previousSnapshot)) {
 		throw new TypeError('Invalid previous Kometa snapshot');
+	}
+	assertFingerprint(payload.previousSnapshotFingerprint, 'previousSnapshotFingerprint');
+	if (
+		kometaMigrationBaselineFingerprint(payload.previousSnapshot as KometaSnapshot | null) !==
+		payload.previousSnapshotFingerprint
+	) {
+		throw new TypeError('Previous Kometa snapshot fingerprint mismatch');
 	}
 	if (!isRecord(payload.nextSnapshot)) throw new TypeError('Invalid next Kometa snapshot');
 	if (

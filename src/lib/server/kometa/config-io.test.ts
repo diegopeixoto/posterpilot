@@ -19,14 +19,23 @@ import {
 	createProtectedBackup,
 	createProtectedBackupAtBinding,
 	canonicalConfigPath,
+	clearConfigCommitCancellationAtBinding,
+	clearConfigCommitProofAtBinding,
+	discardUnpublishedConfigCommitProofAtBinding,
+	finalizePublishedConfigCommitProofAtBinding,
 	freezeConfigPath,
+	inspectConfigCommitProofAtBinding,
 	listBackups,
+	prepareConfigCommitProofAtBinding,
 	pruneBackups,
 	protectedBackupName,
 	readBackup,
 	readBackupAtBinding,
 	readConfig,
 	readConfigAtBinding,
+	recoverConfigCommitProofAtBinding,
+	recoverConfigQuarantineAtBinding,
+	removeConfigAtomicAtBinding,
 	restoreBackup,
 	validateConfigPathBinding,
 	withConfigLock,
@@ -159,6 +168,465 @@ describe('preview-bound migration I/O', () => {
 		expect(readdirSync(DIR).some((entry) => entry.includes('.posterpilot-bak-'))).toBe(false);
 	});
 
+	it('does not treat externally written intended bytes as an idempotent source match', () => {
+		const original = 'before: true\n';
+		const intended = 'after: true\n';
+		writeFileSync(FILE, original, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		writeFileSync(FILE, intended, 'utf8');
+
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, intended, 'migration', {
+				expectedSource: original
+			})
+		).toThrow(PhysicalPathInspectionError);
+		expect(readFileSync(FILE, 'utf8')).toBe(intended);
+	});
+
+	it('keeps a token proof as the prepared inode and clears it after commit', () => {
+		const source = 'before: proof\n';
+		const proposed = 'after: proof\n';
+		const token = 'checkpoint-proof-123';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+			expectedSource: source,
+			proofToken: token
+		});
+
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+		expect(statSync(FILE).nlink).toBe(2);
+		expect(readdirSync(DIR).some((name) => name.includes('.tmp-'))).toBe(false);
+		clearConfigCommitProofAtBinding(binding, token, proposed);
+		expect(existsSync(proof)).toBe(false);
+		expect(statSync(FILE).nlink).toBe(1);
+	});
+
+	it('consumes a proof that was durably prepared before its checkpoint', () => {
+		const source = 'before: precreated-proof\n';
+		const proposed = 'after: precreated-proof\n';
+		const token = 'checkpoint-precreated-proof';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+		const proofInode = statSync(proof).ino;
+		writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+			expectedSource: source,
+			proofToken: token,
+			preparedProof: true
+		});
+
+		expect(readFileSync(FILE, 'utf8')).toBe(proposed);
+		expect(statSync(FILE).ino).toBe(proofInode);
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+	});
+
+	it('performs a full inode CAS for a precreated no-op proof', () => {
+		const content = 'same: precreated-proof\n';
+		const token = 'checkpoint-precreated-noop';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, content, 'utf8');
+		const sourceInode = statSync(FILE).ino;
+		const binding = freezeConfigPath(FILE);
+
+		prepareConfigCommitProofAtBinding(binding, token, content);
+		const proofInode = statSync(proof).ino;
+		expect(proofInode).not.toBe(sourceInode);
+		writeConfigAtomicAtBinding(binding, content, 'migration', {
+			expectedSource: content,
+			proofToken: token,
+			preparedProof: true
+		});
+
+		expect(statSync(FILE).ino).toBe(proofInode);
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+		expect(recoverConfigCommitProofAtBinding(binding, token, content, content)).toBe('published');
+	});
+
+	it('never recreates a cancelled precreated proof', () => {
+		const source = 'before: cancelled-proof\n';
+		const proposed = 'after: cancelled-proof\n';
+		const token = 'checkpoint-cancelled-proof';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+		unlinkSync(proof);
+
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				preparedProof: true
+			})
+		).toThrow(PhysicalPathInspectionError);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(proof)).toBe(false);
+	});
+
+	it('rejects simultaneous proof and cancellation artifacts without publishing', () => {
+		const source = 'before: conflicting-proof\n';
+		const proposed = 'after: conflicting-proof\n';
+		const token = 'checkpoint-conflicting-proof';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		const cancellation = join(DIR, `.config.yml.posterpilot-commit-proof-cancel-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+		linkSync(proof, cancellation);
+
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('ambiguous');
+		expect(recoverConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('ambiguous');
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				preparedProof: true
+			})
+		).toThrow(PhysicalPathInspectionError);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+	});
+
+	it('restores the source when cancellation lands after prepared-proof validation', () => {
+		const source = 'before: cancel-race\n';
+		const proposed = 'after: cancel-race\n';
+		const token = 'checkpoint-cancel-race';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				preparedProof: true,
+				testHooks: { afterProofCreated: () => unlinkSync(proof) }
+			})
+		).toThrow(PhysicalPathInspectionError);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+		expect(existsSync(proof)).toBe(false);
+	});
+
+	it('cleanup-only proof finalization never republishes after an external replacement', () => {
+		const source = 'before: cleanup-only\n';
+		const proposed = 'after: cleanup-only\n';
+		const token = 'checkpoint-cleanup-only';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+			expectedSource: source,
+			proofToken: token
+		});
+		unlinkSync(FILE);
+		writeFileSync(FILE, source, 'utf8');
+
+		expect(finalizePublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'ambiguous'
+		);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(readFileSync(proof, 'utf8')).toBe(proposed);
+	});
+
+	it('creates an exact inode proof for an idempotent file write that still commits DB state', () => {
+		const content = 'same: authorized\n';
+		const token = 'checkpoint-noop-proof';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, content, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		expect(
+			writeConfigAtomicAtBinding(binding, content, 'migration', {
+				expectedSource: content,
+				proofToken: token
+			})
+		).toEqual({ backup: null });
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+		expect(recoverConfigCommitProofAtBinding(binding, token, content, content)).toBe('published');
+		clearConfigCommitProofAtBinding(binding, token, content);
+		expect(existsSync(proof)).toBe(false);
+	});
+
+	it('classifies proofless external drift as superseding an unpublished checkpoint', () => {
+		const source = 'before: checkpoint\n';
+		const proposed = 'after: checkpoint\n';
+		const token = 'checkpoint-superseded';
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		writeFileSync(FILE, 'external: winner\n', 'utf8');
+
+		expect(recoverConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('superseded');
+		expect(readFileSync(FILE, 'utf8')).toBe('external: winner\n');
+	});
+
+	it('completes a proven publication after a crash between proof and target', () => {
+		const source = 'before: proof-gap\n';
+		const proposed = 'after: proof-gap\n';
+		const token = 'checkpoint-proof-gap';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				testHooks: {
+					afterProofCreated: () => {
+						throw new Error('crash after proof');
+					}
+				}
+			})
+		).toThrow('crash after proof');
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(proof)).toBe(true);
+		expect(readdirSync(DIR).some((name) => name.includes('.tmp-'))).toBe(false);
+
+		expect(recoverConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('published');
+		expect(readFileSync(FILE, 'utf8')).toBe(proposed);
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+	});
+
+	it('inspects a prepared proof without publishing it and can discard the attempt', () => {
+		const source = 'before: prepared\n';
+		const proposed = 'after: prepared\n';
+		const token = 'checkpoint-prepared-inspection';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		const cancellation = join(DIR, `.config.yml.posterpilot-commit-proof-cancel-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				testHooks: {
+					afterProofCreated: () => {
+						throw new Error('stop');
+					}
+				}
+			})
+		).toThrow('stop');
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('prepared');
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(proof)).toBe(true);
+
+		expect(discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'discarded'
+		);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(proof)).toBe(false);
+		expect(existsSync(cancellation)).toBe(true);
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('cancelled');
+		clearConfigCommitCancellationAtBinding(binding, token, proposed);
+		expect(existsSync(cancellation)).toBe(false);
+	});
+
+	it('restores the exact detached predecessor while discarding a stale prepared proof', () => {
+		const source = 'before: detached\n';
+		const proposed = 'after: detached\n';
+		const token = 'checkpoint-detached-discard';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		const cancellation = join(DIR, `.config.yml.posterpilot-commit-proof-cancel-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		writeFileSync(proof, proposed, { encoding: 'utf8', mode: 0o600 });
+		renameSync(FILE, CAS_QUARANTINE);
+
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('prepared');
+		expect(discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'discarded'
+		);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(proof)).toBe(false);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+		expect(existsSync(cancellation)).toBe(true);
+		clearConfigCommitCancellationAtBinding(binding, token, proposed);
+	});
+
+	it('retries discard from its durable cancellation marker after source restore crashes', () => {
+		const source = 'before: restored-crash\n';
+		const proposed = 'after: restored-crash\n';
+		const token = 'checkpoint-restored-crash';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		const cancellation = join(DIR, `.config.yml.posterpilot-commit-proof-cancel-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		writeFileSync(proof, proposed, { encoding: 'utf8', mode: 0o600 });
+		renameSync(FILE, CAS_QUARANTINE);
+
+		expect(() =>
+			discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed, {
+				afterSourceRestored: () => {
+					throw new Error('crash after source restore');
+				}
+			})
+		).toThrow('crash after source restore');
+		expect(statSync(FILE).ino).toBe(statSync(CAS_QUARANTINE).ino);
+		expect(existsSync(proof)).toBe(false);
+		expect(existsSync(cancellation)).toBe(true);
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('cancelled');
+		expect(discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'discarded'
+		);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+		expect(existsSync(proof)).toBe(false);
+		expect(existsSync(cancellation)).toBe(true);
+		clearConfigCommitCancellationAtBinding(binding, token, proposed);
+	});
+
+	it('preserves proof when the old writer publishes immediately before cancellation', () => {
+		const source = 'before: cancellation-race\n';
+		const proposed = 'after: cancellation-race\n';
+		const token = 'checkpoint-cancellation-race';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+
+		expect(
+			discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed, {
+				beforeProofCancellation: () => {
+					renameSync(FILE, CAS_QUARANTINE);
+					linkSync(proof, FILE);
+				}
+			})
+		).toBe('published');
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+		expect(finalizePublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'published'
+		);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+	});
+
+	it('resumes an unpublished cancellation after its marker fsync', () => {
+		const source = 'before: cancellation-marker\n';
+		const proposed = 'after: cancellation-marker\n';
+		const token = 'checkpoint-cancellation-marker';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		const cancellation = join(DIR, `.config.yml.posterpilot-commit-proof-cancel-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+
+		expect(() =>
+			discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed, {
+				afterProofCancelled: () => {
+					throw new Error('crash after cancellation fsync');
+				}
+			})
+		).toThrow('crash after cancellation fsync');
+		expect(existsSync(proof)).toBe(false);
+		expect(existsSync(cancellation)).toBe(true);
+		expect(readFileSync(FILE, 'utf8')).toBe(source);
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('cancelled');
+		expect(discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'discarded'
+		);
+		clearConfigCommitCancellationAtBinding(binding, token, proposed);
+	});
+
+	it('recovers publication evidence after crashing just after proof cancellation', () => {
+		const source = 'before: cancellation-crash\n';
+		const proposed = 'after: cancellation-crash\n';
+		const token = 'checkpoint-cancellation-crash';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		const cancellation = join(DIR, `.config.yml.posterpilot-commit-proof-cancel-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+
+		expect(() =>
+			discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed, {
+				beforeProofCancellation: () => {
+					renameSync(FILE, CAS_QUARANTINE);
+					linkSync(proof, FILE);
+				},
+				afterProofCancelled: () => {
+					throw new Error('crash after proof cancellation');
+				}
+			})
+		).toThrow('crash after proof cancellation');
+		expect(existsSync(proof)).toBe(false);
+		expect(existsSync(cancellation)).toBe(true);
+		expect(statSync(FILE).ino).toBe(statSync(cancellation).ino);
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('cancelled');
+
+		expect(discardUnpublishedConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+			'published'
+		);
+		expect(statSync(FILE).ino).toBe(statSync(proof).ino);
+		expect(existsSync(cancellation)).toBe(false);
+	});
+
+	it('continues a bound write from durable duplicate predecessor links', () => {
+		const source = 'before: duplicate-links\n';
+		const proposed = 'after: duplicate-links\n';
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		linkSync(FILE, CAS_QUARANTINE);
+
+		expect(
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', { expectedSource: source })
+		).toEqual({ backup: expect.any(String) });
+		expect(readFileSync(FILE, 'utf8')).toBe(proposed);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+	});
+
+	it.each([true, false])(
+		'recovers duplicate predecessor links before proof publication (proof exists: %s)',
+		(proofExists) => {
+			const source = 'before: duplicate-recovery\n';
+			const proposed = 'after: duplicate-recovery\n';
+			const token = `checkpoint-duplicate-recovery-${proofExists ? 'proof' : 'no-proof'}`;
+			const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+			writeFileSync(FILE, source, 'utf8');
+			const binding = freezeConfigPath(FILE);
+			linkSync(FILE, CAS_QUARANTINE);
+			if (proofExists) writeFileSync(proof, proposed, { encoding: 'utf8', mode: 0o600 });
+
+			expect(recoverConfigCommitProofAtBinding(binding, token, source, proposed)).toBe(
+				proofExists ? 'published' : 'not_published'
+			);
+			expect(readFileSync(FILE, 'utf8')).toBe(proofExists ? proposed : source);
+			expect(existsSync(CAS_QUARANTINE)).toBe(false);
+		}
+	);
+
+	it('does not accept external identical bytes on a different inode as publication proof', () => {
+		const source = 'before: proof-race\n';
+		const proposed = 'after: proof-race\n';
+		const token = 'checkpoint-proof-race';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				testHooks: {
+					afterProofCreated: () => {
+						throw new Error('stop');
+					}
+				}
+			})
+		).toThrow('stop');
+		unlinkSync(FILE);
+		writeFileSync(FILE, proposed, 'utf8');
+
+		expect(statSync(FILE).ino).not.toBe(statSync(proof).ino);
+		expect(recoverConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('ambiguous');
+		expect(readFileSync(FILE, 'utf8')).toBe(proposed);
+	});
+
 	it('finalizes a published target left beside its exact source quarantine', () => {
 		const original = 'before: crash\n';
 		const intended = 'after: published\n';
@@ -177,6 +645,30 @@ describe('preview-bound migration I/O', () => {
 		expect(result.backup).toBeNull();
 		expect(readFileSync(FILE, 'utf8')).toBe(intended);
 		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+	});
+
+	it('preserves quarantine when identical target bytes do not share the prepared proof inode', () => {
+		const source = 'before: proof-quarantine-race\n';
+		const proposed = 'after: proof-quarantine-race\n';
+		const token = 'checkpoint-proof-quarantine-race';
+		const proof = join(DIR, `.config.yml.posterpilot-commit-proof-${token}`);
+		writeFileSync(FILE, source, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		prepareConfigCommitProofAtBinding(binding, token, proposed);
+		renameSync(FILE, CAS_QUARANTINE);
+		writeFileSync(FILE, proposed, 'utf8');
+
+		expect(statSync(FILE).ino).not.toBe(statSync(proof).ino);
+		expect(() =>
+			writeConfigAtomicAtBinding(binding, proposed, 'migration', {
+				expectedSource: source,
+				proofToken: token,
+				preparedProof: true
+			})
+		).toThrow(PhysicalPathInspectionError);
+		expect(readFileSync(FILE, 'utf8')).toBe(proposed);
+		expect(readFileSync(CAS_QUARANTINE, 'utf8')).toBe(source);
+		expect(inspectConfigCommitProofAtBinding(binding, token, source, proposed)).toBe('ambiguous');
 	});
 
 	it('preserves both files when a stale quarantine target is not the intended publication', () => {
@@ -269,6 +761,105 @@ describe('preview-bound migration I/O', () => {
 		expect(readFileSync(join(DIR, 'config.yml.posterpilot-bak-migration'), 'utf8')).toBe(original);
 	});
 
+	it('repairs a crash after target detach without publishing new content', () => {
+		const original = 'before: detached\n';
+		writeFileSync(FILE, original, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		renameSync(FILE, CAS_QUARANTINE);
+
+		expect(recoverConfigQuarantineAtBinding(binding)).toBe('source_restored');
+		expect(readFileSync(FILE, 'utf8')).toBe(original);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+	});
+
+	it('preserves the predecessor after a crash following publication', () => {
+		const original = 'before: published\n';
+		const intended = 'after: published\n';
+		writeFileSync(FILE, original, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		renameSync(FILE, CAS_QUARANTINE);
+		writeFileSync(FILE, intended, 'utf8');
+
+		expect(recoverConfigQuarantineAtBinding(binding)).toBe('predecessor_preserved');
+		expect(readFileSync(FILE, 'utf8')).toBe(intended);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+		const recoveryBackup = readdirSync(DIR).find((entry) =>
+			entry.startsWith('config.yml.posterpilot-bak-cas-recovery-')
+		);
+		expect(recoveryBackup).toBeTruthy();
+		expect(readFileSync(join(DIR, recoveryBackup!), 'utf8')).toBe(original);
+	});
+
+	it('preserves both the predecessor and an external winner during quarantine recovery', () => {
+		const original = 'before: external-race\n';
+		const external = 'external: winner\n';
+		writeFileSync(FILE, original, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		renameSync(FILE, CAS_QUARANTINE);
+		writeFileSync(FILE, external, 'utf8');
+
+		expect(recoverConfigQuarantineAtBinding(binding)).toBe('predecessor_preserved');
+		expect(readFileSync(FILE, 'utf8')).toBe(external);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+		const recoveryBackup = readdirSync(DIR).find((entry) =>
+			entry.startsWith('config.yml.posterpilot-bak-cas-recovery-')
+		);
+		expect(recoveryBackup).toBeTruthy();
+		expect(readFileSync(join(DIR, recoveryBackup!), 'utf8')).toBe(original);
+	});
+
+	it('finishes an authorized removal left in quarantine without restoring it', () => {
+		const proposed = 'created: by-migration\n';
+		writeFileSync(FILE, proposed, 'utf8');
+		const binding = freezeConfigPath(FILE);
+		renameSync(FILE, CAS_QUARANTINE);
+
+		removeConfigAtomicAtBinding(binding, proposed);
+
+		expect(existsSync(FILE)).toBe(false);
+		expect(existsSync(CAS_QUARANTINE)).toBe(false);
+	});
+
+	it('does not unlink a replacement quarantine during removal recovery', () => {
+		const proposed = 'created: by-migration\n';
+		const replacement = 'external: quarantine\n';
+		writeFileSync(CAS_QUARANTINE, proposed, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		expect(() =>
+			removeConfigAtomicAtBinding(binding, proposed, {
+				testHooks: {
+					beforeFinalRevalidation: () => {
+						unlinkSync(CAS_QUARANTINE);
+						writeFileSync(CAS_QUARANTINE, replacement, 'utf8');
+					}
+				}
+			})
+		).toThrow(PhysicalPathInspectionError);
+		expect(readFileSync(CAS_QUARANTINE, 'utf8')).toBe(replacement);
+	});
+
+	it('preserves the newly returned backup when recovery backups fill retention', () => {
+		const source = 'before: newest-backup\n';
+		writeFileSync(FILE, source, 'utf8');
+		for (let index = 0; index < 5; index++) {
+			writeFileSync(
+				join(DIR, `config.yml.posterpilot-bak-cas-recovery-${String(index).padStart(2, '0')}`),
+				`recovery: ${index}\n`,
+				'utf8'
+			);
+		}
+		const binding = freezeConfigPath(FILE);
+
+		const result = writeConfigAtomicAtBinding(binding, 'after: newest-backup\n', '2026-newest', {
+			expectedSource: source
+		});
+
+		expect(result.backup).not.toBeNull();
+		expect(existsSync(result.backup!)).toBe(true);
+		expect(readdirSync(DIR).filter((name) => name.includes('.posterpilot-bak-'))).toHaveLength(5);
+	});
+
 	it('fails closed when the frozen directory ancestor is redirected', () => {
 		const managedDirectory = join(DIR, 'managed');
 		const movedDirectory = join(DIR, 'managed-before-swap');
@@ -323,6 +914,38 @@ describe('preview-bound migration I/O', () => {
 		expect(validateConfigPathBinding(JSON.parse(JSON.stringify(binding)))).toEqual(binding);
 		writeConfigAtomicAtBinding(binding, 'created: true\n', 'migration');
 		expect(readConfigAtBinding(binding)).toBe('created: true\n');
+	});
+
+	it('keeps only the five newest rotating backups under the bound parent lease', () => {
+		let current = 'version: 0\n';
+		writeFileSync(FILE, current, 'utf8');
+		const binding = freezeConfigPath(FILE);
+
+		for (let version = 1; version <= 7; version++) {
+			const next = `version: ${version}\n`;
+			writeConfigAtomicAtBinding(binding, next, `write-0${version}`, {
+				expectedSource: current
+			});
+			current = next;
+		}
+
+		const backups = readdirSync(DIR)
+			.filter((entry) => entry.startsWith('config.yml.posterpilot-bak-'))
+			.sort();
+		expect(backups).toEqual([
+			'config.yml.posterpilot-bak-write-03',
+			'config.yml.posterpilot-bak-write-04',
+			'config.yml.posterpilot-bak-write-05',
+			'config.yml.posterpilot-bak-write-06',
+			'config.yml.posterpilot-bak-write-07'
+		]);
+		expect(backups.map((name) => readFileSync(join(DIR, name), 'utf8'))).toEqual([
+			'version: 2\n',
+			'version: 3\n',
+			'version: 4\n',
+			'version: 5\n',
+			'version: 6\n'
+		]);
 	});
 });
 

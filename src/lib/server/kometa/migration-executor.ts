@@ -9,6 +9,8 @@ import type { KometaSnapshot } from './config';
 export type KometaMigrationExecutionErrorCode =
 	| 'migration_not_resumable'
 	| 'migration_target_changed'
+	| 'migration_evidence_changed'
+	| 'migration_evidence_unavailable'
 	| 'migration_legacy_changed'
 	| 'migration_backup_invalid'
 	| 'migration_write_failed'
@@ -28,6 +30,14 @@ export class KometaMigrationExecutionError extends Error {
 	}
 }
 
+/** Internal marker for a bound filesystem CAS that observed a different target. */
+export class KometaMigrationPhysicalTargetChangedError extends Error {
+	constructor() {
+		super('Kometa migration physical target changed');
+		this.name = 'KometaMigrationPhysicalTargetChangedError';
+	}
+}
+
 export interface KometaProtectedBackup {
 	name: string;
 	checksum: string;
@@ -36,6 +46,9 @@ export interface KometaProtectedBackup {
 export interface KometaMigrationExecutorDependencies {
 	read(path: string): string | null;
 	write(path: string, content: string, stamp: string, expectedSource: string | null): void;
+	remove?(path: string, expectedContent: string): void;
+	/** Recompute the frozen authoritative evidence at each irreversible commit boundary. */
+	assertEvidenceCurrent(): Promise<'current' | 'changed' | 'unavailable'>;
 	createProtectedBackup(
 		path: string,
 		migrationId: string,
@@ -44,6 +57,8 @@ export interface KometaMigrationExecutorDependencies {
 	readProtectedBackup(path: string, name: string, checksum: string): string;
 	/** Final synchronous guard against symlink/hardlink aliasing between preview and write. */
 	assertDistinctPaths?(paths: readonly string[]): void;
+	/** Renew and verify the durable cross-process execution claim before a filesystem commit. */
+	assertCommitOwned?(): Promise<void>;
 	saveJournal(
 		journal: KometaMigrationJournalV1,
 		expectedJournal: KometaMigrationJournalV1
@@ -52,7 +67,7 @@ export interface KometaMigrationExecutorDependencies {
 		journal: KometaMigrationJournalV1,
 		snapshot: KometaSnapshot,
 		expectedJournal: KometaMigrationJournalV1
-	): Promise<void>;
+	): Promise<'current' | 'changed' | 'unavailable'>;
 	rollbackJournal(
 		journal: KometaMigrationJournalV1,
 		snapshot: KometaSnapshot | null,
@@ -72,8 +87,9 @@ function trackedDependencies(
 			onPersist(journal);
 		},
 		completeJournal: async (journal, snapshot, expectedJournal) => {
-			await deps.completeJournal(journal, snapshot, expectedJournal);
-			onPersist(journal);
+			const evidenceState = await deps.completeJournal(journal, snapshot, expectedJournal);
+			if (evidenceState === 'current') onPersist(journal);
+			return evidenceState;
 		},
 		rollbackJournal: async (journal, snapshot, expectedJournal) => {
 			await deps.rollbackJournal(journal, snapshot, expectedJournal);
@@ -223,6 +239,7 @@ async function ensureProtectedBackup(
 	current: string | null
 ): Promise<KometaMigrationJournalV1> {
 	if (current === null || journal.backups[name] !== null) return journal;
+	await deps.assertCommitOwned?.();
 	const backup = deps.createProtectedBackup(path, journal.migrationId, current);
 	return saveStatus(deps, journal, {
 		backups: {
@@ -247,13 +264,13 @@ async function writeSplit(
 	const verifyPhase = name === 'movie' ? 'movie_verify' : 'show_verify';
 	const current = deps.read(file.path);
 	const currentFingerprint = kometaFileFingerprint(current);
-	let sourceContent: string | null;
 	let expectedCurrentFingerprint: string;
+	let expectedWriteSource: string | null;
 
 	if (currentFingerprint !== file.proposedFingerprint) {
 		if (currentFingerprint !== file.sourceFingerprint) targetChanged(backupPhase);
 		journal = await ensureProtectedBackup(deps, journal, name, file.path, current);
-		sourceContent = assertProtectedBackup(
+		const sourceContent = assertProtectedBackup(
 			deps,
 			journal,
 			name,
@@ -263,8 +280,9 @@ async function writeSplit(
 			backupPhase
 		);
 		expectedCurrentFingerprint = file.sourceFingerprint;
+		expectedWriteSource = sourceContent;
 	} else {
-		sourceContent = assertProtectedBackup(
+		assertProtectedBackup(
 			deps,
 			journal,
 			name,
@@ -274,6 +292,7 @@ async function writeSplit(
 			verifyPhase
 		);
 		expectedCurrentFingerprint = file.proposedFingerprint;
+		expectedWriteSource = file.proposedContent;
 	}
 	// saveJournal/createProtectedBackup are observable async boundaries. The
 	// bound writer receives the exact predecessor too, closing the final gap
@@ -282,9 +301,16 @@ async function writeSplit(
 	assertLegacyUnchanged(deps, journal);
 	assertCurrent(deps, file.path, expectedCurrentFingerprint, writePhase);
 	assertPhysicalTargets(deps, journal, writePhase);
+	await deps.assertCommitOwned?.();
 	try {
-		deps.write(file.path, file.proposedContent, `${journal.migrationId}-${name}`, sourceContent);
-	} catch {
+		deps.write(
+			file.path,
+			file.proposedContent,
+			`${journal.migrationId}-${name}`,
+			expectedWriteSource
+		);
+	} catch (error) {
+		if (error instanceof KometaMigrationPhysicalTargetChangedError) targetChanged(writePhase);
 		throw new KometaMigrationExecutionError('migration_write_failed', writePhase);
 	}
 	assertProtectedBackup(
@@ -359,6 +385,34 @@ function assertActivationInputs(
 	assertPhysicalTargets(deps, journal, 'source_revalidate');
 }
 
+async function assertCommitEvidence(
+	deps: KometaMigrationExecutorDependencies,
+	phase: KometaMigrationFailurePhase
+): Promise<void> {
+	let state: 'current' | 'changed' | 'unavailable';
+	try {
+		state = await deps.assertEvidenceCurrent();
+	} catch {
+		throw new KometaMigrationExecutionError('migration_evidence_unavailable', phase);
+	}
+	assertCommitEvidenceState(state, phase);
+}
+
+function assertCommitEvidenceState(
+	state: 'current' | 'changed' | 'unavailable',
+	phase: KometaMigrationFailurePhase
+): void {
+	if (state === 'changed') {
+		// Resuming against changed classification evidence could activate a baseline
+		// that no longer describes the frozen split. Require an explicit physically
+		// inspected abandon/rollback path instead of retrying automatically.
+		throw new KometaMigrationExecutionError('migration_evidence_changed', phase, true);
+	}
+	if (state === 'unavailable') {
+		throw new KometaMigrationExecutionError('migration_evidence_unavailable', phase);
+	}
+}
+
 async function finishManaged(
 	deps: KometaMigrationExecutorDependencies,
 	journal: KometaMigrationJournalV1
@@ -377,12 +431,12 @@ async function finishManaged(
 	assertActivationInputs(deps, journal);
 	const current = deps.read(config.path);
 	const currentFingerprint = kometaFileFingerprint(current);
-	let sourceContent: string | null;
 	let expectedCurrentFingerprint: string;
+	let expectedWriteSource: string | null;
 	if (currentFingerprint !== config.proposedFingerprint) {
 		if (currentFingerprint !== config.sourceFingerprint) targetChanged('config_backup');
 		journal = await ensureProtectedBackup(deps, journal, 'config', config.path, current);
-		sourceContent = assertProtectedBackup(
+		const sourceContent = assertProtectedBackup(
 			deps,
 			journal,
 			'config',
@@ -392,8 +446,9 @@ async function finishManaged(
 			'config_backup'
 		);
 		expectedCurrentFingerprint = config.sourceFingerprint;
+		expectedWriteSource = sourceContent;
 	} else {
-		sourceContent = assertProtectedBackup(
+		assertProtectedBackup(
 			deps,
 			journal,
 			'config',
@@ -403,15 +458,27 @@ async function finishManaged(
 			'config_verify'
 		);
 		expectedCurrentFingerprint = config.proposedFingerprint;
+		expectedWriteSource = config.proposedContent;
 	}
-	// The config backup journal write is an async boundary. Revalidate every
-	// activation input, then let the writer perform the final exact-source CAS.
+	// The config backup journal write is an async boundary. Recompute database
+	// evidence at the last commit boundary, then repeat every synchronous file
+	// guard after that await before the exact-source write.
+	await assertCommitEvidence(deps, 'source_revalidate');
 	assertActivationInputs(deps, journal);
 	assertCurrent(deps, config.path, expectedCurrentFingerprint, 'config_write');
 	assertPhysicalTargets(deps, journal, 'config_write');
+	await deps.assertCommitOwned?.();
 	try {
-		deps.write(config.path, config.proposedContent, `${journal.migrationId}-config`, sourceContent);
-	} catch {
+		deps.write(
+			config.path,
+			config.proposedContent,
+			`${journal.migrationId}-config`,
+			expectedWriteSource
+		);
+	} catch (error) {
+		if (error instanceof KometaMigrationPhysicalTargetChangedError) {
+			targetChanged('config_write');
+		}
 		throw new KometaMigrationExecutionError('migration_write_failed', 'config_write');
 	}
 	assertProtectedBackup(
@@ -433,6 +500,9 @@ async function finishManaged(
 		lastFailure: null
 	});
 
+	// A resumed config_written journal and the baseline transaction both need a
+	// fresh evidence decision. Repeat file checks after this final async guard.
+	await assertCommitEvidence(deps, 'final_verify');
 	assertProtectedBackup(
 		deps,
 		journal,
@@ -458,8 +528,14 @@ async function finishManaged(
 		deps.now()
 	);
 	try {
-		await deps.completeJournal(completed, completed.payload.nextSnapshot, journal);
-	} catch {
+		const evidenceState = await deps.completeJournal(
+			completed,
+			completed.payload.nextSnapshot,
+			journal
+		);
+		assertCommitEvidenceState(evidenceState, 'final_verify');
+	} catch (error) {
+		if (error instanceof KometaMigrationExecutionError) throw error;
 		throw new KometaMigrationExecutionError('migration_write_failed', 'baseline');
 	}
 	return completed;
@@ -487,6 +563,10 @@ export async function executeKometaMigration(
 	let phase: KometaMigrationFailurePhase = 'prepare';
 	try {
 		assertLegacyUnchanged(tracked, journal);
+		// A durable retry may start long after its preview. Revalidate the complete
+		// database evidence, including the exact prior ownership baseline, before the
+		// first split backup or filesystem publication.
+		await assertCommitEvidence(tracked, 'source_revalidate');
 		journal = await saveStatus(tracked, journal, {
 			status: 'writing_splits',
 			lastFailure: null
@@ -535,6 +615,7 @@ export async function acknowledgeManualKometaMigration(
 		latest = value;
 	});
 	try {
+		await assertCommitEvidence(tracked, 'manual_acknowledgment');
 		assertActivationInputs(tracked, journal);
 		const at = tracked.now().toISOString();
 		const completed = updateKometaMigrationJournal(
@@ -549,8 +630,14 @@ export async function acknowledgeManualKometaMigration(
 			tracked.now()
 		);
 		try {
-			await tracked.completeJournal(completed, completed.payload.nextSnapshot, journal);
-		} catch {
+			const evidenceState = await tracked.completeJournal(
+				completed,
+				completed.payload.nextSnapshot,
+				journal
+			);
+			assertCommitEvidenceState(evidenceState, 'manual_acknowledgment');
+		} catch (error) {
+			if (error instanceof KometaMigrationExecutionError) throw error;
 			throw new KometaMigrationExecutionError('migration_write_failed', 'manual_acknowledgment');
 		}
 		return completed;
@@ -575,7 +662,7 @@ export async function rollbackKometaMigration(
 		config.sourceFingerprint === null ||
 		config.proposedFingerprint === null ||
 		config.proposedContent === null ||
-		backup === null
+		(backup === null && config.sourceFingerprint !== MISSING_FILE_FINGERPRINT)
 	) {
 		throw new KometaMigrationExecutionError('migration_rollback_unavailable', 'rollback');
 	}
@@ -594,7 +681,8 @@ export async function rollbackKometaMigration(
 			config.proposedFingerprint,
 			'rollback'
 		);
-		if (restored === null) backupInvalid('rollback');
+		const sourceWasAbsent = config.sourceFingerprint === MISSING_FILE_FINGERPRINT;
+		if (!sourceWasAbsent && restored === null) backupInvalid('rollback');
 
 		let prepared = journal;
 		const initialFingerprint = fingerprint(tracked, config.path);
@@ -626,14 +714,23 @@ export async function rollbackKometaMigration(
 		}
 		assertCurrent(tracked, config.path, currentFingerprint, 'rollback');
 		assertPhysicalTargets(tracked, prepared, 'rollback');
+		await tracked.assertCommitOwned?.();
 		try {
-			tracked.write(
-				config.path,
-				restored,
-				`${journal.migrationId}-rollback`,
-				config.proposedContent
-			);
-		} catch {
+			if (sourceWasAbsent) {
+				if (currentFingerprint !== config.sourceFingerprint) {
+					if (!tracked.remove) backupInvalid('rollback');
+					tracked.remove(config.path, config.proposedContent);
+				}
+			} else {
+				tracked.write(
+					config.path,
+					restored!,
+					`${journal.migrationId}-rollback`,
+					currentFingerprint === config.sourceFingerprint ? restored! : config.proposedContent
+				);
+			}
+		} catch (error) {
+			if (error instanceof KometaMigrationPhysicalTargetChangedError) targetChanged('rollback');
 			throw new KometaMigrationExecutionError('migration_write_failed', 'rollback');
 		}
 

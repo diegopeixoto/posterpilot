@@ -122,6 +122,27 @@ libraries:
 		expect(result.proposedContent).toContain('mass_critic_rating_update: mdb_tomatoes');
 	});
 
+	it('preserves aliases in unrelated library settings while rewriting an owned reference', () => {
+		const result = planKometaMigrationConfig(
+			input({
+				rawConfig: `shared: &shared
+  schedule: daily
+libraries:
+  Movies:
+    operations: *shared
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+`
+			})
+		);
+
+		expect(result.activation).toBe('managed');
+		expect(result.reasons).toEqual([]);
+		expect(result.proposedContent).toContain('shared: &shared');
+		expect(result.proposedContent).toContain('operations: *shared');
+		expect(result.proposedContent).toContain(`file: ${REFERENCES.movie}`);
+	});
+
 	it('treats the complete config as owned in own mode without requiring a snapshot', () => {
 		const result = planKometaMigrationConfig(
 			input({
@@ -141,6 +162,33 @@ libraries:
 		expect(result.nextSnapshot.libraries.Series.metadataReference).toBe(REFERENCES.show);
 	});
 
+	it('stores prototype-shaped library titles as own snapshot keys', () => {
+		const result = planKometaMigrationConfig(
+			input({
+				mode: 'own',
+				snapshot: null,
+				rawConfig: `libraries:
+  __proto__:
+    metadata_files:
+      - file: ${LEGACY_FILENAME}
+`,
+				libraries: [{ title: '__proto__', type: 'movie' }]
+			})
+		);
+
+		expect(result.activation).toBe('managed');
+		expect(Object.getPrototypeOf(result.nextSnapshot.libraries)).toBeNull();
+		expect(Object.hasOwn(result.nextSnapshot.libraries, '__proto__')).toBe(true);
+		expect(result.nextSnapshot.libraries['__proto__']).toEqual({
+			defaults: [],
+			metadataReference: REFERENCES.movie
+		});
+		expect(JSON.parse(JSON.stringify(result.nextSnapshot)).libraries['__proto__']).toEqual({
+			defaults: [],
+			metadataReference: REFERENCES.movie
+		});
+	});
+
 	it('keeps clean config bytes exact when every relevant library is already typed', () => {
 		const rawConfig = `# typed layout is already active
 libraries:
@@ -155,6 +203,39 @@ libraries:
 		expect(result.changes).toEqual([]);
 		expect(result.nextSnapshot.libraries.Movies.metadataReference).toBe(REFERENCES.movie);
 		expect(result.nextSnapshot).not.toHaveProperty('metadataPath');
+	});
+
+	it('ignores null library stanzas and null metadata_files while rewriting an owned reference', () => {
+		const result = planKometaMigrationConfig(
+			input({
+				rawConfig: `libraries:
+  EmptyLibrary:
+  EmptyMetadata:
+    metadata_files: null
+  Movies:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+`
+			})
+		);
+
+		expect(result.activation).toBe('managed');
+		expect(result.reasons).toEqual([]);
+		expect(result.proposedContent).toContain(`file: ${REFERENCES.movie}`);
+	});
+
+	it('treats a null libraries stanza as absent rather than an unsupported shape', () => {
+		const result = planKometaMigrationConfig(
+			input({ rawConfig: 'libraries: null\n', snapshot: null })
+		);
+
+		expect(result.activation).toBe('manual');
+		expect(result.reasons).toContainEqual({
+			code: 'missing_typed_reference',
+			library: 'Movies'
+		});
+		expect(result.reasons).not.toContainEqual({ code: 'unsupported_config_shape' });
+		expect(result.manualWiringActionable).toBe(true);
 	});
 
 	it('requires manual wiring when the legacy file exists but no relevant typed ref is active', () => {
@@ -225,6 +306,26 @@ libraries:
 		expect(result.reasons).toEqual([{ code: 'yaml_alias_or_anchor' }]);
 	});
 
+	it('rejects a root inline merge key that can synthesize the libraries shape', () => {
+		const result = planKometaMigrationConfig(
+			input({
+				rawConfig: `defaults:
+  libraries: {}
+<<:
+  libraries: {}
+libraries:
+  Movies:
+    metadata_files:
+      - file: ${LEGACY_FILENAME}
+`
+			})
+		);
+
+		expect(result.activation).toBe('manual');
+		expect(result.reasons).toEqual([{ code: 'yaml_alias_or_anchor' }]);
+		expect(result.manualWiringActionable).toBe(false);
+	});
+
 	it('rejects an unknown metadata_files shape instead of guessing', () => {
 		const result = planKometaMigrationConfig(
 			input({
@@ -264,6 +365,58 @@ libraries:
 			library: 'Movies 4K',
 			reason: 'unknown_library'
 		});
+		expect(result.manualWiringActionable).toBe(false);
+	});
+
+	it('marks an active legacy title with conflicting authoritative types as non-actionable', () => {
+		const result = planKometaMigrationConfig(
+			input({
+				mode: 'own',
+				snapshot: null,
+				rawConfig: `libraries:
+  Shared:
+    metadata_files:
+      - file: ${LEGACY_FILENAME}
+`,
+				libraries: [
+					{ title: 'Shared', type: 'movie' },
+					{ title: 'Shared', type: 'show' }
+				]
+			})
+		);
+
+		expect(result.activation).toBe('manual');
+		expect(result.incompatibleLibraries).toContainEqual({
+			library: 'Shared',
+			reason: 'conflicting_authoritative_types'
+		});
+		expect(result.manualWiringActionable).toBe(false);
+	});
+
+	it('marks a duplicated authoritative title as non-actionable even when its types agree', () => {
+		const result = planKometaMigrationConfig(
+			input({
+				mode: 'own',
+				snapshot: null,
+				rawConfig: `libraries:
+  Shared:
+    metadata_files:
+      - file: ${LEGACY_FILENAME}
+`,
+				libraries: [
+					{ title: 'Shared', type: 'movie' },
+					{ title: 'Shared', type: 'movie' }
+				]
+			})
+		);
+
+		expect(result.activation).toBe('manual');
+		expect(result.incompatibleLibraries).toContainEqual({
+			library: 'Shared',
+			reason: 'conflicting_authoritative_types'
+		});
+		expect(result.manualWiringActionable).toBe(false);
+		expect(result.changes).toEqual([]);
 	});
 
 	it('rejects a legacy rewire that would duplicate a typed PosterPilot reference', () => {

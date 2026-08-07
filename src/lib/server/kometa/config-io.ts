@@ -39,7 +39,9 @@ import {
 const BACKUP_INFIX = '.posterpilot-bak-';
 const PROTECTED_BACKUP_INFIX = '.posterpilot-migration-bak-';
 const CAS_QUARANTINE_SUFFIX = '.posterpilot-cas-quarantine';
+const COMMIT_PROOF_INFIX = '.posterpilot-commit-proof-';
 const MIGRATION_ID = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,127})$/;
+const COMMIT_PROOF_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
 /** Serializable canonical destination binding frozen during migration preview. */
@@ -475,6 +477,56 @@ function nextBoundNormalBackup(binding: ConfigPathBinding, stamp: string): Confi
 	throw new Error('Unable to allocate config backup name');
 }
 
+/** Prune rotating backups while the frozen parent directory is still identity-bound. */
+function pruneBoundBackups(
+	binding: ConfigPathBinding,
+	keep: number,
+	lease: BoundParentLease,
+	preserveName?: string
+): void {
+	if (!Number.isSafeInteger(keep)) throw new TypeError('Invalid config backup count');
+	if (keep < 0) return;
+	const prefix = `${basename(binding.canonicalPath)}${BACKUP_INFIX}`;
+	assertBoundParentLease(binding, lease);
+	let entries: string[];
+	try {
+		entries = readdirSync(lease.path);
+	} catch (error) {
+		boundInspectionFailed(error);
+	}
+	assertBoundParentLease(binding, lease);
+	const backups = entries
+		.filter((entry) => entry.startsWith(prefix))
+		.map((name) => {
+			let modifiedAt = 0;
+			try {
+				modifiedAt = lstatSync(join(lease.path, name)).mtimeMs;
+			} catch {
+				// A raced entry will be revalidated before deletion and otherwise preserved.
+			}
+			return { name, modifiedAt };
+		})
+		.sort((left, right) => {
+			if (left.name === preserveName) return 1;
+			if (right.name === preserveName) return -1;
+			return left.modifiedAt - right.modifiedAt || left.name.localeCompare(right.name);
+		});
+	for (const { name } of backups.slice(0, Math.max(0, backups.length - keep))) {
+		const backup = siblingBinding(binding, name);
+		assertBoundParentLease(binding, lease);
+		try {
+			const inspected = inspectFrozenPhysicalPath(backup);
+			if (inspected.exists) unlinkSync(backup.canonicalPath);
+		} catch {
+			// Rotating cleanup remains best-effort. Symlinks, non-files, and races
+			// are preserved rather than followed or allowed to fail a publication.
+		}
+		assertBoundParentLease(binding, lease);
+	}
+	assertBoundParentLease(binding, lease);
+	syncDescriptor(lease.fd);
+}
+
 function sameBoundFile(expected: BoundFileRead | null, actual: BoundFileRead | null): boolean {
 	return (
 		(expected === null && actual === null) ||
@@ -491,6 +543,63 @@ function hasExpectedContent(actual: BoundFileRead | null, expected: Buffer | nul
 
 function casQuarantineBinding(binding: ConfigPathBinding): ConfigPathBinding {
 	return siblingBinding(binding, `.${basename(binding.canonicalPath)}${CAS_QUARANTINE_SUFFIX}`);
+}
+
+function commitProofBinding(binding: ConfigPathBinding, token: string): ConfigPathBinding {
+	if (!COMMIT_PROOF_TOKEN.test(token)) throw new TypeError('Invalid config commit proof token');
+	return siblingBinding(
+		binding,
+		`.${basename(binding.canonicalPath)}${COMMIT_PROOF_INFIX}${token}`
+	);
+}
+
+function commitCancellationBinding(binding: ConfigPathBinding, token: string): ConfigPathBinding {
+	if (!COMMIT_PROOF_TOKEN.test(token)) throw new TypeError('Invalid config commit proof token');
+	return siblingBinding(
+		binding,
+		`.${basename(binding.canonicalPath)}${COMMIT_PROOF_INFIX}cancel-${token}`
+	);
+}
+
+/**
+ * Durably reserve the token-specific prepared inode before installing its DB
+ * checkpoint. A later writer may only consume this exact file; it never creates
+ * the proof after another lease owner could have cancelled the checkpoint.
+ */
+export function prepareConfigCommitProofAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	proposedContent: string
+): void {
+	ensureBoundParentDirectories(binding);
+	const proof = commitProofBinding(binding, proofToken);
+	const cancellation = commitCancellationBinding(binding, proofToken);
+	const proposed = Buffer.from(proposedContent, 'utf8');
+	const lease = openBoundParentLease(binding);
+	let created = false;
+	try {
+		assertBoundParentLease(binding, lease);
+		if (readBoundFile(proof) !== null || readBoundFile(cancellation) !== null) boundPathChanged();
+		writeBoundTemporary(proof.canonicalPath, proposed);
+		created = true;
+		assertBoundParentLease(binding, lease);
+		const prepared = readBoundFile(proof);
+		if (prepared === null || !prepared.content.equals(proposed)) boundPathChanged();
+		syncDescriptor(lease.fd);
+	} catch (error) {
+		if (created && boundParentLeaseIsCurrent(binding, lease)) {
+			try {
+				unlinkIfPresent(proof.canonicalPath);
+				syncDescriptor(lease.fd);
+			} catch {
+				// Preserve the primary failure; an exact hidden proof is inert without
+				// an authenticated checkpoint and can be collected conservatively later.
+			}
+		}
+		throw error;
+	} finally {
+		closeSync(lease.fd);
+	}
 }
 
 /**
@@ -517,6 +626,15 @@ function restoreQuarantinedTarget(
 		const restored = readBoundFile(binding);
 		if (!sameBoundFile(detached, restored)) return false;
 		assertBoundParentLease(binding, lease);
+		if (
+			!sameBoundFile(restored, readBoundFile(binding)) ||
+			!sameBoundFile(detached, readBoundFile(quarantine))
+		) {
+			return false;
+		}
+		// Persist the no-replace target link before deleting its only recovery
+		// marker. A power loss may retain both names, but never neither name.
+		syncDescriptor(lease.fd);
 		unlinkSync(quarantine.canonicalPath);
 		syncDescriptor(lease.fd);
 		return true;
@@ -532,13 +650,46 @@ function recoverOrRejectStaleQuarantine(
 	quarantine: ConfigPathBinding,
 	lease: BoundParentLease,
 	intendedContent: Buffer,
-	expectedSource: Buffer | null | undefined
+	expectedSource: Buffer | null | undefined,
+	commitProof?: { proof: ConfigPathBinding; cancellation: ConfigPathBinding }
 ): boolean {
 	const quarantined = readBoundFile(quarantine);
 	if (quarantined === null) return false;
 	const target = readBoundFile(binding);
+	const proofFile = commitProof ? readBoundFile(commitProof.proof) : null;
+	const cancellationFile = commitProof ? readBoundFile(commitProof.cancellation) : null;
+	if (cancellationFile !== null) boundPathChanged();
 	if (target === null) {
+		if (
+			commitProof &&
+			(!sameBoundFile(proofFile, readBoundFile(commitProof.proof)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(commitProof.cancellation)))
+		) {
+			boundPathChanged();
+		}
 		if (!restoreQuarantinedTarget(binding, quarantine, lease)) boundPathChanged();
+		return false;
+	}
+	// A prior restore can durably leave both names as hardlinks when the process
+	// stops after the pre-unlink fsync. Retire only that exact duplicate marker.
+	if (
+		sameBoundFile(target, quarantined) &&
+		expectedSource !== undefined &&
+		hasExpectedContent(target, expectedSource)
+	) {
+		assertBoundParentLease(binding, lease);
+		if (
+			!sameBoundFile(target, readBoundFile(binding)) ||
+			!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+			(commitProof !== undefined &&
+				(!sameBoundFile(proofFile, readBoundFile(commitProof.proof)) ||
+					!sameBoundFile(cancellationFile, readBoundFile(commitProof.cancellation))))
+		) {
+			boundPathChanged();
+		}
+		syncDescriptor(lease.fd);
+		unlinkSync(quarantine.canonicalPath);
+		syncDescriptor(lease.fd);
 		return false;
 	}
 
@@ -548,20 +699,92 @@ function recoverOrRejectStaleQuarantine(
 		!target.content.equals(intendedContent) ||
 		expectedSource === undefined ||
 		expectedSource === null ||
-		!quarantined.content.equals(expectedSource)
+		!quarantined.content.equals(expectedSource) ||
+		(commitProof !== undefined && !sameBoundFile(target, proofFile))
 	) {
 		boundPathChanged();
 	}
 	assertBoundParentLease(binding, lease);
 	if (
 		!sameBoundFile(target, readBoundFile(binding)) ||
-		!sameBoundFile(quarantined, readBoundFile(quarantine))
+		!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+		(commitProof !== undefined &&
+			(!sameBoundFile(proofFile, readBoundFile(commitProof.proof)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(commitProof.cancellation))))
 	) {
 		boundPathChanged();
 	}
+	// The published name must reach stable storage before its predecessor marker
+	// can be removed; otherwise a power loss could durably retain neither name.
+	syncDescriptor(lease.fd);
 	unlinkSync(quarantine.canonicalPath);
 	syncDescriptor(lease.fd);
 	return true;
+}
+
+export type ConfigQuarantineRecovery = 'none' | 'source_restored' | 'predecessor_preserved';
+
+/**
+ * Repair the discoverable state left by termination inside a bound CAS write.
+ *
+ * This never publishes new intended content. With an absent target it restores
+ * the quarantined predecessor to the canonical name. With a present target —
+ * whether it is the completed publication or an external winner — it preserves
+ * the quarantined bytes as a normal no-replace backup before removing the marker.
+ */
+export function recoverConfigQuarantineAtBinding(
+	binding: ConfigPathBinding
+): ConfigQuarantineRecovery {
+	// A frozen missing suffix is a valid future destination. Recovery must not
+	// create it: no quarantine can exist without its immediate parent directory.
+	inspectFrozenPhysicalPath(binding);
+	try {
+		const parent = lstatSync(dirname(binding.canonicalPath));
+		if (parent.isSymbolicLink() || !parent.isDirectory()) boundPathChanged();
+	} catch (error) {
+		if (errorCode(error) === 'ENOENT') return 'none';
+		if (error instanceof PhysicalPathInspectionError) throw error;
+		boundInspectionFailed(error);
+	}
+	const quarantine = casQuarantineBinding(binding);
+	const lease = openBoundParentLease(binding);
+	try {
+		assertBoundParentLease(binding, lease);
+		const quarantined = readBoundFile(quarantine);
+		if (quarantined === null) return 'none';
+		const target = readBoundFile(binding);
+		if (target === null) {
+			if (!restoreQuarantinedTarget(binding, quarantine, lease)) boundPathChanged();
+			assertBoundParentLease(binding, lease);
+			return 'source_restored';
+		}
+
+		const recoveryBackup = siblingBinding(
+			binding,
+			`${basename(binding.canonicalPath)}${BACKUP_INFIX}cas-recovery-${sha256(quarantined.content)}`
+		);
+		const existingBackup = readBoundFile(recoveryBackup, { secureMode: true });
+		if (existingBackup === null) {
+			publishNewBoundFile(recoveryBackup, quarantined.content, 'config-cas-recovery-backup');
+		} else if (!existingBackup.content.equals(quarantined.content)) {
+			boundPathChanged();
+		}
+
+		assertBoundParentLease(binding, lease);
+		if (
+			!sameBoundFile(target, readBoundFile(binding)) ||
+			!sameBoundFile(quarantined, readBoundFile(quarantine))
+		) {
+			boundPathChanged();
+		}
+		syncDescriptor(lease.fd);
+		unlinkSync(quarantine.canonicalPath);
+		assertBoundParentLease(binding, lease);
+		syncDescriptor(lease.fd);
+		return 'predecessor_preserved';
+	} finally {
+		closeSync(lease.fd);
+	}
 }
 
 /** Synchronous fault-injection hooks used only by filesystem race tests. */
@@ -569,11 +792,18 @@ export interface BoundConfigWriteTestHooks {
 	beforeFinalRevalidation?: () => void;
 	afterTargetDetached?: () => void;
 	beforePublish?: () => void;
+	afterProofCreated?: () => void;
 }
 
 export interface BoundConfigWriteOptions {
 	/** Exact predecessor bytes frozen by the migration, or null when it was absent. */
 	expectedSource?: string | null;
+	/** Number of rotating backups to retain; negative keeps all. Defaults to five. */
+	backups?: number;
+	/** Durable checkpoint token whose proof hardlink survives until the DB bundle commits. */
+	proofToken?: string;
+	/** Require `proofToken` to have been durably prepared before the DB checkpoint. */
+	preparedProof?: boolean;
 	/** @internal */
 	testHooks?: BoundConfigWriteTestHooks;
 }
@@ -608,6 +838,8 @@ export function writeConfigAtomicAtBinding(
 ): { backup: string | null } {
 	ensureBoundParentDirectories(binding);
 	const content = Buffer.from(text, 'utf8');
+	const backupCount = opts.backups ?? 5;
+	if (!Number.isSafeInteger(backupCount)) throw new TypeError('Invalid config backup count');
 	const hasExpectedSource = Object.prototype.hasOwnProperty.call(opts, 'expectedSource');
 	const expectedSource: Buffer | null | undefined = !hasExpectedSource
 		? undefined
@@ -616,30 +848,101 @@ export function writeConfigAtomicAtBinding(
 			: typeof opts.expectedSource === 'string'
 				? Buffer.from(opts.expectedSource, 'utf8')
 				: boundInspectionFailed(new Error('Invalid expected source'));
-	const tmp = siblingBinding(
-		binding,
-		`.${basename(binding.canonicalPath)}.tmp-${safeStamp(stamp)}-${process.pid}-${randomUUID()}`
-	);
 	const quarantine = casQuarantineBinding(binding);
+	const proof = opts.proofToken ? commitProofBinding(binding, opts.proofToken) : null;
+	const cancellation = opts.proofToken ? commitCancellationBinding(binding, opts.proofToken) : null;
+	if (opts.preparedProof && proof === null) {
+		throw new TypeError('A prepared config proof requires a proof token');
+	}
+	const prepared =
+		proof ??
+		siblingBinding(
+			binding,
+			`.${basename(binding.canonicalPath)}.tmp-${safeStamp(stamp)}-${process.pid}-${randomUUID()}`
+		);
 	const lease = openBoundParentLease(binding);
 	let backup: string | null = null;
 	let detached = false;
 	let published = false;
+	const assertCancellationAbsent = (): void => {
+		if (cancellation !== null && readBoundFile(cancellation) !== null) boundPathChanged();
+	};
 
 	try {
-		if (recoverOrRejectStaleQuarantine(binding, quarantine, lease, content, expectedSource)) {
+		assertCancellationAbsent();
+		if (
+			recoverOrRejectStaleQuarantine(
+				binding,
+				quarantine,
+				lease,
+				content,
+				expectedSource,
+				proof !== null && cancellation !== null ? { proof, cancellation } : undefined
+			)
+		) {
+			assertCancellationAbsent();
+			if (proof !== null && !sameBoundFile(readBoundFile(binding), readBoundFile(proof))) {
+				boundPathChanged();
+			}
+			pruneBoundBackups(binding, backupCount, lease);
 			return { backup: null };
 		}
 		const initial = readBoundFile(binding);
-		// Exact intended bytes already at the target make retries idempotent even
-		// after the original predecessor has ceased to be current.
-		if (initial?.content.equals(content)) return { backup: null };
 		if (expectedSource !== undefined && !hasExpectedContent(initial, expectedSource)) {
 			boundPathChanged();
 		}
-		writeBoundTemporary(tmp.canonicalPath, content);
+		// Idempotence is accepted only after the caller proves that these exact
+		// current bytes—not a stale predecessor—were its authorized source.
+		if (initial?.content.equals(content) && !opts.preparedProof) {
+			if (proof !== null) {
+				if (readBoundFile(proof) !== null) boundPathChanged();
+				opts.testHooks?.beforeFinalRevalidation?.();
+				assertBoundParentLease(binding, lease);
+				if (
+					!sameBoundFile(initial, readBoundFile(binding)) ||
+					readBoundFile(proof) !== null ||
+					(cancellation !== null && readBoundFile(cancellation) !== null)
+				) {
+					boundPathChanged();
+				}
+				try {
+					// A no-op file CAS can still commit managed DB state. Preserve proof of
+					// the exact authorized target inode instead of manufacturing equal bytes.
+					linkSync(binding.canonicalPath, proof.canonicalPath);
+				} catch (error) {
+					if (errorCode(error) === 'EEXIST') boundPathChanged(error);
+					boundInspectionFailed(error);
+				}
+				const current = readBoundFile(binding);
+				const proofFile = readBoundFile(proof);
+				if (
+					!sameBoundFile(initial, current) ||
+					!sameBoundFile(current, proofFile) ||
+					(cancellation !== null && readBoundFile(cancellation) !== null)
+				) {
+					boundPathChanged();
+				}
+				syncDescriptor(lease.fd);
+			}
+			pruneBoundBackups(binding, backupCount, lease);
+			return { backup: null };
+		}
+		if (opts.preparedProof) {
+			const preparedFile = readBoundFile(prepared);
+			if (preparedFile === null || !preparedFile.content.equals(content)) boundPathChanged();
+		} else {
+			writeBoundTemporary(prepared.canonicalPath, content);
+		}
 		assertBoundParentLease(binding, lease);
-		if (initial !== null) {
+		if (proof !== null) {
+			if (!readBoundFile(proof)?.content.equals(content)) boundPathChanged();
+			assertCancellationAbsent();
+			syncDescriptor(lease.fd);
+			opts.testHooks?.afterProofCreated?.();
+			assertBoundParentLease(binding, lease);
+			assertCancellationAbsent();
+		}
+		if (initial !== null && !initial.content.equals(content)) {
 			const backupBinding = nextBoundNormalBackup(binding, stamp);
 			publishNewBoundFile(backupBinding, initial.content, 'config-backup');
 			backup = backupBinding.canonicalPath;
@@ -647,6 +950,7 @@ export function writeConfigAtomicAtBinding(
 
 		opts.testHooks?.beforeFinalRevalidation?.();
 		assertBoundParentLease(binding, lease);
+		assertCancellationAbsent();
 		const current = readBoundFile(binding);
 		if (!sameBoundFile(initial, current)) boundPathChanged();
 
@@ -666,15 +970,17 @@ export function writeConfigAtomicAtBinding(
 				boundPathChanged();
 			}
 			opts.testHooks?.afterTargetDetached?.();
+			assertCancellationAbsent();
 		}
 
 		assertBoundParentLease(binding, lease);
 		if (readBoundFile(binding) !== null) boundPathChanged();
 		opts.testHooks?.beforePublish?.();
 		assertBoundParentLease(binding, lease);
+		assertCancellationAbsent();
 		try {
 			// link(2) cannot replace a file that appears after the final check.
-			linkSync(tmp.canonicalPath, binding.canonicalPath);
+			linkSync(prepared.canonicalPath, binding.canonicalPath);
 		} catch (error) {
 			if (errorCode(error) === 'EEXIST') boundPathChanged(error);
 			boundInspectionFailed(error);
@@ -682,8 +988,12 @@ export function writeConfigAtomicAtBinding(
 		published = true;
 
 		const publishedFile = readBoundFile(binding);
+		assertCancellationAbsent();
 		if (!publishedFile?.content.equals(content)) {
 			throw new Error('config write content verification failed');
+		}
+		if (proof !== null && !sameBoundFile(publishedFile, readBoundFile(proof))) {
+			throw new Error('config write commit proof does not match publication');
 		}
 		if (detached) {
 			const quarantined = readBoundFile(quarantine);
@@ -691,18 +1001,31 @@ export function writeConfigAtomicAtBinding(
 				throw new Error('config write quarantine changed during publication');
 			}
 			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(publishedFile, readBoundFile(binding)) ||
+				(proof !== null && !sameBoundFile(publishedFile, readBoundFile(proof))) ||
+				!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+				(cancellation !== null && readBoundFile(cancellation) !== null)
+			) {
+				throw new Error('config write publication changed before durable cleanup');
+			}
+			// Persist the canonical publication before deleting the only durable
+			// predecessor marker. The following fsync persists marker removal.
+			syncDescriptor(lease.fd);
 			unlinkSync(quarantine.canonicalPath);
 			detached = false;
 		}
 		assertBoundParentLease(binding, lease);
+		assertCancellationAbsent();
 		syncDescriptor(lease.fd);
+		pruneBoundBackups(binding, backupCount, lease, backup ? basename(backup) : undefined);
 	} catch (error) {
 		if (detached && !published) restoreQuarantinedTarget(binding, quarantine, lease);
 		throw error;
 	} finally {
-		if (boundParentLeaseIsCurrent(binding, lease)) {
+		if (proof === null && boundParentLeaseIsCurrent(binding, lease)) {
 			try {
-				unlinkIfPresent(tmp.canonicalPath);
+				unlinkIfPresent(prepared.canonicalPath);
 			} catch {
 				// Do not mask the primary result; a mode-0600 temp is inert and discoverable.
 			}
@@ -711,6 +1034,627 @@ export function writeConfigAtomicAtBinding(
 	}
 
 	return { backup };
+}
+
+export type ConfigCommitProofRecovery = 'published' | 'not_published' | 'superseded' | 'ambiguous';
+
+export type ConfigCommitProofInspection = ConfigCommitProofRecovery | 'prepared' | 'cancelled';
+
+function classifyConfigCommitProof(
+	proofFile: BoundFileRead | null,
+	target: BoundFileRead | null,
+	quarantined: BoundFileRead | null,
+	source: Buffer | null,
+	proposed: Buffer
+): ConfigCommitProofInspection {
+	if (proofFile === null) {
+		if (quarantined !== null) {
+			const recoverable =
+				(target === null && hasExpectedContent(quarantined, source)) ||
+				(sameBoundFile(target, quarantined) && hasExpectedContent(target, source));
+			return recoverable ? 'not_published' : 'ambiguous';
+		}
+		return hasExpectedContent(target, source) ? 'not_published' : 'superseded';
+	}
+	if (!proofFile.content.equals(proposed)) return 'ambiguous';
+	if (sameBoundFile(target, proofFile)) {
+		return quarantined === null || hasExpectedContent(quarantined, source)
+			? 'published'
+			: 'ambiguous';
+	}
+	if (
+		(quarantined === null && hasExpectedContent(target, source)) ||
+		(target === null && hasExpectedContent(quarantined, source)) ||
+		(sameBoundFile(target, quarantined) && hasExpectedContent(target, source))
+	) {
+		return 'prepared';
+	}
+	return 'ambiguous';
+}
+
+/** Inspect checkpoint proof state without publishing, restoring, or deleting any file. */
+export function inspectConfigCommitProofAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	sourceContent: string | null,
+	proposedContent: string,
+	opts: { beforeFinalRevalidation?: () => void } = {}
+): ConfigCommitProofInspection {
+	const proof = commitProofBinding(binding, proofToken);
+	const cancellation = commitCancellationBinding(binding, proofToken);
+	const quarantine = casQuarantineBinding(binding);
+	const proposed = Buffer.from(proposedContent, 'utf8');
+	const source = sourceContent === null ? null : Buffer.from(sourceContent, 'utf8');
+	let lease: BoundParentLease;
+	try {
+		lease = openBoundParentLease(binding);
+	} catch (error) {
+		if (readConfigAtBinding(binding) === null && source === null) return 'not_published';
+		throw error;
+	}
+	try {
+		assertBoundParentLease(binding, lease);
+		const proofFile = readBoundFile(proof);
+		const cancellationFile = readBoundFile(cancellation);
+		const target = readBoundFile(binding);
+		const quarantined = readBoundFile(quarantine);
+		if (proofFile !== null && cancellationFile !== null) return 'ambiguous';
+		opts.beforeFinalRevalidation?.();
+		assertBoundParentLease(binding, lease);
+		if (
+			!sameBoundFile(proofFile, readBoundFile(proof)) ||
+			!sameBoundFile(cancellationFile, readBoundFile(cancellation)) ||
+			!sameBoundFile(target, readBoundFile(binding)) ||
+			!sameBoundFile(quarantined, readBoundFile(quarantine))
+		) {
+			return 'ambiguous';
+		}
+		if (cancellationFile !== null) {
+			const cancelledState = classifyConfigCommitProof(
+				cancellationFile,
+				target,
+				quarantined,
+				source,
+				proposed
+			);
+			return cancelledState === 'ambiguous' ? 'ambiguous' : 'cancelled';
+		}
+		return classifyConfigCommitProof(proofFile, target, quarantined, source, proposed);
+	} finally {
+		closeSync(lease.fd);
+	}
+}
+
+export type ConfigCommitProofDiscard = 'discarded' | 'published' | 'superseded' | 'ambiguous';
+
+/**
+ * Clean up only an already-published proof. Unlike general recovery, this can
+ * never link proposed bytes into the canonical target.
+ */
+export function finalizePublishedConfigCommitProofAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	sourceContent: string | null,
+	proposedContent: string,
+	opts: { beforeFinalRevalidation?: () => void } = {}
+): 'published' | 'ambiguous' {
+	const proof = commitProofBinding(binding, proofToken);
+	const cancellation = commitCancellationBinding(binding, proofToken);
+	const quarantine = casQuarantineBinding(binding);
+	const proposed = Buffer.from(proposedContent, 'utf8');
+	const source = sourceContent === null ? null : Buffer.from(sourceContent, 'utf8');
+	const lease = openBoundParentLease(binding);
+	try {
+		assertBoundParentLease(binding, lease);
+		const proofFile = readBoundFile(proof);
+		const cancellationFile = readBoundFile(cancellation);
+		const target = readBoundFile(binding);
+		const quarantined = readBoundFile(quarantine);
+		if (
+			proofFile === null ||
+			cancellationFile !== null ||
+			!proofFile.content.equals(proposed) ||
+			!sameBoundFile(target, proofFile) ||
+			(quarantined !== null && !hasExpectedContent(quarantined, source))
+		) {
+			return 'ambiguous';
+		}
+		opts.beforeFinalRevalidation?.();
+		assertBoundParentLease(binding, lease);
+		if (
+			!sameBoundFile(target, readBoundFile(binding)) ||
+			!sameBoundFile(proofFile, readBoundFile(proof)) ||
+			!sameBoundFile(cancellationFile, readBoundFile(cancellation)) ||
+			!sameBoundFile(quarantined, readBoundFile(quarantine))
+		) {
+			return 'ambiguous';
+		}
+		if (quarantined !== null) {
+			// Persist the proven target before retiring the predecessor marker.
+			syncDescriptor(lease.fd);
+			unlinkSync(quarantine.canonicalPath);
+		}
+		syncDescriptor(lease.fd);
+		return 'published';
+	} finally {
+		closeSync(lease.fd);
+	}
+}
+
+/**
+ * Cancel only a proven-unpublished checkpoint attempt. This may restore its exact
+ * quarantined predecessor, but it never links the proposed proof into the target.
+ */
+export function discardUnpublishedConfigCommitProofAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	sourceContent: string | null,
+	proposedContent: string,
+	opts: {
+		beforeFinalRevalidation?: () => void;
+		/** @internal */
+		beforeProofCancellation?: () => void;
+		/** @internal */
+		afterProofCancelled?: () => void;
+		/** @internal */
+		afterSourceRestored?: () => void;
+	} = {}
+): ConfigCommitProofDiscard {
+	const proof = commitProofBinding(binding, proofToken);
+	const cancellation = commitCancellationBinding(binding, proofToken);
+	const quarantine = casQuarantineBinding(binding);
+	const proposed = Buffer.from(proposedContent, 'utf8');
+	const source = sourceContent === null ? null : Buffer.from(sourceContent, 'utf8');
+	let lease: BoundParentLease;
+	try {
+		lease = openBoundParentLease(binding);
+	} catch (error) {
+		if (readConfigAtBinding(binding) === null && source === null) return 'discarded';
+		throw error;
+	}
+	try {
+		assertBoundParentLease(binding, lease);
+		const proofFile = readBoundFile(proof);
+		const cancellationFile = readBoundFile(cancellation);
+		let target = readBoundFile(binding);
+		let quarantined = readBoundFile(quarantine);
+		if (proofFile !== null && cancellationFile !== null) return 'ambiguous';
+		const evidence = proofFile ?? cancellationFile;
+		if (evidence === null) {
+			const proofless = classifyConfigCommitProof(null, target, quarantined, source, proposed);
+			return proofless === 'superseded' ? 'superseded' : 'ambiguous';
+		}
+		const state = classifyConfigCommitProof(evidence, target, quarantined, source, proposed);
+		if (state === 'ambiguous') return state;
+		if (state === 'published') {
+			if (cancellationFile === null) return 'published';
+			try {
+				renameSync(cancellation.canonicalPath, proof.canonicalPath);
+			} catch {
+				return 'ambiguous';
+			}
+			const restoredProof = readBoundFile(proof);
+			if (!sameBoundFile(target, restoredProof)) return 'ambiguous';
+			syncDescriptor(lease.fd);
+			return 'published';
+		}
+
+		opts.beforeFinalRevalidation?.();
+		assertBoundParentLease(binding, lease);
+		if (
+			!sameBoundFile(proofFile, readBoundFile(proof)) ||
+			!sameBoundFile(cancellationFile, readBoundFile(cancellation)) ||
+			!sameBoundFile(target, readBoundFile(binding)) ||
+			!sameBoundFile(quarantined, readBoundFile(quarantine))
+		) {
+			return 'ambiguous';
+		}
+		opts.beforeProofCancellation?.();
+		if (proofFile !== null) {
+			// Atomically remove the pathname consumed by the old writer while retaining
+			// the exact inode as durable evidence across a crash.
+			try {
+				renameSync(proof.canonicalPath, cancellation.canonicalPath);
+			} catch {
+				return 'ambiguous';
+			}
+			syncDescriptor(lease.fd);
+			opts.afterProofCancelled?.();
+		}
+
+		target = readBoundFile(binding);
+		quarantined = readBoundFile(quarantine);
+		const proofAfterCancellation = readBoundFile(proof);
+		const cancellationAfter = readBoundFile(cancellation);
+		if (
+			proofAfterCancellation !== null ||
+			cancellationAfter === null ||
+			!sameBoundFile(evidence, cancellationAfter)
+		) {
+			return 'ambiguous';
+		}
+		if (sameBoundFile(target, cancellationAfter)) {
+			// The old writer won publication immediately before proof cancellation.
+			// Restore the original proof pathname so DB completion can proceed.
+			try {
+				renameSync(cancellation.canonicalPath, proof.canonicalPath);
+			} catch {
+				return 'ambiguous';
+			}
+			const restoredProof = readBoundFile(proof);
+			if (!sameBoundFile(target, restoredProof)) return 'ambiguous';
+			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(target, readBoundFile(binding)) ||
+				!sameBoundFile(restoredProof, readBoundFile(proof)) ||
+				!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+				readBoundFile(cancellation) !== null
+			) {
+				return 'ambiguous';
+			}
+			syncDescriptor(lease.fd);
+			return 'published';
+		}
+
+		const cancelledState = classifyConfigCommitProof(
+			cancellationAfter,
+			target,
+			quarantined,
+			source,
+			proposed
+		);
+		if (cancelledState !== 'prepared') return 'ambiguous';
+
+		if (quarantined !== null) {
+			let restored = target;
+			if (target === null) {
+				try {
+					linkSync(quarantine.canonicalPath, binding.canonicalPath);
+				} catch {
+					return 'ambiguous';
+				}
+				restored = readBoundFile(binding);
+			}
+			if (!sameBoundFile(restored, quarantined) || !hasExpectedContent(restored, source)) {
+				return 'ambiguous';
+			}
+			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(restored, readBoundFile(binding)) ||
+				!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+				readBoundFile(proof) !== null ||
+				!sameBoundFile(cancellationAfter, readBoundFile(cancellation))
+			) {
+				return 'ambiguous';
+			}
+			// Order durability just like restoreQuarantinedTarget: make the restored
+			// canonical name durable before removing the quarantine marker.
+			syncDescriptor(lease.fd);
+			opts.afterSourceRestored?.();
+			unlinkSync(quarantine.canonicalPath);
+		}
+		assertBoundParentLease(binding, lease);
+		const finalTarget = readBoundFile(binding);
+		if (
+			!hasExpectedContent(finalTarget, source) ||
+			readBoundFile(quarantine) !== null ||
+			readBoundFile(proof) !== null ||
+			!sameBoundFile(cancellationAfter, readBoundFile(cancellation))
+		) {
+			return 'ambiguous';
+		}
+		syncDescriptor(lease.fd);
+		return 'discarded';
+	} finally {
+		closeSync(lease.fd);
+	}
+}
+
+/** Remove an unpublished cancellation marker only after its DB checkpoint is gone. */
+export function clearConfigCommitCancellationAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	proposedContent: string
+): void {
+	const cancellation = commitCancellationBinding(binding, proofToken);
+	const lease = openBoundParentLease(binding);
+	try {
+		assertBoundParentLease(binding, lease);
+		const marker = readBoundFile(cancellation);
+		if (marker === null) return;
+		if (!marker.content.equals(Buffer.from(proposedContent, 'utf8'))) boundPathChanged();
+		assertBoundParentLease(binding, lease);
+		if (!sameBoundFile(marker, readBoundFile(cancellation))) boundPathChanged();
+		unlinkSync(cancellation.canonicalPath);
+		syncDescriptor(lease.fd);
+	} finally {
+		closeSync(lease.fd);
+	}
+}
+
+/**
+ * Resume only a publication proven by a token-specific hardlink to its prepared inode.
+ * Exact proposed bytes on a different inode are deliberately not accepted as proof.
+ */
+export function recoverConfigCommitProofAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	sourceContent: string | null,
+	proposedContent: string,
+	opts: { beforeFinalRevalidation?: () => void } = {}
+): ConfigCommitProofRecovery {
+	const proof = commitProofBinding(binding, proofToken);
+	const cancellation = commitCancellationBinding(binding, proofToken);
+	const quarantine = casQuarantineBinding(binding);
+	const proposed = Buffer.from(proposedContent, 'utf8');
+	const source = sourceContent === null ? null : Buffer.from(sourceContent, 'utf8');
+	let lease: BoundParentLease;
+	try {
+		lease = openBoundParentLease(binding);
+	} catch (error) {
+		if (readConfigAtBinding(binding) === null && source === null) return 'not_published';
+		throw error;
+	}
+	try {
+		assertBoundParentLease(binding, lease);
+		const cancellationFile = readBoundFile(cancellation);
+		if (cancellationFile !== null) return 'ambiguous';
+		const proofFile = readBoundFile(proof);
+		let target = readBoundFile(binding);
+		let quarantined = readBoundFile(quarantine);
+
+		if (proofFile === null) {
+			if (quarantined !== null && target === null) {
+				if (!hasExpectedContent(quarantined, source)) return 'ambiguous';
+				if (!sameBoundFile(cancellationFile, readBoundFile(cancellation))) return 'ambiguous';
+				if (!restoreQuarantinedTarget(binding, quarantine, lease)) return 'ambiguous';
+				target = readBoundFile(binding);
+				quarantined = null;
+			}
+			if (
+				quarantined !== null &&
+				sameBoundFile(target, quarantined) &&
+				hasExpectedContent(target, source)
+			) {
+				assertBoundParentLease(binding, lease);
+				if (
+					!sameBoundFile(target, readBoundFile(binding)) ||
+					!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+					!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+				) {
+					return 'ambiguous';
+				}
+				syncDescriptor(lease.fd);
+				unlinkSync(quarantine.canonicalPath);
+				syncDescriptor(lease.fd);
+				quarantined = null;
+			}
+			if (quarantined !== null) return 'ambiguous';
+			return hasExpectedContent(target, source) ? 'not_published' : 'superseded';
+		}
+		if (!proofFile.content.equals(proposed)) return 'ambiguous';
+		if (
+			quarantined !== null &&
+			sameBoundFile(target, quarantined) &&
+			hasExpectedContent(target, source)
+		) {
+			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(target, readBoundFile(binding)) ||
+				!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+				!sameBoundFile(proofFile, readBoundFile(proof)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+			) {
+				return 'ambiguous';
+			}
+			syncDescriptor(lease.fd);
+			unlinkSync(quarantine.canonicalPath);
+			syncDescriptor(lease.fd);
+			quarantined = null;
+		}
+
+		if (sameBoundFile(target, proofFile)) {
+			opts.beforeFinalRevalidation?.();
+			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(target, readBoundFile(binding)) ||
+				!sameBoundFile(proofFile, readBoundFile(proof)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+			) {
+				return 'ambiguous';
+			}
+			if (quarantined !== null) {
+				if (!hasExpectedContent(quarantined, source)) return 'ambiguous';
+				if (!sameBoundFile(quarantined, readBoundFile(quarantine))) return 'ambiguous';
+				syncDescriptor(lease.fd);
+				unlinkSync(quarantine.canonicalPath);
+			}
+			syncDescriptor(lease.fd);
+			return 'published';
+		}
+
+		if (target === null) {
+			if (!hasExpectedContent(quarantined, source)) return 'ambiguous';
+			opts.beforeFinalRevalidation?.();
+			assertBoundParentLease(binding, lease);
+			if (
+				readBoundFile(binding) !== null ||
+				!sameBoundFile(proofFile, readBoundFile(proof)) ||
+				!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+			) {
+				return 'ambiguous';
+			}
+			try {
+				linkSync(proof.canonicalPath, binding.canonicalPath);
+			} catch {
+				return 'ambiguous';
+			}
+			target = readBoundFile(binding);
+			if (!sameBoundFile(target, proofFile)) return 'ambiguous';
+			if (!sameBoundFile(cancellationFile, readBoundFile(cancellation))) return 'ambiguous';
+			if (quarantined !== null) {
+				assertBoundParentLease(binding, lease);
+				if (
+					!sameBoundFile(target, readBoundFile(binding)) ||
+					!sameBoundFile(proofFile, readBoundFile(proof)) ||
+					!sameBoundFile(quarantined, readBoundFile(quarantine)) ||
+					!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+				) {
+					return 'ambiguous';
+				}
+				syncDescriptor(lease.fd);
+				unlinkSync(quarantine.canonicalPath);
+			}
+			syncDescriptor(lease.fd);
+			return 'published';
+		}
+
+		// Generic quarantine recovery may already have restored the exact source.
+		// Re-detach it only when source and proposed bytes are distinguishable.
+		if (quarantined === null && source !== null && target.content.equals(source)) {
+			opts.beforeFinalRevalidation?.();
+			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(target, readBoundFile(binding)) ||
+				readBoundFile(quarantine) !== null ||
+				!sameBoundFile(proofFile, readBoundFile(proof)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+			) {
+				return 'ambiguous';
+			}
+			try {
+				renameSync(binding.canonicalPath, quarantine.canonicalPath);
+				linkSync(proof.canonicalPath, binding.canonicalPath);
+			} catch {
+				restoreQuarantinedTarget(binding, quarantine, lease);
+				return 'ambiguous';
+			}
+			if (!sameBoundFile(readBoundFile(binding), proofFile)) return 'ambiguous';
+			const detachedSource = readBoundFile(quarantine);
+			if (!hasExpectedContent(detachedSource, source)) return 'ambiguous';
+			assertBoundParentLease(binding, lease);
+			if (
+				!sameBoundFile(readBoundFile(binding), proofFile) ||
+				!sameBoundFile(proofFile, readBoundFile(proof)) ||
+				!sameBoundFile(detachedSource, readBoundFile(quarantine)) ||
+				!sameBoundFile(cancellationFile, readBoundFile(cancellation))
+			) {
+				return 'ambiguous';
+			}
+			syncDescriptor(lease.fd);
+			unlinkSync(quarantine.canonicalPath);
+			syncDescriptor(lease.fd);
+			return 'published';
+		}
+
+		return 'ambiguous';
+	} finally {
+		closeSync(lease.fd);
+	}
+}
+
+/** Remove only the exact token-specific proof after its DB bundle commits. */
+export function clearConfigCommitProofAtBinding(
+	binding: ConfigPathBinding,
+	proofToken: string,
+	proposedContent: string,
+	opts: { beforeFinalRevalidation?: () => void } = {}
+): void {
+	const proof = commitProofBinding(binding, proofToken);
+	const lease = openBoundParentLease(binding);
+	try {
+		assertBoundParentLease(binding, lease);
+		const proofFile = readBoundFile(proof);
+		if (proofFile === null) return;
+		if (!proofFile.content.equals(Buffer.from(proposedContent, 'utf8'))) boundPathChanged();
+		opts.beforeFinalRevalidation?.();
+		assertBoundParentLease(binding, lease);
+		if (!sameBoundFile(proofFile, readBoundFile(proof))) boundPathChanged();
+		unlinkSync(proof.canonicalPath);
+		assertBoundParentLease(binding, lease);
+		syncDescriptor(lease.fd);
+	} finally {
+		closeSync(lease.fd);
+	}
+}
+
+export interface BoundConfigRemoveOptions {
+	/** @internal */
+	testHooks?: Pick<BoundConfigWriteTestHooks, 'beforeFinalRevalidation' | 'afterTargetDetached'>;
+}
+
+/**
+ * Remove exactly the frozen bytes without ever unlinking the canonical name.
+ *
+ * The expected target is atomically detached into the discoverable quarantine,
+ * revalidated there, and only then unlinked. A writer that fills the canonical
+ * name during that window is preserved. Termination before the final unlink is
+ * recoverable through `recoverConfigQuarantineAtBinding`.
+ */
+export function removeConfigAtomicAtBinding(
+	binding: ConfigPathBinding,
+	expectedContent: string,
+	opts: BoundConfigRemoveOptions = {}
+): void {
+	if (typeof expectedContent !== 'string') throw new TypeError('Invalid expected config content');
+	const expected = Buffer.from(expectedContent, 'utf8');
+	const quarantine = casQuarantineBinding(binding);
+	let lease: BoundParentLease;
+	try {
+		lease = openBoundParentLease(binding);
+	} catch (error) {
+		// A missing parent cannot contain either the target or its quarantine.
+		if (readConfigAtBinding(binding) === null) return;
+		throw error;
+	}
+	let detached = false;
+	try {
+		assertBoundParentLease(binding, lease);
+		const staleQuarantine = readBoundFile(quarantine);
+		const initial = readBoundFile(binding);
+		if (staleQuarantine !== null) {
+			if (!staleQuarantine.content.equals(expected)) boundPathChanged();
+			opts.testHooks?.beforeFinalRevalidation?.();
+			assertBoundParentLease(binding, lease);
+			if (!sameBoundFile(staleQuarantine, readBoundFile(quarantine))) boundPathChanged();
+			unlinkSync(quarantine.canonicalPath);
+			syncDescriptor(lease.fd);
+			return;
+		}
+		if (initial === null) return;
+		if (!initial.content.equals(expected)) boundPathChanged();
+
+		opts.testHooks?.beforeFinalRevalidation?.();
+		assertBoundParentLease(binding, lease);
+		if (!sameBoundFile(initial, readBoundFile(binding))) boundPathChanged();
+		try {
+			renameSync(binding.canonicalPath, quarantine.canonicalPath);
+		} catch (error) {
+			boundPathChanged(error);
+		}
+		detached = true;
+		assertBoundParentLease(binding, lease);
+		if (!sameBoundFile(initial, readBoundFile(quarantine))) {
+			if (restoreQuarantinedTarget(binding, quarantine, lease)) detached = false;
+			boundPathChanged();
+		}
+
+		opts.testHooks?.afterTargetDetached?.();
+		assertBoundParentLease(binding, lease);
+		if (!sameBoundFile(initial, readBoundFile(quarantine))) boundPathChanged();
+		// The canonical path is deliberately not inspected or unlinked here. If an
+		// external writer has filled it, that winner survives this commit.
+		unlinkSync(quarantine.canonicalPath);
+		detached = false;
+		assertBoundParentLease(binding, lease);
+		syncDescriptor(lease.fd);
+	} catch (error) {
+		if (detached) restoreQuarantinedTarget(binding, quarantine, lease);
+		throw error;
+	} finally {
+		closeSync(lease.fd);
+	}
 }
 
 /** Keep only the newest rotating backups; protected migration backups are excluded. */

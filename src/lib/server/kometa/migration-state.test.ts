@@ -6,6 +6,7 @@ import { kometaFileFingerprint } from './plan';
 import {
 	KOMETA_MIGRATION_PLAN_KIND,
 	KOMETA_MIGRATION_PLAN_VERSION,
+	kometaMigrationBaselineFingerprint,
 	type KometaMigrationPlanPayload
 } from './migration-plan';
 import {
@@ -74,6 +75,7 @@ function fixture() {
 		},
 		evidenceFingerprint: 'e'.repeat(64),
 		previousSnapshot: null,
+		previousSnapshotFingerprint: kometaMigrationBaselineFingerprint(null),
 		nextSnapshot: { libraries: {}, managedSettingKeys: [], connections: {} },
 		manualSnippet: null,
 		manualSnippetFingerprint: null,
@@ -211,6 +213,27 @@ describe('migration state projections', () => {
 		};
 		expect(publicKometaMigrationState(journal, { scopeMatches: true })).toMatchObject({
 			canRestartPreview: false
+		});
+	});
+
+	it('keeps an abandoned journal guarded while allowing only a fresh preview', () => {
+		const journal = fixture();
+		journal.status = 'abandoned';
+		journal.lastFailure = {
+			phase: 'source_revalidate',
+			code: 'migration_evidence_changed',
+			at: '2026-08-07T12:01:00.000Z'
+		};
+
+		expect(() => assertKometaMigrationJournal(journal)).not.toThrow();
+		expect(isKometaMigrationIncomplete(journal)).toBe(true);
+		expect(kometaMigrationCollisionState(journal)).toMatchObject({ status: 'abandoned' });
+		expect(publicKometaMigrationState(journal, { scopeMatches: true })).toMatchObject({
+			status: 'abandoned',
+			canResume: false,
+			canRestartPreview: true,
+			canAbandon: false,
+			canRollback: false
 		});
 	});
 

@@ -6,6 +6,7 @@ import { kometaFileFingerprint } from './plan';
 import {
 	KOMETA_MIGRATION_PLAN_KIND,
 	KOMETA_MIGRATION_PLAN_VERSION,
+	kometaMigrationBaselineFingerprint,
 	type KometaMigrationPlanPayload
 } from './migration-plan';
 import {
@@ -74,6 +75,7 @@ function plan(): KometaMigrationPlanPayload {
 		},
 		evidenceFingerprint: 'e'.repeat(64),
 		previousSnapshot: null,
+		previousSnapshotFingerprint: kometaMigrationBaselineFingerprint(null),
 		nextSnapshot: { libraries: {}, managedSettingKeys: [], connections: {} },
 		manualSnippet: null,
 		manualSnippetFingerprint: null,
@@ -241,6 +243,6 @@ describe('Kometa migration journal', () => {
 		expect(isKometaMigrationIncomplete(rollbackPrepared)).toBe(true);
 		const missingBackup = structuredClone(rollbackPrepared);
 		missingBackup.backups.config = null;
-		expect(() => assertKometaMigrationJournal(missingBackup)).toThrow(/activated managed/);
+		expect(() => assertKometaMigrationJournal(missingBackup)).toThrow(/recoverable managed/);
 	});
 });

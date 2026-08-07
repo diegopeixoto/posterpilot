@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeFileSync
+} from 'node:fs';
 import { join } from 'node:path';
 import { createClient } from '@libsql/client';
 import { parse } from 'yaml';
@@ -133,6 +142,43 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 
 		try {
 			await gotoHydrated(page, '/kometa');
+			const prefixInput = page.getByLabel(t('kometa_metadata_path'));
+			const header = page.locator('.surface').filter({ has: prefixInput }).first();
+			const saveHeaderButton = header.getByRole('button', {
+				name: t('settings_save'),
+				exact: true
+			});
+			await prefixInput.fill('config-e2e');
+			await page.route(
+				'**/api/settings',
+				(route) =>
+					route.fulfill({
+						status: 500,
+						contentType: 'application/json',
+						body: JSON.stringify({ error: { code: 'e2e_settings_failure' } })
+					}),
+				{ times: 1 }
+			);
+			await expect(
+				page.getByRole('status').filter({ hasText: t('kometa_save_header_first') })
+			).toHaveCount(1);
+			await saveHeaderButton.click();
+			await expect(header.getByRole('alert')).toContainText(t('settings_save_failed'));
+			await prefixInput.fill('/config');
+			await expect(prefixInput).toHaveAttribute('aria-invalid', 'true');
+			await expect(page.locator('#metadataPathPrefixFeedback')).toContainText(
+				t('kometa_metadata_path_error_absolute')
+			);
+			await expect(header.getByText(t('settings_save_failed'), { exact: true })).toHaveCount(0);
+			await expect(header.getByRole('alert')).toHaveCount(1);
+			await expect(saveHeaderButton).toBeDisabled();
+			await prefixInput.fill('config');
+			await expect(prefixInput).toHaveAttribute('aria-invalid', 'false');
+			await expect(header.getByRole('alert')).toHaveCount(0);
+			await expect(page.locator('#metadataPathPrefixFeedback')).toContainText(
+				'config/posterpilot-movies.yml'
+			);
+
 			const migration = page.getByTestId('kometa-migration-panel');
 			const previewResponsePromise = page.waitForResponse(
 				(response) =>
@@ -166,6 +212,9 @@ test.describe.serial('multi-server isolation and Kometa exact writes', () => {
 
 			await migration.getByRole('button', { name: t('kometa_migration_cancel_preview') }).click();
 			await expect(migration.getByText(t('kometa_migration_preview_title'))).toHaveCount(0);
+			await expect(
+				migration.getByText(t('kometa_migration_cancelled_notice'), { exact: true })
+			).toHaveCount(1);
 		} finally {
 			rmSync(moviePath, { force: true });
 			rmSync(showPath, { force: true });
@@ -541,13 +590,45 @@ libraries:
 		const renewedAfterExpiry = await renewedAfterExpiryResponse.json();
 		expect(renewedAfterExpiry.planId).not.toBe(preview.planId);
 		await expect(migration.getByText(t('kometa_migration_preview_title'))).toBeVisible();
+		await migration.getByLabel(t('kometa_migration_accept_ambiguous')).check();
+		writeFileSync(legacyPath, `${legacyMetadata}\n# changed after preview\n`, { mode: 0o600 });
+		const staleConfirmationResponsePromise = page.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname === '/api/kometa/migration/confirm' &&
+				response.request().method() === 'POST'
+		);
+		try {
+			await confirmButton.click();
+			const staleConfirmationResponse = await staleConfirmationResponsePromise;
+			expect(staleConfirmationResponse.status()).toBe(409);
+			expect(await staleConfirmationResponse.json()).toMatchObject({
+				error: { code: 'plan_stale' }
+			});
+		} finally {
+			writeFileSync(legacyPath, legacyMetadata, { mode: 0o600 });
+		}
+		await expect(migration.getByRole('alert')).toContainText(t('kometa_migration_error_stale'));
+		await expect(migration.getByText(t('kometa_migration_preview_title'))).toHaveCount(0);
+		await expect(previewButton).toBeFocused();
+
+		const renewedAfterStaleResponsePromise = page.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname === '/api/kometa/migration/preview' &&
+				response.request().method() === 'POST'
+		);
+		await previewButton.click();
+		const renewedAfterStaleResponse = await renewedAfterStaleResponsePromise;
+		expect(renewedAfterStaleResponse.ok()).toBeTruthy();
+		const renewedAfterStale = await renewedAfterStaleResponse.json();
+		expect(renewedAfterStale.planId).not.toBe(renewedAfterExpiry.planId);
+		await expect(migration.getByText(t('kometa_migration_preview_title'))).toBeVisible();
 		await migration.getByRole('button', { name: t('kometa_migration_cancel_preview') }).click();
 		await expect(migration.getByText(t('kometa_migration_preview_title'))).toHaveCount(0);
 		await expect(previewButton).toBeFocused();
 		const cancelledReplay = await page.request.post('/api/kometa/migration/confirm', {
 			data: {
-				planId: renewedAfterExpiry.planId,
-				digest: renewedAfterExpiry.digest,
+				planId: renewedAfterStale.planId,
+				digest: renewedAfterStale.digest,
 				acceptAmbiguous: true
 			}
 		});
@@ -572,19 +653,54 @@ libraries:
 		const renewedAfterCancelResponse = await renewedAfterCancelResponsePromise;
 		expect(renewedAfterCancelResponse.ok()).toBeTruthy();
 		const renewedAfterCancel = await renewedAfterCancelResponse.json();
-		expect(renewedAfterCancel.planId).not.toBe(renewedAfterExpiry.planId);
+		expect(renewedAfterCancel.planId).not.toBe(renewedAfterStale.planId);
 		await expect(migration.getByText(t('kometa_migration_preview_title'))).toBeVisible();
 		await migration.getByLabel(t('kometa_migration_accept_ambiguous')).check();
 		await expect(confirmButton).toBeEnabled();
-		const confirmationResponse = page.waitForResponse(
+		const failedConfirmationResponse = page.waitForResponse(
 			(response) =>
 				new URL(response.url()).pathname === '/api/kometa/migration/confirm' &&
 				response.request().method() === 'POST'
 		);
-		await confirmButton.click();
-		const confirmedResponse = await confirmationResponse;
-		expect(confirmedResponse.ok()).toBeTruthy();
-		const completed = await confirmedResponse.json();
+		const kometaDirectoryMode = statSync(runtime.kometaDirectory).mode & 0o777;
+		try {
+			// Reads and the DB-backed consume/journal remain available, but the first
+			// atomic split-file write fails after the durable checkpoint is installed.
+			chmodSync(runtime.kometaDirectory, 0o500);
+			await confirmButton.click();
+			const failedResponse = await failedConfirmationResponse;
+			expect(failedResponse.status()).toBe(500);
+			expect(await failedResponse.json()).toMatchObject({
+				error: { code: 'migration_write_failed' }
+			});
+		} finally {
+			chmodSync(runtime.kometaDirectory, kometaDirectoryMode);
+		}
+		await expect(migration.getByText(t('kometa_migration_preview_title'))).toHaveCount(0);
+		await expect(migration).toContainText(t('kometa_migration_status_failed'));
+		await expect(migration.getByRole('alert')).toHaveCount(1);
+		await expect(migration.getByRole('alert')).toContainText(t('kometa_migration_error_generic'));
+		const resumeButton = migration.getByRole('button', {
+			name: t('kometa_migration_resume_action')
+		});
+		await expect(resumeButton).toBeVisible();
+		expect(readFileSync(legacyPath, 'utf8')).toBe(legacyMetadata);
+		expect(readFileSync(runtime.kometaConfigPath, 'utf8')).toBe(legacyConfig);
+
+		await reloadHydrated(page);
+		await expect(migration.getByText(t('kometa_migration_preview_title'))).toHaveCount(0);
+		await expect(migration).toContainText(t('kometa_migration_status_failed'));
+		await expect(migration.getByRole('alert')).toHaveCount(1);
+		await expect(resumeButton).toBeVisible();
+		const resumeResponsePromise = page.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname === '/api/kometa/migration/resume' &&
+				response.request().method() === 'POST'
+		);
+		await resumeButton.click();
+		const resumeResponse = await resumeResponsePromise;
+		expect(resumeResponse.ok()).toBeTruthy();
+		const completed = await resumeResponse.json();
 		expect(completed).toMatchObject({
 			status: 'completed',
 			activation: 'managed',

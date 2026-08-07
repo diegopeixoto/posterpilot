@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
 	confirm: vi.fn(),
 	cancel: vi.fn(),
 	resume: vi.fn(),
+	abandon: vi.fn(),
 	acknowledge: vi.fn(),
 	previewRollback: vi.fn(),
 	confirmRollback: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('$lib/server/kometa/migration', () => {
 		confirmKometaMigration: h.confirm,
 		cancelKometaMigrationPreview: h.cancel,
 		resumeKometaMigration: h.resume,
+		abandonKometaMigration: h.abandon,
 		acknowledgeKometaMigration: h.acknowledge,
 		previewKometaMigrationRollback: h.previewRollback,
 		confirmKometaMigrationRollback: h.confirmRollback,
@@ -66,6 +68,7 @@ import { POST as preview } from './preview/+server';
 import { POST as confirm } from './confirm/+server';
 import { POST as cancel } from './cancel/+server';
 import { POST as resume } from './resume/+server';
+import { POST as abandon } from './abandon/+server';
 import { POST as acknowledge } from './acknowledge/+server';
 import { POST as previewRollback } from './rollback/preview/+server';
 import { POST as confirmRollback } from './rollback/confirm/+server';
@@ -209,6 +212,26 @@ describe('Kometa migration HTTP adapters', () => {
 		}
 	);
 
+	it('abandons only the exact migration id', async () => {
+		h.abandon.mockResolvedValue({ version: 1, status: 'abandoned' });
+
+		const response = await call(abandon, { migrationId: 'migration-1' });
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get('cache-control')).toBe('private, no-store');
+		expect(h.abandon).toHaveBeenCalledWith({ migrationId: 'migration-1' });
+	});
+
+	it.each([{}, { migrationId: '' }, { migrationId: 'migration-1', force: true }])(
+		'rejects an invalid abandon body %#',
+		async (body) => {
+			const response = await call(abandon, body);
+
+			await expectError(response, 400, 'invalid_request');
+			expect(h.abandon).not.toHaveBeenCalled();
+		}
+	);
+
 	it('acknowledges manual wiring only with the frozen SHA-256 fingerprint', async () => {
 		h.acknowledge.mockResolvedValue({ version: 1, status: 'completed' });
 
@@ -335,6 +358,16 @@ describe('Kometa migration HTTP adapters', () => {
 		const response = await call(resume, { migrationId: 'migration-1' });
 
 		await expectError(response, 500, 'migration_write_failed');
+	});
+
+	it('marks commit-boundary evidence outages as temporarily unavailable', async () => {
+		h.resume.mockRejectedValue(
+			new KometaMigrationExecutionError('migration_evidence_unavailable', 'source_revalidate')
+		);
+
+		const response = await call(resume, { migrationId: 'migration-1' });
+
+		await expectError(response, 503, 'migration_evidence_unavailable');
 	});
 
 	it('hides unknown exception details and keeps the error response private/no-store', async () => {

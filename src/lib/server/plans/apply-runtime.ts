@@ -14,7 +14,9 @@ import { resolveDataPaths } from '$lib/server/data-paths';
 import { resolveConfig, type AppConfig } from '$lib/server/config';
 import { withConfigLocks } from '$lib/server/kometa/config-io';
 import { LEGACY_FILENAME } from '$lib/server/kometa/destination';
-import { loadKometaMigrationJournal } from '$lib/server/kometa/migration-store';
+import { withKometaMigrationControlLock } from '$lib/server/kometa/migration-control-lock';
+import { assertNoPendingKometaConfigMutationWhileOwned } from '$lib/server/kometa/config-mutation-recovery';
+import { loadKometaMigrationJournalForGuard } from '$lib/server/kometa/migration-store';
 import { kometaMigrationCollisionState } from '$lib/server/kometa/migration-state';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
 import { getActiveServerInstance } from '$lib/server/server-instances';
@@ -55,11 +57,11 @@ function requestDestinationResolver(serverRegistry: ApplyServerRegistry = databa
 		serverRegistry,
 		cacheKometaReads: true,
 		loadMigrationState: async (serverInstanceId) =>
-			kometaMigrationCollisionState(await loadKometaMigrationJournal(serverInstanceId))
+			kometaMigrationCollisionState(await loadKometaMigrationJournalForGuard(serverInstanceId))
 	});
 }
 
-/** Hold every in-process collision-guard source stable while a typed file is written. */
+/** Hold every in-process collision-guard source stable through one typed-file commit. */
 async function withKometaGuardLocks<T>(
 	config: AppConfig,
 	metadataFilenames: readonly string[],
@@ -180,7 +182,7 @@ export async function executeDatabaseFrozenApplyJob(
 		loadConfig: () => Promise.resolve(config),
 		cacheKometaReads: true,
 		loadMigrationState: async (serverInstanceId) =>
-			kometaMigrationCollisionState(await loadKometaMigrationJournal(serverInstanceId))
+			kometaMigrationCollisionState(await loadKometaMigrationJournalForGuard(serverInstanceId))
 	});
 	await assertApplyPlanFresh(payload.plan, {
 		loadItemData: loadDatabaseApplyPlannerItemData,
@@ -207,13 +209,90 @@ export async function executeDatabaseFrozenApplyJob(
 				: undefined,
 		kometaAssetsDirectory: kometaOutputDirectory(config)
 	});
+	const preflightKometa = (operations: readonly ApplyPlanOperation[]) => {
+		const filenames = new Set<string>();
+		for (const operation of operations) {
+			const filename = operation.kometaDestination?.filename;
+			if (!filename) throw new TypeError('Kometa preflight operation is missing its typed file');
+			filenames.add(filename);
+		}
+		return withKometaGuardLocks(config, [...filenames], () =>
+			withKometaMigrationControlLock(async (assertControlLockOwned) => {
+				try {
+					await assertNoPendingKometaConfigMutationWhileOwned(assertControlLockOwned);
+				} catch {
+					throw new ApplyPlannerError(
+						'invalid_destination_snapshot',
+						'A confirmed Kometa configuration save requires recovery'
+					);
+				}
+				const liveConfig = await resolveConfig();
+				if (
+					liveConfig.kometaServerInstanceId !== config.kometaServerInstanceId ||
+					liveConfig.kometaConfigPath !== config.kometaConfigPath ||
+					liveConfig.kometaMetadataPathPrefix !== config.kometaMetadataPathPrefix ||
+					kometaOutputDirectory(liveConfig) !== kometaOutputDirectory(config)
+				) {
+					throw new ApplyPlannerError(
+						'invalid_destination_snapshot',
+						'Frozen Kometa configuration changed before execution'
+					);
+				}
+				const liveResolver = createApplyDestinationResolver({
+					serverRegistry: registry,
+					loadConfig: () => Promise.resolve(liveConfig),
+					cacheKometaReads: true,
+					loadMigrationState: async (serverInstanceId) =>
+						kometaMigrationCollisionState(
+							await loadKometaMigrationJournalForGuard(serverInstanceId)
+						)
+				});
+				await assertApplyPlanFresh(payload.plan, {
+					loadItemData: loadDatabaseApplyPlannerItemData,
+					resolveDestinationSlots: liveResolver,
+					validateContext:
+						payload.plan.context.source === 'collection'
+							? (plan) => assertCollectionApplyContextFresh(db, plan)
+							: undefined
+				});
+				await assertControlLockOwned();
+			})
+		);
+	};
 	const result = await executeFrozenApplyPlan(
 		payload.planId,
 		payload.digest,
 		payload.plan,
 		{
 			serverRegistry: registry,
-			writeKometa: (items, operations = [], isCancelled) => {
+			preflightKometa,
+			withKometaCommit: (operations, commit) => {
+				const filenames = new Set<string>();
+				for (const operation of operations) {
+					const filename = operation.kometaDestination?.filename;
+					if (!filename) throw new TypeError('Kometa commit operation is missing its typed file');
+					filenames.add(filename);
+				}
+				if (filenames.size !== 1) {
+					throw new TypeError('One Kometa commit batch must target exactly one file');
+				}
+				return withKometaGuardLocks(config, [...filenames], () =>
+					withKometaMigrationControlLock(async (assertControlLockOwned) => {
+						try {
+							await assertNoPendingKometaConfigMutationWhileOwned(assertControlLockOwned);
+						} catch {
+							throw new ApplyPlannerError(
+								'invalid_destination_snapshot',
+								'A confirmed Kometa configuration save requires recovery'
+							);
+						}
+						return commit(async () => {
+							await assertControlLockOwned();
+						});
+					})
+				);
+			},
+			writeKometa: (items, operations = [], isCancelled, assertCommitOwned) => {
 				const filenames = new Set(items.map((item) => item.destination.filename));
 				const operationFilenames = new Set(
 					operations.map((operation) => operation.kometaDestination?.filename)
@@ -225,38 +304,34 @@ export async function executeDatabaseFrozenApplyJob(
 				) {
 					throw new TypeError('One Kometa writer batch must target exactly one file');
 				}
-				return withKometaGuardLocks(config, [...filenames], () => {
-					return writeKometaYaml(kometaOutputDirectory(config), items, {
-						isCancelled,
-						validateCurrent: async (raw) => {
-							// Re-resolve mutable settings as the final awaited step while the
-							// exact typed file and every guard source are locked. After this
-							// callback, the writer performs only synchronous merge/rename I/O.
-							const [liveConfig, liveMigration] = await Promise.all([
-								resolveConfig(),
-								config.kometaServerInstanceId
-									? loadKometaMigrationJournal(config.kometaServerInstanceId)
-									: Promise.resolve(null)
-							]);
-							if (
-								liveConfig.kometaServerInstanceId !== config.kometaServerInstanceId ||
-								liveConfig.kometaConfigPath !== config.kometaConfigPath ||
-								liveConfig.kometaMetadataPathPrefix !== config.kometaMetadataPathPrefix ||
-								kometaOutputDirectory(liveConfig) !== kometaOutputDirectory(config)
-							) {
-								throw new Error('Frozen Kometa configuration changed before the artwork write');
-							}
-							coordinator.assertKometaGuardFresh(
-								operations,
-								inspectKometaCollisionGuard(
-									liveConfig,
-									kometaMigrationCollisionState(liveMigration)
-								)
-							);
-							coordinator.assertKometaFresh(operations, raw);
-							if (isCancelled?.()) throw new Error('cancelled');
+				return writeKometaYaml(kometaOutputDirectory(config), items, {
+					isCancelled,
+					assertCommitOwned,
+					validateCurrent: async (raw) => {
+						// Re-resolve mutable settings while every config path and the
+						// cross-process migration fence are held. Lease ownership is the
+						// final await before the writer's synchronous merge/rename I/O.
+						const [liveConfig, liveMigration] = await Promise.all([
+							resolveConfig(),
+							config.kometaServerInstanceId
+								? loadKometaMigrationJournalForGuard(config.kometaServerInstanceId)
+								: Promise.resolve(null)
+						]);
+						if (
+							liveConfig.kometaServerInstanceId !== config.kometaServerInstanceId ||
+							liveConfig.kometaConfigPath !== config.kometaConfigPath ||
+							liveConfig.kometaMetadataPathPrefix !== config.kometaMetadataPathPrefix ||
+							kometaOutputDirectory(liveConfig) !== kometaOutputDirectory(config)
+						) {
+							throw new Error('Frozen Kometa configuration changed before the artwork write');
 						}
-					});
+						coordinator.assertKometaGuardFresh(
+							operations,
+							inspectKometaCollisionGuard(liveConfig, kometaMigrationCollisionState(liveMigration))
+						);
+						coordinator.assertKometaFresh(operations, raw);
+						if (isCancelled?.()) throw new Error('cancelled');
+					}
 				});
 			},
 			prepareOperation: coordinator.prepareOperation,

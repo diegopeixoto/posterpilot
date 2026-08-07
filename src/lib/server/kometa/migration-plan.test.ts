@@ -7,6 +7,7 @@ import {
 	KOMETA_MIGRATION_PLAN_KIND,
 	KOMETA_MIGRATION_PLAN_VERSION,
 	assertKometaMigrationPlanPayload,
+	kometaMigrationBaselineFingerprint,
 	kometaManualSnippetFingerprint,
 	type KometaMigrationPlanPayload
 } from './migration-plan';
@@ -91,6 +92,7 @@ function payload(activation: 'managed' | 'manual' = 'managed'): KometaMigrationP
 					},
 		evidenceFingerprint: 'a'.repeat(64),
 		previousSnapshot: null,
+		previousSnapshotFingerprint: kometaMigrationBaselineFingerprint(null),
 		nextSnapshot: { libraries: {}, managedSettingKeys: [], connections: {} },
 		manualSnippet: activation === 'manual' ? snippet : null,
 		manualSnippetFingerprint:
@@ -144,6 +146,14 @@ describe('assertKometaMigrationPlanPayload', () => {
 		const candidate = payload();
 		candidate.files.movie.proposedContent += '# changed\n';
 		expect(() => assertKometaMigrationPlanPayload(candidate)).toThrow(/fingerprint mismatch/);
+	});
+
+	it('rejects a previous snapshot whose frozen fingerprint was tampered', () => {
+		const candidate = payload();
+		candidate.previousSnapshotFingerprint = '0'.repeat(64);
+		expect(() => assertKometaMigrationPlanPayload(candidate)).toThrow(
+			/previous Kometa snapshot fingerprint mismatch/i
+		);
 	});
 
 	it('rejects overlapping physical targets', () => {

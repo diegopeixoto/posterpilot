@@ -3,10 +3,12 @@ import {
 	assertKometaConfigPlanPayload,
 	kometaFileFingerprint,
 	kometaProposedFingerprint,
+	kometaStructuredDependencyFingerprint,
 	rawKometaChanges,
 	safeYamlPreviewLines,
 	type KometaConfigPlanPayload
 } from './plan';
+import { freezeConfigPath } from './config-io';
 
 describe('Kometa mutation plan helpers', () => {
 	it('distinguishes an absent file from an empty file', () => {
@@ -145,14 +147,17 @@ describe('Kometa mutation plan helpers', () => {
 		const content = 'settings:\n  cache: true\n';
 		const payload: KometaConfigPlanPayload = {
 			type: 'kometa_config_mutation',
-			version: 1,
+			version: 2,
 			action: 'raw',
 			serverInstanceId: 'server-a',
 			serverName: 'Plex A',
 			configPath: '/config/config.yml',
+			pathBinding: freezeConfigPath('/config/config.yml'),
 			mode: 'merge',
+			sourceContent: '',
 			sourceFingerprint: kometaFileFingerprint(''),
 			proposedFingerprint: kometaProposedFingerprint(content),
+			structuredDependencyFingerprint: null,
 			proposedContent: content,
 			display: {
 				changes: [],
@@ -167,5 +172,20 @@ describe('Kometa mutation plan helpers', () => {
 		expect(() => assertKometaConfigPlanPayload(payload)).not.toThrow();
 		payload.proposedContent += '# changed';
 		expect(() => assertKometaConfigPlanPayload(payload)).toThrow(/fingerprint/);
+	});
+
+	it('fingerprints every server-held dependency used by a structured preview', () => {
+		const base = {
+			serverInstanceId: 'server-a',
+			plexUrl: 'https://plex.example',
+			plexToken: 'plex-secret',
+			tmdbKey: 'tmdb-secret'
+		};
+		const fingerprint = kometaStructuredDependencyFingerprint(base);
+		expect(fingerprint).toMatch(/^[0-9a-f]{64}$/);
+		expect(
+			kometaStructuredDependencyFingerprint({ ...base, plexToken: 'rotated-secret' })
+		).not.toBe(fingerprint);
+		expect(kometaStructuredDependencyFingerprint({ ...base, tmdbKey: null })).not.toBe(fingerprint);
 	});
 });

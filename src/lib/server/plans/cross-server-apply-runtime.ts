@@ -3,7 +3,7 @@ import { db } from '$lib/server/db';
 import { mediaItems, serverInstances } from '$lib/server/db/schema';
 import type { FrozenApplyJobPayload } from './apply-plan';
 import { createApplyDestinationResolver } from './apply-destinations';
-import { loadKometaMigrationJournal } from '$lib/server/kometa/migration-store';
+import { loadKometaMigrationJournalForGuard } from '$lib/server/kometa/migration-store';
 import { kometaMigrationCollisionState } from '$lib/server/kometa/migration-state';
 import { previewDatabaseArtworkApply } from './apply-runtime';
 import { loadDatabaseApplyPlannerItemData } from './apply-planner-db';
@@ -108,7 +108,7 @@ export async function confirmDatabaseCrossServerApply(
 			serverRegistry: registry,
 			cacheKometaReads: true,
 			loadMigrationState: async (serverInstanceId) =>
-				kometaMigrationCollisionState(await loadKometaMigrationJournal(serverInstanceId))
+				kometaMigrationCollisionState(await loadKometaMigrationJournalForGuard(serverInstanceId))
 		}),
 		enqueue
 	});

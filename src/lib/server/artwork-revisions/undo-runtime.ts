@@ -1,19 +1,41 @@
 import { env } from '$env/dynamic/private';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { resolve } from 'node:path';
 import type { AppConfig } from '$lib/server/config';
 import { resolveConfig } from '$lib/server/config';
 import { resolveDataPaths } from '$lib/server/data-paths';
 import { db } from '$lib/server/db';
-import { readConfig, withConfigLock, writeConfigAtomic } from '$lib/server/kometa/config-io';
+import {
+	canonicalConfigPath,
+	freezeConfigPath,
+	readConfigAtBinding,
+	recoverConfigQuarantineAtBinding,
+	withConfigLocks,
+	writeConfigAtomicAtBinding,
+	type ConfigPathBinding
+} from '$lib/server/kometa/config-io';
 import {
 	kometaBindingErrorCode,
 	resolveKometaServerBinding,
 	type ResolvedKometaServerBinding
 } from '$lib/server/kometa/server-binding';
-import { kometaYamlMappingKey } from '$lib/server/kometa/destination';
+import { assertNoPendingKometaConfigMutationWhileOwned } from '$lib/server/kometa/config-mutation-recovery';
+import { LEGACY_FILENAME, kometaYamlMappingKey } from '$lib/server/kometa/destination';
+import {
+	withKometaMigrationControlLock,
+	type KometaMigrationControlLease
+} from '$lib/server/kometa/migration-control-lock';
+import {
+	kometaMigrationCollisionState,
+	type KometaMigrationCollisionState
+} from '$lib/server/kometa/migration-state';
+import { loadKometaMigrationJournalForGuard } from '$lib/server/kometa/migration-store';
 import { enqueueJobDetailed } from '$lib/server/jobs/runner';
 import { assertMutationsAllowed } from '$lib/server/maintenance';
-import { kometaOutputDirectory } from '$lib/server/plans/apply-destinations';
+import {
+	inspectKometaCollisionGuard,
+	kometaOutputDirectory
+} from '$lib/server/plans/apply-destinations';
 import { createDatabaseApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
 import { operationPlanStore } from '$lib/server/plans/operation-plan-store';
 import { getMediaItem } from '$lib/server/queries';
@@ -30,6 +52,7 @@ import {
 	createArtworkUndoExecutor,
 	type ArtworkUndoExecutionResult,
 	type ArtworkUndoExecutor,
+	type ArtworkUndoKometaPreflightTarget,
 	type ExecuteArtworkUndoInput,
 	type UndoKometaMutationInput
 } from './undo-executor';
@@ -77,7 +100,7 @@ export interface ConfirmedArtworkUndoJob {
 	operationCount: number;
 }
 
-export type ArtworkUndoRuntimeErrorCode =
+type ArtworkUndoRuntimeErrorCode =
 	| 'invalid_request'
 	| 'server_instance_not_found'
 	| 'item_not_found'
@@ -307,17 +330,44 @@ export function createArtworkUndoRuntime(dependencies: ArtworkUndoRuntimeDepende
 export interface BoundKometaUndoAccessDependencies {
 	loadConfig(): Promise<AppConfig>;
 	resolveBinding(serverInstanceId: string | null): Promise<ResolvedKometaServerBinding>;
-	read(path: string): string | null;
-	write(path: string, text: string, stamp: string): unknown;
-	withLock<T>(path: string, operation: () => Promise<T>): Promise<T>;
+	loadMigrationState(serverInstanceId: string): Promise<KometaMigrationCollisionState | null>;
+	assertNoPendingConfigMutationWhileOwned?(
+		assertControlLockOwned: () => Promise<KometaMigrationControlLease>
+	): Promise<unknown>;
+	freezePath(path: string): ConfigPathBinding;
+	readAtBinding(binding: ConfigPathBinding): string | null;
+	recoverAtBinding(binding: ConfigPathBinding): unknown;
+	writeAtBinding(
+		binding: ConfigPathBinding,
+		text: string,
+		stamp: string,
+		opts: { expectedSource: string | null }
+	): unknown;
+	withLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T>;
+	withControlLock<T>(
+		operation: (assertOwned: () => Promise<KometaMigrationControlLease>) => Promise<T>
+	): Promise<T>;
 	clock?: () => Date;
 }
 
-async function boundKometaPath(
+interface BoundKometaUndoTarget {
+	config: AppConfig;
+	path: string;
+	guardPaths: string[];
+}
+
+interface ActiveBoundKometaUndoCommit {
+	serverInstanceId: string;
+	destinationKey: string;
+	binding: ConfigPathBinding;
+	assertOwned: () => Promise<void>;
+}
+
+async function boundKometaTarget(
 	serverInstanceId: string,
 	destination: UndoKometaDestination,
 	dependencies: BoundKometaUndoAccessDependencies
-): Promise<string> {
+): Promise<BoundKometaUndoTarget> {
 	const config = await dependencies.loadConfig();
 	if (config.kometaServerInstanceId !== serverInstanceId) {
 		throw new ArtworkUndoRuntimeError('kometa_server_binding_mismatch');
@@ -330,7 +380,61 @@ async function boundKometaPath(
 				: kometaBindingErrorCode(resolvedBinding.status);
 		throw new ArtworkUndoRuntimeError(code);
 	}
-	return resolve(kometaOutputDirectory(config), destination.filename);
+	const outputDirectory = kometaOutputDirectory(config);
+	const path = resolve(outputDirectory, destination.filename);
+	const guardPaths = new Set<string>();
+	if (config.kometaConfigPath) guardPaths.add(config.kometaConfigPath);
+	guardPaths.add(resolve(outputDirectory, LEGACY_FILENAME));
+	guardPaths.add(path);
+	return {
+		config,
+		path,
+		guardPaths: [...guardPaths].sort((first, second) =>
+			first < second ? -1 : first > second ? 1 : 0
+		)
+	};
+}
+
+function sameOptionalConfigPath(first: string | null, second: string | null): boolean {
+	return (
+		(first === null && second === null) ||
+		(first !== null &&
+			second !== null &&
+			canonicalConfigPath(first) === canonicalConfigPath(second))
+	);
+}
+
+function assertSameKometaUndoTarget(
+	planned: BoundKometaUndoTarget,
+	live: BoundKometaUndoTarget,
+	binding: ConfigPathBinding
+): void {
+	if (
+		planned.config.kometaServerInstanceId !== live.config.kometaServerInstanceId ||
+		planned.config.kometaMetadataPathPrefix !== live.config.kometaMetadataPathPrefix ||
+		!sameOptionalConfigPath(planned.config.kometaConfigPath, live.config.kometaConfigPath) ||
+		canonicalConfigPath(kometaOutputDirectory(planned.config)) !==
+			canonicalConfigPath(kometaOutputDirectory(live.config)) ||
+		canonicalConfigPath(live.path) !== binding.canonicalPath
+	) {
+		throw new ArtworkUndoRuntimeError('plan_stale');
+	}
+}
+
+function assertMigrationAllowsKometaUndo(
+	config: AppConfig,
+	destination: UndoKometaDestination,
+	migration: KometaMigrationCollisionState | null
+): void {
+	if (migration && migration.status !== 'completed' && migration.status !== 'rolled_back') {
+		throw new ArtworkUndoRuntimeError('plan_stale');
+	}
+	if (
+		destination.version === 2 &&
+		inspectKometaCollisionGuard(config, migration).migrationRequired
+	) {
+		throw new ArtworkUndoRuntimeError('plan_stale');
+	}
 }
 
 function currentKometaMatches(
@@ -342,34 +446,148 @@ function currentKometaMatches(
 	return kometaSlotFingerprint(current) === expected.fingerprint;
 }
 
-/** One-file Kometa adapter with a lock-scoped compare-and-set and atomic replacement. */
+/**
+ * One-file Kometa adapter with physical-path CAS and a cross-process migration fence.
+ * Config/legacy/target path locks are always acquired before the durable control lease.
+ */
 export function createBoundKometaUndoAccess(dependencies: BoundKometaUndoAccessDependencies) {
 	const clock = dependencies.clock ?? (() => new Date());
+	const assertNoPendingConfigMutationWhileOwned =
+		dependencies.assertNoPendingConfigMutationWhileOwned ??
+		assertNoPendingKometaConfigMutationWhileOwned;
+	const activeCommit = new AsyncLocalStorage<ActiveBoundKometaUndoCommit>();
+
+	async function preflightKometa(
+		targets: readonly ArtworkUndoKometaPreflightTarget[]
+	): Promise<void> {
+		const uniqueTargets = new Map<string, ArtworkUndoKometaPreflightTarget>();
+		for (const target of targets) {
+			uniqueTargets.set(`${target.serverInstanceId}\0${target.destination.key}`, target);
+		}
+		if (uniqueTargets.size === 0) return;
+		const planned = await Promise.all(
+			[...uniqueTargets.values()].map(async (target) => {
+				const resolved = await boundKometaTarget(
+					target.serverInstanceId,
+					target.destination,
+					dependencies
+				);
+				return { target, resolved, binding: dependencies.freezePath(resolved.path) };
+			})
+		);
+		const guardPaths = [...new Set(planned.flatMap(({ resolved }) => resolved.guardPaths))].sort(
+			(first, second) => (first < second ? -1 : first > second ? 1 : 0)
+		);
+		await dependencies.withLocks(guardPaths, () =>
+			dependencies.withControlLock(async (assertControlLockOwned) => {
+				await assertControlLockOwned();
+				try {
+					await assertNoPendingConfigMutationWhileOwned(assertControlLockOwned);
+				} catch {
+					throw new ArtworkUndoRuntimeError('plan_stale');
+				}
+				const migrations = new Map<string, Promise<KometaMigrationCollisionState | null>>();
+				for (const { target, resolved, binding } of planned) {
+					let migration = migrations.get(target.serverInstanceId);
+					if (!migration) {
+						migration = dependencies.loadMigrationState(target.serverInstanceId);
+						migrations.set(target.serverInstanceId, migration);
+					}
+					const [live, liveMigration] = await Promise.all([
+						boundKometaTarget(target.serverInstanceId, target.destination, dependencies),
+						migration
+					]);
+					assertSameKometaUndoTarget(resolved, live, binding);
+					assertMigrationAllowsKometaUndo(live.config, target.destination, liveMigration);
+				}
+				await assertControlLockOwned();
+			})
+		);
+	}
+
+	async function withKometaCommit<T>(
+		serverInstanceId: string,
+		destination: UndoKometaDestination,
+		commit: (assertOwned: () => Promise<void>) => Promise<T>
+	): Promise<T> {
+		const planned = await boundKometaTarget(serverInstanceId, destination, dependencies);
+		const binding = dependencies.freezePath(planned.path);
+		return dependencies.withLocks(planned.guardPaths, () =>
+			dependencies.withControlLock(async (assertControlLockOwned) => {
+				const assertOwned = async (): Promise<void> => {
+					await assertControlLockOwned();
+					const [live, migration] = await Promise.all([
+						boundKometaTarget(serverInstanceId, destination, dependencies),
+						dependencies.loadMigrationState(serverInstanceId),
+						assertNoPendingConfigMutationWhileOwned(assertControlLockOwned).catch(() => {
+							throw new ArtworkUndoRuntimeError('plan_stale');
+						})
+					]);
+					assertSameKometaUndoTarget(planned, live, binding);
+					assertMigrationAllowsKometaUndo(live.config, destination, migration);
+					// No writer following the control protocol can install a migration or
+					// config checkpoint after this assertion and before synchronous bound I/O.
+					await assertControlLockOwned();
+				};
+
+				await assertOwned();
+				dependencies.recoverAtBinding(binding);
+				await assertOwned();
+				return activeCommit.run(
+					{
+						serverInstanceId,
+						destinationKey: destination.key,
+						binding,
+						assertOwned
+					},
+					() => commit(assertOwned)
+				);
+			})
+		);
+	}
 
 	async function readKometa(
 		serverInstanceId: string,
 		destination: UndoKometaDestination
 	): Promise<string | null> {
-		const path = await boundKometaPath(serverInstanceId, destination, dependencies);
-		return dependencies.read(path);
+		const current = activeCommit.getStore();
+		if (
+			current?.serverInstanceId === serverInstanceId &&
+			current.destinationKey === destination.key
+		) {
+			return dependencies.readAtBinding(current.binding);
+		}
+		const target = await boundKometaTarget(serverInstanceId, destination, dependencies);
+		return dependencies.withLocks([target.path], async () => {
+			const binding = dependencies.freezePath(target.path);
+			return dependencies.readAtBinding(binding);
+		});
 	}
 
-	async function mutateKometa(input: UndoKometaMutationInput): Promise<void> {
-		const plannedPath = await boundKometaPath(
-			input.serverInstanceId,
-			input.destination,
-			dependencies
-		);
-		await dependencies.withLock(plannedPath, async () => {
-			// Settings/binding may change while waiting for the file lock. Never write
-			// the previously resolved path under a different live binding.
-			const currentPath = await boundKometaPath(
-				input.serverInstanceId,
-				input.destination,
-				dependencies
+	async function mutateKometa(
+		input: UndoKometaMutationInput,
+		assertCommitOwned?: () => Promise<void>
+	): Promise<void> {
+		const currentCommit = activeCommit.getStore();
+		if (
+			!currentCommit ||
+			currentCommit.serverInstanceId !== input.serverInstanceId ||
+			currentCommit.destinationKey !== input.destination.key
+		) {
+			return withKometaCommit(input.serverInstanceId, input.destination, (assertOwned) =>
+				mutateKometa(input, assertCommitOwned ?? assertOwned)
 			);
-			if (currentPath !== plannedPath) throw new ArtworkUndoRuntimeError('plan_stale');
-			const raw = dependencies.read(currentPath) ?? '';
+		}
+		const assertOwned = async (): Promise<void> => {
+			// The active runtime fence is authoritative. A caller-supplied assertion may
+			// only strengthen it; it must never replace or weaken lease ownership.
+			await currentCommit.assertOwned();
+			await assertCommitOwned?.();
+		};
+		await assertOwned();
+		const source = dependencies.readAtBinding(currentCommit.binding);
+		const raw = source ?? '';
+		try {
 			let current: ReturnType<typeof readKometaSlot>;
 			try {
 				current = readKometaSlot(raw, kometaYamlMappingKey(input.destination), input.slot);
@@ -380,27 +598,29 @@ export function createBoundKometaUndoAccess(dependencies: BoundKometaUndoAccessD
 				throw new ArtworkUndoRuntimeError('plan_stale');
 			}
 
-			let next: string;
-			try {
-				next = restoreKometaSlot(
-					raw,
-					kometaYamlMappingKey(input.destination),
-					input.slot,
-					input.restore
-				);
-				const stamp = new Date(clock().getTime());
-				if (!Number.isFinite(stamp.getTime())) {
-					throw new ArtworkUndoRuntimeError('undo_kometa_write_failed');
-				}
-				dependencies.write(currentPath, next, stamp.toISOString());
-			} catch (error) {
-				if (error instanceof ArtworkUndoRuntimeError) throw error;
+			const next = restoreKometaSlot(
+				raw,
+				kometaYamlMappingKey(input.destination),
+				input.slot,
+				input.restore
+			);
+			const stamp = new Date(clock().getTime());
+			if (!Number.isFinite(stamp.getTime())) {
 				throw new ArtworkUndoRuntimeError('undo_kometa_write_failed');
 			}
-		});
+			// This is the final await before synchronous bound compare-and-set I/O.
+			await assertOwned();
+			dependencies.writeAtBinding(currentCommit.binding, next, stamp.toISOString(), {
+				expectedSource: source
+			});
+			await assertOwned();
+		} catch (error) {
+			if (error instanceof ArtworkUndoRuntimeError) throw error;
+			throw new ArtworkUndoRuntimeError('undo_kometa_write_failed');
+		}
 	}
 
-	return { readKometa, mutateKometa };
+	return { preflightKometa, readKometa, mutateKometa, withKometaCommit };
 }
 
 let liveRuntime: ReturnType<typeof createArtworkUndoRuntime> | null = null;
@@ -416,16 +636,23 @@ function executor(): ArtworkUndoExecutor {
 	const kometa = createBoundKometaUndoAccess({
 		loadConfig: resolveConfig,
 		resolveBinding: resolveKometaServerBinding,
-		read: readConfig,
-		write: writeConfigAtomic,
-		withLock: withConfigLock
+		loadMigrationState: async (serverInstanceId) =>
+			kometaMigrationCollisionState(await loadKometaMigrationJournalForGuard(serverInstanceId)),
+		freezePath: freezeConfigPath,
+		readAtBinding: readConfigAtBinding,
+		recoverAtBinding: recoverConfigQuarantineAtBinding,
+		writeAtBinding: writeConfigAtomicAtBinding,
+		withLocks: withConfigLocks,
+		withControlLock: withKometaMigrationControlLock
 	});
 	liveExecutor = createArtworkUndoExecutor({
 		serverRegistry,
 		snapshots: createArtworkSnapshotRepository(db, snapshotStore),
 		ledger: createArtworkRevisionLedger(db),
+		preflightKometa: kometa.preflightKometa,
 		readKometa: kometa.readKometa,
-		mutateKometa: kometa.mutateKometa
+		mutateKometa: kometa.mutateKometa,
+		withKometaCommit: kometa.withKometaCommit
 	});
 	return liveExecutor;
 }
@@ -436,9 +663,14 @@ function runtime() {
 	const kometa = createBoundKometaUndoAccess({
 		loadConfig: resolveConfig,
 		resolveBinding: resolveKometaServerBinding,
-		read: readConfig,
-		write: writeConfigAtomic,
-		withLock: withConfigLock
+		loadMigrationState: async (serverInstanceId) =>
+			kometaMigrationCollisionState(await loadKometaMigrationJournalForGuard(serverInstanceId)),
+		freezePath: freezeConfigPath,
+		readAtBinding: readConfigAtBinding,
+		recoverAtBinding: recoverConfigQuarantineAtBinding,
+		writeAtBinding: writeConfigAtomicAtBinding,
+		withLocks: withConfigLocks,
+		withControlLock: withKometaMigrationControlLock
 	});
 	const plannerDependencies: ArtworkUndoPlannerDependencies = {
 		database: db,

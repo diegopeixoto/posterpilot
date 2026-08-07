@@ -23,10 +23,13 @@ import { settings } from '$lib/server/db/schema';
 import { encryptSecret } from '$lib/server/secrets/crypto';
 import { resolveKometaDestination } from './destination';
 import { canonicalConfigPath } from './config-io';
+import type { KometaMigrationControlLease } from './migration-control-lock';
+import { createKometaMigrationControlLock } from './migration-control-lock';
 import { kometaFileFingerprint } from './plan';
 import {
 	KOMETA_MIGRATION_PLAN_KIND,
 	KOMETA_MIGRATION_PLAN_VERSION,
+	kometaMigrationBaselineFingerprint,
 	kometaManualSnippetFingerprint,
 	type KometaMigrationPlanPayload
 } from './migration-plan';
@@ -45,7 +48,9 @@ import {
 	completeKometaMigrationJournal,
 	KometaMigrationStoreError,
 	kometaMigrationJournalSettingKey,
+	loadActiveKometaMigrationJournal,
 	loadKometaMigrationJournal,
+	loadKometaMigrationJournalForGuard,
 	prepareKometaMigrationJournal,
 	rollbackKometaMigrationJournal,
 	saveKometaMigrationJournal
@@ -107,6 +112,7 @@ function payload(): KometaMigrationPlanPayload {
 		},
 		evidenceFingerprint: 'e'.repeat(64),
 		previousSnapshot: null,
+		previousSnapshotFingerprint: kometaMigrationBaselineFingerprint(null),
 		nextSnapshot: {
 			metadataPathPrefix: 'config',
 			libraries: {},
@@ -278,6 +284,22 @@ async function forceStoredJournal(journal: KometaMigrationJournalV1): Promise<vo
 		.onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
+function preparedJournalFor(
+	serverInstanceId: string,
+	migrationId: string
+): KometaMigrationJournalV1 {
+	const value = payload();
+	value.serverInstanceId = serverInstanceId;
+	value.serverName = `Server ${serverInstanceId}`;
+	value.migrationId = migrationId;
+	return createKometaMigrationJournal({
+		planId: `plan-${migrationId}`,
+		planDigest: '1'.repeat(64),
+		payload: value,
+		now: new Date('2026-08-07T12:00:00.000Z')
+	});
+}
+
 beforeEach(async () => {
 	await db.delete(settings);
 });
@@ -301,9 +323,110 @@ describe('Kometa migration journal store', () => {
 
 		await db
 			.update(settings)
-			.set({ value: `${row.value.slice(0, -1)}${row.value.endsWith('A') ? 'B' : 'A'}` })
+			.set({
+				value: `${row.value.slice(0, 12)}${row.value[12] === 'A' ? 'B' : 'A'}${row.value.slice(13)}`
+			})
 			.where(eq(settings.key, kometaMigrationJournalSettingKey('server-a')));
-		await expect(loadKometaMigrationJournal('server-a')).rejects.toThrow(/authenticated/);
+		await expect(loadKometaMigrationJournal('server-a')).rejects.toMatchObject({
+			code: 'journal_unreadable'
+		});
+	});
+
+	it('selects the only non-terminal journal globally and ignores terminal history', async () => {
+		const completed = completedFrom(managedReady(preparedJournalFor('server-a', 'migration-a')));
+		const rollbackSource = completedFrom(
+			managedReady(preparedJournalFor('server-b', 'migration-b'))
+		);
+		const rolledBack = rolledBackFrom(rollbackPreparedFrom(rollbackSource));
+		const active = preparedJournalFor('server-c', 'migration-c');
+		await forceStoredJournal(completed);
+		await forceStoredJournal(rolledBack);
+		await forceStoredJournal(active);
+
+		await expect(loadActiveKometaMigrationJournal()).resolves.toEqual(active);
+		await expect(loadKometaMigrationJournalForGuard('server-a')).resolves.toEqual(active);
+		await db.delete(settings).where(eq(settings.key, kometaMigrationJournalSettingKey('server-c')));
+		await expect(loadActiveKometaMigrationJournal()).resolves.toBeNull();
+		await expect(loadKometaMigrationJournalForGuard('server-a')).resolves.toEqual(completed);
+	});
+
+	it('keeps an abandoned journal globally active until an exact replacement is installed', async () => {
+		const prepared = preparedJournalFor('server-a', 'migration-abandoned');
+		const failed = updateKometaMigrationJournal(
+			prepared,
+			{
+				status: 'recovery_required',
+				lastFailure: {
+					phase: 'prepare',
+					code: 'migration_source_changed',
+					at: '2026-08-07T12:00:01.000Z'
+				}
+			},
+			new Date('2026-08-07T12:00:01.000Z')
+		);
+		const abandoned = updateKometaMigrationJournal(
+			failed,
+			{ status: 'abandoned' },
+			new Date('2026-08-07T12:00:02.000Z')
+		);
+		await forceStoredJournal(abandoned);
+
+		await expect(loadActiveKometaMigrationJournal()).resolves.toEqual(abandoned);
+	});
+
+	it('fails closed for corrupt, mis-keyed, or multiple active journal rows', async () => {
+		await db.insert(settings).values({
+			key: kometaMigrationJournalSettingKey('corrupt'),
+			value: 'not-an-authenticated-journal'
+		});
+		await expect(loadActiveKometaMigrationJournal()).rejects.toMatchObject({
+			code: 'journal_unreadable'
+		});
+
+		await db.delete(settings);
+		const miskeyed = preparedJournalFor('server-a', 'migration-miskeyed');
+		await db.insert(settings).values({
+			key: kometaMigrationJournalSettingKey('server-b'),
+			value: encryptSecret(JSON.stringify(miskeyed), Buffer.alloc(32, 7))
+		});
+		await expect(loadActiveKometaMigrationJournal()).rejects.toMatchObject({
+			code: 'journal_unreadable'
+		});
+
+		await db.delete(settings);
+		await forceStoredJournal(preparedJournalFor('server-a', 'migration-one'));
+		await forceStoredJournal(preparedJournalFor('server-b', 'migration-two'));
+		await expect(loadActiveKometaMigrationJournal()).rejects.toMatchObject({
+			code: 'multiple_active_journals'
+		});
+	});
+
+	it('serializes competing cross-server journal creation under the durable control lease', async () => {
+		const lockA = createKometaMigrationControlLock(db, {
+			leaseMs: 2_000,
+			pollIntervalMs: 5,
+			owner: () => 'journal-process-a'
+		});
+		const lockB = createKometaMigrationControlLock(db, {
+			leaseMs: 2_000,
+			pollIntervalMs: 5,
+			owner: () => 'journal-process-b'
+		});
+		const journalA = preparedJournalFor('server-a', 'migration-race-a');
+		const journalB = preparedJournalFor('server-b', 'migration-race-b');
+
+		const results = await Promise.allSettled([
+			lockA(async (assertOwned) =>
+				prepareKometaMigrationJournal(journalA, null, await assertOwned())
+			),
+			lockB(async (assertOwned) =>
+				prepareKometaMigrationJournal(journalB, null, await assertOwned())
+			)
+		]);
+
+		expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+		await expect(loadActiveKometaMigrationJournal()).resolves.toMatchObject({ status: 'prepared' });
 	});
 
 	it('persists the completed baseline and restores a null pre-migration snapshot on rollback', async () => {
@@ -367,6 +490,89 @@ describe('Kometa migration journal store', () => {
 		expect((await db.select().from(settings).where(eq(settings.key, baselineKey))).length).toBe(0);
 	});
 
+	it('aborts journal and baseline completion when the transactional evidence fence changes', async () => {
+		const prepared = createKometaMigrationJournal({
+			planId: 'plan-1',
+			planDigest: '1'.repeat(64),
+			payload: payload(),
+			now: new Date('2026-08-07T12:00:00.000Z')
+		});
+		const ready = managedReady(prepared);
+		const completed = completedFrom(ready);
+		await prepareKometaMigrationJournal(prepared, null);
+		await saveKometaMigrationJournal(ready, prepared);
+
+		await expect(
+			completeKometaMigrationJournal(
+				completed,
+				completed.payload.nextSnapshot,
+				ready,
+				async () => 'changed'
+			)
+		).resolves.toBe('changed');
+		expect(await loadKometaMigrationJournal('server-a')).toEqual(ready);
+		const baselineKey = kometaLastAppliedSettingKey(scope(completed.payload));
+		expect(await db.select().from(settings).where(eq(settings.key, baselineKey))).toEqual([]);
+	});
+
+	it('recognizes an already committed completion before rechecking later evidence', async () => {
+		const prepared = createKometaMigrationJournal({
+			planId: 'plan-1',
+			planDigest: '1'.repeat(64),
+			payload: payload(),
+			now: new Date('2026-08-07T12:00:00.000Z')
+		});
+		const ready = managedReady(prepared);
+		const completed = completedFrom(ready);
+		await prepareKometaMigrationJournal(prepared, null);
+		await saveKometaMigrationJournal(ready, prepared);
+		await completeKometaMigrationJournal(
+			completed,
+			completed.payload.nextSnapshot,
+			ready,
+			async () => 'current'
+		);
+
+		const evidenceFence = vi.fn(async () => 'changed' as const);
+		await expect(
+			completeKometaMigrationJournal(
+				completed,
+				completed.payload.nextSnapshot,
+				ready,
+				evidenceFence
+			)
+		).resolves.toBe('current');
+		expect(evidenceFence).not.toHaveBeenCalled();
+	});
+
+	it('fences evidence and completion against a lost migration-control lease', async () => {
+		const prepared = createKometaMigrationJournal({
+			planId: 'plan-lease-completion',
+			planDigest: '1'.repeat(64),
+			payload: payload(),
+			now: new Date('2026-08-07T12:00:00.000Z')
+		});
+		const ready = managedReady(prepared);
+		const completed = completedFrom(ready);
+		await prepareKometaMigrationJournal(prepared, null);
+		await saveKometaMigrationJournal(ready, prepared);
+
+		const evidenceFence = vi.fn(async () => 'current' as const);
+		await expect(
+			completeKometaMigrationJournal(
+				completed,
+				completed.payload.nextSnapshot,
+				ready,
+				evidenceFence,
+				'stale-control-lease' as KometaMigrationControlLease
+			)
+		).rejects.toMatchObject({ code: 'lost' });
+		expect(evidenceFence).not.toHaveBeenCalled();
+		expect(await loadKometaMigrationJournal('server-a')).toEqual(ready);
+		const baselineKey = kometaLastAppliedSettingKey(scope(completed.payload));
+		expect(await db.select().from(settings).where(eq(settings.key, baselineKey))).toEqual([]);
+	});
+
 	it('installs prepared only when the exact terminal journal is unchanged', async () => {
 		const first = createKometaMigrationJournal({
 			planId: 'plan-1',
@@ -390,6 +596,24 @@ describe('Kometa migration journal store', () => {
 		});
 		await expect(prepareKometaMigrationJournal(competing, first)).rejects.toThrow(/terminal/);
 		expect(await loadKometaMigrationJournal('server-a')).toEqual(first);
+	});
+
+	it('rejects journal installation when the durable control lease was lost', async () => {
+		const prepared = createKometaMigrationJournal({
+			planId: 'plan-lease',
+			planDigest: '1'.repeat(64),
+			payload: payload(),
+			now: new Date('2026-08-07T12:00:00.000Z')
+		});
+
+		await expect(
+			prepareKometaMigrationJournal(
+				prepared,
+				null,
+				'stale-control-lease' as KometaMigrationControlLease
+			)
+		).rejects.toMatchObject({ code: 'lost' });
+		expect(await loadKometaMigrationJournal('server-a')).toBeNull();
 	});
 
 	it('does not replace a same-identity terminal journal when its exact state changed', async () => {
@@ -730,6 +954,7 @@ describe('Kometa migration journal store', () => {
 			libraries: { Movies: { metadataReference: 'config/old.yml', defaults: [] } },
 			managedSettingKeys: []
 		};
+		value.previousSnapshotFingerprint = kometaMigrationBaselineFingerprint(value.previousSnapshot);
 		const prepared = createKometaMigrationJournal({
 			planId: 'plan-previous',
 			planDigest: '3'.repeat(64),
@@ -761,6 +986,7 @@ describe('Kometa migration journal store', () => {
 			libraries: { Movies: { metadataReference: 'config/old.yml', defaults: [] } },
 			managedSettingKeys: []
 		};
+		value.previousSnapshotFingerprint = kometaMigrationBaselineFingerprint(value.previousSnapshot);
 		const prepared = createKometaMigrationJournal({
 			planId: 'plan-1',
 			planDigest: '1'.repeat(64),

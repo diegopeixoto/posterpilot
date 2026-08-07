@@ -131,6 +131,10 @@
 				return m.server_manager_error_disconnected();
 			case 'server_instance_protected':
 				return m.server_manager_error_protected();
+			case 'kometa_config_recovery_required':
+				return m.kometa_config_recovery_hint();
+			case 'kometa_migration_config_locked':
+				return m.kometa_migration_config_locked_hint();
 			case 'server_purge_requires_disconnect':
 				return m.server_purge_error_disconnect_first();
 			case 'server_purge_active_jobs':

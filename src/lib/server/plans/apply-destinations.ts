@@ -139,10 +139,10 @@ export function inspectKometaCollisionGuard(
 				activeConfig &&
 				canonicalConfigPath(migration.configPath) ===
 					canonicalConfigPath(config.kometaConfigPath)));
+	// A non-terminal journal owns one global migration transaction. Scope drift
+	// must not make it disappear from apply/undo collision guards.
 	const migrationIncomplete =
-		migrationScopeMatches &&
-		migration?.status !== 'completed' &&
-		migration?.status !== 'rolled_back';
+		migration !== null && migration.status !== 'completed' && migration.status !== 'rolled_back';
 	const manualBaselineMatches =
 		migrationScopeMatches &&
 		migration?.status === 'completed' &&
@@ -167,17 +167,19 @@ export function inspectKometaCollisionGuard(
 			configKnown: classification.known,
 			activeLegacyReferences: classification.references,
 			legacyFile: legacyFile.fingerprint,
-			migration: migrationScopeMatches
-				? {
-						migrationId: migration.migrationId,
-						status: migration.status,
-						completedAt: migration.completedAt,
-						activationEvidence: migration.activationEvidence,
-						configPath: migration.configPath,
-						outputDirectory: migration.outputDirectory,
-						metadataPathPrefix: migration.metadataPathPrefix
-					}
-				: null,
+			migration:
+				migration && (migrationIncomplete || migrationScopeMatches)
+					? {
+							migrationId: migration.migrationId,
+							status: migration.status,
+							scopeMatches: migrationScopeMatches,
+							completedAt: migration.completedAt,
+							activationEvidence: migration.activationEvidence,
+							configPath: migration.configPath,
+							outputDirectory: migration.outputDirectory,
+							metadataPathPrefix: migration.metadataPathPrefix
+						}
+					: null,
 			manualBaselineAccepted: manualBaselineMatches,
 			migrationRequired,
 			reason

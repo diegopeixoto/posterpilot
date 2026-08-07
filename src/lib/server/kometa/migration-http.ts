@@ -3,6 +3,7 @@ import { OperationPlanError } from '$lib/server/plans/operation-plan-store';
 import {
 	KometaMigrationServiceError,
 	type AcknowledgeKometaMigrationRequest,
+	type AbandonKometaMigrationRequest,
 	type CancelKometaMigrationPreviewRequest,
 	type ConfirmKometaMigrationRequest,
 	type ResumeKometaMigrationRequest
@@ -107,6 +108,16 @@ export function parseMigrationResume(
 	return { ok: true, value: { migrationId: body.migrationId } };
 }
 
+export function parseMigrationAbandon(
+	value: unknown
+): ParsedMigrationRequest<AbandonKometaMigrationRequest> {
+	const body = object(value);
+	if (!body || !hasOnlyKeys(body, ['migrationId']) || !validOpaqueId(body.migrationId)) {
+		return { ok: false, code: 'invalid_request' };
+	}
+	return { ok: true, value: { migrationId: body.migrationId } };
+}
+
 export function parseMigrationAcknowledgement(
 	value: unknown
 ): ParsedMigrationRequest<AcknowledgeKometaMigrationRequest> {
@@ -167,9 +178,11 @@ export function kometaMigrationApiError(error: unknown): Response {
 	}
 	if (error instanceof KometaMigrationExecutionError) {
 		const status =
-			error.code === 'migration_write_failed' || error.code === 'migration_verify_failed'
-				? 500
-				: 409;
+			error.code === 'migration_evidence_unavailable'
+				? 503
+				: error.code === 'migration_write_failed' || error.code === 'migration_verify_failed'
+					? 500
+					: 409;
 		return migrationJson({ error: { code: error.code } }, status);
 	}
 	return migrationJson({ error: { code: 'kometa_migration_failed' } }, 500);

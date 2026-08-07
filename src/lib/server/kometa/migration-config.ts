@@ -1,5 +1,15 @@
 import type { KometaConfigMode } from '$lib/server/config';
-import { isAlias, isMap, isScalar, isSeq, stringify, type Scalar, type YAMLSeq } from 'yaml';
+import {
+	isAlias,
+	isMap,
+	isScalar,
+	isSeq,
+	stringify,
+	type Pair,
+	type Scalar,
+	type YAMLMap,
+	type YAMLSeq
+} from 'yaml';
 import type { KometaSnapshot, ManagedLib } from './config';
 import { parseBoundedKometaConfig, type KometaConfigYamlLimitOverrides } from './config-yaml';
 import {
@@ -94,6 +104,8 @@ export interface KometaMigrationConfigPlan {
 	reasons: KometaMigrationConfigReason[];
 	incompatibleLibraries: KometaMigrationConfigIncompatibility[];
 	legacyReferenceCount: number;
+	/** False when the shown manual wiring cannot cover every active/possible legacy reference. */
+	manualWiringActionable: boolean;
 	/** Exact URL-free per-library reference guide for manual wiring; null for managed activation. */
 	manualSnippet: string | null;
 }
@@ -134,16 +146,54 @@ function incompatibilityIdentity(value: KometaMigrationConfigIncompatibility): s
 	return `${value.reason}\0${value.library}`;
 }
 
-function hasAliasOrAnchor(node: unknown): boolean {
-	if (isAlias(node)) return true;
-	if (isScalar(node)) return Boolean(node.anchor);
-	if (isMap(node)) {
-		if (node.anchor) return true;
-		return node.items.some((pair) => hasAliasOrAnchor(pair.key) || hasAliasOrAnchor(pair.value));
-	}
-	if (isSeq(node)) {
-		if (node.anchor) return true;
-		return node.items.some((item) => hasAliasOrAnchor(item));
+function isYamlNull(node: unknown): boolean {
+	return node === null || (isScalar(node) && node.value === null);
+}
+
+function isMergePair(pair: Pair): boolean {
+	return isScalar(pair.key) && pair.key.value === '<<';
+}
+
+function hasShapeIndirection(map: YAMLMap): boolean {
+	return map.items.some((pair) => isMergePair(pair) || isAlias(pair.key));
+}
+
+function hasNodeAnchor(node: unknown): boolean {
+	return (isScalar(node) || isMap(node) || isSeq(node)) && Boolean(node.anchor);
+}
+
+/**
+ * Reject indirection only where it can affect the direct path we inspect and
+ * mutate: `libraries.*.metadata_files[].file`. Aliases in sibling settings are
+ * unrelated to that shape and must survive a merge-mode migration unchanged.
+ */
+function hasRelevantIndirection(root: YAMLMap, librariesNode: unknown): boolean {
+	if (root.anchor || hasShapeIndirection(root)) return true;
+	if (librariesNode === undefined || isYamlNull(librariesNode)) return false;
+	if (isAlias(librariesNode)) return true;
+	if (!isMap(librariesNode)) return false;
+	if (librariesNode.anchor || hasShapeIndirection(librariesNode)) return true;
+
+	for (const libraryPair of librariesNode.items) {
+		const libraryNode = libraryPair.value;
+		if (isYamlNull(libraryNode)) continue;
+		if (isAlias(libraryNode)) return true;
+		if (!isMap(libraryNode)) continue;
+		if (libraryNode.anchor || hasShapeIndirection(libraryNode)) return true;
+
+		const metadataFiles = libraryNode.get('metadata_files', true);
+		if (metadataFiles === undefined || isYamlNull(metadataFiles)) continue;
+		if (isAlias(metadataFiles)) return true;
+		if (!isSeq(metadataFiles)) continue;
+		if (metadataFiles.anchor) return true;
+
+		for (const item of metadataFiles.items) {
+			if (isAlias(item)) return true;
+			if (!isMap(item)) continue;
+			if (item.anchor || hasShapeIndirection(item)) return true;
+			const fileNode = item.get('file', true);
+			if (isAlias(fileNode) || hasNodeAnchor(fileNode)) return true;
+		}
 	}
 	return false;
 }
@@ -153,17 +203,17 @@ function resolveAuthoritativeLibraries(libraries: readonly AuthoritativeKometaLi
 	byTitle: Map<string, KometaMediaKind | null>;
 	incompatible: KometaMigrationConfigIncompatibility[];
 } {
-	const typesByTitle = new Map<string, Set<string>>();
+	const typesByTitle = new Map<string, string[]>();
 	const order: string[] = [];
 	for (const library of libraries) {
 		if (typeof library.title !== 'string' || library.title.length === 0) {
 			throw new TypeError('Authoritative Kometa library title must be non-empty');
 		}
 		if (!typesByTitle.has(library.title)) {
-			typesByTitle.set(library.title, new Set());
+			typesByTitle.set(library.title, []);
 			order.push(library.title);
 		}
-		typesByTitle.get(library.title)?.add(library.type);
+		typesByTitle.get(library.title)?.push(library.type);
 	}
 
 	const resolved: ResolvedLibrary[] = [];
@@ -264,7 +314,7 @@ function buildNextSnapshot(
 	typedLibraries: readonly ResolvedLibrary[],
 	references: KometaMigrationConfigReferences
 ): KometaSnapshot {
-	const libraries: Record<string, ManagedLib> = {};
+	const libraries: Record<string, ManagedLib> = Object.create(null);
 	for (const [title, managed] of Object.entries(snapshot?.libraries ?? {})) {
 		libraries[title] = scrubLegacyOwnership(managed, snapshot?.metadataPath);
 	}
@@ -370,6 +420,7 @@ function manualPlan(input: {
 	incompatible: KometaMigrationConfigIncompatibility[];
 	reasons: KometaMigrationConfigReason[];
 	legacyReferenceCount: number;
+	manualWiringActionable: boolean;
 	legacyLibraries?: ReadonlySet<string>;
 	snapshot: KometaSnapshot | null;
 }): KometaMigrationConfigPlan {
@@ -393,6 +444,7 @@ function manualPlan(input: {
 		reasons: dedupeBy(input.reasons, reasonIdentity),
 		incompatibleLibraries: dedupeBy(input.incompatible, incompatibilityIdentity),
 		legacyReferenceCount: input.legacyReferenceCount,
+		manualWiringActionable: input.manualWiringActionable,
 		manualSnippet: buildManualSnippet(input.resolvedLibraries, input.references)
 	};
 }
@@ -429,13 +481,14 @@ export function planKometaMigrationConfig(
 				}
 			],
 			legacyReferenceCount: 0,
+			manualWiringActionable: false,
 			snapshot: input.snapshot
 		});
 	}
 	const document = bounded.document;
 
 	const contents = document.contents;
-	if (contents !== null && !isMap(contents)) {
+	if (!isYamlNull(contents) && !isMap(contents)) {
 		return manualPlan({
 			sourceFingerprint,
 			metadataPathPrefix,
@@ -444,13 +497,14 @@ export function planKometaMigrationConfig(
 			incompatible,
 			reasons: [{ code: 'unsupported_config_shape' }],
 			legacyReferenceCount: 0,
+			manualWiringActionable: false,
 			snapshot: input.snapshot
 		});
 	}
 
-	const librariesNode = contents?.get('libraries', true);
-	const aliasScope = input.mode === 'own' ? contents : librariesNode;
-	if (aliasScope !== undefined && aliasScope !== null && hasAliasOrAnchor(aliasScope)) {
+	const root = isMap(contents) ? contents : null;
+	const librariesNode = root?.get('libraries', true);
+	if (root !== null && hasRelevantIndirection(root, librariesNode)) {
 		return manualPlan({
 			sourceFingerprint,
 			metadataPathPrefix,
@@ -459,13 +513,14 @@ export function planKometaMigrationConfig(
 			incompatible,
 			reasons: [{ code: 'yaml_alias_or_anchor' }],
 			legacyReferenceCount: 0,
+			manualWiringActionable: false,
 			snapshot: input.snapshot
 		});
 	}
 
 	const legacy: LegacyReference[] = [];
 	const typedReferencesByLibrary = new Map<string, string[]>();
-	if (librariesNode !== undefined && librariesNode !== null) {
+	if (librariesNode !== undefined && !isYamlNull(librariesNode)) {
 		if (!isMap(librariesNode)) {
 			reasons.push({ code: 'unsupported_config_shape' });
 		} else {
@@ -475,12 +530,13 @@ export function planKometaMigrationConfig(
 					reasons.push({ code: 'unsupported_config_shape' });
 					continue;
 				}
+				if (isYamlNull(pair.value)) continue;
 				if (!isMap(pair.value)) {
 					reasons.push({ code: 'unsupported_config_shape', library });
 					continue;
 				}
 				const metadataFiles = pair.value.get('metadata_files', true);
-				if (metadataFiles === undefined || metadataFiles === null) continue;
+				if (metadataFiles === undefined || isYamlNull(metadataFiles)) continue;
 				if (!isSeq(metadataFiles)) {
 					reasons.push({ code: 'unsupported_config_shape', library });
 					continue;
@@ -556,6 +612,12 @@ export function planKometaMigrationConfig(
 
 	const uniqueReasons = dedupeBy(reasons, reasonIdentity);
 	if (uniqueReasons.length > 0) {
+		const structurallyIndeterminate = uniqueReasons.some(
+			(reason) => reason.code === 'unsupported_config_shape'
+		);
+		const unresolvedLegacyReference = legacy.some(
+			(reference) => reference.type === null || reference.targetReference === null
+		);
 		return manualPlan({
 			sourceFingerprint,
 			metadataPathPrefix,
@@ -564,6 +626,10 @@ export function planKometaMigrationConfig(
 			incompatible,
 			reasons: uniqueReasons,
 			legacyReferenceCount: legacy.length,
+			manualWiringActionable:
+				authoritative.resolved.length > 0 &&
+				!structurallyIndeterminate &&
+				!unresolvedLegacyReference,
 			legacyLibraries: new Set(legacy.map((reference) => reference.library)),
 			snapshot: input.snapshot
 		});
@@ -600,6 +666,7 @@ export function planKometaMigrationConfig(
 		reasons: [],
 		incompatibleLibraries: dedupeBy(incompatible, incompatibilityIdentity),
 		legacyReferenceCount: legacy.length,
+		manualWiringActionable: true,
 		manualSnippet: null
 	};
 }

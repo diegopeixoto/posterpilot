@@ -3,6 +3,9 @@ import {
 	isEffectlessKometaMigrationFailure,
 	isKometaMigrationIncomplete
 } from './migration-journal';
+import { kometaFileFingerprint } from './plan';
+
+const MISSING_FILE_FINGERPRINT = kometaFileFingerprint(null);
 
 export interface CompletedKometaMigrationBaseline {
 	migrationId: string;
@@ -10,6 +13,7 @@ export interface CompletedKometaMigrationBaseline {
 	outputDirectory: string;
 	metadataPathPrefix: string;
 	configPath: string | null;
+	configSourceFingerprint: string | null;
 	references: { movie: string; show: string };
 	activationEvidence: 'verified_config' | 'user_acknowledged';
 	completedAt: string;
@@ -56,13 +60,23 @@ export interface PublicKometaMigrationState {
 	};
 	canResume: boolean;
 	canRestartPreview: boolean;
+	canAbandon: boolean;
 	requiresAcknowledgment: boolean;
 	canRollback: boolean;
+	recoveryGuidance:
+		| 'manual_safe_to_abandon'
+		| 'source_safe_to_abandon'
+		| 'proposed_safe_to_rollback'
+		| 'divergent_manual_intervention'
+		| null;
 }
 
 export interface PublicKometaMigrationStateOptions {
 	/** True only after the caller has revalidated the frozen server/config scope. */
 	scopeMatches?: boolean;
+	canAbandon?: boolean;
+	canRecoveryRollback?: boolean;
+	recoveryGuidance?: PublicKometaMigrationState['recoveryGuidance'];
 }
 
 /** Return only the activation fields needed by the Kometa collision guard. */
@@ -83,6 +97,7 @@ export function completedKometaMigrationBaseline(
 		outputDirectory: journal.payload.outputDirectory,
 		metadataPathPrefix: journal.payload.metadataPathPrefix,
 		configPath: journal.payload.config.path,
+		configSourceFingerprint: journal.payload.config.sourceFingerprint,
 		references: journal.payload.references,
 		activationEvidence: journal.activationEvidence.type,
 		completedAt: journal.completedAt
@@ -150,15 +165,23 @@ export function publicKometaMigrationState(
 		canResume:
 			scopeMatches &&
 			isKometaMigrationIncomplete(journal) &&
+			journal.status !== 'abandoned' &&
 			journal.status !== 'recovery_required' &&
 			journal.status !== 'awaiting_manual_wiring' &&
 			journal.status !== 'rollback_prepared',
-		canRestartPreview: scopeMatches && isEffectlessKometaMigrationFailure(journal),
+		canRestartPreview:
+			scopeMatches &&
+			(isEffectlessKometaMigrationFailure(journal) || journal.status === 'abandoned'),
+		canAbandon: scopeMatches && options.canAbandon === true,
 		requiresAcknowledgment: journal.status === 'awaiting_manual_wiring',
 		canRollback:
 			scopeMatches &&
-			(journal.status === 'completed' || journal.status === 'rollback_prepared') &&
+			(journal.status === 'completed' ||
+				journal.status === 'rollback_prepared' ||
+				options.canRecoveryRollback === true) &&
 			journal.payload.config.activation === 'managed' &&
-			journal.backups.config !== null
+			(journal.backups.config !== null ||
+				journal.payload.config.sourceFingerprint === MISSING_FILE_FINGERPRINT),
+		recoveryGuidance: scopeMatches ? (options.recoveryGuidance ?? null) : null
 	};
 }

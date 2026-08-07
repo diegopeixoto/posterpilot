@@ -3,9 +3,10 @@ import type { ChangeEntry, ConsistencyWarning, KometaSnapshot } from './config';
 import type { KometaConfigMode } from '$lib/server/config';
 import type { SyncSelectionInput } from './selection';
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
+import { validateConfigPathBinding, type ConfigPathBinding } from './config-io';
 
 export const KOMETA_CONFIG_PLAN_KIND = 'kometa_config_mutation';
-const KOMETA_CONFIG_PLAN_VERSION = 1 as const;
+const KOMETA_CONFIG_PLAN_VERSION = 2 as const;
 const MAX_KOMETA_DIFF_ENTRIES = 500;
 
 export type KometaConfigPlanAction = 'structured' | 'raw' | 'restore';
@@ -25,9 +26,14 @@ export interface KometaConfigPlanPayload {
 	serverInstanceId: string;
 	serverName: string;
 	configPath: string;
+	pathBinding: ConfigPathBinding;
 	mode: KometaConfigMode;
+	/** Exact predecessor bytes authorized by preview, including an absent file. */
+	sourceContent: string | null;
 	sourceFingerprint: string;
 	proposedFingerprint: string;
+	/** Frozen identity of server-held inputs used to render a structured config. */
+	structuredDependencyFingerprint: string | null;
 	/** Exact bytes authorized by confirmation. Kept only in the server-side plan row. */
 	proposedContent: string;
 	display: KometaPlanDisplay;
@@ -39,6 +45,26 @@ export interface KometaConfigPlanPayload {
 		backupName: string;
 		backupFingerprint: string;
 	} | null;
+}
+
+export interface KometaStructuredConfigDependencies {
+	serverInstanceId: string;
+	plexUrl: string | null;
+	plexToken: string | null;
+	tmdbKey: string | null;
+}
+
+/** Bind structured previews to every mutable server-held credential they render. */
+export function kometaStructuredDependencyFingerprint(
+	dependencies: KometaStructuredConfigDependencies
+): string {
+	return hashCanonicalJson({
+		version: 1,
+		serverInstanceId: dependencies.serverInstanceId,
+		plexUrl: dependencies.plexUrl,
+		plexToken: dependencies.plexToken,
+		tmdbKey: dependencies.tmdbKey
+	});
 }
 
 export function kometaFileFingerprint(content: string | null): string {
@@ -192,6 +218,7 @@ export function assertKometaConfigPlanPayload(
 		!payload.serverName ||
 		!payload.configPath ||
 		!['merge', 'own'].includes(payload.mode) ||
+		(payload.sourceContent !== null && typeof payload.sourceContent !== 'string') ||
 		!validDigest(payload.sourceFingerprint) ||
 		!validDigest(payload.proposedFingerprint) ||
 		typeof payload.proposedContent !== 'string' ||
@@ -203,8 +230,21 @@ export function assertKometaConfigPlanPayload(
 	) {
 		throw new TypeError('Invalid Kometa configuration plan');
 	}
+	const binding = validateConfigPathBinding(payload.pathBinding);
+	if (
+		binding.canonicalPath === '' ||
+		kometaFileFingerprint(payload.sourceContent) !== payload.sourceFingerprint
+	) {
+		throw new TypeError('Kometa source content fingerprint mismatch');
+	}
 	if (kometaProposedFingerprint(payload.proposedContent) !== payload.proposedFingerprint) {
 		throw new TypeError('Kometa proposed content fingerprint mismatch');
+	}
+	if (
+		(payload.action === 'structured' && !validDigest(payload.structuredDependencyFingerprint)) ||
+		(payload.action !== 'structured' && payload.structuredDependencyFingerprint !== null)
+	) {
+		throw new TypeError('Kometa structured dependency fingerprint mismatch');
 	}
 	if (payload.action === 'structured' && !payload.structured) {
 		throw new TypeError('Structured Kometa plan is missing its frozen selection');

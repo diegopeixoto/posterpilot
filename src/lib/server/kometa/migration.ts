@@ -15,7 +15,10 @@ import {
 	type OperationPlan
 } from '$lib/server/plans/operation-plan-store';
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
-import { kometaOutputDirectory } from '$lib/server/plans/apply-destinations';
+import {
+	inspectKometaCollisionGuard,
+	kometaOutputDirectory
+} from '$lib/server/plans/apply-destinations';
 import {
 	canonicalConfigPath,
 	createProtectedBackupAtBinding,
@@ -23,12 +26,18 @@ import {
 	readBackupAtBinding,
 	readConfig,
 	readConfigAtBinding,
+	recoverConfigQuarantineAtBinding,
+	removeConfigAtomicAtBinding,
 	withConfigLocks,
 	writeConfigAtomicAtBinding,
 	type ConfigPathBinding
 } from './config-io';
 import { LEGACY_FILENAME, MOVIE_FILENAME, SHOW_FILENAME } from './destination';
 import { classifyKometaLegacyConfig } from './legacy-layout';
+import {
+	withKometaMigrationControlLock,
+	type KometaMigrationControlLease
+} from './migration-control-lock';
 import {
 	classifyLegacyEntries,
 	compareCodeUnitStrings,
@@ -40,10 +49,14 @@ import {
 	type AuthoritativeKometaLibrary,
 	type KometaMigrationConfigPlan
 } from './migration-config';
-import { loadKometaMigrationEvidence } from './migration-evidence';
+import {
+	loadKometaMigrationEvidence,
+	type KometaMigrationEvidenceDatabase
+} from './migration-evidence';
 import {
 	acknowledgeManualKometaMigration,
 	executeKometaMigration,
+	KometaMigrationPhysicalTargetChangedError,
 	rollbackKometaMigration,
 	type KometaMigrationExecutorDependencies
 } from './migration-executor';
@@ -51,11 +64,13 @@ import {
 	createKometaMigrationJournal,
 	isEffectlessKometaMigrationFailure,
 	isKometaMigrationIncomplete,
+	updateKometaMigrationJournal,
 	type KometaMigrationJournalV1
 } from './migration-journal';
 import {
 	KOMETA_MIGRATION_PLAN_KIND,
 	assertKometaMigrationPlanPayload,
+	kometaMigrationBaselineFingerprint,
 	kometaManualSnippetFingerprint,
 	type KometaMigrationAmbiguousDisplay,
 	type KometaMigrationDisplay,
@@ -63,17 +78,29 @@ import {
 } from './migration-plan';
 import {
 	completeKometaMigrationJournal,
+	loadActiveKometaMigrationJournal,
 	loadKometaMigrationJournal,
+	loadKometaMigrationJournalForGuard,
 	KometaMigrationStoreError,
 	prepareKometaMigrationJournal,
 	rollbackKometaMigrationJournal,
 	saveKometaMigrationJournal
 } from './migration-store';
-import { publicKometaMigrationState, type PublicKometaMigrationState } from './migration-state';
+import {
+	publicKometaMigrationState,
+	kometaMigrationCollisionState,
+	type PublicKometaMigrationState,
+	type PublicKometaMigrationStateOptions
+} from './migration-state';
 import { buildSplitMigrationYaml } from './migration-yaml';
 import { kometaFileFingerprint, rawKometaChanges } from './plan';
-import { findPhysicalPathAliasConflict, inspectFrozenPhysicalPath } from './physical-path-alias';
+import {
+	findPhysicalPathAliasConflict,
+	inspectFrozenPhysicalPath,
+	PhysicalPathInspectionError
+} from './physical-path-alias';
 import { kometaMetadataReference } from './reference-path';
+import { assertNoPendingKometaConfigMutationWhileOwned } from './config-mutation-recovery';
 import {
 	kometaBindingErrorCode,
 	resolveKometaServerBinding,
@@ -81,8 +108,9 @@ import {
 } from './server-binding';
 
 const ROLLBACK_PLAN_KIND = 'kometa_split_migration_rollback' as const;
-const ROLLBACK_PLAN_VERSION = 1 as const;
+const ROLLBACK_PLAN_VERSION = 2 as const;
 const SHA256 = /^[0-9a-f]{64}$/;
+const MISSING_FILE_FINGERPRINT = kometaFileFingerprint(null);
 
 export type KometaMigrationServiceErrorCode =
 	| 'kometa_migration_not_required'
@@ -90,9 +118,12 @@ export type KometaMigrationServiceErrorCode =
 	| 'kometa_migration_not_found'
 	| 'kometa_migration_scope_changed'
 	| 'kometa_migration_ambiguous_confirmation_required'
+	| 'kometa_migration_config_incompatible'
 	| 'kometa_migration_manual_ack_mismatch'
+	| 'kometa_migration_abandon_unavailable'
 	| 'kometa_migration_path_conflict'
 	| 'kometa_migration_rollback_unavailable'
+	| 'kometa_config_recovery_required'
 	| 'kometa_server_binding_missing'
 	| 'kometa_server_binding_incompatible'
 	| 'kometa_server_binding_unavailable';
@@ -101,6 +132,16 @@ export class KometaMigrationServiceError extends Error {
 	constructor(readonly code: KometaMigrationServiceErrorCode) {
 		super(code);
 		this.name = 'KometaMigrationServiceError';
+	}
+}
+
+async function assertConfigCommitRecoveryIdle(
+	assertControlLockOwned: () => Promise<KometaMigrationControlLease>
+): Promise<void> {
+	try {
+		await assertNoPendingKometaConfigMutationWhileOwned(assertControlLockOwned);
+	} catch {
+		throw new KometaMigrationServiceError('kometa_config_recovery_required');
 	}
 }
 
@@ -146,6 +187,10 @@ export interface AcknowledgeKometaMigrationRequest {
 	manualSnippetFingerprint: string;
 }
 
+export interface AbandonKometaMigrationRequest {
+	migrationId: string;
+}
+
 export interface KometaMigrationRollbackPreview {
 	planId: string;
 	digest: string;
@@ -162,9 +207,10 @@ interface RollbackPlanPayload {
 	serverInstanceId: string;
 	configPath: string;
 	currentFingerprint: string;
-	backupName: string;
-	backupChecksum: string;
+	backupName: string | null;
+	backupChecksum: string | null;
 	backupContentFingerprint: string;
+	baselineFingerprint: string;
 	display: {
 		changes: ReturnType<typeof rawKometaChanges>['changes'];
 		warnings: string[];
@@ -202,8 +248,12 @@ function assertFrozenMigrationBindings(payload: KometaMigrationPlanPayload): voi
 }
 
 function executorDependencies(
-	payload: KometaMigrationPlanPayload
+	payload: KometaMigrationPlanPayload,
+	controlLease?: KometaMigrationControlLease,
+	assertControlLockOwned?: () => Promise<KometaMigrationControlLease>
 ): KometaMigrationExecutorDependencies {
+	const isPhysicalTargetChange = (error: unknown): boolean =>
+		error instanceof PhysicalPathInspectionError && error.code !== 'inspection_failed';
 	const entries = migrationBindingEntries(payload);
 	const bindings = new Map(entries);
 	const requireBinding = (path: string): ConfigPathBinding => {
@@ -213,8 +263,28 @@ function executorDependencies(
 	};
 	return {
 		read: (path) => readConfigAtBinding(requireBinding(path)),
+		// Never reuse request-start evidence here: every callback runs while the
+		// executor still owns the frozen filesystem locks.
+		assertEvidenceCurrent: () => currentMigrationEvidenceState(payload),
 		write: (path, content, stamp, expectedSource) => {
-			writeConfigAtomicAtBinding(requireBinding(path), content, stamp, { expectedSource });
+			try {
+				writeConfigAtomicAtBinding(requireBinding(path), content, stamp, { expectedSource });
+			} catch (error) {
+				if (isPhysicalTargetChange(error)) {
+					throw new KometaMigrationPhysicalTargetChangedError();
+				}
+				throw error;
+			}
+		},
+		remove: (path, expectedContent) => {
+			try {
+				removeConfigAtomicAtBinding(requireBinding(path), expectedContent);
+			} catch (error) {
+				if (isPhysicalTargetChange(error)) {
+					throw new KometaMigrationPhysicalTargetChangedError();
+				}
+				throw error;
+			}
 		},
 		createProtectedBackup: (path, migrationId, expectedContent) => {
 			const backup = createProtectedBackupAtBinding(requireBinding(path), migrationId, {
@@ -233,9 +303,23 @@ function executorDependencies(
 			}
 			assertFrozenMigrationBindings(payload);
 		},
-		saveJournal: saveKometaMigrationJournal,
-		completeJournal: completeKometaMigrationJournal,
-		rollbackJournal: rollbackKometaMigrationJournal,
+		assertCommitOwned: assertControlLockOwned
+			? async () => {
+					await assertControlLockOwned();
+				}
+			: undefined,
+		saveJournal: (journal, expectedJournal) =>
+			saveKometaMigrationJournal(journal, expectedJournal, controlLease),
+		completeJournal: (journal, snapshot, expectedJournal) =>
+			completeKometaMigrationJournal(
+				journal,
+				snapshot,
+				expectedJournal,
+				(database) => currentMigrationEvidenceState(payload, database),
+				controlLease
+			),
+		rollbackJournal: (journal, snapshot, expectedJournal) =>
+			rollbackKometaMigrationJournal(journal, snapshot, expectedJournal, controlLease),
 		now: () => new Date()
 	};
 }
@@ -371,12 +455,22 @@ function snapshotScope(config: AppConfig, binding: KometaServerBinding) {
 	};
 }
 
+function frozenSnapshotScope(payload: KometaMigrationPlanPayload) {
+	return {
+		serverInstanceId: payload.serverInstanceId,
+		configPath: payload.config.path,
+		outputDirectory: payload.outputDirectory,
+		metadataPathPrefix: payload.metadataPathPrefix
+	};
+}
+
 function assertFrozenScope(
 	config: AppConfig,
 	binding: KometaServerBinding,
 	payload: KometaMigrationPlanPayload
 ): void {
 	if (
+		config.kometaServerInstanceId !== payload.serverInstanceId ||
 		binding.id !== payload.serverInstanceId ||
 		!samePath(resolve(kometaOutputDirectory(config)), payload.outputDirectory) ||
 		config.kometaMetadataPathPrefix !== payload.metadataPathPrefix ||
@@ -418,7 +512,10 @@ function assertCompletedMigrationCanRestart(
 		frozenScopeMatches(config, binding, existing.payload) &&
 		!hasActiveLegacyReference(config)
 	) {
-		throw new KometaMigrationServiceError('kometa_migration_not_required');
+		const guard = inspectKometaCollisionGuard(config, kometaMigrationCollisionState(existing));
+		if (guard.reason !== 'unknown_config_with_legacy_file') {
+			throw new KometaMigrationServiceError('kometa_migration_not_required');
+		}
 	}
 }
 
@@ -428,7 +525,7 @@ function assertExistingMigrationCanStartFreshPreview(
 	binding: KometaServerBinding
 ): void {
 	if (existing && isKometaMigrationIncomplete(existing)) {
-		if (!isEffectlessKometaMigrationFailure(existing)) {
+		if (existing.status !== 'abandoned' && !isEffectlessKometaMigrationFailure(existing)) {
 			throw new KometaMigrationServiceError('kometa_migration_in_progress');
 		}
 		assertFrozenScope(config, binding, existing.payload);
@@ -492,10 +589,12 @@ function scopedAuthoritativeLibraries(input: {
 
 function combinedEvidenceFingerprint(
 	classification: LegacyEntryClassificationResult,
-	libraries: readonly AuthoritativeKometaLibrary[]
+	libraries: readonly AuthoritativeKometaLibrary[],
+	baselineFingerprint: string
 ): string {
 	return hashCanonicalJson({
 		classification: classification.evidenceFingerprint,
+		baseline: baselineFingerprint,
 		libraries: [...libraries]
 			.map((library) => ({ title: library.title, type: library.type }))
 			.sort(
@@ -536,6 +635,12 @@ function configTarget(
 		proposedFingerprint: null,
 		proposedContent: null
 	};
+}
+
+function assertMigrationConfigActionable(configPlan: KometaMigrationConfigPlan): void {
+	if (!configPlan.manualWiringActionable) {
+		throw new KometaMigrationServiceError('kometa_migration_config_incompatible');
+	}
 }
 
 function conflictDisplays(
@@ -654,6 +759,7 @@ async function previewInputs(config: AppConfig, binding: KometaServerBinding) {
 	}
 
 	const previousSnapshot = await getKometaLastApplied(snapshotScope(config, binding));
+	const previousSnapshotFingerprint = kometaMigrationBaselineFingerprint(previousSnapshot);
 	const [cached, managedKeys, evidence] = await Promise.all([
 		getCachedLibraries(binding.id),
 		getKometaManagedLibraries(),
@@ -696,6 +802,7 @@ async function previewInputs(config: AppConfig, binding: KometaServerBinding) {
 		legacyRaw,
 		rawConfig,
 		previousSnapshot,
+		previousSnapshotFingerprint,
 		libraries,
 		classification,
 		built,
@@ -707,9 +814,10 @@ async function previewInputs(config: AppConfig, binding: KometaServerBinding) {
 /** Build and persist a read-only, encrypted, exact-content migration preview. */
 export async function previewKometaMigration(): Promise<KometaMigrationPreview> {
 	const { config, binding } = await resolveBoundScope();
-	const existing = await loadKometaMigrationJournal(binding.id);
+	const existing = await loadKometaMigrationJournalForGuard(binding.id);
 	assertExistingMigrationCanStartFreshPreview(existing, config, binding);
 	const input = await previewInputs(config, binding);
+	assertMigrationConfigActionable(input.configPlan);
 	const target = configTarget(
 		config,
 		input.pathBindings.config?.canonicalPath ?? null,
@@ -750,8 +858,13 @@ export async function previewKometaMigration(): Promise<KometaMigrationPreview> 
 			}
 		},
 		config: target,
-		evidenceFingerprint: combinedEvidenceFingerprint(input.classification, input.libraries),
+		evidenceFingerprint: combinedEvidenceFingerprint(
+			input.classification,
+			input.libraries,
+			input.previousSnapshotFingerprint
+		),
 		previousSnapshot: input.previousSnapshot,
+		previousSnapshotFingerprint: input.previousSnapshotFingerprint,
 		nextSnapshot: input.configPlan.nextSnapshot,
 		manualSnippet,
 		manualSnippetFingerprint:
@@ -804,39 +917,102 @@ export async function cancelKometaMigrationPreview(
 
 async function assertEvidenceStillCurrent(
 	payload: KometaMigrationPlanPayload,
-	config: AppConfig
+	config: AppConfig,
+	options: {
+		propagateReadFailure?: boolean;
+		database?: KometaMigrationEvidenceDatabase;
+	} = {}
 ): Promise<void> {
-	let rawConfig: string | null;
-	let legacyRaw: string | null;
-	try {
-		rawConfig = payload.pathBindings.config
-			? readConfigAtBinding(payload.pathBindings.config)
-			: null;
-		legacyRaw = readConfigAtBinding(payload.pathBindings.legacy);
-	} catch {
-		throw new OperationPlanError('plan_stale', 'kometa-migration');
+	const verify = async (database: KometaMigrationEvidenceDatabase): Promise<void> => {
+		let rawConfig: string | null;
+		let legacyRaw: string | null;
+		try {
+			rawConfig = payload.pathBindings.config
+				? readConfigAtBinding(payload.pathBindings.config)
+				: null;
+			legacyRaw = readConfigAtBinding(payload.pathBindings.legacy);
+		} catch (error) {
+			if (options.propagateReadFailure) throw error;
+			throw new OperationPlanError('plan_stale', 'kometa-migration');
+		}
+		const legacyConfig = rawConfig
+			? classifyKometaLegacyConfig(rawConfig)
+			: { references: [] as string[] };
+		const [currentSnapshot, cached, managedKeys, evidence] = await Promise.all([
+			getKometaLastApplied(frozenSnapshotScope(payload), database),
+			getCachedLibraries(payload.serverInstanceId, database),
+			getKometaManagedLibraries(database),
+			loadKometaMigrationEvidence(database, payload.serverInstanceId)
+		]);
+		const currentSnapshotFingerprint = kometaMigrationBaselineFingerprint(currentSnapshot);
+		if (currentSnapshotFingerprint !== payload.previousSnapshotFingerprint) {
+			throw new OperationPlanError('plan_stale', 'kometa-migration');
+		}
+		const libraries = scopedAuthoritativeLibraries({
+			cached,
+			managedKeys,
+			// Manual wiring legitimately removes the last active legacy reference before
+			// acknowledgment. Keep the exact resolved library scope frozen in the proposed
+			// baseline so that successful wiring does not erase its own evidence context.
+			snapshotLibraries: [
+				...new Set([
+					...Object.keys(payload.previousSnapshot?.libraries ?? {}),
+					...Object.keys(payload.nextSnapshot.libraries)
+				])
+			],
+			legacyConfigLibraries: legacyConfig.references
+		});
+		const parsed = parseLegacyMetadata(legacyRaw ?? '');
+		const classification = classifyLegacyEntries({ parsed, ...evidence });
+		const configPlan = planKometaMigrationConfig({
+			rawConfig: rawConfig ?? '',
+			mode: config.kometaConfigMode,
+			snapshot: payload.previousSnapshot,
+			metadataPathPrefix: payload.metadataPathPrefix,
+			references: payload.references,
+			libraries
+		});
+		assertMigrationConfigActionable(configPlan);
+		if (
+			combinedEvidenceFingerprint(classification, libraries, currentSnapshotFingerprint) !==
+				payload.evidenceFingerprint ||
+			config.kometaMetadataPathPrefix !== payload.metadataPathPrefix
+		) {
+			throw new OperationPlanError('plan_stale', 'kometa-migration');
+		}
+	};
+
+	if (options.database) {
+		await verify(options.database);
+		return;
 	}
-	const legacyConfig = rawConfig
-		? classifyKometaLegacyConfig(rawConfig)
-		: { references: [] as string[] };
-	const [cached, managedKeys, evidence] = await Promise.all([
-		getCachedLibraries(payload.serverInstanceId),
-		getKometaManagedLibraries(),
-		loadKometaMigrationEvidence(db, payload.serverInstanceId)
-	]);
-	const libraries = scopedAuthoritativeLibraries({
-		cached,
-		managedKeys,
-		snapshotLibraries: Object.keys(payload.previousSnapshot?.libraries ?? {}),
-		legacyConfigLibraries: legacyConfig.references
-	});
-	const parsed = parseLegacyMetadata(legacyRaw ?? '');
-	const classification = classifyLegacyEntries({ parsed, ...evidence });
-	if (
-		combinedEvidenceFingerprint(classification, libraries) !== payload.evidenceFingerprint ||
-		config.kometaMetadataPathPrefix !== payload.metadataPathPrefix
-	) {
-		throw new OperationPlanError('plan_stale', 'kometa-migration');
+	// libSQL starts a write transaction here. Every evidence source is therefore
+	// read from one coherent snapshot and no evidence writer can commit mid-check.
+	await db.transaction(verify);
+}
+
+async function currentMigrationEvidenceState(
+	payload: KometaMigrationPlanPayload,
+	database?: KometaMigrationEvidenceDatabase
+): Promise<'current' | 'changed' | 'unavailable'> {
+	try {
+		const { config, binding } = await resolveBoundScope();
+		assertFrozenScope(config, binding, payload);
+		await assertEvidenceStillCurrent(payload, config, {
+			propagateReadFailure: true,
+			database
+		});
+		return 'current';
+	} catch (error) {
+		if (
+			(error instanceof OperationPlanError && error.code === 'plan_stale') ||
+			(error instanceof KometaMigrationServiceError &&
+				(error.code === 'kometa_migration_scope_changed' ||
+					error.code === 'kometa_migration_config_incompatible'))
+		) {
+			return 'changed';
+		}
+		return 'unavailable';
 	}
 }
 
@@ -846,42 +1022,52 @@ export async function confirmKometaMigration(
 ): Promise<PublicKometaMigrationState> {
 	const initial = await validateMigrationPlan(request);
 	return withConfigLocks(migrationPaths(initial.payload), async () => {
-		const pending = await validateMigrationPlan(request);
-		const { config, binding } = await resolveBoundScope();
-		assertFrozenScope(config, binding, pending.payload);
-		assertFrozenMigrationBindings(pending.payload);
-		const existing = await loadKometaMigrationJournal(binding.id);
-		assertExistingMigrationCanStartFreshPreview(existing, config, binding);
-		if (pending.payload.display.ambiguous.length > 0 && request.acceptAmbiguous !== true) {
-			throw new KometaMigrationServiceError('kometa_migration_ambiguous_confirmation_required');
-		}
-		if (!currentFileMatchesSource(pending.payload)) {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		await assertEvidenceStillCurrent(pending.payload, config);
-		// The single-use CAS decides confirm-vs-cancel before a durable journal or
-		// filesystem effect exists. A crash in the following narrow gap is safe: no
-		// target changed and the user must generate a fresh preview.
-		await operationPlanStore.consume<KometaMigrationPlanPayload>(request.planId, {
-			kind: KOMETA_MIGRATION_PLAN_KIND,
-			digest: request.digest,
-			serverInstanceId: pending.payload.serverInstanceId
-		});
-		const journal = createKometaMigrationJournal({
-			planId: pending.id,
-			planDigest: pending.digest,
-			payload: pending.payload,
-			now: new Date()
-		});
-		try {
-			await prepareKometaMigrationJournal(journal, existing);
-		} catch (error) {
-			if (error instanceof KometaMigrationStoreError && error.code === 'journal_changed') {
-				throw new KometaMigrationServiceError('kometa_migration_in_progress');
+		const completed = await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			await assertConfigCommitRecoveryIdle(assertControlLockOwned);
+			const pending = await validateMigrationPlan(request);
+			const { config, binding } = await resolveBoundScope();
+			assertFrozenScope(config, binding, pending.payload);
+			assertFrozenMigrationBindings(pending.payload);
+			const existing = await loadKometaMigrationJournalForGuard(binding.id);
+			await assertControlLockOwned();
+			assertExistingMigrationCanStartFreshPreview(existing, config, binding);
+			if (pending.payload.display.ambiguous.length > 0 && request.acceptAmbiguous !== true) {
+				throw new KometaMigrationServiceError('kometa_migration_ambiguous_confirmation_required');
 			}
-			throw error;
-		}
-		const completed = await executeKometaMigration(executorDependencies(journal.payload), journal);
+			await recoverMigrationQuarantines(pending.payload, assertControlLockOwned);
+			if (!currentFileMatchesSource(pending.payload)) {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+			await assertEvidenceStillCurrent(pending.payload, config);
+			// The single-use CAS decides confirm-vs-cancel before a durable journal or
+			// filesystem effect exists. A crash in the following narrow gap is safe: no
+			// target changed and the user must generate a fresh preview.
+			await assertControlLockOwned();
+			await operationPlanStore.consume<KometaMigrationPlanPayload>(request.planId, {
+				kind: KOMETA_MIGRATION_PLAN_KIND,
+				digest: request.digest,
+				serverInstanceId: pending.payload.serverInstanceId
+			});
+			const journalLease = await assertControlLockOwned();
+			const journal = createKometaMigrationJournal({
+				planId: pending.id,
+				planDigest: pending.digest,
+				payload: pending.payload,
+				now: new Date()
+			});
+			try {
+				await prepareKometaMigrationJournal(journal, existing, journalLease);
+			} catch (error) {
+				if (error instanceof KometaMigrationStoreError && error.code === 'journal_changed') {
+					throw new KometaMigrationServiceError('kometa_migration_in_progress');
+				}
+				throw error;
+			}
+			return executeKometaMigration(
+				executorDependencies(journal.payload, journalLease, assertControlLockOwned),
+				journal
+			);
+		});
 		await logEvent('info', 'kometa_migration', 'kometa_migration_confirmed', {
 			serverInstanceId: completed.payload.serverInstanceId,
 			migrationId: completed.migrationId,
@@ -895,14 +1081,90 @@ export async function confirmKometaMigration(
 }
 
 async function loadScopedJournal(migrationId: string) {
-	const { config, binding } = await resolveBoundScope();
-	const journal = await loadKometaMigrationJournal(binding.id);
+	const config = await resolveConfig();
+	const configuredBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+	const journal =
+		(await loadActiveKometaMigrationJournal()) ??
+		(configuredBinding.binding
+			? await loadKometaMigrationJournal(configuredBinding.binding.id)
+			: null);
 	if (!journal || journal.migrationId !== migrationId) {
 		throw new KometaMigrationServiceError('kometa_migration_not_found');
 	}
+	const resolvedBinding = await resolveKometaServerBinding(journal.payload.serverInstanceId);
+	if (!resolvedBinding.binding) {
+		throw new KometaMigrationServiceError(
+			kometaBindingErrorCode(
+				resolvedBinding.status as Exclude<typeof resolvedBinding.status, 'ready'>
+			) as KometaMigrationServiceErrorCode
+		);
+	}
+	const binding = resolvedBinding.binding;
 	assertFrozenScope(config, binding, journal.payload);
 	assertFrozenMigrationBindings(journal.payload);
 	return { config, binding, journal };
+}
+
+function recoveryStateOptions(
+	journal: KometaMigrationJournalV1
+): PublicKometaMigrationStateOptions {
+	if (journal.status !== 'failed' && journal.status !== 'recovery_required') return {};
+	if (journal.payload.config.activation === 'manual') {
+		return { canAbandon: true, recoveryGuidance: 'manual_safe_to_abandon' };
+	}
+	const config = journal.payload.config;
+	const configBinding = journal.payload.pathBindings.config;
+	if (
+		configBinding === null ||
+		config.sourceFingerprint === null ||
+		config.proposedFingerprint === null
+	) {
+		return { recoveryGuidance: 'divergent_manual_intervention' };
+	}
+	let currentFingerprint: string;
+	try {
+		currentFingerprint = kometaFileFingerprint(readConfigAtBinding(configBinding));
+	} catch {
+		return { recoveryGuidance: 'divergent_manual_intervention' };
+	}
+	if (currentFingerprint === config.sourceFingerprint) {
+		return { canAbandon: true, recoveryGuidance: 'source_safe_to_abandon' };
+	}
+	if (currentFingerprint !== config.proposedFingerprint) {
+		return { recoveryGuidance: 'divergent_manual_intervention' };
+	}
+	if (config.sourceFingerprint === MISSING_FILE_FINGERPRINT && journal.backups.config === null) {
+		return { canRecoveryRollback: true, recoveryGuidance: 'proposed_safe_to_rollback' };
+	}
+	if (journal.backups.config === null) {
+		return { recoveryGuidance: 'divergent_manual_intervention' };
+	}
+	try {
+		const backup = readBackupAtBinding(configBinding, journal.backups.config.name, {
+			expectedChecksum: journal.backups.config.fingerprint
+		});
+		if (kometaFileFingerprint(backup) !== config.sourceFingerprint) {
+			return { recoveryGuidance: 'divergent_manual_intervention' };
+		}
+	} catch {
+		return { recoveryGuidance: 'divergent_manual_intervention' };
+	}
+	return { canRecoveryRollback: true, recoveryGuidance: 'proposed_safe_to_rollback' };
+}
+
+async function recoverMigrationQuarantines(
+	payload: KometaMigrationPlanPayload,
+	assertControlLockOwned: () => Promise<KometaMigrationControlLease>
+): Promise<void> {
+	for (const binding of [
+		payload.pathBindings.movie,
+		payload.pathBindings.show,
+		payload.pathBindings.config
+	]) {
+		if (binding === null) continue;
+		await assertControlLockOwned();
+		recoverConfigQuarantineAtBinding(binding);
+	}
 }
 
 /** Retry only exact source/proposed states from the durable journal; never reclassify. */
@@ -911,11 +1173,16 @@ export async function resumeKometaMigration(
 ): Promise<PublicKometaMigrationState> {
 	const initial = await loadScopedJournal(request.migrationId);
 	return withConfigLocks(migrationPaths(initial.journal.payload), async () => {
-		const current = await loadScopedJournal(request.migrationId);
-		const resumed = await executeKometaMigration(
-			executorDependencies(current.journal.payload),
-			current.journal
-		);
+		const resumed = await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			await assertConfigCommitRecoveryIdle(assertControlLockOwned);
+			const current = await loadScopedJournal(request.migrationId);
+			await recoverMigrationQuarantines(current.journal.payload, assertControlLockOwned);
+			const lease = await assertControlLockOwned();
+			return executeKometaMigration(
+				executorDependencies(current.journal.payload, lease, assertControlLockOwned),
+				current.journal
+			);
+		});
 		return publicKometaMigrationState(resumed, { scopeMatches: true })!;
 	});
 }
@@ -928,19 +1195,60 @@ export async function acknowledgeKometaMigration(
 		throw new KometaMigrationServiceError('kometa_migration_manual_ack_mismatch');
 	}
 	return withConfigLocks(migrationPaths(initial.journal.payload), async () => {
-		const current = await loadScopedJournal(request.migrationId);
-		if (current.journal.payload.manualSnippetFingerprint !== request.manualSnippetFingerprint) {
-			throw new KometaMigrationServiceError('kometa_migration_manual_ack_mismatch');
-		}
-		const completed = await acknowledgeManualKometaMigration(
-			executorDependencies(current.journal.payload),
-			current.journal
-		);
+		const completed = await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			await assertConfigCommitRecoveryIdle(assertControlLockOwned);
+			const current = await loadScopedJournal(request.migrationId);
+			if (current.journal.payload.manualSnippetFingerprint !== request.manualSnippetFingerprint) {
+				throw new KometaMigrationServiceError('kometa_migration_manual_ack_mismatch');
+			}
+			await recoverMigrationQuarantines(current.journal.payload, assertControlLockOwned);
+			const completionLease = await assertControlLockOwned();
+			return acknowledgeManualKometaMigration(
+				executorDependencies(current.journal.payload, completionLease, assertControlLockOwned),
+				current.journal
+			);
+		});
 		await logEvent('info', 'kometa_migration', 'kometa_migration_manual_acknowledged', {
 			serverInstanceId: completed.payload.serverInstanceId,
 			migrationId: completed.migrationId
 		});
 		return publicKometaMigrationState(completed, { scopeMatches: true })!;
+	});
+}
+
+/** Keep all current files, terminalize only a physically safe failed migration, and unlock replanning. */
+export async function abandonKometaMigration(
+	request: AbandonKometaMigrationRequest
+): Promise<PublicKometaMigrationState> {
+	const initial = await loadScopedJournal(request.migrationId);
+	return withConfigLocks(migrationPaths(initial.journal.payload), async () => {
+		const abandoned = await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			await assertConfigCommitRecoveryIdle(assertControlLockOwned);
+			const current = await loadScopedJournal(request.migrationId);
+			await recoverMigrationQuarantines(current.journal.payload, assertControlLockOwned);
+			if (!recoveryStateOptions(current.journal).canAbandon) {
+				throw new KometaMigrationServiceError('kometa_migration_abandon_unavailable');
+			}
+			const lease = await assertControlLockOwned();
+			// Re-read the exact target after the final lease renewal. Collision guards
+			// continue checking the frozen source fingerprint after terminalization.
+			if (!recoveryStateOptions(current.journal).canAbandon) {
+				throw new KometaMigrationServiceError('kometa_migration_abandon_unavailable');
+			}
+			const next = updateKometaMigrationJournal(
+				current.journal,
+				{ status: 'abandoned' },
+				new Date()
+			);
+			await saveKometaMigrationJournal(next, current.journal, lease);
+			return next;
+		});
+		await logEvent('warn', 'kometa_migration', 'kometa_migration_abandoned', {
+			serverInstanceId: abandoned.payload.serverInstanceId,
+			migrationId: abandoned.migrationId,
+			failure: abandoned.lastFailure?.code ?? null
+		});
+		return publicKometaMigrationState(abandoned, { scopeMatches: true })!;
 	});
 }
 
@@ -955,35 +1263,45 @@ function assertRollbackPayload(value: unknown): asserts value is RollbackPlanPay
 		typeof payload.configPath !== 'string' ||
 		resolve(payload.configPath) !== payload.configPath ||
 		!SHA256.test(String(payload.currentFingerprint)) ||
-		typeof payload.backupName !== 'string' ||
-		payload.backupName.includes('/') ||
-		payload.backupName.includes('\\') ||
-		payload.backupName.includes('..') ||
-		!SHA256.test(String(payload.backupChecksum)) ||
-		!SHA256.test(String(payload.backupContentFingerprint))
+		!(
+			(payload.backupName === null && payload.backupChecksum === null) ||
+			(typeof payload.backupName === 'string' &&
+				!payload.backupName.includes('/') &&
+				!payload.backupName.includes('\\') &&
+				!payload.backupName.includes('..') &&
+				typeof payload.backupChecksum === 'string' &&
+				SHA256.test(payload.backupChecksum))
+		) ||
+		!SHA256.test(String(payload.backupContentFingerprint)) ||
+		!SHA256.test(String(payload.baselineFingerprint))
 	) {
 		throw new TypeError('Invalid Kometa migration rollback plan');
 	}
 }
 
-export async function previewKometaMigrationRollback(): Promise<KometaMigrationRollbackPreview> {
-	const scope = await resolveBoundScope();
-	const journal = await loadKometaMigrationJournal(scope.binding.id);
-	if (!journal) throw new KometaMigrationServiceError('kometa_migration_not_found');
-	assertFrozenScope(scope.config, scope.binding, journal.payload);
-	assertFrozenMigrationBindings(journal.payload);
-	const { binding } = scope;
+async function previewKometaMigrationRollbackLocked(
+	migrationId: string
+): Promise<KometaMigrationRollbackPreview> {
+	const scope = await loadScopedJournal(migrationId);
+	const { config: appConfig, binding, journal } = scope;
 	const config = journal.payload.config;
 	const configBinding = journal.payload.pathBindings.config;
 	const backup = journal.backups.config;
+	const sourceWasAbsent = config.sourceFingerprint === MISSING_FILE_FINGERPRINT;
+	const recovery = recoveryStateOptions(journal);
+	const recoveryRollback =
+		(journal.status === 'failed' || journal.status === 'recovery_required') &&
+		recovery.canRecoveryRollback === true;
 	if (
-		(journal.status !== 'completed' && journal.status !== 'rollback_prepared') ||
+		(journal.status !== 'completed' &&
+			journal.status !== 'rollback_prepared' &&
+			!recoveryRollback) ||
 		config.activation !== 'managed' ||
 		config.path === null ||
 		configBinding === null ||
 		config.proposedFingerprint === null ||
 		config.sourceFingerprint === null ||
-		backup === null
+		(!sourceWasAbsent && backup === null)
 	) {
 		throw new KometaMigrationServiceError('kometa_migration_rollback_unavailable');
 	}
@@ -997,23 +1315,35 @@ export async function previewKometaMigrationRollback(): Promise<KometaMigrationR
 	const resumableCurrent =
 		journal.status === 'completed'
 			? currentFingerprint === config.proposedFingerprint
-			: currentFingerprint === config.proposedFingerprint ||
-				currentFingerprint === config.sourceFingerprint;
+			: recoveryRollback
+				? currentFingerprint === config.proposedFingerprint
+				: currentFingerprint === config.proposedFingerprint ||
+					currentFingerprint === config.sourceFingerprint;
 	if (!resumableCurrent) {
 		throw new KometaMigrationServiceError('kometa_migration_rollback_unavailable');
 	}
-	let backupContent: string;
-	try {
-		backupContent = readBackupAtBinding(configBinding, backup.name, {
-			expectedChecksum: backup.fingerprint
-		});
-	} catch {
-		throw new KometaMigrationServiceError('kometa_migration_rollback_unavailable');
+	let backupContent: string | null = null;
+	if (backup !== null) {
+		try {
+			backupContent = readBackupAtBinding(configBinding, backup.name, {
+				expectedChecksum: backup.fingerprint
+			});
+		} catch {
+			throw new KometaMigrationServiceError('kometa_migration_rollback_unavailable');
+		}
 	}
 	if (kometaFileFingerprint(backupContent) !== config.sourceFingerprint) {
 		throw new KometaMigrationServiceError('kometa_migration_rollback_unavailable');
 	}
-	const diff = rawKometaChanges(current, backupContent);
+	const expectedBaseline = journal.checkpoints.baselinePersisted
+		? journal.payload.nextSnapshot
+		: journal.payload.previousSnapshot;
+	const currentBaseline = await getKometaLastApplied(snapshotScope(appConfig, binding));
+	const baselineFingerprint = kometaMigrationBaselineFingerprint(currentBaseline);
+	if (baselineFingerprint !== kometaMigrationBaselineFingerprint(expectedBaseline)) {
+		throw new KometaMigrationServiceError('kometa_migration_rollback_unavailable');
+	}
+	const diff = rawKometaChanges(current, backupContent ?? '');
 	const payload: RollbackPlanPayload = {
 		type: ROLLBACK_PLAN_KIND,
 		version: ROLLBACK_PLAN_VERSION,
@@ -1021,9 +1351,10 @@ export async function previewKometaMigrationRollback(): Promise<KometaMigrationR
 		serverInstanceId: binding.id,
 		configPath: config.path,
 		currentFingerprint,
-		backupName: backup.name,
-		backupChecksum: backup.fingerprint,
+		backupName: backup?.name ?? null,
+		backupChecksum: backup?.fingerprint ?? null,
 		backupContentFingerprint: kometaFileFingerprint(backupContent),
+		baselineFingerprint,
 		display: {
 			changes: diff.changes,
 			warnings: diff.truncated ? ['diff_truncated'] : []
@@ -1043,6 +1374,24 @@ export async function previewKometaMigrationRollback(): Promise<KometaMigrationR
 		changes: payload.display.changes,
 		warnings: payload.display.warnings
 	};
+}
+
+export async function previewKometaMigrationRollback(): Promise<KometaMigrationRollbackPreview> {
+	const scope = await resolveBoundScope();
+	const journal = await loadKometaMigrationJournalForGuard(scope.binding.id);
+	if (!journal) throw new KometaMigrationServiceError('kometa_migration_not_found');
+	assertFrozenScope(scope.config, scope.binding, journal.payload);
+	assertFrozenMigrationBindings(journal.payload);
+	return withConfigLocks(migrationPaths(journal.payload), () =>
+		withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			await assertConfigCommitRecoveryIdle(assertControlLockOwned);
+			const current = await loadScopedJournal(journal.migrationId);
+			await recoverMigrationQuarantines(current.journal.payload, assertControlLockOwned);
+			await assertControlLockOwned();
+			const revalidated = await loadScopedJournal(journal.migrationId);
+			return previewKometaMigrationRollbackLocked(revalidated.journal.migrationId);
+		})
+	);
 }
 
 /** Invalidate a frozen rollback preview; replay can no longer confirm it. */
@@ -1101,53 +1450,88 @@ export async function confirmKometaMigrationRollback(request: {
 	const initial = await validateRollbackPlan(request);
 	const scope = await loadScopedJournal(initial.payload.migrationId);
 	return withConfigLocks(migrationPaths(scope.journal.payload), async () => {
-		const pending = await validateRollbackPlan(request);
-		const current = await loadScopedJournal(pending.payload.migrationId);
-		const config = current.journal.payload.config;
-		const configBinding = current.journal.payload.pathBindings.config;
-		if (configBinding === null) throw new OperationPlanError('plan_stale', request.planId);
-		let currentFingerprint: string;
-		try {
-			currentFingerprint = kometaFileFingerprint(readConfigAtBinding(configBinding));
-		} catch {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		const resumableCurrent =
-			(current.journal.status === 'completed' &&
-				currentFingerprint === config.proposedFingerprint) ||
-			(current.journal.status === 'rollback_prepared' &&
-				(currentFingerprint === config.proposedFingerprint ||
-					currentFingerprint === config.sourceFingerprint));
-		if (
-			!resumableCurrent ||
-			current.journal.payload.serverInstanceId !== pending.payload.serverInstanceId ||
-			current.journal.payload.config.path !== pending.payload.configPath ||
-			currentFingerprint !== pending.payload.currentFingerprint ||
-			current.journal.backups.config?.name !== pending.payload.backupName ||
-			current.journal.backups.config?.fingerprint !== pending.payload.backupChecksum
-		) {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		let backupContent: string;
-		try {
-			backupContent = readBackupAtBinding(configBinding, pending.payload.backupName, {
-				expectedChecksum: pending.payload.backupChecksum
+		const rolledBack = await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			await assertConfigCommitRecoveryIdle(assertControlLockOwned);
+			const pending = await validateRollbackPlan(request);
+			const current = await loadScopedJournal(pending.payload.migrationId);
+			const config = current.journal.payload.config;
+			const configBinding = current.journal.payload.pathBindings.config;
+			if (configBinding === null) throw new OperationPlanError('plan_stale', request.planId);
+			await recoverMigrationQuarantines(current.journal.payload, assertControlLockOwned);
+			const recovery = recoveryStateOptions(current.journal);
+			const recoveryRollback =
+				(current.journal.status === 'failed' || current.journal.status === 'recovery_required') &&
+				recovery.canRecoveryRollback === true;
+			let currentFingerprint: string;
+			try {
+				currentFingerprint = kometaFileFingerprint(readConfigAtBinding(configBinding));
+			} catch {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+			const resumableCurrent =
+				(current.journal.status === 'completed' &&
+					currentFingerprint === config.proposedFingerprint) ||
+				(recoveryRollback && currentFingerprint === config.proposedFingerprint) ||
+				(current.journal.status === 'rollback_prepared' &&
+					(currentFingerprint === config.proposedFingerprint ||
+						currentFingerprint === config.sourceFingerprint));
+			if (
+				!resumableCurrent ||
+				current.journal.payload.serverInstanceId !== pending.payload.serverInstanceId ||
+				current.journal.payload.config.path !== pending.payload.configPath ||
+				currentFingerprint !== pending.payload.currentFingerprint ||
+				(current.journal.backups.config?.name ?? null) !== pending.payload.backupName ||
+				(current.journal.backups.config?.fingerprint ?? null) !== pending.payload.backupChecksum
+			) {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+			let backupContent: string | null = null;
+			if (pending.payload.backupName !== null && pending.payload.backupChecksum !== null) {
+				try {
+					backupContent = readBackupAtBinding(configBinding, pending.payload.backupName, {
+						expectedChecksum: pending.payload.backupChecksum
+					});
+				} catch {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
+			}
+			if (kometaFileFingerprint(backupContent) !== pending.payload.backupContentFingerprint) {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+			const expectedBaseline = current.journal.checkpoints.baselinePersisted
+				? current.journal.payload.nextSnapshot
+				: current.journal.payload.previousSnapshot;
+			const currentBaseline = await getKometaLastApplied(
+				snapshotScope(current.config, current.binding)
+			);
+			const currentBaselineFingerprint = kometaMigrationBaselineFingerprint(currentBaseline);
+			if (
+				currentBaselineFingerprint !== pending.payload.baselineFingerprint ||
+				currentBaselineFingerprint !== kometaMigrationBaselineFingerprint(expectedBaseline)
+			) {
+				throw new OperationPlanError('plan_stale', request.planId);
+			}
+			await assertControlLockOwned();
+			await operationPlanStore.consume(request.planId, {
+				kind: ROLLBACK_PLAN_KIND,
+				digest: request.digest,
+				serverInstanceId: pending.payload.serverInstanceId
 			});
-		} catch {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		if (kometaFileFingerprint(backupContent) !== pending.payload.backupContentFingerprint) {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		await operationPlanStore.consume(request.planId, {
-			kind: ROLLBACK_PLAN_KIND,
-			digest: request.digest,
-			serverInstanceId: pending.payload.serverInstanceId
+			const rollbackLease = await assertControlLockOwned();
+			let rollbackPrepared = current.journal;
+			if (current.journal.status !== 'rollback_prepared') {
+				rollbackPrepared = updateKometaMigrationJournal(
+					current.journal,
+					{ status: 'rollback_prepared', lastFailure: null },
+					new Date()
+				);
+				await saveKometaMigrationJournal(rollbackPrepared, current.journal, rollbackLease);
+			}
+			return rollbackKometaMigration(
+				executorDependencies(rollbackPrepared.payload, rollbackLease, assertControlLockOwned),
+				rollbackPrepared
+			);
 		});
-		const rolledBack = await rollbackKometaMigration(
-			executorDependencies(current.journal.payload),
-			current.journal
-		);
 		await logEvent('info', 'kometa_migration', 'kometa_migration_rolled_back', {
 			serverInstanceId: rolledBack.payload.serverInstanceId,
 			migrationId: rolledBack.migrationId
@@ -1160,9 +1544,19 @@ export async function confirmKometaMigrationRollback(request: {
 export async function loadCurrentKometaMigrationState(): Promise<PublicKometaMigrationState | null> {
 	const config = await resolveConfig();
 	const binding = await resolveKometaServerBinding(config.kometaServerInstanceId);
-	if (!binding.binding) return null;
-	const journal = await loadKometaMigrationJournal(binding.binding.id);
-	return publicKometaMigrationState(journal, {
-		scopeMatches: journal ? frozenScopeMatches(config, binding.binding, journal.payload) : false
+	const active = await loadActiveKometaMigrationJournal();
+	const journal =
+		active ?? (binding.binding ? await loadKometaMigrationJournal(binding.binding.id) : null);
+	if (!journal) return null;
+	const scopeMatches = Boolean(
+		binding.binding && frozenScopeMatches(config, binding.binding, journal.payload)
+	);
+	if (!scopeMatches) return publicKometaMigrationState(journal, { scopeMatches: false });
+	return withConfigLocks(migrationPaths(journal.payload), async () => {
+		const current = await loadScopedJournal(journal.migrationId);
+		return publicKometaMigrationState(current.journal, {
+			scopeMatches: true,
+			...recoveryStateOptions(current.journal)
+		});
 	});
 }

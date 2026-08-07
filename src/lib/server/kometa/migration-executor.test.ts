@@ -6,6 +6,7 @@ import { kometaFileFingerprint } from './plan';
 import {
 	KOMETA_MIGRATION_PLAN_KIND,
 	KOMETA_MIGRATION_PLAN_VERSION,
+	kometaMigrationBaselineFingerprint,
 	kometaManualSnippetFingerprint,
 	type KometaMigrationPlanPayload
 } from './migration-plan';
@@ -101,6 +102,11 @@ function payload(activation: 'managed' | 'manual' = 'managed'): KometaMigrationP
 			libraries: { Movies: { metadata: true, defaults: [] } },
 			managedSettingKeys: []
 		},
+		previousSnapshotFingerprint: kometaMigrationBaselineFingerprint({
+			metadataPath: 'config/posterpilot.yml',
+			libraries: { Movies: { metadata: true, defaults: [] } },
+			managedSettingKeys: []
+		}),
 		nextSnapshot: {
 			metadataPathPrefix: 'config',
 			libraries: {
@@ -173,17 +179,27 @@ function harness(activation: 'managed' | 'manual' = 'managed') {
 	const saved: KometaMigrationJournalV1[] = [];
 	const completed: KometaMigrationJournalV1[] = [];
 	const rolledBack: KometaMigrationJournalV1[] = [];
+	const evidenceChecks: (string | null)[] = [];
 	let failProtectedBackup: string | null = null;
 	let failWrite: string | null = null;
 	let corruptAfterWrite: string | null = null;
 	let failComplete = false;
 	let failRollback = false;
 	let failDistinctPathCheck = false;
+	let evidenceState: 'current' | 'changed' | 'unavailable' = 'current';
+	let completionEvidenceState: 'current' | 'changed' | 'unavailable' = 'current';
 	let durableJournal: KometaMigrationJournalV1 | null = null;
 	let onSaveJournal: ((value: KometaMigrationJournalV1) => void | Promise<void>) | null = null;
 	let onReadProtectedBackup: ((path: string, name: string) => void) | null = null;
+	let onAssertEvidence: (() => void | Promise<void>) | null = null;
 	const deps: KometaMigrationExecutorDependencies = {
 		read: (path) => files.get(path) ?? null,
+		assertEvidenceCurrent: async () => {
+			evidenceChecks.push(files.get(CONFIG) ?? null);
+			await onAssertEvidence?.();
+			if (evidenceState === 'unavailable') throw new Error('evidence store unavailable');
+			return evidenceState;
+		},
 		write: (path, content, _stamp, expectedSource) => {
 			writeAttempts.push({ path, expectedSource });
 			const current = files.get(path) ?? null;
@@ -240,8 +256,10 @@ function harness(activation: 'managed' | 'manual' = 'managed') {
 				failComplete = false;
 				throw new Error('private database error');
 			}
+			if (completionEvidenceState !== 'current') return completionEvidenceState;
 			durableJournal = structuredClone(value);
 			completed.push(structuredClone(value));
+			return 'current';
 		},
 		rollbackJournal: async (value, _snapshot, expected) => {
 			durableJournal ??= structuredClone(expected);
@@ -265,6 +283,7 @@ function harness(activation: 'managed' | 'manual' = 'managed') {
 		saved,
 		completed,
 		rolledBack,
+		evidenceChecks,
 		deps,
 		setFailProtectedBackup(path: string) {
 			failProtectedBackup = path;
@@ -283,6 +302,18 @@ function harness(activation: 'managed' | 'manual' = 'managed') {
 		},
 		setFailDistinctPathCheck() {
 			failDistinctPathCheck = true;
+		},
+		setEvidenceCurrent(current: boolean) {
+			evidenceState = current ? 'current' : 'changed';
+		},
+		setEvidenceUnavailable() {
+			evidenceState = 'unavailable';
+		},
+		setCompletionEvidenceState(state: 'current' | 'changed' | 'unavailable') {
+			completionEvidenceState = state;
+		},
+		setOnAssertEvidence(callback: () => void | Promise<void>) {
+			onAssertEvidence = callback;
 		},
 		setOnSaveJournal(callback: (value: KometaMigrationJournalV1) => void | Promise<void>) {
 			onSaveJournal = callback;
@@ -365,6 +396,100 @@ describe('Kometa migration executor', () => {
 			baselinePersisted: true
 		});
 		expect(h.completed).toHaveLength(1);
+		expect(h.evidenceChecks).toEqual([CONFIG_SOURCE, CONFIG_SOURCE, CONFIG_PROPOSED]);
+	});
+
+	it('revalidates authoritative evidence after the config backup await and before activation', async () => {
+		const h = harness();
+		let invalidated = false;
+		h.setOnSaveJournal((value) => {
+			if (!invalidated && value.backups.config !== null && !value.checkpoints.configVerified) {
+				invalidated = true;
+				h.setEvidenceCurrent(false);
+			}
+		});
+
+		await expect(executeKometaMigration(h.deps, journal())).rejects.toMatchObject({
+			code: 'migration_evidence_changed',
+			phase: 'source_revalidate',
+			recoveryRequired: true
+		});
+		expect(h.writes).toEqual([MOVIE, SHOW]);
+		expect(h.files.get(CONFIG)).toBe(CONFIG_SOURCE);
+		expect(h.completed).toHaveLength(0);
+		expect(h.saved.at(-1)?.status).toBe('recovery_required');
+	});
+
+	it('fails closed but remains resumable when commit evidence is temporarily unavailable', async () => {
+		const h = harness();
+		let unavailable = false;
+		h.setOnSaveJournal((value) => {
+			if (!unavailable && value.backups.config !== null && !value.checkpoints.configVerified) {
+				unavailable = true;
+				h.setEvidenceUnavailable();
+			}
+		});
+
+		await expect(executeKometaMigration(h.deps, journal())).rejects.toMatchObject({
+			code: 'migration_evidence_unavailable',
+			phase: 'source_revalidate',
+			recoveryRequired: false
+		});
+		const failed = h.saved.at(-1)!;
+		expect(failed.status).toBe('failed');
+		expect(h.files.get(CONFIG)).toBe(CONFIG_SOURCE);
+		expect(h.completed).toHaveLength(0);
+
+		h.setEvidenceCurrent(true);
+		h.writes.length = 0;
+		const completed = await executeKometaMigration(h.deps, failed);
+		expect(completed.status).toBe('completed');
+		expect(h.writes).toEqual([CONFIG]);
+	});
+
+	it('revalidates evidence again after config_written and before committing the baseline', async () => {
+		const h = harness();
+		let checks = 0;
+		h.setOnAssertEvidence(() => {
+			checks += 1;
+			if (checks === 3) h.setEvidenceCurrent(false);
+		});
+
+		await expect(executeKometaMigration(h.deps, journal())).rejects.toMatchObject({
+			code: 'migration_evidence_changed',
+			phase: 'final_verify',
+			recoveryRequired: true
+		});
+		expect(h.writes).toEqual([MOVIE, SHOW, CONFIG]);
+		expect(h.files.get(CONFIG)).toBe(CONFIG_PROPOSED);
+		expect(h.completed).toHaveLength(0);
+		expect(h.saved.at(-1)?.status).toBe('recovery_required');
+	});
+
+	it('does not commit a baseline when evidence changes inside the completion transaction', async () => {
+		const h = harness();
+		h.setCompletionEvidenceState('changed');
+
+		await expect(executeKometaMigration(h.deps, journal())).rejects.toMatchObject({
+			code: 'migration_evidence_changed',
+			phase: 'final_verify',
+			recoveryRequired: true
+		});
+		expect(h.completed).toHaveLength(0);
+		expect(h.saved.at(-1)?.status).toBe('recovery_required');
+	});
+
+	it('keeps a transactional evidence outage resumable and classifiable as unavailable', async () => {
+		const h = harness();
+		h.setCompletionEvidenceState('unavailable');
+
+		await expect(executeKometaMigration(h.deps, journal())).rejects.toMatchObject({
+			code: 'migration_evidence_unavailable',
+			phase: 'final_verify',
+			recoveryRequired: false
+		});
+		expect(h.completed).toHaveLength(0);
+		expect(h.saved.at(-1)?.status).toBe('failed');
 	});
 
 	describe.each(EXECUTION_FAILURE_TARGETS)('$name failure boundaries', (target) => {
@@ -515,10 +640,32 @@ describe('Kometa migration executor', () => {
 		expect(completed.backups.config).toEqual(failed.backups.config);
 		expect(h.writes).toEqual(writesBeforeResume);
 		expect(h.writeAttempts).toEqual([
-			{ path: MOVIE, expectedSource: MOVIE_SOURCE },
-			{ path: SHOW, expectedSource: SHOW_SOURCE },
-			{ path: CONFIG, expectedSource: CONFIG_SOURCE }
+			{ path: MOVIE, expectedSource: MOVIE_PROPOSED },
+			{ path: SHOW, expectedSource: SHOW_PROPOSED },
+			{ path: CONFIG, expectedSource: CONFIG_PROPOSED }
 		]);
+	});
+
+	it('does not complete a resumed published config after authoritative evidence changes', async () => {
+		const h = harness();
+		h.setFailComplete();
+		await expect(executeKometaMigration(h.deps, journal())).rejects.toMatchObject({
+			code: 'migration_write_failed',
+			phase: 'baseline'
+		});
+		const interrupted = h.saved.at(-1)!;
+		expect(h.files.get(CONFIG)).toBe(CONFIG_PROPOSED);
+
+		h.writes.length = 0;
+		h.writeAttempts.length = 0;
+		h.setEvidenceCurrent(false);
+		await expect(executeKometaMigration(h.deps, interrupted)).rejects.toMatchObject({
+			code: 'migration_evidence_changed',
+			phase: 'source_revalidate',
+			recoveryRequired: true
+		});
+		expect(h.writes).toEqual([]);
+		expect(h.completed).toHaveLength(0);
 	});
 
 	it('enters recovery-required without overwriting a divergent target', async () => {
@@ -697,6 +844,34 @@ describe('Kometa migration executor', () => {
 		expect(h.completed).toHaveLength(1);
 	});
 
+	it('revalidates authoritative evidence immediately before manual acknowledgment', async () => {
+		const h = harness('manual');
+		const awaiting = await executeKometaMigration(h.deps, journal('manual'));
+		h.setEvidenceCurrent(false);
+
+		await expect(acknowledgeManualKometaMigration(h.deps, awaiting)).rejects.toMatchObject({
+			code: 'migration_evidence_changed',
+			phase: 'manual_acknowledgment',
+			recoveryRequired: true
+		});
+		expect(h.completed).toHaveLength(0);
+		expect(h.saved.at(-1)?.status).toBe('recovery_required');
+	});
+
+	it('does not acknowledge manual wiring when the transactional evidence fence changes', async () => {
+		const h = harness('manual');
+		const awaiting = await executeKometaMigration(h.deps, journal('manual'));
+		h.setCompletionEvidenceState('changed');
+
+		await expect(acknowledgeManualKometaMigration(h.deps, awaiting)).rejects.toMatchObject({
+			code: 'migration_evidence_changed',
+			phase: 'manual_acknowledgment',
+			recoveryRequired: true
+		});
+		expect(h.completed).toHaveLength(0);
+		expect(h.saved.at(-1)?.status).toBe('recovery_required');
+	});
+
 	it('restores only the protected config backup and the previous ownership snapshot', async () => {
 		const h = harness();
 		const completed = await executeKometaMigration(h.deps, journal());
@@ -734,7 +909,7 @@ describe('Kometa migration executor', () => {
 		expect(finalized.status).toBe('rolled_back');
 		expect(finalized.lastFailure).toBeNull();
 		expect(h.writes).toEqual([]);
-		expect(h.writeAttempts).toEqual([{ path: CONFIG, expectedSource: CONFIG_PROPOSED }]);
+		expect(h.writeAttempts).toEqual([{ path: CONFIG, expectedSource: CONFIG_SOURCE }]);
 		expect(h.files.get(CONFIG)).toBe(CONFIG_SOURCE);
 		expect(h.rolledBack).toHaveLength(1);
 	});

@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createClient } from '@libsql/client';
+import { drizzle } from 'drizzle-orm/libsql';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // The flow uses a purpose-built lifecycle store; keep this pure test `$env`-free.
 vi.mock('$lib/server/db', () => ({ db: {} }));
 import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
+import * as schema from '$lib/server/db/schema';
+import { createKometaMigrationControlLock } from '$lib/server/kometa/migration-control-lock';
 import { selectAutomaticArtwork } from '$lib/server/posters/automatic-selection';
 import {
 	RemoteArtworkDownloadError,
@@ -39,6 +46,57 @@ import {
 import { resolveKometaDestination } from '$lib/server/kometa/destination';
 
 const NOW = new Date('2026-07-10T12:00:00.000Z');
+
+function deferred() {
+	let resolve!: () => void;
+	const promise = new Promise<void>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
+async function independentKometaControlLocks() {
+	const directory = mkdtempSync(join(tmpdir(), 'posterpilot-apply-control-lock-'));
+	const url = `file:${join(directory, 'shared.db')}`;
+	const applyClient = createClient({ url });
+	const journalClient = createClient({ url });
+	await applyClient.execute(
+		`CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)`
+	);
+	const applyDatabase = drizzle(applyClient, { schema });
+	const journalDatabase = drizzle(journalClient, { schema });
+	return {
+		apply: createKometaMigrationControlLock(applyDatabase, {
+			leaseMs: 2_000,
+			pollIntervalMs: 5,
+			owner: () => 'apply-process'
+		}),
+		journal: createKometaMigrationControlLock(journalDatabase, {
+			leaseMs: 2_000,
+			pollIntervalMs: 5,
+			owner: () => 'journal-process'
+		}),
+		close() {
+			applyClient.close();
+			journalClient.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	};
+}
+
+function asApplyCommitFence(
+	lock: Awaited<ReturnType<typeof independentKometaControlLocks>>['apply']
+): NonNullable<ApplyPlanExecutorDependencies['withKometaCommit']> {
+	return (operations, commit) =>
+		lock(async (assertControlLockOwned) => {
+			expect(
+				new Set(operations.map((operation) => operation.kometaDestination?.filename)).size
+			).toBe(1);
+			return commit(async () => {
+				await assertControlLockOwned();
+			});
+		});
+}
 
 function data(mediaItemId: number): ApplyPlannerItemData {
 	const identity = {
@@ -562,6 +620,103 @@ describe('frozen apply flow', () => {
 		expect(result.summary).toMatchObject({ operationCount: 8, succeeded: 8, failed: 0 });
 	});
 
+	it.each(['pending config checkpoint', 'corrupt config checkpoint', 'invalid Kometa guard'])(
+		'blocks a mixed plan before every server effect when preflight reports %s',
+		async (failure) => {
+			const fixture = setup();
+			const preview = await fixture.planner({
+				context: { source: 'single' },
+				targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+				selectionMode: 'auto',
+				method: 'both'
+			});
+			const resolveServer = vi.fn();
+			const prepareOperation = vi.fn();
+			const executeServerOperation = vi.fn();
+			const writeKometa = vi.fn();
+			const recordOutcome = vi.fn();
+			const progress = vi.fn();
+			const preflightKometa = vi.fn<NonNullable<ApplyPlanExecutorDependencies['preflightKometa']>>(
+				async (_operations) => {
+					throw new Error(failure);
+				}
+			);
+
+			await expect(
+				executeFrozenApplyPlan(
+					preview.plan!.id,
+					preview.plan!.digest,
+					preview.payload,
+					{
+						serverRegistry: { resolve: resolveServer },
+						preflightKometa,
+						prepareOperation,
+						executeServerOperation,
+						writeKometa,
+						recordOutcome
+					},
+					{ progress }
+				)
+			).rejects.toThrow(failure);
+			expect(preflightKometa).toHaveBeenCalledOnce();
+			expect(preflightKometa.mock.calls[0]?.[0]).toHaveLength(2);
+			expect(resolveServer).not.toHaveBeenCalled();
+			expect(prepareOperation).not.toHaveBeenCalled();
+			expect(executeServerOperation).not.toHaveBeenCalled();
+			expect(writeKometa).not.toHaveBeenCalled();
+			expect(recordOutcome).not.toHaveBeenCalled();
+			expect(progress).not.toHaveBeenCalled();
+		}
+	);
+
+	it('turns a post-preflight fence race into failed Kometa outcomes after server success', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'both'
+		});
+		const executeServerOperation = vi.fn(async () => undefined);
+		const writeKometa = vi.fn();
+		const recordOutcome = vi.fn(async (_operation, result) => result);
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: { type: 'plex' } as never
+					})
+				},
+				preflightKometa: vi.fn(async () => undefined),
+				withKometaCommit: vi.fn(async () => {
+					throw new Error('concurrent Kometa guard change');
+				}),
+				writeKometa,
+				prepareOperation: vi.fn(async () => undefined),
+				executeServerOperation,
+				recordOutcome
+			}
+		);
+
+		expect(executeServerOperation).toHaveBeenCalledTimes(2);
+		expect(writeKometa).not.toHaveBeenCalled();
+		expect(result.summary).toMatchObject({ succeeded: 2, failed: 2 });
+		expect(
+			result.items[0].operations.filter((operation) => operation.destination === 'kometa')
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ status: 'failed', error: 'concurrent Kometa guard change' })
+			])
+		);
+		expect(recordOutcome).toHaveBeenCalledTimes(4);
+	});
+
 	it('keeps direct-server operations actionable when a show has no Kometa identifier', async () => {
 		const fixture = setup();
 		fixture.items[0].item.identity.type = 'show';
@@ -636,6 +791,9 @@ describe('frozen apply flow', () => {
 		const applyBackgroundUrl = vi.fn(async () => undefined);
 		const prepareOperation = vi.fn(async () => undefined);
 		const executeServerOperation = vi.fn(async () => undefined);
+		const preflightKometa = vi.fn(async () => {
+			throw new Error('Plex-only plans must not enter the Kometa fence');
+		});
 
 		const result = await executeFrozenApplyPlan(
 			preview.plan!.id,
@@ -655,6 +813,7 @@ describe('frozen apply flow', () => {
 						} as never
 					})
 				},
+				preflightKometa,
 				writeKometa: vi.fn(),
 				prepareOperation,
 				executeServerOperation
@@ -665,6 +824,7 @@ describe('frozen apply flow', () => {
 		expect(executeServerOperation).toHaveBeenCalledTimes(2);
 		expect(applyPosterUrl).not.toHaveBeenCalled();
 		expect(applyBackgroundUrl).not.toHaveBeenCalled();
+		expect(preflightKometa).not.toHaveBeenCalled();
 		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
 	});
 
@@ -995,6 +1155,136 @@ describe('frozen apply flow', () => {
 				expect.objectContaining({ status: 'failed', error: 'cancelled' })
 			])
 		);
+	});
+
+	it('keeps a later migration journal outside the typed write until success evidence is durable', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+		const locks = await independentKometaControlLocks();
+		const recordEntered = deferred();
+		const releaseRecord = deferred();
+		const events: string[] = [];
+		let recordCount = 0;
+		try {
+			const applying = executeFrozenApplyPlan(
+				preview.plan!.id,
+				preview.plan!.digest,
+				preview.payload,
+				{
+					serverRegistry: { resolve: vi.fn() },
+					withKometaCommit: asApplyCommitFence(locks.apply),
+					prepareOperation: vi.fn(async () => {
+						events.push('apply:prepare');
+					}),
+					writeKometa: vi.fn(async (_items, _operations, _isCancelled, assertOwned) => {
+						await assertOwned?.();
+						events.push('apply:write');
+					}),
+					recordOutcome: vi.fn(async (_operation, result) => {
+						recordCount++;
+						events.push(`apply:record:${recordCount}`);
+						if (recordCount === 1) {
+							recordEntered.resolve();
+							await releaseRecord.promise;
+						}
+						return result;
+					})
+				}
+			);
+			await recordEntered.promise;
+
+			let journalEntered = false;
+			const journal = locks.journal(async () => {
+				journalEntered = true;
+				events.push('journal:installed');
+			});
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			expect(journalEntered).toBe(false);
+
+			releaseRecord.resolve();
+			const [result] = await Promise.all([applying, journal]);
+			expect(result.summary).toMatchObject({ succeeded: 2, failed: 0 });
+			expect(events).toEqual([
+				'apply:prepare',
+				'apply:prepare',
+				'apply:write',
+				'apply:record:1',
+				'apply:record:2',
+				'journal:installed'
+			]);
+		} finally {
+			releaseRecord.resolve();
+			locks.close();
+		}
+	});
+
+	it('waits for an installed migration journal and then fails the typed write closed', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+		const locks = await independentKometaControlLocks();
+		const journalEntered = deferred();
+		const releaseJournal = deferred();
+		let journalInstalled = false;
+		let wrote = false;
+		const prepareOperation = vi.fn(async () => undefined);
+		const recordOutcome = vi.fn(async (_operation, result) => result);
+		try {
+			const journal = locks.journal(async () => {
+				journalInstalled = true;
+				journalEntered.resolve();
+				await releaseJournal.promise;
+			});
+			await journalEntered.promise;
+
+			const applying = executeFrozenApplyPlan(
+				preview.plan!.id,
+				preview.plan!.digest,
+				preview.payload,
+				{
+					serverRegistry: { resolve: vi.fn() },
+					withKometaCommit: asApplyCommitFence(locks.apply),
+					prepareOperation,
+					writeKometa: vi.fn(async (_items, _operations, _isCancelled, assertOwned) => {
+						await assertOwned?.();
+						if (journalInstalled) {
+							throw new Error('Kometa migration is in progress');
+						}
+						wrote = true;
+					}),
+					recordOutcome
+				}
+			);
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			expect(prepareOperation).not.toHaveBeenCalled();
+			expect(recordOutcome).not.toHaveBeenCalled();
+			expect(wrote).toBe(false);
+
+			releaseJournal.resolve();
+			await journal;
+			const result = await applying;
+			expect(wrote).toBe(false);
+			expect(result.summary).toMatchObject({ succeeded: 0, failed: 2 });
+			expect(result.items[0].operations).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ status: 'failed', error: 'Kometa migration is in progress' }),
+					expect.objectContaining({ status: 'failed', error: 'Kometa migration is in progress' })
+				])
+			);
+			expect(recordOutcome).toHaveBeenCalledTimes(2);
+		} finally {
+			releaseJournal.resolve();
+			locks.close();
+		}
 	});
 
 	it('isolates an atomic failure in one typed file from the other file batch', async () => {

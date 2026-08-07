@@ -11,7 +11,7 @@ import type {
 import { LEGACY_METADATA_LIMITS, compareCodeUnitStrings } from './migration-classifier';
 import { recordedKometaDestination } from './recorded-destination';
 
-type Database = LibSQLDatabase<typeof schema>;
+export type KometaMigrationEvidenceDatabase = Pick<LibSQLDatabase<typeof schema>, 'select'>;
 
 export interface KometaMigrationEvidence {
 	/** Active items, eligible for direct legacy-key classification. */
@@ -77,7 +77,7 @@ function presentSnapshotValue(value: unknown): { state: 'present'; url: string }
  * are never returned or logged by this repository.
  */
 export async function loadKometaMigrationEvidence(
-	database: Database,
+	database: KometaMigrationEvidenceDatabase,
 	serverInstanceId: string
 ): Promise<KometaMigrationEvidence> {
 	assertServerInstanceId(serverInstanceId);

@@ -16,8 +16,8 @@ vi.mock('drizzle-orm', () => ({
 	// schema.ts uses `sql` only to describe partial indexes; this test never executes it.
 	sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })
 }));
-vi.mock('$lib/server/db', () => ({
-	db: {
+vi.mock('$lib/server/db', () => {
+	const database = {
 		select: () => ({
 			from: () => {
 				const all = [...h.store.entries()].map(([key, value]) => ({ key, value }));
@@ -44,8 +44,15 @@ vi.mock('$lib/server/db', () => ({
 				return Promise.resolve();
 			}
 		})
-	}
-}));
+	};
+	return {
+		db: {
+			...database,
+			transaction: async <T>(operation: (tx: typeof database) => Promise<T>): Promise<T> =>
+				operation(database)
+		}
+	};
+});
 
 import {
 	resolveConfig,
@@ -62,6 +69,7 @@ import {
 	getIncludedSectionsForServer,
 	setIncludedSectionsForServer
 } from './index';
+import type { KometaMigrationControlLease } from '$lib/server/kometa/migration-control-lock';
 
 beforeEach(() => {
 	for (const k of Object.keys(h.env)) delete h.env[k];
@@ -165,6 +173,16 @@ describe('saveSettings — clearing the ThePosterDB password', () => {
 		expect(h.store.has('thePosterDbPassword')).toBe(false);
 		expect((await resolveConfig()).thePosterDbPassword).toBeNull();
 		expect((await publicConfig()).thePosterDbPasswordSet).toBe(false);
+	});
+
+	it('does not persist any setting when its migration-control lease was lost', async () => {
+		await expect(
+			saveSettings(
+				{ kometaServerInstanceId: 'server-b', kometaAssetsDir: '/data/kometa-b' },
+				'stale-control-lease' as KometaMigrationControlLease
+			)
+		).rejects.toMatchObject({ code: 'lost' });
+		expect(h.store).toEqual(new Map());
 	});
 });
 

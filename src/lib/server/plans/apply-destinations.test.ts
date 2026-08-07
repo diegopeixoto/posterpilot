@@ -505,7 +505,46 @@ describe('Kometa apply destination binding', () => {
 			loadMigrationState: async () => migration
 		});
 		const [isolated] = await differentPath(input('server-a'));
-		expect(isolated.skipCode).toBeNull();
+		expect(isolated).toMatchObject({
+			skipCode: 'kometa_migration_required',
+			parameters: { reason: 'migration_incomplete' }
+		});
+	});
+
+	it('keeps typed exports blocked after an abandoned attempt until replacement completes', async () => {
+		const directory = mkdtempSync(join(tmpdir(), 'posterpilot-kometa-abandoned-'));
+		temporaryDirectories.push(directory);
+		const configPath = join(directory, 'config.yml');
+		writeFileSync(
+			configPath,
+			`libraries:\n  Movies:\n    metadata_files:\n      - file: ${MOVIE_FILENAME}\n`
+		);
+		writeFileSync(join(directory, LEGACY_FILENAME), 'metadata: {}\n');
+		const resolve = createApplyDestinationResolver({
+			serverRegistry: registry(),
+			loadConfig: async () =>
+				config('server-a', { kometaConfigPath: configPath, kometaMetadataPathPrefix: 'config' }),
+			loadMigrationState: async () => ({
+				migrationId: 'migration-abandoned',
+				status: 'abandoned',
+				serverInstanceId: 'server-a',
+				outputDirectory: directory,
+				metadataPathPrefix: 'config',
+				configPath,
+				references: {
+					movie: `config/${MOVIE_FILENAME}`,
+					show: `config/${SHOW_FILENAME}`
+				},
+				activationEvidence: null,
+				completedAt: null
+			})
+		});
+
+		const [blocked] = await resolve(input('server-a'));
+		expect(blocked).toMatchObject({
+			skipCode: 'kometa_migration_required',
+			parameters: { reason: 'migration_incomplete' }
+		});
 	});
 
 	it('allows split exports after rewiring and fingerprints config plus the preserved legacy file', async () => {

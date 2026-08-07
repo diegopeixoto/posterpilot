@@ -291,7 +291,18 @@
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify(payload)
 			});
-			if (!response.ok) throw new Error('settings_save_failed');
+			if (!response.ok) {
+				const body = (await response.json().catch(() => null)) as {
+					error?: { code?: unknown };
+				} | null;
+				throw new Error(
+					body?.error?.code === 'kometa_migration_config_locked'
+						? 'kometa_migration_config_locked'
+						: body?.error?.code === 'kometa_config_recovery_required'
+							? 'kometa_config_recovery_required'
+							: 'settings_save_failed'
+				);
+			}
 			plexToken = '';
 			jellyfinApiKey = '';
 			embyApiKey = '';
@@ -302,8 +313,13 @@
 			saved = true;
 			toasts.success(m.settings_saved());
 			await invalidateAll();
-		} catch {
-			saveError = m.settings_save_failed();
+		} catch (error) {
+			saveError =
+				error instanceof Error && error.message === 'kometa_migration_config_locked'
+					? m.kometa_migration_config_locked_hint()
+					: error instanceof Error && error.message === 'kometa_config_recovery_required'
+						? m.kometa_config_recovery_hint()
+						: m.settings_save_failed();
 			toasts.error(saveError);
 		} finally {
 			saving = false;

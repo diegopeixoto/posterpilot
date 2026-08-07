@@ -85,17 +85,37 @@ export interface UndoKometaMutationInput {
 	};
 }
 
+export interface ArtworkUndoKometaPreflightTarget {
+	serverInstanceId: string;
+	destination: KometaDestinationV2 | KometaLegacyDestinationV1;
+}
+
 export interface ArtworkUndoExecutorDependencies {
 	serverRegistry: ApplyServerRegistry;
 	snapshots: UndoSnapshots;
 	ledger: UndoLedger;
+	/** Validate all Kometa guards before a mixed undo can produce a server effect. */
+	preflightKometa?(targets: readonly ArtworkUndoKometaPreflightTarget[]): Promise<void>;
 	/** null means an absent file/empty document; undefined means it could not be observed. */
 	readKometa(
 		serverInstanceId: string,
 		destination: KometaDestinationV2 | KometaLegacyDestinationV1
 	): Promise<string | null | undefined>;
 	/** Atomically restore/remove exactly one managed scalar and preserve unrelated YAML. */
-	mutateKometa(input: UndoKometaMutationInput): Promise<void>;
+	mutateKometa(
+		input: UndoKometaMutationInput,
+		assertCommitOwned?: () => Promise<void>
+	): Promise<void>;
+	/**
+	 * Fence one exact Kometa destination from its final compare-and-set through
+	 * verification and durable outcome evidence. Runtime adapters use this to
+	 * serialize undo with migration/config writers without fencing Plex work.
+	 */
+	withKometaCommit?<T>(
+		serverInstanceId: string,
+		destination: KometaDestinationV2 | KometaLegacyDestinationV1,
+		commit: (assertOwned: () => Promise<void>) => Promise<T>
+	): Promise<T>;
 	clock?: () => Date;
 }
 
@@ -355,6 +375,17 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 		input: ExecuteArtworkUndoInput
 	): Promise<ArtworkUndoExecutionResult> {
 		assertExecutionInput(input);
+		const kometaOperations = input.payload.operations.filter(
+			(operation) => operation.destination === 'kometa'
+		);
+		if (kometaOperations.length > 0) {
+			await dependencies.preflightKometa?.(
+				kometaOperations.flatMap((operation) => {
+					const destination = kometaDestination(operation);
+					return destination ? [{ serverInstanceId: operation.serverInstanceId, destination }] : [];
+				})
+			);
+		}
 		const observedAt = checkedNow(clock);
 		const groupIds = new Map<string, Promise<string>>();
 		const serverBindings = new Map<
@@ -772,23 +803,17 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			});
 		}
 
-		async function executeKometaOperation(
+		async function executeFencedKometaOperation(
 			operation: UndoPlanOperation,
-			groupId: string
+			groupId: string,
+			destination: KometaDestinationV2 | KometaLegacyDestinationV1,
+			assertCommitOwned: () => Promise<void>
 		): Promise<ArtworkUndoOperationResult> {
-			const destination = kometaDestination(operation);
-			if (!destination) {
-				return record(operation, groupId, {
-					beforeSnapshotId: null,
-					afterSnapshotId: null,
-					priorFingerprint: null,
-					proposedFingerprint: operation.snapshot.fingerprint,
-					applyMethod: 'kometa_yaml',
-					status: 'skipped',
-					verification: 'unavailable',
-					errorCode: 'undo_kometa_target_invalid'
-				});
-			}
+			const recordFenced = async (entry: OperationRecord) => {
+				await assertCommitOwned();
+				return record(operation, groupId, entry);
+			};
+			await assertCommitOwned();
 			const before = await captureKometaObservation(operation);
 			const base = {
 				beforeSnapshotId: before.snapshotId,
@@ -798,7 +823,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				applyMethod: 'kometa_yaml'
 			};
 			if (operation.target.kind === 'collection') {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: 'failed',
 					verification: 'unavailable',
@@ -806,7 +831,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				});
 			}
 			if (!before.snapshotId) {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: 'failed',
 					verification: 'failed',
@@ -814,7 +839,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				});
 			}
 			if (before.state === 'unavailable' || !before.value) {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: 'failed',
 					verification: 'unavailable',
@@ -822,7 +847,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				});
 			}
 			if (!currentMatchesPlan(operation, before.state, before.fingerprint)) {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: 'failed',
 					verification: 'mismatch',
@@ -832,7 +857,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 
 			const desired = await loadDesiredSnapshot(operation);
 			if (desired.errorCode || !desired.snapshot) {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: desired.errorCode === 'undo_snapshot_unavailable' ? 'skipped' : 'failed',
 					verification:
@@ -846,7 +871,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				(restore.state === 'present' &&
 					kometaSlotFingerprint(restore) !== operation.snapshot.fingerprint)
 			) {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: 'failed',
 					verification: 'failed',
@@ -854,19 +879,23 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				});
 			}
 
+			await assertCommitOwned();
 			try {
-				await dependencies.mutateKometa({
-					serverInstanceId: operation.serverInstanceId,
-					destination,
-					slot: operation.slot,
-					restore,
-					expectedCurrent: {
-						state: before.value.state,
-						fingerprint: before.fingerprint
-					}
-				});
+				await dependencies.mutateKometa(
+					{
+						serverInstanceId: operation.serverInstanceId,
+						destination,
+						slot: operation.slot,
+						restore,
+						expectedCurrent: {
+							state: before.value.state,
+							fingerprint: before.fingerprint
+						}
+					},
+					assertCommitOwned
+				);
 			} catch {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					status: 'failed',
 					verification: 'failed',
@@ -874,9 +903,10 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				});
 			}
 
+			await assertCommitOwned();
 			const after = await captureKometaObservation(operation);
 			if (!after.snapshotId) {
-				return record(operation, groupId, {
+				return recordFenced({
 					...base,
 					afterSnapshotId: null,
 					status: 'failed',
@@ -897,7 +927,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			} catch {
 				verified = false;
 			}
-			return record(operation, groupId, {
+			return recordFenced({
 				...base,
 				afterSnapshotId: after.snapshotId,
 				status: verified ? 'success' : 'failed',
@@ -905,6 +935,57 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				errorCode: verified ? null : 'undo_kometa_verify_failed',
 				verified
 			});
+		}
+
+		async function executeKometaOperation(
+			operation: UndoPlanOperation,
+			groupId: string
+		): Promise<ArtworkUndoOperationResult> {
+			const destination = kometaDestination(operation);
+			if (!destination) {
+				return record(operation, groupId, {
+					beforeSnapshotId: null,
+					afterSnapshotId: null,
+					priorFingerprint: null,
+					proposedFingerprint: operation.snapshot.fingerprint,
+					applyMethod: 'kometa_yaml',
+					status: 'skipped',
+					verification: 'unavailable',
+					errorCode: 'undo_kometa_target_invalid'
+				});
+			}
+			const commit = (assertOwned: () => Promise<void>) =>
+				executeFencedKometaOperation(operation, groupId, destination, assertOwned);
+			let commitStarted = false;
+			try {
+				if (dependencies.withKometaCommit) {
+					return await dependencies.withKometaCommit(
+						operation.serverInstanceId,
+						destination,
+						async (assertOwned) => {
+							commitStarted = true;
+							return commit(assertOwned);
+						}
+					);
+				}
+				commitStarted = true;
+				return await commit(async () => undefined);
+			} catch (error) {
+				// A fence rejected before the callback only when a concurrent config or
+				// migration writer invalidated the post-preflight guard. Record a safe
+				// stale outcome rather than throwing after earlier Plex operations.
+				if (commitStarted) throw error;
+				return record(operation, groupId, {
+					beforeSnapshotId: null,
+					afterSnapshotId: null,
+					priorFingerprint: operation.current.fingerprint,
+					proposedFingerprint: operation.snapshot.fingerprint,
+					applyMethod: 'kometa_yaml',
+					status: 'failed',
+					verification: 'mismatch',
+					errorCode: 'undo_stale_destination'
+				});
+			}
 		}
 
 		for (const operation of input.payload.operations) {
