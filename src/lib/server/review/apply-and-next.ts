@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from '$lib/server/db/schema';
 import {
@@ -53,11 +53,27 @@ interface ApplyOutcomeProjection {
 	result: Record<string, unknown> | null;
 }
 
+interface FrozenApplyItemProjection {
+	operations: ApplyOperationProjection[];
+	selectionUpdatedAt: string | null;
+}
+
 function count(value: unknown): number {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : -1;
 }
 
-function readOperations(payload: Record<string, unknown>): ApplyOperationProjection[] {
+function readSelectionUpdatedAt(value: unknown): string | null {
+	if (value === null) return null;
+	if (typeof value !== 'string') throw new ApplyAndNextError('job_not_verified');
+
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+		throw new ApplyAndNextError('job_not_verified');
+	}
+	return value;
+}
+
+function readFrozenItem(payload: Record<string, unknown>): FrozenApplyItemProjection {
 	if (payload.kind !== 'apply' || !payload.plan || typeof payload.plan !== 'object') {
 		throw new ApplyAndNextError('job_not_verified');
 	}
@@ -65,11 +81,24 @@ function readOperations(payload: Record<string, unknown>): ApplyOperationProject
 	if (!Array.isArray(items) || items.length !== 1) {
 		throw new ApplyAndNextError('job_not_verified');
 	}
-	const operations = (items[0] as Record<string, unknown>)?.operations;
+	const item = items[0];
+	if (!item || typeof item !== 'object' || Array.isArray(item)) {
+		throw new ApplyAndNextError('job_not_verified');
+	}
+	const selectionFrom = (item as Record<string, unknown>).selectionFrom;
+	if (!selectionFrom || typeof selectionFrom !== 'object' || Array.isArray(selectionFrom)) {
+		throw new ApplyAndNextError('job_not_verified');
+	}
+	const operations = (item as Record<string, unknown>).operations;
 	if (!Array.isArray(operations) || operations.length === 0) {
 		throw new ApplyAndNextError('job_not_verified');
 	}
-	return operations as ApplyOperationProjection[];
+	return {
+		operations: operations as ApplyOperationProjection[],
+		selectionUpdatedAt: readSelectionUpdatedAt(
+			(selectionFrom as Record<string, unknown>).selectionUpdatedAt
+		)
+	};
 }
 
 function operationId(outcome: ApplyOutcomeProjection): string | null {
@@ -81,18 +110,19 @@ function operationId(outcome: ApplyOutcomeProjection): string | null {
  * provider-aware verification. Completed jobs containing skips are intentionally
  * ineligible: Apply and next advances only when every selected target succeeded.
  */
-export function validateApplyAndNextCompletion(input: {
+function verifyApplyAndNextCompletion(input: {
 	serverInstanceId: string;
 	mediaItemId: number;
 	job: ApplyJobProjection;
 	outcomes: ApplyOutcomeProjection[];
-}): ApplyOperationProjection[] {
+}): FrozenApplyItemProjection {
 	const { serverInstanceId, mediaItemId, job, outcomes } = input;
 	if (job.serverInstanceId !== serverInstanceId || job.type !== 'apply') {
 		throw new ApplyAndNextError('job_not_found');
 	}
 	if (job.status !== 'completed') throw new ApplyAndNextError('job_not_completed');
-	const operations = readOperations(job.payload);
+	const frozenItem = readFrozenItem(job.payload);
+	const { operations } = frozenItem;
 	if (
 		operations.some(
 			(operation) =>
@@ -138,7 +168,16 @@ export function validateApplyAndNextCompletion(input: {
 		observed.add(id);
 	}
 	if (observed.size !== expected.size) throw new ApplyAndNextError('job_not_verified');
-	return operations;
+	return frozenItem;
+}
+
+export function validateApplyAndNextCompletion(input: {
+	serverInstanceId: string;
+	mediaItemId: number;
+	job: ApplyJobProjection;
+	outcomes: ApplyOutcomeProjection[];
+}): ApplyOperationProjection[] {
+	return verifyApplyAndNextCompletion(input).operations;
 }
 
 function slotKey(slot: ApplyOperationProjection['slot']): string {
@@ -189,6 +228,10 @@ function stagedSelectionMatches(
 	);
 }
 
+function selectionVersionMatches(current: Date | null, frozen: string | null): boolean {
+	return (current?.toISOString() ?? null) === frozen;
+}
+
 /** Atomically complete review intent only while the exact applied staging is unchanged. */
 export function createApplyAndNextCompletionService(
 	database: Database,
@@ -218,6 +261,7 @@ export function createApplyAndNextCompletionService(
 				.select({
 					selectedPosterUrl: mediaItems.selectedPosterUrl,
 					selectedBackgroundUrl: mediaItems.selectedBackgroundUrl,
+					selectionUpdatedAt: mediaItems.selectionUpdatedAt,
 					state: reviewStateExpression
 				})
 				.from(mediaItems)
@@ -269,12 +313,15 @@ export function createApplyAndNextCompletionService(
 				})
 				.from(jobItemOutcomes)
 				.where(eq(jobItemOutcomes.jobId, input.jobId));
-			const operations = validateApplyAndNextCompletion({
+			const { operations, selectionUpdatedAt } = verifyApplyAndNextCompletion({
 				serverInstanceId: input.serverInstanceId,
 				mediaItemId: input.mediaItemId,
 				job: job as ApplyJobProjection,
 				outcomes
 			});
+			if (!selectionVersionMatches(item.selectionUpdatedAt, selectionUpdatedAt)) {
+				throw new ApplyAndNextError('selection_changed');
+			}
 			const expected = frozenSelections(operations);
 			const children = await tx
 				.select({
@@ -309,10 +356,21 @@ export function createApplyAndNextCompletionService(
 			}
 
 			const completedAt = clock();
-			await tx
+			const selectionVersionCondition =
+				selectionUpdatedAt === null
+					? isNull(mediaItems.selectionUpdatedAt)
+					: eq(mediaItems.selectionUpdatedAt, new Date(selectionUpdatedAt));
+			const [cleared] = await tx
 				.update(mediaItems)
-				.set({ selectedPosterUrl: null, selectedBackgroundUrl: null, reviewedAt: completedAt })
-				.where(scope);
+				.set({
+					selectedPosterUrl: null,
+					selectedBackgroundUrl: null,
+					selectionUpdatedAt: completedAt,
+					reviewedAt: completedAt
+				})
+				.where(and(scope, selectionVersionCondition))
+				.returning({ id: mediaItems.id });
+			if (!cleared) throw new ApplyAndNextError('selection_changed');
 			await tx
 				.delete(childSelections)
 				.where(

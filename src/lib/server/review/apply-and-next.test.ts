@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -22,6 +22,24 @@ import {
 
 const serverInstanceId = 'server-a';
 const mediaItemId = 1;
+const plannedSelectionUpdatedAt = '2026-07-11T10:00:00.000Z';
+const restagedSelectionUpdatedAt = new Date('2026-07-11T11:00:00.000Z');
+
+function frozenIdentity(selectionUpdatedAt: unknown = plannedSelectionUpdatedAt) {
+	return {
+		serverInstanceId,
+		mediaItemId,
+		librarySectionKey: 'movies',
+		sourceId: 'item-1',
+		type: 'movie' as const,
+		tmdbId: '1',
+		imdbId: null,
+		tvdbId: null,
+		mediaType: 'movie' as const,
+		updatedAt: '2026-07-11T09:00:00.000Z',
+		selectionUpdatedAt
+	};
+}
 
 function operation(
 	id: string,
@@ -49,13 +67,33 @@ function operation(
 	};
 }
 
-function job(operations = [operation('poster')], overrides: Record<string, unknown> = {}) {
+function job(
+	operations = [operation('poster')],
+	overrides: Record<string, unknown> = {},
+	selectionUpdatedAt: unknown = plannedSelectionUpdatedAt
+) {
 	return {
 		id: 7,
 		serverInstanceId,
 		type: 'apply',
 		status: 'completed',
-		payload: { kind: 'apply', plan: { items: [{ operations }] } },
+		payload: {
+			kind: 'apply',
+			planId: 'plan-7',
+			digest: 'digest-7',
+			plan: {
+				version: 1,
+				type: 'artwork_apply',
+				plannedAt: '2026-07-11T10:30:00.000Z',
+				items: [
+					{
+						target: frozenIdentity(selectionUpdatedAt),
+						selectionFrom: frozenIdentity(selectionUpdatedAt),
+						operations
+					}
+				]
+			}
+		},
 		result: {
 			summary: {
 				operationCount: operations.length,
@@ -136,6 +174,33 @@ describe('Apply and next verification', () => {
 			})
 		).toThrowError('job_not_verified');
 	});
+
+	it.each([42, '2026-07-11T10:00:00Z', 'not-a-date'])(
+		'rejects a non-canonical frozen selection timestamp (%s)',
+		(selectionUpdatedAt) => {
+			const operations = [operation('poster')];
+			expect(() =>
+				validateApplyAndNextCompletion({
+					serverInstanceId,
+					mediaItemId,
+					job: job(operations, {}, selectionUpdatedAt),
+					outcomes: outcomes(operations)
+				})
+			).toThrowError('job_not_verified');
+		}
+	);
+
+	it('accepts a null frozen selection timestamp for legacy plans', () => {
+		const operations = [operation('poster')];
+		expect(
+			validateApplyAndNextCompletion({
+				serverInstanceId,
+				mediaItemId,
+				job: job(operations, {}, null),
+				outcomes: outcomes(operations)
+			})
+		).toHaveLength(1);
+	});
 });
 
 let client: Client;
@@ -161,7 +226,8 @@ beforeEach(async () => {
 		type: 'movie',
 		title: 'Example',
 		resolved: true,
-		selectedPosterUrl: 'https://art.example/poster.jpg'
+		selectedPosterUrl: 'https://art.example/poster.jpg',
+		selectionUpdatedAt: new Date(plannedSelectionUpdatedAt)
 	});
 });
 
@@ -170,24 +236,7 @@ afterEach(() => {
 	for (const suffix of ['', '-shm', '-wal']) rmSync(`${databasePath}${suffix}`, { force: true });
 });
 
-async function insertCompletedJob() {
-	const operations = [
-		operation('poster', { url: 'https://art.example/poster.jpg' }),
-		operation('episode', {
-			kind: 'title_card',
-			season: 1,
-			episode: 2,
-			url: 'https://art.example/episode.jpg'
-		})
-	];
-	await database.insert(childSelections).values({
-		serverInstanceId,
-		mediaItemId,
-		kind: 'title_card',
-		season: 1,
-		episode: 2,
-		url: 'https://art.example/episode.jpg'
-	});
+async function insertJob(operations: ReturnType<typeof operation>[]) {
 	await database.insert(jobs).values({
 		id: 7,
 		serverInstanceId,
@@ -207,6 +256,27 @@ async function insertCompletedJob() {
 	);
 }
 
+async function insertCompletedJob() {
+	const frozenOperations = [
+		operation('poster', { url: 'https://art.example/poster.jpg' }),
+		operation('episode', {
+			kind: 'title_card',
+			season: 1,
+			episode: 2,
+			url: 'https://art.example/episode.jpg'
+		})
+	];
+	await database.insert(childSelections).values({
+		serverInstanceId,
+		mediaItemId,
+		kind: 'title_card',
+		season: 1,
+		episode: 2,
+		url: 'https://art.example/episode.jpg'
+	});
+	await insertJob(frozenOperations);
+}
+
 describe('Apply and next completion service', () => {
 	it('atomically clears the exact staging, records completion, and is idempotent', async () => {
 		await insertCompletedJob();
@@ -220,11 +290,13 @@ describe('Apply and next completion service', () => {
 			.select({
 				poster: mediaItems.selectedPosterUrl,
 				background: mediaItems.selectedBackgroundUrl,
+				selectionUpdatedAt: mediaItems.selectionUpdatedAt,
 				reviewedAt: mediaItems.reviewedAt
 			})
 			.from(mediaItems)
 			.where(eq(mediaItems.id, mediaItemId));
 		expect(item).toMatchObject({ poster: null, background: null });
+		expect(item.selectionUpdatedAt?.toISOString()).toBe('2026-07-11T12:00:00.000Z');
 		expect(item.reviewedAt?.toISOString()).toBe('2026-07-11T12:00:00.000Z');
 		expect(await database.select().from(childSelections)).toEqual([]);
 		expect(await database.select().from(reviewEvents)).toHaveLength(1);
@@ -238,7 +310,10 @@ describe('Apply and next completion service', () => {
 		await insertCompletedJob();
 		await database
 			.update(mediaItems)
-			.set({ selectedPosterUrl: 'https://art.example/newer.jpg' })
+			.set({
+				selectedPosterUrl: 'https://art.example/newer.jpg',
+				selectionUpdatedAt: restagedSelectionUpdatedAt
+			})
 			.where(
 				and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, mediaItemId))
 			);
@@ -263,23 +338,7 @@ describe('Apply and next completion service', () => {
 			.update(mediaItems)
 			.set({ selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/apply-next.jpg' })
 			.where(eq(mediaItems.id, mediaItemId));
-		await database.insert(jobs).values({
-			id: 7,
-			serverInstanceId,
-			type: 'apply',
-			status: 'completed',
-			payload: job(operations).payload,
-			result: job(operations).result
-		});
-		await database.insert(jobItemOutcomes).values(
-			outcomes(operations).map((outcome) => ({
-				jobId: 7,
-				serverInstanceId,
-				mediaItemId,
-				status: outcome.status as 'success',
-				result: outcome.result
-			}))
-		);
+		await insertJob(operations);
 
 		await expect(
 			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
@@ -299,23 +358,7 @@ describe('Apply and next completion service', () => {
 			.update(mediaItems)
 			.set({ selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/custom.jpg' })
 			.where(eq(mediaItems.id, mediaItemId));
-		await database.insert(jobs).values({
-			id: 7,
-			serverInstanceId,
-			type: 'apply',
-			status: 'completed',
-			payload: job(operations).payload,
-			result: job(operations).result
-		});
-		await database.insert(jobItemOutcomes).values(
-			outcomes(operations).map((outcome) => ({
-				jobId: 7,
-				serverInstanceId,
-				mediaItemId,
-				status: outcome.status as 'success',
-				result: outcome.result
-			}))
-		);
+		await insertJob(operations);
 
 		await expect(
 			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
@@ -324,13 +367,141 @@ describe('Apply and next completion service', () => {
 		expect(item.selectedPosterUrl).toBe('https://image.tmdb.org/t/p/w500/custom.jpg');
 	});
 
+	it.each([
+		{
+			name: 'an equivalent TMDB preview size',
+			plannedUrl: 'https://image.tmdb.org/t/p/original/restaged.jpg',
+			provider: 'tmdb',
+			stagedUrl: 'https://image.tmdb.org/t/p/w780/restaged.jpg'
+		},
+		{
+			name: 'the same custom URL',
+			plannedUrl: 'https://art.example/restaged.jpg',
+			provider: 'custom',
+			stagedUrl: 'https://art.example/restaged.jpg'
+		}
+	])(
+		'preserves $name restaged after the frozen plan',
+		async ({ plannedUrl, provider, stagedUrl }) => {
+			const operations = [operation('poster', { url: plannedUrl, provider })];
+			await insertJob(operations);
+			await database
+				.update(mediaItems)
+				.set({ selectedPosterUrl: stagedUrl, selectionUpdatedAt: restagedSelectionUpdatedAt })
+				.where(eq(mediaItems.id, mediaItemId));
+
+			await expect(
+				createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
+			).rejects.toMatchObject({ code: 'selection_changed' });
+			const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
+			expect(item.selectedPosterUrl).toBe(stagedUrl);
+			expect(item.selectionUpdatedAt?.toISOString()).toBe(restagedSelectionUpdatedAt.toISOString());
+			expect(await database.select().from(reviewEvents)).toEqual([]);
+		}
+	);
+
+	it('preserves a child selection restaged with the same URL after the frozen plan', async () => {
+		await insertCompletedJob();
+		await database
+			.update(mediaItems)
+			.set({ selectionUpdatedAt: restagedSelectionUpdatedAt })
+			.where(eq(mediaItems.id, mediaItemId));
+
+		await expect(
+			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
+		).rejects.toMatchObject({ code: 'selection_changed' });
+		const children = await database.select().from(childSelections);
+		expect(children).toHaveLength(1);
+		expect(children[0]?.url).toBe('https://art.example/episode.jpg');
+		expect(await database.select().from(reviewEvents)).toEqual([]);
+	});
+
+	it('does not delete child selections when the completion compare-and-swap updates no row', async () => {
+		const operations = [
+			operation('poster', { url: 'https://art.example/poster.jpg' }),
+			operation('episode', {
+				kind: 'title_card',
+				season: 1,
+				episode: 2,
+				url: 'https://art.example/episode.jpg'
+			})
+		];
+		type Query = Promise<unknown[]> & {
+			where: () => Query;
+			limit: () => Query;
+		};
+		const query = (rows: unknown[]): Query => {
+			const result = Promise.resolve(rows) as Query;
+			result.where = () => result;
+			result.limit = () => result;
+			return result;
+		};
+		const returning = vi.fn().mockResolvedValue([]);
+		const deleteSelections = vi.fn(() => {
+			throw new Error('child selections must not be deleted after a failed compare-and-swap');
+		});
+		const fakeTransaction = {
+			select: vi.fn(() => ({
+				from: (table: unknown) => {
+					if (table === mediaItems) {
+						return query([
+							{
+								selectedPosterUrl: 'https://art.example/poster.jpg',
+								selectedBackgroundUrl: null,
+								selectionUpdatedAt: new Date(plannedSelectionUpdatedAt),
+								state: 'selected'
+							}
+						]);
+					}
+					if (table === reviewEvents) return query([]);
+					if (table === jobs) return query([job(operations)]);
+					if (table === jobItemOutcomes) return query(outcomes(operations));
+					if (table === childSelections) {
+						return query([
+							{
+								id: 1,
+								kind: 'title_card',
+								season: 1,
+								episode: 2,
+								url: 'https://art.example/episode.jpg'
+							}
+						]);
+					}
+					throw new Error('unexpected table');
+				}
+			})),
+			update: vi.fn(() => ({
+				set: () => ({
+					where: () => ({ returning })
+				})
+			})),
+			delete: deleteSelections
+		};
+		const casMissDatabase = {
+			transaction: (callback: (tx: typeof fakeTransaction) => unknown) => callback(fakeTransaction)
+		} as unknown as LibSQLDatabase<typeof schema>;
+
+		await expect(
+			createApplyAndNextCompletionService(casMissDatabase)({
+				serverInstanceId,
+				mediaItemId,
+				jobId: 7
+			})
+		).rejects.toMatchObject({ code: 'selection_changed' });
+		expect(returning).toHaveBeenCalledOnce();
+		expect(deleteSelections).not.toHaveBeenCalled();
+	});
+
 	it('does not let an idempotent replay skip newly staged review work', async () => {
 		await insertCompletedJob();
 		const complete = createApplyAndNextCompletionService(database);
 		await complete({ serverInstanceId, mediaItemId, jobId: 7 });
 		await database
 			.update(mediaItems)
-			.set({ selectedPosterUrl: 'https://art.example/new-review.jpg' })
+			.set({
+				selectedPosterUrl: 'https://art.example/new-review.jpg',
+				selectionUpdatedAt: restagedSelectionUpdatedAt
+			})
 			.where(
 				and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, mediaItemId))
 			);
