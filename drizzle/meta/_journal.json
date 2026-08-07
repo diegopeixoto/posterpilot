@@ -71,6 +71,13 @@
       "when": 1786076925703,
       "tag": "0009_silent_zaran",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786082785611,
+      "tag": "0010_canonical_artwork_assets",
+      "breakpoints": true
     }
   ]
 }

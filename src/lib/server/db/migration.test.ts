@@ -12,7 +12,8 @@ const MIGRATIONS = [
 	'0006_breezy_sinister_six.sql',
 	'0007_first_puff_adder.sql',
 	'0008_melodic_purifiers.sql',
-	'0009_silent_zaran.sql'
+	'0009_silent_zaran.sql',
+	'0010_canonical_artwork_assets.sql'
 ] as const;
 
 const clients: Client[] = [];
@@ -56,6 +57,109 @@ describe('0009 TMDB repair query index migration', () => {
 			'type',
 			'media_type'
 		]);
+	});
+});
+
+describe('0010 canonical artwork assets migration', () => {
+	it('adds preview metadata and conservatively backfills staged provenance', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 9);
+		const now = 1_700_000_000;
+		await client.execute({
+			sql: `insert into server_instances
+				(id, name, normalized_name, type, enabled, protected, connection_status, created_at, updated_at)
+				values ('server-a', 'Server A', 'server a', 'plex', 1, 0, 'unknown', ?, ?)`,
+			args: [now, now]
+		});
+		await client.execute({
+			sql: `insert into media_items
+				(id, server_instance_id, rating_key, section_key, type, title, resolved, ignored,
+				 has_candidates, has_mediux, watched, artwork_version, manual_match_pinned,
+				 discovery_status, selected_poster_url, selected_background_url,
+				 selected_poster_candidate_id, selected_background_candidate_id, updated_at)
+				values
+				 (41, 'server-a', 'movie-a', 'movies', 'movie', 'Movie A', 1, 0, 1, 0, 0, 0, 0,
+				  'succeeded', ?, 'https://custom.example/background.jpg', 71, 999, ?),
+				 (42, 'server-a', 'movie-b', 'movies', 'movie', 'Movie B', 1, 0, 1, 0, 0, 0, 0,
+				  'succeeded', 'https://shared.example/poster.jpg', null, null, null, ?),
+				 (43, 'server-a', 'movie-c', 'movies', 'movie', 'Movie C', 1, 0, 1, 0, 0, 0, 0,
+				  'succeeded', 'https://images.example/fallback.jpg', null, 999, null, ?)`,
+			args: ['https://image.tmdb.org/t/p/w500/legacy-root.jpg', now, now, now]
+		});
+		await client.execute(`insert into poster_candidates
+			(id, server_instance_id, media_item_id, set_id, provider, url, kind, season, episode, created_at)
+			values
+			 (71, 'server-a', 41, 'tmdb-root', 'tmdb',
+			  'https://image.tmdb.org/t/p/original/legacy-root.jpg', 'poster', null, null, ${now}),
+			 (72, 'server-a', 41, 'tmdb-season', 'tmdb',
+			  'https://image.tmdb.org/t/p/original/legacy-season.jpg', 'season', 1, null, ${now}),
+			 (73, 'server-a', 42, 'shared-a', 'mediux',
+			  'https://shared.example/poster.jpg', 'poster', null, null, ${now}),
+			 (74, 'server-a', 42, 'shared-b', 'fanarttv',
+			  'https://shared.example/poster.jpg', 'poster', null, null, ${now}),
+			 (75, 'server-a', 43, 'fallback-root', 'mediux',
+			  'https://images.example/fallback.jpg', 'poster', null, null, ${now}),
+			 (76, 'server-a', 41, 'fallback-child', 'mediux',
+			  'https://images.example/season-background.jpg', 'background', 1, null, ${now})`);
+		await client.execute(`insert into child_selections
+			(id, server_instance_id, media_item_id, kind, season, episode, url, candidate_id,
+			 provider, set_id, updated_at)
+			values
+			 (81, 'server-a', 41, 'poster', 1, null,
+			  'https://image.tmdb.org/t/p/w500/legacy-season.jpg', 72, null, null, ${now}),
+			 (82, 'server-a', 41, 'background', 1, null,
+			  'https://images.example/season-background.jpg', 73, null, 'stale-set', ${now})`);
+
+		await applyMigration(client, MIGRATIONS[10]);
+
+		const candidates = await client.execute(
+			`select id, preview_url, language_provenance from poster_candidates order by id`
+		);
+		expect(candidates.rows).toEqual(
+			expect.arrayContaining([
+				{ id: 71, preview_url: null, language_provenance: 'unknown' },
+				{ id: 72, preview_url: null, language_provenance: 'unknown' }
+			])
+		);
+		const items = await client.execute(`select id, selected_poster_candidate_id,
+			selected_poster_provider, selected_background_candidate_id,
+			selected_background_provider, selection_revision
+			from media_items where id in (41, 42, 43) order by id`);
+		expect(items.rows).toEqual([
+			{
+				id: 41,
+				selected_poster_candidate_id: 71,
+				selected_poster_provider: 'tmdb',
+				selected_background_candidate_id: null,
+				selected_background_provider: 'custom',
+				selection_revision: 0
+			},
+			{
+				id: 42,
+				selected_poster_candidate_id: null,
+				selected_poster_provider: 'custom',
+				selected_background_candidate_id: null,
+				selected_background_provider: null,
+				selection_revision: 0
+			},
+			{
+				id: 43,
+				selected_poster_candidate_id: null,
+				selected_poster_provider: 'mediux',
+				selected_background_candidate_id: null,
+				selected_background_provider: null,
+				selection_revision: 0
+			}
+		]);
+		const child = await client.execute(
+			`select id, candidate_id, provider, set_id from child_selections where id in (81, 82) order by id`
+		);
+		expect(child.rows).toEqual([
+			{ id: 81, candidate_id: 72, provider: 'tmdb', set_id: 'tmdb-season' },
+			{ id: 82, candidate_id: null, provider: 'mediux', set_id: null }
+		]);
+		const violations = await client.execute('pragma foreign_key_check');
+		expect(violations.rows).toHaveLength(0);
 	});
 });
 
