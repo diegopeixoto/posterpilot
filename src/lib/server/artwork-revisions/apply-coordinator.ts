@@ -515,10 +515,14 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		result: ApplyOperationExecutionResult,
 		context: ApplyOperationExecutionContext
 	): Promise<ApplyOperationExecutionResult> {
-		const groupId = await ensureGroup(operation.target.serverInstanceId);
-		return operation.destination === 'server'
-			? recordServerOutcome(operation, result, context.server, groupId)
-			: recordKometaOutcome(operation, result, groupId);
+		try {
+			const groupId = await ensureGroup(operation.target.serverInstanceId);
+			return operation.destination === 'server'
+				? await recordServerOutcome(operation, result, context.server, groupId)
+				: await recordKometaOutcome(operation, result, groupId);
+		} finally {
+			prepared.delete(operation.id);
+		}
 	}
 
 	function assertKometaFresh(operations: ApplyPlanOperation[], raw: string | null): void {

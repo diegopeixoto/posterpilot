@@ -405,6 +405,9 @@ describe('ArtworkApplyCoordinator', () => {
 			await subject.prepareOperation(planned, { server });
 			await subject.executeServerOperation(planned, { server });
 			const result = await subject.recordOutcome(planned, successfulWrite(planned), { server });
+			await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+				'Server operation was not prepared'
+			);
 
 			expect(preflight).toHaveBeenCalledWith(planned.selection.url);
 			expect(server[bytesMethod]).toHaveBeenCalledWith(
@@ -417,6 +420,72 @@ describe('ArtworkApplyCoordinator', () => {
 			expect(result).toMatchObject({ status: 'success', verification: 'exact' });
 			const [revision] = await database.select().from(artworkRevisions);
 			expect(revision).toMatchObject({ applyMethod: 'server_bytes', outcome: 'success' });
+		}
+	);
+
+	it.each(['snapshot', 'ledger'] as const)(
+		'releases prepared bytes when $s outcome recording fails and is converted',
+		async (failurePoint) => {
+			const planned = operation({ id: `record-${failurePoint}-failure` });
+			const beforeArtwork = artwork('before record failure', 'before-record-failure');
+			planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+			const server = serverReader(
+				beforeArtwork,
+				artwork('after record failure', 'after-record-failure')
+			);
+			let captureCount = 0;
+			const failingSnapshots: ArtworkSnapshotRepository =
+				failurePoint === 'snapshot'
+					? {
+							...snapshots,
+							captureServer: vi.fn(
+								async (input: Parameters<ArtworkSnapshotRepository['captureServer']>[0]) => {
+									captureCount += 1;
+									if (captureCount === 3) throw new Error('snapshot record failed');
+									return snapshots.captureServer(input);
+								}
+							)
+						}
+					: snapshots;
+			const failingLedger: ArtworkRevisionLedger =
+				failurePoint === 'ledger'
+					? {
+							...ledger,
+							recordOutcome: vi.fn(async () => {
+								throw new Error('ledger record failed');
+							})
+						}
+					: ledger;
+			const subject = createArtworkApplyCoordinator({
+				snapshots: failingSnapshots,
+				ledger: failingLedger,
+				planId: 'plan-global',
+				kometaAssetsDirectory: kometaDirectory,
+				clock: () => NOW,
+				fetchArtworkBytes: async () => ({
+					bytes: bytes('prepared record failure bytes'),
+					contentType: 'image/jpeg'
+				})
+			});
+
+			await subject.prepareOperation(planned, { server });
+			const converted = await subject
+				.recordOutcome(planned, successfulWrite(planned), { server })
+				.catch(
+					(error: unknown): ApplyOperationExecutionResult => ({
+						...successfulWrite(planned),
+						status: 'failed',
+						error: `Outcome record failed: ${error instanceof Error ? error.message : String(error)}`
+					})
+				);
+
+			expect(converted).toMatchObject({
+				status: 'failed',
+				error: expect.stringContaining(`${failurePoint} record failed`)
+			});
+			await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+				'Server operation was not prepared'
+			);
 		}
 	);
 
@@ -748,6 +817,33 @@ describe('ArtworkApplyCoordinator', () => {
 		).toThrow(/changed before/);
 	});
 
+	it('releases Kometa entries after each outcome without breaking the remaining sequence', async () => {
+		const subject = coordinator();
+		const poster = operation({
+			id: 'kometa-sequence-poster',
+			destination: 'kometa',
+			kind: 'poster',
+			tmdbId: '101'
+		});
+		const background = operation({
+			id: 'kometa-sequence-background',
+			destination: 'kometa',
+			kind: 'background',
+			tmdbId: '101'
+		});
+		await subject.prepareOperation(poster, {});
+		await subject.prepareOperation(background, {});
+		const raw = `metadata:\n  101:\n    url_poster: ${poster.selection.url}\n    url_background: ${background.selection.url}\n`;
+		await writeFile(join(kometaDirectory, DEFAULT_FILENAME), raw, 'utf8');
+
+		expect(() => subject.assertKometaFresh([poster, background], '')).not.toThrow();
+		await subject.recordOutcome(poster, successfulWrite(poster), {});
+		expect(() => subject.assertKometaFresh([poster], '')).toThrow('not prepared');
+		expect(() => subject.assertKometaFresh([background], '')).not.toThrow();
+		await subject.recordOutcome(background, successfulWrite(background), {});
+		expect(() => subject.assertKometaFresh([background], '')).toThrow('not prepared');
+	});
+
 	it('uses one group per server and finalizes mixed outcomes as partial', async () => {
 		const subject = coordinator();
 		const exact = operation({ id: 'group-exact', kind: 'poster' });
@@ -765,10 +861,16 @@ describe('ArtworkApplyCoordinator', () => {
 		const exactResult = await subject.recordOutcome(exact, successfulWrite(exact), {
 			server: exactServer
 		});
+		await expect(subject.executeServerOperation(exact, { server: exactServer })).rejects.toThrow(
+			'not prepared'
+		);
 		await subject.prepareOperation(mismatch, { server: mismatchServer });
 		const mismatchResult = await subject.recordOutcome(mismatch, successfulWrite(mismatch), {
 			server: mismatchServer
 		});
+		await expect(
+			subject.executeServerOperation(mismatch, { server: mismatchServer })
+		).rejects.toThrow('not prepared');
 
 		const [pendingGroup] = await database.select().from(artworkRevisionGroups);
 		expect(await database.select().from(artworkRevisionGroups)).toHaveLength(1);
