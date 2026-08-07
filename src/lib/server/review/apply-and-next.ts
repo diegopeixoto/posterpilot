@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from '$lib/server/db/schema';
 import {
@@ -57,6 +57,7 @@ interface FrozenApplyItemProjection {
 	operations: ApplyOperationProjection[];
 	selectionUpdatedAt: string | null;
 	selectionRevision: number;
+	hasSelectionRevision: boolean;
 }
 
 function count(value: unknown): number {
@@ -104,12 +105,12 @@ function readFrozenItem(payload: Record<string, unknown>): FrozenApplyItemProjec
 	if (!Array.isArray(operations) || operations.length === 0) {
 		throw new ApplyAndNextError('job_not_verified');
 	}
+	const frozenSelection = selectionFrom as Record<string, unknown>;
 	return {
 		operations: operations as ApplyOperationProjection[],
-		selectionUpdatedAt: readSelectionUpdatedAt(
-			(selectionFrom as Record<string, unknown>).selectionUpdatedAt
-		),
-		selectionRevision: readSelectionRevision(selectionFrom as Record<string, unknown>)
+		selectionUpdatedAt: readSelectionUpdatedAt(frozenSelection.selectionUpdatedAt),
+		selectionRevision: readSelectionRevision(frozenSelection),
+		hasSelectionRevision: Object.hasOwn(frozenSelection, 'selectionRevision')
 	};
 }
 
@@ -269,6 +270,7 @@ export function createApplyAndNextCompletionService(
 				.select({
 					selectedPosterUrl: mediaItems.selectedPosterUrl,
 					selectedBackgroundUrl: mediaItems.selectedBackgroundUrl,
+					selectionUpdatedAt: mediaItems.selectionUpdatedAt,
 					selectionRevision: mediaItems.selectionRevision,
 					state: reviewStateExpression
 				})
@@ -321,13 +323,18 @@ export function createApplyAndNextCompletionService(
 				})
 				.from(jobItemOutcomes)
 				.where(eq(jobItemOutcomes.jobId, input.jobId));
-			const { operations, selectionRevision } = verifyApplyAndNextCompletion({
-				serverInstanceId: input.serverInstanceId,
-				mediaItemId: input.mediaItemId,
-				job: job as ApplyJobProjection,
-				outcomes
-			});
-			if (item.selectionRevision !== selectionRevision) {
+			const { operations, selectionUpdatedAt, selectionRevision, hasSelectionRevision } =
+				verifyApplyAndNextCompletion({
+					serverInstanceId: input.serverInstanceId,
+					mediaItemId: input.mediaItemId,
+					job: job as ApplyJobProjection,
+					outcomes
+				});
+			const currentSelectionUpdatedAt = item.selectionUpdatedAt?.toISOString() ?? null;
+			if (
+				item.selectionRevision !== selectionRevision ||
+				(!hasSelectionRevision && currentSelectionUpdatedAt !== selectionUpdatedAt)
+			) {
 				throw new ApplyAndNextError('selection_changed');
 			}
 			const expected = frozenSelections(operations);
@@ -364,6 +371,14 @@ export function createApplyAndNextCompletionService(
 			}
 
 			const completedAt = clock();
+			const selectionVersionScope = hasSelectionRevision
+				? eq(mediaItems.selectionRevision, selectionRevision)
+				: and(
+						eq(mediaItems.selectionRevision, 0),
+						selectionUpdatedAt === null
+							? isNull(mediaItems.selectionUpdatedAt)
+							: eq(mediaItems.selectionUpdatedAt, new Date(selectionUpdatedAt))
+					);
 			const [cleared] = await tx
 				.update(mediaItems)
 				.set({
@@ -378,7 +393,7 @@ export function createApplyAndNextCompletionService(
 					updatedAt: completedAt,
 					reviewedAt: completedAt
 				})
-				.where(and(scope, eq(mediaItems.selectionRevision, selectionRevision)))
+				.where(and(scope, selectionVersionScope))
 				.returning({ id: mediaItems.id });
 			if (!cleared) throw new ApplyAndNextError('selection_changed');
 			await tx

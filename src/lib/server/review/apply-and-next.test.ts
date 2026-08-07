@@ -569,7 +569,7 @@ describe('Apply and next completion service', () => {
 			.update(mediaItems)
 			.set({
 				selectionRevision: 0,
-				selectionUpdatedAt: new Date('2026-07-11T09:30:00.000Z')
+				selectionUpdatedAt: new Date(plannedSelectionUpdatedAt)
 			})
 			.where(eq(mediaItems.id, mediaItemId));
 		await insertJob(operations, { omitSelectionRevision: true });
@@ -579,6 +579,73 @@ describe('Apply and next completion service', () => {
 				database,
 				() => new Date('2026-07-11T12:00:00.000Z')
 			)({ serverInstanceId, mediaItemId, jobId: 7 })
+		).resolves.toMatchObject({ state: 'completed' });
+		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
+		expect(item.selectedPosterUrl).toBeNull();
+		expect(item.selectionRevision).toBe(1);
+	});
+
+	it('preserves matching staging when a revisionless legacy timestamp changed', async () => {
+		const operations = [
+			operation('poster', { url: 'https://art.example/poster.jpg', provider: 'mediux' })
+		];
+		const restagedAt = new Date('2026-07-11T09:30:00.000Z');
+		await database
+			.update(mediaItems)
+			.set({ selectionRevision: 0, selectionUpdatedAt: restagedAt })
+			.where(eq(mediaItems.id, mediaItemId));
+		await insertJob(operations, { omitSelectionRevision: true });
+
+		await expect(
+			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
+		).rejects.toMatchObject({ code: 'selection_changed' });
+		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
+		expect(item).toMatchObject({
+			selectedPosterUrl: 'https://art.example/poster.jpg',
+			selectedPosterCandidateId: 101,
+			selectedPosterProvider: 'mediux',
+			selectionRevision: 0
+		});
+		expect(item.selectionUpdatedAt?.toISOString()).toBe(restagedAt.toISOString());
+		expect(await database.select().from(reviewEvents)).toEqual([]);
+	});
+
+	it('accepts a revisionless legacy plan when both timestamps are null', async () => {
+		const operations = [
+			operation('poster', { url: 'https://art.example/poster.jpg', provider: 'mediux' })
+		];
+		await database
+			.update(mediaItems)
+			.set({ selectionRevision: 0, selectionUpdatedAt: null })
+			.where(eq(mediaItems.id, mediaItemId));
+		await insertJob(operations, {
+			omitSelectionRevision: true,
+			selectionUpdatedAt: null
+		});
+
+		await expect(
+			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
+		).resolves.toMatchObject({ state: 'completed' });
+		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
+		expect(item.selectedPosterUrl).toBeNull();
+		expect(item.selectionRevision).toBe(1);
+	});
+
+	it('uses an explicitly frozen revision zero alone when a versioned timestamp differs', async () => {
+		const operations = [
+			operation('poster', { url: 'https://art.example/poster.jpg', provider: 'mediux' })
+		];
+		await database
+			.update(mediaItems)
+			.set({
+				selectionRevision: 0,
+				selectionUpdatedAt: new Date('2026-07-11T09:30:00.000Z')
+			})
+			.where(eq(mediaItems.id, mediaItemId));
+		await insertJob(operations, { selectionRevision: 0 });
+
+		await expect(
+			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
 		).resolves.toMatchObject({ state: 'completed' });
 		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
 		expect(item.selectedPosterUrl).toBeNull();
