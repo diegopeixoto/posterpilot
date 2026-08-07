@@ -147,8 +147,8 @@ export async function seedPrimaryScenario() {
 					tmdbId: definition.tmdbId,
 					kind,
 					assetId: assetStem,
-					url: `${runtime.fakeJellyfinUrl}/assets/${assetStem}-original.png`,
-					previewUrl: `${runtime.fakeJellyfinUrl}/assets/${assetStem}-preview.png`,
+					url: `${runtime.fakeMediuxUrl}/${assetStem}-original.png`,
+					previewUrl: `${runtime.fakeMediuxUrl}/${assetStem}-preview.png`,
 					score: kind === 'poster' ? 9.5 : 8.9
 				});
 			}
@@ -158,8 +158,8 @@ export async function seedPrimaryScenario() {
 			tmdbId: '71001',
 			kind: 'poster',
 			assetId: 'jf-alpha-poster-alternate',
-			url: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-alternate-original.png`,
-			previewUrl: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-alternate-preview.png`,
+			url: `${runtime.fakeMediuxUrl}/jf-alpha-poster-alternate-original.png`,
+			previewUrl: `${runtime.fakeMediuxUrl}/jf-alpha-poster-alternate-preview.png`,
 			score: 8.7
 		});
 
@@ -245,6 +245,14 @@ export async function seedPrimaryScenario() {
 		await execute(
 			client,
 			`insert into settings(key, value) values ('setupDismissed', 'true')
+			 on conflict(key) do update set value = excluded.value`
+		);
+		// Setup disables external providers so bootstrap never touches the network.
+		// The deterministic scenario below supplies MediUX-shaped candidates through
+		// the local transport bridge, so expose those fixtures to the item UI now.
+		await execute(
+			client,
+			`insert into settings(key, value) values ('providerMediux', 'true')
 			 on conflict(key) do update set value = excluded.value`
 		);
 

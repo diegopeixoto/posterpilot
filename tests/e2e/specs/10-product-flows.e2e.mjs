@@ -189,13 +189,13 @@ test.describe
 		const artwork = {
 			poster: {
 				server: `${runtime.fakeJellyfinUrl}/Items/jf-alpha/Images/Primary`,
-				canonical: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-primary-original.png`,
-				preview: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-primary-preview.png`
+				canonical: `${runtime.fakeMediuxUrl}/jf-alpha-poster-primary-original.png`,
+				preview: `${runtime.fakeMediuxUrl}/jf-alpha-poster-primary-preview.png`
 			},
 			background: {
 				server: `${runtime.fakeJellyfinUrl}/Items/jf-alpha/Images/Backdrop`,
-				canonical: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-background-primary-original.png`,
-				preview: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-background-primary-preview.png`
+				canonical: `${runtime.fakeMediuxUrl}/jf-alpha-background-primary-original.png`,
+				preview: `${runtime.fakeMediuxUrl}/jf-alpha-background-primary-preview.png`
 			}
 		};
 		const imageBytes = async (url) => {
@@ -210,12 +210,18 @@ test.describe
 			poster: await imageBytes(artwork.poster.server),
 			background: await imageBytes(artwork.background.server)
 		};
+		const fixtureAssetUrl = (url) =>
+			url.replace(`${runtime.fakeMediuxUrl}/`, `${runtime.fakeJellyfinUrl}/assets/`);
 		const canonicalBytes = {
-			poster: await imageBytes(artwork.poster.canonical),
-			background: await imageBytes(artwork.background.canonical)
+			poster: await imageBytes(fixtureAssetUrl(artwork.poster.canonical)),
+			background: await imageBytes(fixtureAssetUrl(artwork.background.canonical))
 		};
-		expect(canonicalBytes.poster).not.toBe(await imageBytes(artwork.poster.preview));
-		expect(canonicalBytes.background).not.toBe(await imageBytes(artwork.background.preview));
+		expect(canonicalBytes.poster).not.toBe(
+			await imageBytes(fixtureAssetUrl(artwork.poster.preview))
+		);
+		expect(canonicalBytes.background).not.toBe(
+			await imageBytes(fixtureAssetUrl(artwork.background.preview))
+		);
 		await gotoHydrated(page, `/item/${itemId}?returnTo=%2Freview`);
 		await page.getByLabel(t('library_apply_method_label')).selectOption('plex');
 		await expect(
