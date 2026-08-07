@@ -19,10 +19,7 @@ import {
 	type PlannerStoredSelection,
 	type ResolveApplyDestinationsInput
 } from './apply-planner';
-import {
-	canonicalizeProviderArtworkUrl,
-	equivalentProviderArtworkUrls
-} from '$lib/server/tmdb/artwork-url';
+import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
 
 export type ApplyPlanValidationErrorCode = 'invalid_plan' | 'plan_stale' | 'plan_scope_mismatch';
 
@@ -188,37 +185,66 @@ function freezeLegacyV1StoredSelection(
 		planned.width === null &&
 		planned.height === null &&
 		stored.url === planned.url &&
-		applySlotKey(stored.slot) === applySlotKey(planned.slot) &&
-		persisted?.candidateId === null &&
-		persisted.setId === planned.setId;
+		applySlotKey(stored.slot) === applySlotKey(planned.slot);
 	const customBackfill =
 		legacyStandalone &&
+		persisted?.candidateId === null &&
 		persisted?.provider === 'custom' &&
+		persisted.setId === planned.setId &&
 		stored.candidateId === null &&
 		stored.provider === 'custom' &&
 		stored.setId === persisted.setId &&
 		stored.setAuthor === null;
+	// Mirror migration 0010's temporary match tables: other providers match only
+	// byte-identical URLs, while TMDB size variants share one trusted asset identity.
+	const migrationMatches = legacyStandalone
+		? data.candidates.filter(
+				(candidate) =>
+					candidate.serverInstanceId === data.item.identity.serverInstanceId &&
+					candidate.mediaItemId === data.item.identity.mediaItemId &&
+					applySlotKey(candidate.slot) === applySlotKey(stored.slot) &&
+					(candidate.url === stored.url ||
+						(candidate.provider === 'tmdb' &&
+							equivalentProviderArtworkUrls(candidate.url, stored.url, 'tmdb')))
+			)
+		: [];
 	const tmdbCandidate =
 		legacyStandalone &&
 		persisted?.provider === 'tmdb' &&
 		stored.candidateId !== null &&
 		stored.provider === 'tmdb'
-			? data.candidates.find(
+			? migrationMatches.find(
 					(candidate) =>
 						candidate.candidateId === stored.candidateId &&
-						candidate.serverInstanceId === data.item.identity.serverInstanceId &&
-						candidate.mediaItemId === data.item.identity.mediaItemId &&
 						candidate.provider === 'tmdb' &&
 						candidate.url !== stored.url &&
-						canonicalizeProviderArtworkUrl(candidate.url, 'tmdb') === stored.url &&
-						applySlotKey(candidate.slot) === applySlotKey(stored.slot) &&
 						stored.setId === candidate.setId &&
 						stored.setAuthor === candidate.setAuthor
 				)
 			: null;
-	const tmdbBackfill = tmdbCandidate !== null && tmdbCandidate !== undefined;
+	// Without a raw id, 0010 backfilled only when every match had one provider.
+	const uniquelyBackfilledProvider =
+		persisted?.candidateId === null &&
+		persisted.setId === planned?.setId &&
+		new Set(migrationMatches.map((candidate) => candidate.provider)).size === 1 &&
+		migrationMatches[0]?.provider === 'tmdb';
+	// With a raw id, require the loader to resolve that exact migrated candidate.
+	// Root staging has no set column; 0010 fills child set ids from the candidate.
+	const preservedCandidateId =
+		tmdbCandidate !== null &&
+		tmdbCandidate !== undefined &&
+		persisted?.candidateId !== null &&
+		persisted?.candidateId !== undefined &&
+		persisted.candidateId === stored.candidateId &&
+		persisted.candidateId === tmdbCandidate.candidateId &&
+		planned?.setId === null &&
+		persisted.setId === (stored.slot.season === null ? null : tmdbCandidate.setId);
+	const tmdbBackfill =
+		tmdbCandidate !== null &&
+		tmdbCandidate !== undefined &&
+		(uniquelyBackfilledProvider || preservedCandidateId);
 	const provider = customBackfill || tmdbBackfill ? null : stored.provider;
-	const setId = customBackfill || tmdbBackfill ? (persisted?.setId ?? null) : stored.setId;
+	const setId = customBackfill || tmdbBackfill ? (planned?.setId ?? null) : stored.setId;
 	const setAuthor = customBackfill || tmdbBackfill ? null : stored.setAuthor;
 	const selection = {
 		selectionSource: 'stored' as const,

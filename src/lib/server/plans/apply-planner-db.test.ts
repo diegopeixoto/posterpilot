@@ -316,4 +316,105 @@ describe('database apply-planner snapshot', () => {
 			])
 		);
 	});
+
+	it('preserves migrated candidate ids across reverse and non-original TMDB variants', async () => {
+		await db.insert(serverInstances).values({
+			id: 'server-a',
+			name: 'Cinema',
+			normalizedName: 'cinema',
+			type: 'plex'
+		});
+		const [item] = await db
+			.insert(mediaItems)
+			.values({
+				serverInstanceId: 'server-a',
+				ratingKey: 'plex-reverse',
+				sectionKey: 'shows',
+				type: 'show',
+				title: 'Reverse',
+				tmdbId: '88',
+				mediaType: 'tv',
+				selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/reverse-root.jpg',
+				selectedPosterCandidateId: null,
+				selectedPosterProvider: 'tmdb',
+				selectionRevision: 0
+			})
+			.returning();
+		const candidates = await db
+			.insert(posterCandidates)
+			.values([
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/reverse-root.jpg',
+					setId: 'tmdb-reverse-root',
+					url: 'https://image.tmdb.org/t/p/original/reverse-root.jpg',
+					kind: 'poster' as const,
+					active: true,
+					stale: false
+				},
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/reverse-child.jpg',
+					setId: 'tmdb-reverse-child',
+					url: 'https://image.tmdb.org/t/p/w500/reverse-child.jpg',
+					kind: 'title_card' as const,
+					season: 2,
+					episode: 3,
+					active: true,
+					stale: false
+				}
+			])
+			.returning();
+		await db
+			.update(mediaItems)
+			.set({ selectedPosterCandidateId: candidates[0].id })
+			.where(eq(mediaItems.id, item.id));
+		await db.insert(childSelections).values({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id,
+			kind: 'title_card',
+			season: 2,
+			episode: 3,
+			url: 'https://image.tmdb.org/t/p/w780/reverse-child.jpg',
+			candidateId: candidates[1].id,
+			provider: 'tmdb',
+			setId: 'tmdb-reverse-child'
+		});
+
+		const snapshot = await loadDatabaseApplyPlannerItemData({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id
+		});
+
+		expect(snapshot?.storedSelections).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					candidateId: candidates[0].id,
+					url: 'https://image.tmdb.org/t/p/w500/reverse-root.jpg',
+					provider: 'tmdb',
+					setId: 'tmdb-reverse-root',
+					persisted: {
+						candidateId: candidates[0].id,
+						provider: 'tmdb',
+						setId: null
+					}
+				}),
+				expect.objectContaining({
+					candidateId: candidates[1].id,
+					url: 'https://image.tmdb.org/t/p/w780/reverse-child.jpg',
+					provider: 'tmdb',
+					setId: 'tmdb-reverse-child',
+					persisted: {
+						candidateId: candidates[1].id,
+						provider: 'tmdb',
+						setId: 'tmdb-reverse-child'
+					}
+				})
+			])
+		);
+	});
 });

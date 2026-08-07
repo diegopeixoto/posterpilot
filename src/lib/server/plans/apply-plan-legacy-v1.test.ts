@@ -21,10 +21,13 @@ import {
 import type { ApplyPlannerItemData } from './apply-planner';
 import { canonicalJsonDigest, hashCanonicalJson } from './canonical-json';
 import capturedCustomFixture from './fixtures/pre-0010-providerless-custom-plan.json';
+import capturedReverseTmdbFixture from './fixtures/pre-0010-providerless-tmdb-reverse-plan.json';
 import capturedTmdbFixture from './fixtures/pre-0010-providerless-tmdb-plan.json';
 import type { OperationPlan, OperationPlanExpectations } from './operation-plan-store';
 
 const CAPTURED_TMDB_DIGEST = '0856fff26007eeaa67eaa7d882b2d9005bda7f7809649a022069e3d1b7c4d40f';
+const CAPTURED_REVERSE_TMDB_DIGEST =
+	'49ba27edee4fc22102944a3577fc3b7c9422de6181a3fe8c266105f98e43506d';
 const CAPTURED_CUSTOM_DIGEST = '680ecbe4b5cdbab424b82c9796b978757ef553a0e74e7e4d4b1dc57b2f495ff6';
 
 function capturedTmdbPlan(): ApplyPlanPayloadV1 {
@@ -33,6 +36,10 @@ function capturedTmdbPlan(): ApplyPlanPayloadV1 {
 
 function capturedCustomPlan(): ApplyPlanPayloadV1 {
 	return structuredClone(capturedCustomFixture) as unknown as ApplyPlanPayloadV1;
+}
+
+function capturedReverseTmdbPlan(): ApplyPlanPayloadV1 {
+	return structuredClone(capturedReverseTmdbFixture) as unknown as ApplyPlanPayloadV1;
 }
 
 function currentIdentity(payload: ApplyPlanPayloadV1): ApplyItemIdentity {
@@ -177,6 +184,108 @@ function migratedCustomData(): ApplyPlannerItemData {
 	};
 }
 
+function migratedReverseTmdbData(): ApplyPlannerItemData {
+	const identity = currentIdentity(capturedReverseTmdbPlan());
+	return {
+		item: {
+			identity,
+			ignored: false,
+			sourceRemoved: false,
+			discovery: {
+				status: 'succeeded',
+				runId: 'run-pre0010-reverse',
+				completedAt: '2026-07-10T10:59:00.000Z'
+			},
+			currentSlots: [
+				{
+					slot: { kind: 'poster', season: null, episode: null },
+					url: 'https://server.example/current-reverse-root.jpg',
+					fingerprint: 'current-reverse-root',
+					artworkVersion: 5,
+					observedAt: '2026-07-10T10:00:00.000Z'
+				},
+				{
+					slot: { kind: 'title_card', season: 2, episode: 3 },
+					url: 'https://server.example/current-reverse-child.jpg',
+					fingerprint: 'current-reverse-child',
+					artworkVersion: 3,
+					observedAt: '2026-07-10T10:00:00.000Z'
+				}
+			]
+		},
+		candidates: [
+			{
+				candidateId: 801,
+				serverInstanceId: 'server-a',
+				mediaItemId: 88,
+				discoveryRunId: 'run-pre0010-reverse',
+				provider: 'tmdb',
+				providerAssetId: '/reverse-root.jpg',
+				setId: 'tmdb-reverse-root',
+				setAuthor: null,
+				designFamily: null,
+				language: null,
+				url: 'https://image.tmdb.org/t/p/original/reverse-root.jpg',
+				slot: { kind: 'poster', season: null, episode: null },
+				resolvedTmdbId: '88',
+				resolvedMediaType: 'tv',
+				width: 1000,
+				height: 1500,
+				score: 1,
+				active: true,
+				stale: false,
+				lastSeenAt: '2026-07-10T10:58:00.000Z'
+			},
+			{
+				candidateId: 802,
+				serverInstanceId: 'server-a',
+				mediaItemId: 88,
+				discoveryRunId: 'run-pre0010-reverse',
+				provider: 'tmdb',
+				providerAssetId: '/reverse-child.jpg',
+				setId: 'tmdb-reverse-child',
+				setAuthor: null,
+				designFamily: null,
+				language: null,
+				url: 'https://image.tmdb.org/t/p/w500/reverse-child.jpg',
+				slot: { kind: 'title_card', season: 2, episode: 3 },
+				resolvedTmdbId: '88',
+				resolvedMediaType: 'tv',
+				width: 1280,
+				height: 720,
+				score: 1,
+				active: true,
+				stale: false,
+				lastSeenAt: '2026-07-10T10:58:00.000Z'
+			}
+		],
+		storedSelections: [
+			{
+				slot: { kind: 'poster', season: null, episode: null },
+				candidateId: 801,
+				url: 'https://image.tmdb.org/t/p/w500/reverse-root.jpg',
+				provider: 'tmdb',
+				setId: 'tmdb-reverse-root',
+				setAuthor: null,
+				persisted: { candidateId: 801, provider: 'tmdb', setId: null }
+			},
+			{
+				slot: { kind: 'title_card', season: 2, episode: 3 },
+				candidateId: 802,
+				url: 'https://image.tmdb.org/t/p/w780/reverse-child.jpg',
+				provider: 'tmdb',
+				setId: 'tmdb-reverse-child',
+				setAuthor: null,
+				persisted: {
+					candidateId: 802,
+					provider: 'tmdb',
+					setId: 'tmdb-reverse-child'
+				}
+			}
+		]
+	};
+}
+
 const resolveDestinationSlots: ApplyPlanFreshnessResolverDependencies['resolveDestinationSlots'] =
 	async ({ target, selections, destinations }) =>
 		selections.flatMap((selection) =>
@@ -283,6 +392,15 @@ describe('captured pre-0010 apply plan compatibility', () => {
 		).resolves.toBeUndefined();
 	});
 
+	it('accepts root and child reverse/non-original variants emitted by a375115', async () => {
+		const payload = capturedReverseTmdbPlan();
+		expect(canonicalJsonDigest(payload).digest).toBe(CAPTURED_REVERSE_TMDB_DIGEST);
+		expect(() => assertApplyPlanPayload(payload)).not.toThrow();
+		await expect(
+			assertApplyPlanFresh(payload, freshnessDependencies(migratedReverseTmdbData()))
+		).resolves.toBeUndefined();
+	});
+
 	it('confirms, enqueues, and executes both captured TMDB operations unchanged', async () => {
 		const payload = capturedTmdbPlan();
 		let queued: FrozenApplyJobPayload | null = null;
@@ -356,7 +474,7 @@ describe('captured pre-0010 apply plan compatibility', () => {
 
 	it('rejects TMDB compatibility when raw root or child provenance is not the migrated shape', async () => {
 		const changedRoot = migratedTmdbData();
-		changedRoot.storedSelections[0].persisted!.candidateId = 701;
+		changedRoot.storedSelections[0].persisted!.candidateId = 999;
 		await expect(
 			assertApplyPlanFresh(capturedTmdbPlan(), freshnessDependencies(changedRoot))
 		).rejects.toMatchObject({ code: 'plan_stale' });
@@ -385,6 +503,72 @@ describe('captured pre-0010 apply plan compatibility', () => {
 		changedUrl.storedSelections[0].url = 'https://custom.example/replaced.jpg';
 		await expect(
 			assertApplyPlanFresh(capturedCustomPlan(), freshnessDependencies(changedUrl))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
+	it('rejects reverse TMDB migration proof for the wrong id, server, item, slot, provider, or path', async () => {
+		const wrongCandidateId = migratedReverseTmdbData();
+		wrongCandidateId.storedSelections[0].persisted!.candidateId = 999;
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongCandidateId))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongServer = migratedReverseTmdbData();
+		wrongServer.candidates[0].serverInstanceId = 'server-b';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongServer))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongItem = migratedReverseTmdbData();
+		wrongItem.candidates[0].mediaItemId = 999;
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongItem))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongSlot = migratedReverseTmdbData();
+		wrongSlot.storedSelections[0].candidateId = 802;
+		wrongSlot.storedSelections[0].persisted!.candidateId = 802;
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongSlot))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongProvider = migratedReverseTmdbData();
+		wrongProvider.storedSelections[0].persisted!.provider = 'mediux';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongProvider))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongResolvedProvider = migratedReverseTmdbData();
+		wrongResolvedProvider.storedSelections[0].provider = 'mediux';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongResolvedProvider))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongCandidateProvider = migratedReverseTmdbData();
+		wrongCandidateProvider.candidates[0].provider = 'mediux';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongCandidateProvider))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongPath = migratedReverseTmdbData();
+		wrongPath.storedSelections[1].url =
+			'https://image.tmdb.org/t/p/w780/different-reverse-child.jpg';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongPath))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
+	it('rejects reverse TMDB migration proof when migrated root or child set provenance differs', async () => {
+		const wrongRootSet = migratedReverseTmdbData();
+		wrongRootSet.storedSelections[0].persisted!.setId = 'unexpected-root-set';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongRootSet))
+		).rejects.toMatchObject({ code: 'plan_stale' });
+
+		const wrongChildSet = migratedReverseTmdbData();
+		wrongChildSet.storedSelections[1].persisted!.setId = 'unexpected-child-set';
+		await expect(
+			assertApplyPlanFresh(capturedReverseTmdbPlan(), freshnessDependencies(wrongChildSet))
 		).rejects.toMatchObject({ code: 'plan_stale' });
 	});
 });
