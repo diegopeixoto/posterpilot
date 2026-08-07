@@ -360,6 +360,24 @@
 	function thumb(url: string): string {
 		return /^https?:\/\//i.test(url) ? `/api/thumb?url=${encodeURIComponent(url)}` : url;
 	}
+	function stagedRootPreview(
+		kind: 'poster' | 'background',
+		canonicalUrl: string | null
+	): string | null {
+		if (!canonicalUrl) return null;
+		const candidate = data.candidates.find(
+			(entry) =>
+				entry.kind === kind &&
+				entry.season === null &&
+				entry.episode === null &&
+				entry.url === canonicalUrl
+		);
+		// Candidate previews are trusted provider assets and belong in the thumb cache.
+		// Preserve the existing direct display for a custom URL that has no candidate row.
+		return candidate ? thumb(candidate.previewUrl ?? candidate.url) : canonicalUrl;
+	}
+	const selectedPosterPreview = $derived(stagedRootPreview('poster', selectedPoster));
+	const selectedBackgroundPreview = $derived(stagedRootPreview('background', selectedBackground));
 
 	const jsonHeaders = { 'content-type': 'application/json' };
 
@@ -1408,8 +1426,8 @@
 			<div
 				class="h-[51px] w-[34px] flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
 			>
-				{#if selectedPoster}<img
-						src={selectedPoster}
+				{#if selectedPosterPreview}<img
+						src={selectedPosterPreview}
 						alt=""
 						class="h-full w-full object-cover"
 					/>{/if}
@@ -1417,8 +1435,8 @@
 			<div
 				class="h-[45px] w-20 flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
 			>
-				{#if selectedBackground}<img
-						src={selectedBackground}
+				{#if selectedBackgroundPreview}<img
+						src={selectedBackgroundPreview}
 						alt=""
 						class="h-full w-full object-cover"
 					/>{/if}

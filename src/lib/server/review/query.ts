@@ -44,6 +44,39 @@ export interface ReviewCandidateSummary {
 	stale: boolean;
 }
 
+interface ReviewPreviewCandidate {
+	id: number;
+	mediaItemId: number;
+	url: string;
+	previewUrl: string | null;
+	kind: 'poster' | 'background' | 'season' | 'title_card';
+}
+
+/** Resolve a display-only preview without ever changing the canonical staged URL. */
+function selectedCandidatePreview(
+	candidates: ReviewPreviewCandidate[],
+	selection: {
+		mediaItemId: number;
+		kind: 'poster' | 'background';
+		url: string | null;
+		candidateId: number | null;
+	}
+): string | null {
+	if (!selection.url) return null;
+	const matchesSelection = (candidate: ReviewPreviewCandidate) =>
+		candidate.mediaItemId === selection.mediaItemId &&
+		candidate.kind === selection.kind &&
+		candidate.url === selection.url;
+	const matchedById =
+		selection.candidateId === null
+			? null
+			: candidates.find(
+					(candidate) => candidate.id === selection.candidateId && matchesSelection(candidate)
+				);
+	const matched = matchedById ?? candidates.find(matchesSelection);
+	return matched?.previewUrl ?? selection.url;
+}
+
 function reviewConditions(filter: ReviewFilter): SQL[] {
 	const conditions: SQL[] = [
 		eq(mediaItems.serverInstanceId, filter.serverInstanceId),
@@ -168,11 +201,6 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 	]);
 
 	const ids = rows.map((row) => row.id);
-	const selectedCandidateIds = [
-		...new Set(
-			rows.flatMap((row) => [row.selectedPosterCandidateId, row.selectedBackgroundCandidateId])
-		)
-	].filter((id): id is number => id !== null);
 	const [candidates, failedSlots] = ids.length
 		? await Promise.all([
 				db
@@ -228,33 +256,9 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 					)
 			])
 		: [[], []];
-	const selectedCandidates = selectedCandidateIds.length
-		? await db
-				.select({
-					id: posterCandidates.id,
-					url: posterCandidates.url,
-					previewUrl: posterCandidates.previewUrl
-				})
-				.from(posterCandidates)
-				.where(
-					and(
-						eq(posterCandidates.serverInstanceId, filter.serverInstanceId),
-						inArray(posterCandidates.id, selectedCandidateIds)
-					)
-				)
-		: [];
-	const selectedCandidatesById = new Map(
-		selectedCandidates.map((candidate) => [candidate.id, candidate])
-	);
 
 	const items = rows.map((item) => {
 		const own = candidates.filter((candidate) => candidate.mediaItemId === item.id);
-		const selectedPoster = item.selectedPosterCandidateId
-			? selectedCandidatesById.get(item.selectedPosterCandidateId)
-			: null;
-		const selectedBackground = item.selectedBackgroundCandidateId
-			? selectedCandidatesById.get(item.selectedBackgroundCandidateId)
-			: null;
 		const first = (kind: 'poster' | 'background'): ReviewCandidateSummary | null => {
 			const candidate = own.find((entry) => entry.kind === kind);
 			return candidate
@@ -274,10 +278,18 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 		return {
 			item: {
 				...item,
-				selectedPosterPreviewUrl:
-					selectedPoster?.previewUrl ?? selectedPoster?.url ?? item.selectedPosterUrl,
-				selectedBackgroundPreviewUrl:
-					selectedBackground?.previewUrl ?? selectedBackground?.url ?? item.selectedBackgroundUrl,
+				selectedPosterPreviewUrl: selectedCandidatePreview(own, {
+					mediaItemId: item.id,
+					kind: 'poster',
+					url: item.selectedPosterUrl,
+					candidateId: item.selectedPosterCandidateId
+				}),
+				selectedBackgroundPreviewUrl: selectedCandidatePreview(own, {
+					mediaItemId: item.id,
+					kind: 'background',
+					url: item.selectedBackgroundUrl,
+					candidateId: item.selectedBackgroundCandidateId
+				}),
 				hasCurrentPoster: item.hasCurrentPoster === 1,
 				hasCurrentBackground: item.hasCurrentBackground === 1
 			},
