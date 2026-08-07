@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { m } from '$lib/paraglide/messages';
+	import {
+		createSingleFlightTmdbRepairRefresh,
+		isActiveTmdbRepairJob,
+		observeTmdbRepairWakeSignals,
+		tmdbRepairPollInterval
+	} from './tmdb-repair-polling';
 
 	type RepairJob = {
 		id: number;
@@ -19,21 +25,30 @@
 
 	let starting = $state(false);
 	let actionError = $state<string | null>(null);
-	const active = $derived(
-		repair.job !== null && ['pending', 'running', 'retry_scheduled'].includes(repair.job.status)
-	);
+	const refresh = createSingleFlightTmdbRepairRefresh(invalidateAll);
+	const active = $derived(isActiveTmdbRepairJob(repair.job?.status));
 	const incomplete = $derived(
 		repair.job !== null &&
 			['partial_failed', 'failed', 'cancelled', 'interrupted'].includes(repair.job.status)
 	);
 
-	// Durable database state remains authoritative. Poll only while the banner exists
-	// so normal sync, worker retries, cancellation, or a pin in another tab is reflected
-	// without browser-local completion flags.
+	// Durable database state remains authoritative. Poll only while a repair job is active;
+	// an idle warning can otherwise live for days and must not keep invalidating every root
+	// load in every open tab. Visibility and focus refreshes still pick up work done elsewhere.
 	$effect(() => {
-		if (repair.pendingCount === 0) return;
-		const timer = setInterval(() => void invalidateAll(), active ? 3_000 : 10_000);
-		return () => clearInterval(timer);
+		if (
+			repair.pendingCount === 0 ||
+			typeof document === 'undefined' ||
+			typeof window === 'undefined'
+		)
+			return;
+		const stopWakeRefresh = observeTmdbRepairWakeSignals(document, window, refresh);
+		const interval = tmdbRepairPollInterval(repair.pendingCount, repair.job?.status);
+		const timer = interval === null ? null : setInterval(() => void refresh(), interval);
+		return () => {
+			stopWakeRefresh();
+			if (timer !== null) clearInterval(timer);
+		};
 	});
 
 	async function startRepair() {
