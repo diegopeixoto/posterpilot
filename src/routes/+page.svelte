@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
 	import JobDetails from '$lib/components/JobDetails.svelte';
 	import JobProgress from '$lib/components/JobProgress.svelte';
@@ -19,6 +20,11 @@
 	const startedJobIds = new SvelteSet<number>();
 	const expandedJobIds = new SvelteSet<number>();
 
+	$effect(() => {
+		const match = /^#job-(\d+)$/u.exec(page.url.hash);
+		if (match) expandedJobIds.add(Number(match[1]));
+	});
+
 	// The set of job ids to show live progress for: server-reported active jobs plus
 	// anything started in this session that hasn't terminated yet.
 	const activeJobIds = $derived.by(() => {
@@ -27,9 +33,12 @@
 		return [...ids].sort((a, b) => b - a);
 	});
 	const hasActive = $derived(activeJobIds.length > 0);
+	const recentJobs = $derived(data.jobs.filter((job) => !activeJobIds.includes(job.id)));
 	const hasActiveSync = $derived(
 		startedJobIds.size > 0 ||
-			data.activeJobsList.some((job) => job.type === 'sync' || job.type === 'full_rescan')
+			data.activeJobsList.some(
+				(job) => job.type === 'sync' || job.type === 'full_rescan' || job.type === 'tmdb_repair'
+			)
 	);
 
 	// While any job is active, refresh dashboard data (stats + recent jobs) live so
@@ -238,7 +247,9 @@
 {#if hasActive}
 	<section class="mt-4 space-y-3">
 		{#each activeJobIds as jobId (jobId)}
-			<JobProgress {jobId} onDone={() => onJobDone(jobId)} {onRetryStarted} />
+			<div id={`job-${jobId}`} class="scroll-mt-20">
+				<JobProgress {jobId} onDone={() => onJobDone(jobId)} {onRetryStarted} />
+			</div>
 		{/each}
 	</section>
 {/if}
@@ -343,7 +354,7 @@
 	>
 </div>
 <div class="surface overflow-hidden">
-	{#if data.jobs.length === 0}
+	{#if recentJobs.length === 0}
 		<p class="p-4 text-sm text-neutral-400">{m.dashboard_no_jobs()}</p>
 	{:else}
 		<table class="w-full text-sm">
@@ -358,8 +369,11 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each data.jobs as job (job.id)}
-					<tr class="border-b border-neutral-800/60 last:border-0">
+				{#each recentJobs as job (job.id)}
+					<tr
+						id={`job-${job.id}`}
+						class="scroll-mt-20 border-b border-neutral-800/60 last:border-0"
+					>
 						<td class="px-4 py-2 text-neutral-400">#{job.id}</td>
 						<td class="px-4 py-2">{jobTypeLabel(job.type)}</td>
 						<td class="px-4 py-2 text-neutral-400">

@@ -4,12 +4,17 @@ import { asc, eq } from 'drizzle-orm';
 // Swappable task implementation so each test controls what the worker runs.
 const h = vi.hoisted(() => ({
 	syncImpl: null as null | ((ctx: unknown) => Promise<unknown>),
+	tmdbRepairImpl: null as null | ((ctx: unknown, payload: unknown) => Promise<unknown>),
 	automationImpl: null as null | ((ctx: unknown, payload: unknown) => Promise<unknown>),
 	applyImpl: null as null | ((ctx: unknown, payload: unknown) => Promise<unknown>)
 }));
 
 vi.mock('./tasks', () => ({
 	runSyncJob: (ctx: unknown) => (h.syncImpl ? h.syncImpl(ctx) : Promise.resolve()),
+	runTmdbRepairJob: (ctx: unknown, payload: unknown) =>
+		h.tmdbRepairImpl
+			? h.tmdbRepairImpl(ctx, payload)
+			: Promise.resolve({ summary: { processed: 0, succeeded: 0, failed: 0 } }),
 	runDiscoverJob: () => Promise.resolve(),
 	runAutomationJob: (ctx: unknown, payload: unknown) =>
 		h.automationImpl
@@ -88,6 +93,7 @@ async function waitFor(id: number, statuses: string[], timeout = 3000) {
 describe('job runner', () => {
 	beforeEach(async () => {
 		h.syncImpl = null;
+		h.tmdbRepairImpl = null;
 		h.automationImpl = null;
 		h.applyImpl = null;
 		resetMaintenanceModeForTests();
@@ -155,6 +161,53 @@ describe('job runner', () => {
 		const job = await waitFor(id, ['completed']);
 		expect(job.type).toBe('full_rescan');
 		expect(job.payload).toEqual({ kind: 'sync', serverInstanceId: SERVER_ID, full: true });
+	});
+
+	it('runs selective TMDB normalization under its distinct durable job type', async () => {
+		const executed = vi.fn().mockResolvedValue({
+			summary: { processed: 1, succeeded: 1, failed: 0 },
+			tmdbRepair: { pendingBefore: 1, pendingAfter: 0 }
+		});
+		h.tmdbRepairImpl = executed;
+		const id = await enqueueJob({ kind: 'tmdb_repair', serverInstanceId: SERVER_ID });
+		const job = await waitFor(id, ['completed']);
+		expect(executed).toHaveBeenCalledWith(expect.anything(), {
+			kind: 'tmdb_repair',
+			serverInstanceId: SERVER_ID
+		});
+		expect(job).toMatchObject({
+			type: 'tmdb_repair',
+			payload: { kind: 'tmdb_repair', serverInstanceId: SERVER_ID },
+			result: { tmdbRepair: { pendingBefore: 1, pendingAfter: 0 } }
+		});
+	});
+
+	it('keeps successful TMDB repair units durable when another unit fails', async () => {
+		h.tmdbRepairImpl = async (ctx) => {
+			const c = ctx as Ctx;
+			await c.recordOutcome({ serverInstanceId: SERVER_ID, status: 'success' });
+			await c.recordOutcome({
+				serverInstanceId: SERVER_ID,
+				status: 'failed',
+				retryable: true,
+				errorCode: 'sync_item_transient'
+			});
+			return {
+				summary: { processed: 2, succeeded: 1, failed: 1 },
+				tmdbRepair: { pendingBefore: 2, pendingAfter: 1 }
+			};
+		};
+		const id = await enqueueJob({ kind: 'tmdb_repair', serverInstanceId: SERVER_ID });
+		const job = await waitFor(id, ['partial_failed']);
+		expect(job.result).toMatchObject({
+			summary: { succeeded: 1, failed: 1 },
+			tmdbRepair: { pendingBefore: 2, pendingAfter: 1 }
+		});
+		expect(
+			(await db.select().from(jobItemOutcomes).where(eq(jobItemOutcomes.jobId, id)))
+				.map((outcome) => outcome.status)
+				.sort()
+		).toEqual(['failed', 'success']);
 	});
 
 	it('executes a frozen review-only automation without entering the apply path', async () => {
@@ -229,6 +282,28 @@ describe('job runner', () => {
 		release();
 		const j = await waitFor(id, ['cancelled']);
 		expect(j.status).toBe('cancelled');
+	});
+
+	it('cancels a running TMDB repair without changing its durable execution identity', async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		h.tmdbRepairImpl = async (ctx) => {
+			await (ctx as Ctx).setTotal(2);
+			await gate;
+			return {
+				summary: { processed: 1, succeeded: 1, failed: 0, interrupted: 1 },
+				tmdbRepair: { pendingBefore: 2, pendingAfter: 1 }
+			};
+		};
+		const id = await enqueueJob({ kind: 'tmdb_repair', serverInstanceId: SERVER_ID });
+		await waitFor(id, ['running']);
+		await cancelJob(id);
+		release();
+		const job = await waitFor(id, ['cancelled']);
+		expect(job).toMatchObject({
+			type: 'tmdb_repair',
+			payload: { kind: 'tmdb_repair', serverInstanceId: SERVER_ID }
+		});
 	});
 
 	it('atomically cancels queued work and its pending attempt', async () => {
@@ -441,6 +516,54 @@ describe('job runner', () => {
 		await waitFor(a.id, ['completed']);
 		await waitFor(b.id, ['completed']);
 		const attempts = await db.select().from(jobAttempts).where(eq(jobAttempts.jobId, a.id));
+		expect(attempts.map((attempt) => attempt.status)).toEqual(['interrupted', 'completed']);
+	});
+
+	it('replays an expired TMDB repair lease with the same durable job identity', async () => {
+		const executed = vi.fn().mockResolvedValue({
+			summary: { processed: 1, succeeded: 1, failed: 0 },
+			tmdbRepair: { pendingBefore: 1, pendingAfter: 0 }
+		});
+		h.tmdbRepairImpl = executed;
+		const [job] = await db
+			.insert(jobs)
+			.values({
+				type: 'tmdb_repair',
+				status: 'running',
+				processed: 0,
+				total: 1,
+				payload: { kind: 'tmdb_repair', serverInstanceId: SERVER_ID },
+				serverInstanceId: SERVER_ID,
+				attempt: 1,
+				maxAttempts: 3,
+				leaseOwner: 'dead-repair-worker',
+				leaseExpiresAt: new Date(0)
+			})
+			.returning();
+		await db.insert(jobAttempts).values({
+			jobId: job.id,
+			serverInstanceId: SERVER_ID,
+			attemptNumber: 1,
+			trigger: 'enqueue',
+			status: 'running',
+			leaseOwner: 'dead-repair-worker',
+			leaseExpiresAt: new Date(0)
+		});
+
+		await markInterruptedJobs();
+		const completed = await waitFor(job.id, ['completed']);
+		expect(completed).toMatchObject({
+			id: job.id,
+			type: 'tmdb_repair',
+			attempt: 2,
+			payload: { kind: 'tmdb_repair', serverInstanceId: SERVER_ID }
+		});
+		expect(executed).toHaveBeenCalledOnce();
+		const attempts = await db
+			.select()
+			.from(jobAttempts)
+			.where(eq(jobAttempts.jobId, job.id))
+			.orderBy(asc(jobAttempts.attemptNumber));
 		expect(attempts.map((attempt) => attempt.status)).toEqual(['interrupted', 'completed']);
 	});
 

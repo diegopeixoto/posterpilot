@@ -1,8 +1,10 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from '$lib/server/db/schema';
 import {
 	childSelections,
+	collectionMemberships,
+	mediaCollections,
 	mediaItems,
 	posterCandidates,
 	resolutionAudits
@@ -29,6 +31,7 @@ async function findScopedItem(
 		.select({
 			id: mediaItems.id,
 			serverInstanceId: mediaItems.serverInstanceId,
+			type: mediaItems.type,
 			title: mediaItems.title,
 			year: mediaItems.year,
 			tmdbId: mediaItems.tmdbId,
@@ -57,6 +60,20 @@ function summary(item: ManualMatchItem): ResolutionSummary {
 		manualMatchPinned: item.manualMatchPinned,
 		resolutionUpdatedAt: item.resolutionUpdatedAt
 	};
+}
+
+/**
+ * SQLite timestamps have one-second precision. Keep the resolution version strictly
+ * increasing so an A -> B -> A identity cycle cannot satisfy an older CAS guard.
+ */
+function nextResolutionTimestamp(requestedAt: Date, current: ManualMatchItem): Date {
+	const requestedSecond = Math.floor(requestedAt.getTime() / 1000) * 1000;
+	const currentMillis = current.resolutionUpdatedAt?.getTime();
+	return new Date(
+		currentMillis !== undefined && requestedSecond <= currentMillis
+			? currentMillis + 1000
+			: requestedSecond
+	);
 }
 
 async function requireScopedItem(
@@ -89,6 +106,62 @@ async function invalidateCandidates(
 		);
 }
 
+/** Remove collection state in the same transaction that changes TMDB identity. */
+async function invalidateTmdbCollections(
+	executor: Executor,
+	serverInstanceId: string,
+	itemId: number,
+	invalidatedAt: Date
+): Promise<void> {
+	const memberships = await executor
+		.select({ id: collectionMemberships.id, collectionId: collectionMemberships.collectionId })
+		.from(collectionMemberships)
+		.where(
+			and(
+				eq(collectionMemberships.serverInstanceId, serverInstanceId),
+				eq(collectionMemberships.mediaItemId, itemId),
+				eq(collectionMemberships.source, 'tmdb'),
+				isNull(collectionMemberships.removedAt)
+			)
+		);
+	if (!memberships.length) return;
+
+	await executor
+		.update(collectionMemberships)
+		.set({ removedAt: invalidatedAt })
+		.where(
+			inArray(
+				collectionMemberships.id,
+				memberships.map((membership) => membership.id)
+			)
+		);
+
+	for (const collectionId of new Set(memberships.map((membership) => membership.collectionId))) {
+		const [remaining] = await executor
+			.select({ id: collectionMemberships.id })
+			.from(collectionMemberships)
+			.where(
+				and(
+					eq(collectionMemberships.collectionId, collectionId),
+					isNull(collectionMemberships.removedAt)
+				)
+			)
+			.limit(1);
+		if (!remaining) {
+			await executor
+				.update(mediaCollections)
+				.set({ removedAt: invalidatedAt, updatedAt: invalidatedAt })
+				.where(
+					and(
+						eq(mediaCollections.id, collectionId),
+						eq(mediaCollections.serverInstanceId, serverInstanceId),
+						eq(mediaCollections.source, 'tmdb')
+					)
+				);
+		}
+	}
+}
+
 const invalidatedIdentityFields = {
 	selectedPosterUrl: null,
 	selectedBackgroundUrl: null,
@@ -107,8 +180,10 @@ const invalidatedIdentityFields = {
 	cast: null,
 	tmdbCollectionId: null,
 	tmdbCollectionName: null,
+	lastSyncedAt: null,
 	hasCandidates: false,
 	hasMediux: false,
+	reviewedAt: null,
 	discoveryStatus: 'not_started' as const,
 	discoveryStartedAt: null,
 	discoveryCompletedAt: null
@@ -128,9 +203,13 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 	): Promise<ResolutionSummary> {
 		return database.transaction(async (tx) => {
 			const current = await requireScopedItem(tx, serverInstanceId, itemId);
+			const decisionAt = nextResolutionTimestamp(confirmedAt, current);
 			const identityChanged =
 				current.tmdbId !== candidate.tmdbId || current.mediaType !== candidate.mediaType;
-			if (identityChanged) await invalidateCandidates(tx, serverInstanceId, itemId);
+			if (identityChanged) {
+				await invalidateCandidates(tx, serverInstanceId, itemId);
+				await invalidateTmdbCollections(tx, serverInstanceId, itemId, decisionAt);
+			}
 
 			await tx
 				.update(mediaItems)
@@ -140,8 +219,8 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 					resolved: true,
 					resolutionReason: 'manual',
 					manualMatchPinned: true,
-					resolutionUpdatedAt: confirmedAt,
-					updatedAt: confirmedAt,
+					resolutionUpdatedAt: decisionAt,
+					updatedAt: decisionAt,
 					...(identityChanged ? invalidatedIdentityFields : {})
 				})
 				.where(and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId)));
@@ -161,7 +240,7 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 					originalTitle: candidate.originalTitle,
 					year: candidate.year
 				},
-				createdAt: confirmedAt
+				createdAt: decisionAt
 			});
 			return summary(await requireScopedItem(tx, serverInstanceId, itemId));
 		});
@@ -175,7 +254,9 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 		return database.transaction(async (tx) => {
 			const current = await requireScopedItem(tx, serverInstanceId, itemId);
 			if (!current.manualMatchPinned) throw new ManualMatchError('manual_pin_not_found');
+			const decisionAt = nextResolutionTimestamp(clearedAt, current);
 			await invalidateCandidates(tx, serverInstanceId, itemId);
+			await invalidateTmdbCollections(tx, serverInstanceId, itemId, decisionAt);
 			await tx
 				.update(mediaItems)
 				.set({
@@ -185,8 +266,8 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 					resolved: false,
 					resolutionReason: 'manual_cleared',
 					manualMatchPinned: false,
-					resolutionUpdatedAt: clearedAt,
-					updatedAt: clearedAt
+					resolutionUpdatedAt: decisionAt,
+					updatedAt: decisionAt
 				})
 				.where(and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId)));
 			await tx.insert(resolutionAudits).values({
@@ -200,7 +281,7 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 				reason: 'manual_cleared',
 				source: 'user',
 				userConfirmed: true,
-				createdAt: clearedAt
+				createdAt: decisionAt
 			});
 			return summary(await requireScopedItem(tx, serverInstanceId, itemId));
 		});
@@ -214,10 +295,14 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 		return database.transaction(async (tx) => {
 			const current = await requireScopedItem(tx, serverInstanceId, itemId);
 			if (current.manualMatchPinned) return summary(current);
+			const decisionAt = nextResolutionTimestamp(input.resolvedAt, current);
 			const identityChanged =
 				current.tmdbId !== input.resolution.tmdbId ||
 				current.mediaType !== input.resolution.mediaType;
-			if (identityChanged) await invalidateCandidates(tx, serverInstanceId, itemId);
+			if (identityChanged) {
+				await invalidateCandidates(tx, serverInstanceId, itemId);
+				await invalidateTmdbCollections(tx, serverInstanceId, itemId, decisionAt);
+			}
 			await tx
 				.update(mediaItems)
 				.set({
@@ -226,8 +311,8 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 					resolved: true,
 					resolutionReason: input.reason,
 					manualMatchPinned: false,
-					resolutionUpdatedAt: input.resolvedAt,
-					updatedAt: input.resolvedAt,
+					resolutionUpdatedAt: decisionAt,
+					updatedAt: decisionAt,
 					...(identityChanged ? invalidatedIdentityFields : {})
 				})
 				.where(and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId)));
@@ -243,7 +328,7 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 				source: input.source,
 				userConfirmed: false,
 				attemptedSources: input.attemptedSources,
-				createdAt: input.resolvedAt
+				createdAt: decisionAt
 			});
 			return summary(await requireScopedItem(tx, serverInstanceId, itemId));
 		});
@@ -257,7 +342,9 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 		return database.transaction(async (tx) => {
 			const current = await requireScopedItem(tx, serverInstanceId, itemId);
 			if (current.manualMatchPinned) return summary(current);
+			const decisionAt = nextResolutionTimestamp(input.resolvedAt, current);
 			await invalidateCandidates(tx, serverInstanceId, itemId);
+			await invalidateTmdbCollections(tx, serverInstanceId, itemId, decisionAt);
 			await tx
 				.update(mediaItems)
 				.set({
@@ -267,8 +354,8 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 					resolved: false,
 					resolutionReason: input.reason,
 					manualMatchPinned: false,
-					resolutionUpdatedAt: input.resolvedAt,
-					updatedAt: input.resolvedAt
+					resolutionUpdatedAt: decisionAt,
+					updatedAt: decisionAt
 				})
 				.where(and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId)));
 			await tx.insert(resolutionAudits).values({
@@ -283,7 +370,7 @@ export function createManualMatchRepository(database: Database): ManualMatchRepo
 				source: input.source,
 				userConfirmed: false,
 				attemptedSources: input.attemptedSources,
-				createdAt: input.resolvedAt
+				createdAt: decisionAt
 			});
 			return summary(await requireScopedItem(tx, serverInstanceId, itemId));
 		});

@@ -57,37 +57,43 @@ describe('pickExternalId', () => {
 
 describe('parseFindResult', () => {
 	it('resolves a movie-only result as type movie', () => {
-		expect(parseFindResult({ movie_results: [{ id: 603 }], tv_results: [] })).toEqual({
+		expect(parseFindResult({ movie_results: [{ id: 603 }], tv_results: [] }, 'movie')).toEqual({
 			tmdbId: '603',
 			mediaType: 'movie'
 		});
 	});
 
 	it('resolves a tv-only result as type tv', () => {
-		expect(parseFindResult({ movie_results: [], tv_results: [{ id: 1399 }] })).toEqual({
+		expect(parseFindResult({ movie_results: [], tv_results: [{ id: 1399 }] }, 'tv')).toEqual({
 			tmdbId: '1399',
 			mediaType: 'tv'
 		});
 	});
 
-	it('prefers a movie match over a concurrent tv match', () => {
-		expect(parseFindResult({ movie_results: [{ id: 603 }], tv_results: [{ id: 1399 }] })).toEqual({
-			tmdbId: '603',
-			mediaType: 'movie'
-		});
+	it('selects only the expected bucket when movie and TV share the same numeric id', () => {
+		const response = { movie_results: [{ id: 42 }], tv_results: [{ id: 42 }] };
+
+		expect(parseFindResult(response, 'movie')).toEqual({ tmdbId: '42', mediaType: 'movie' });
+		expect(parseFindResult(response, 'tv')).toEqual({ tmdbId: '42', mediaType: 'tv' });
+	});
+
+	it('does not fall back to the opposite bucket when the expected bucket is empty', () => {
+		expect(parseFindResult({ movie_results: [], tv_results: [{ id: 1399 }] }, 'movie')).toBeNull();
+		expect(parseFindResult({ movie_results: [{ id: 603 }], tv_results: [] }, 'tv')).toBeNull();
 	});
 
 	it('returns null when there are no results', () => {
-		expect(parseFindResult({ movie_results: [], tv_results: [] })).toBeNull();
+		expect(parseFindResult({ movie_results: [], tv_results: [] }, 'movie')).toBeNull();
+		expect(parseFindResult({ movie_results: [], tv_results: [] }, 'tv')).toBeNull();
 	});
 
 	it('returns null for an empty / malformed payload', () => {
-		expect(parseFindResult({})).toBeNull();
-		expect(parseFindResult(null)).toBeNull();
+		expect(parseFindResult({}, 'movie')).toBeNull();
+		expect(parseFindResult(null, 'tv')).toBeNull();
 	});
 
 	it('coerces numeric ids to strings', () => {
-		const res = parseFindResult({ movie_results: [{ id: 27205 }] });
+		const res = parseFindResult({ movie_results: [{ id: 27205 }] }, 'movie');
 		expect(res?.tmdbId).toBe('27205');
 		expect(typeof res?.tmdbId).toBe('string');
 	});

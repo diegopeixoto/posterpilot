@@ -23,69 +23,75 @@ function isTmdbEntity(json: unknown): boolean {
 	return typeof json === 'object' && json !== null && 'id' in (json as Record<string, unknown>);
 }
 
-/**
- * Classify a known TMDB id as a movie or TV show by probing the movie endpoint first
- * and falling back to the TV endpoint.
- */
 function isTmdbNotFound(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : '';
 	return /HTTP (?:400|404)\b/u.test(message);
 }
 
-async function classifyTmdbIdStrict(
+async function validateTmdbIdStrict(
 	tmdbId: string,
+	expectedMediaType: TmdbMediaType,
 	auth: TmdbAuth,
 	cacheTtlDays: number,
 	forceRefresh: boolean
-): Promise<TmdbMediaType | null> {
-	const probe = async (mediaType: TmdbMediaType): Promise<boolean> => {
-		const url = withAuthQuery(`${TMDB_BASE}/${mediaType}/${tmdbId}`, auth.query);
-		try {
-			const json = await fetchJson<unknown>(url, {
-				headers: auth.headers,
-				cacheTtlDays,
-				forceRefresh
-			});
-			return isTmdbEntity(json);
-		} catch (error) {
-			// A 404/400 means only that this id is absent for this media type. Network,
-			// auth, and upstream failures must remain distinguishable from no-match.
-			if (isTmdbNotFound(error)) return false;
-			throw error;
-		}
-	};
+): Promise<boolean> {
+	const url = withAuthQuery(`${TMDB_BASE}/${expectedMediaType}/${tmdbId}`, auth.query);
+	try {
+		const json = await fetchJson<unknown>(url, {
+			headers: auth.headers,
+			cacheTtlDays,
+			cacheNamespace: `tmdb-resolution:${expectedMediaType}`,
+			forceRefresh
+		});
+		return isTmdbEntity(json);
+	} catch (error) {
+		// A 404/400 means only that this id is absent from the authoritative namespace.
+		// Network, auth, and upstream failures remain distinguishable from no-match.
+		if (isTmdbNotFound(error)) return false;
+		throw error;
+	}
+}
 
-	if (await probe('movie')) return 'movie';
-	if (await probe('tv')) return 'tv';
-	return null;
+export interface ResolveTmdbOptions {
+	/** Namespace derived from the authoritative source item type. */
+	expectedMediaType: TmdbMediaType;
+	forceRefresh?: boolean;
+	cacheTtlDays?: number;
 }
 
 /**
  * Resolve a Plex/external GUID set to a canonical TMDB id and media type.
  *
- * Precedence is tmdb > imdb > tvdb. A direct TMDB id is classified by probing the
- * movie endpoint then the TV endpoint; an imdb/tvdb id is resolved through the TMDB
- * `find` endpoint. Results are cached via the shared HTTP cache.
+ * Precedence is tmdb > imdb > tvdb. A direct TMDB id is validated only through the
+ * expected movie or TV endpoint; an imdb/tvdb id is resolved through the TMDB `find`
+ * endpoint and only the expected result bucket is accepted. Results are cached using
+ * both the external identifier and expected media namespace.
  *
  * @param guids The GUIDs carried by a Plex item.
  * @param key The TMDB credential (v3 API key or v4 bearer/JWT).
- * @param opts Optional cache controls.
+ * @param opts Expected media namespace and optional cache controls.
  * @returns The resolved TMDB id and media type, or null when nothing resolves.
  */
 export async function resolveTmdbStrict(
 	guids: PlexGuids,
 	key: string,
-	opts: { forceRefresh?: boolean; cacheTtlDays?: number } = {}
+	opts: ResolveTmdbOptions
 ): Promise<TmdbResolution | null> {
 	const selected = pickExternalId(guids);
 	if (!selected) return null;
 
-	const { forceRefresh = false, cacheTtlDays = DEFAULT_CACHE_TTL_DAYS } = opts;
+	const { expectedMediaType, forceRefresh = false, cacheTtlDays = DEFAULT_CACHE_TTL_DAYS } = opts;
 	const auth = tmdbAuth(key);
 
 	if (selected.source === 'tmdb') {
-		const mediaType = await classifyTmdbIdStrict(selected.id, auth, cacheTtlDays, forceRefresh);
-		return mediaType ? { tmdbId: selected.id, mediaType } : null;
+		const matched = await validateTmdbIdStrict(
+			selected.id,
+			expectedMediaType,
+			auth,
+			cacheTtlDays,
+			forceRefresh
+		);
+		return matched ? { tmdbId: selected.id, mediaType: expectedMediaType } : null;
 	}
 
 	const url = withAuthQuery(
@@ -96,9 +102,10 @@ export async function resolveTmdbStrict(
 		const json = await fetchJson<unknown>(url, {
 			headers: auth.headers,
 			cacheTtlDays,
+			cacheNamespace: `tmdb-resolution:${expectedMediaType}`,
 			forceRefresh
 		});
-		return parseFindResult(json);
+		return parseFindResult(json, expectedMediaType);
 	} catch (error) {
 		if (isTmdbNotFound(error)) return null;
 		throw error;
@@ -109,7 +116,7 @@ export async function resolveTmdbStrict(
 export async function resolveTmdb(
 	guids: PlexGuids,
 	key: string,
-	opts: { forceRefresh?: boolean; cacheTtlDays?: number } = {}
+	opts: ResolveTmdbOptions
 ): Promise<TmdbResolution | null> {
 	try {
 		return await resolveTmdbStrict(guids, key, opts);

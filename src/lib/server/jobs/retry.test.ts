@@ -60,6 +60,23 @@ describe('failed-only job retry planning', () => {
 		});
 	});
 
+	it('keeps a TMDB repair retry server-scoped and failed-item-only', () => {
+		const [retry] = buildRetryPayloads(
+			10,
+			{ kind: 'tmdb_repair', serverInstanceId: 'server-a' },
+			[outcome(6, 44, 'failed'), outcome(5, 11, 'failed')],
+			'2026-07-11T00:00:00.000Z'
+		);
+		expect(retry).toEqual({
+			payload: {
+				kind: 'tmdb_repair',
+				serverInstanceId: 'server-a',
+				itemIds: [11, 44]
+			},
+			outcomeIds: [5, 6]
+		});
+	});
+
 	it('does not broaden a discovery subset', () => {
 		const [retry] = buildRetryPayloads(
 			11,

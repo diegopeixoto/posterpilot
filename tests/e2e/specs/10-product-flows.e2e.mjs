@@ -7,6 +7,7 @@ import {
 	expectNoHorizontalOverflow
 } from '../support/fixtures.mjs';
 import { t } from '../support/i18n.mjs';
+import { createClient } from '@libsql/client';
 
 test.describe
 	.serial('critical review, apply, FUN, automation, backup, and collection flows', () => {
@@ -36,6 +37,116 @@ test.describe
 		await page.getByRole('link', { name: new RegExp(t('review_previous_item')) }).click();
 		await expect(page.getByRole('heading', { level: 1, name: 'Alpha Dawn' })).toBeVisible();
 		await expectNoHorizontalOverflow(page);
+	});
+
+	test('reuses manual TMDB search with the current title, optional year, and handled failures', async ({
+		page,
+		scenario
+	}) => {
+		const searches = [];
+		await page.route(
+			(url) => url.pathname.endsWith('/tmdb/search'),
+			async (route) => {
+				const url = new URL(route.request().url());
+				const request = {
+					query: url.searchParams.get('q'),
+					year: url.searchParams.get('year'),
+					type: url.searchParams.get('type')
+				};
+				searches.push(request);
+
+				if (request.query === 'Network Failure') {
+					await route.abort('failed');
+					return;
+				}
+				if (request.query === 'No Results') {
+					await route.fulfill({ json: { results: [] } });
+					return;
+				}
+
+				await route.fulfill({
+					json: {
+						results: [
+							{
+								tmdbId: String(80000 + searches.length),
+								mediaType: request.type === 'tv' ? 'tv' : 'movie',
+								title: `${request.query} result`,
+								originalTitle: null,
+								year: request.year === null ? null : Number(request.year),
+								overview: null,
+								posterUrl: null
+							}
+						]
+					}
+				});
+			}
+		);
+
+		await gotoHydrated(page, `/item/${scenario.primaryItems.alpha}`);
+		await page.getByRole('button', { name: t('manual_match_replace') }).click();
+		const title = page.getByLabel(t('manual_match_query'), { exact: true });
+		const year = page.getByLabel(t('manual_match_year'), { exact: true });
+		const type = page.getByLabel(t('manual_match_media_type'), { exact: true });
+		const submit = page.getByRole('button', { name: t('manual_match_search') });
+
+		async function submitSearch(expected) {
+			const previousCount = searches.length;
+			await submit.click();
+			await expect.poll(() => searches.length).toBe(previousCount + 1);
+			expect(searches.at(-1)).toEqual(expected);
+		}
+
+		await title.fill('Changed Title');
+		await year.fill('2024');
+		await type.selectOption('tv');
+		await submitSearch({ query: 'Changed Title', year: '2024', type: 'tv' });
+		await expect(page.getByRole('list', { name: t('manual_match_results') })).toContainText(
+			'Changed Title result'
+		);
+
+		await title.fill('Alpha Dawn');
+		await year.fill('2020');
+		await type.selectOption('movie');
+		await submitSearch({ query: 'Alpha Dawn', year: '2020', type: 'movie' });
+		await year.fill('');
+		await submitSearch({ query: 'Alpha Dawn', year: null, type: 'movie' });
+		await submitSearch({ query: 'Alpha Dawn', year: null, type: 'movie' });
+
+		await year.fill('1700');
+		const requestsBeforeInvalidSearch = searches.length;
+		await year.locator('xpath=ancestor::form').dispatchEvent('submit');
+		await expect(page.getByRole('alert')).toContainText(t('manual_match_error_invalid'));
+		expect(searches).toHaveLength(requestsBeforeInvalidSearch);
+
+		await year.fill('2021');
+		await submitSearch({ query: 'Alpha Dawn', year: '2021', type: 'movie' });
+		await expect(page.getByRole('alert')).toBeHidden();
+
+		await title.fill('No Results');
+		await year.fill('');
+		await submitSearch({ query: 'No Results', year: null, type: 'movie' });
+		await expect(
+			page.getByRole('status').filter({ hasText: t('manual_match_empty') })
+		).toBeVisible();
+
+		await title.fill('Network Failure');
+		await submitSearch({ query: 'Network Failure', year: null, type: 'movie' });
+		await expect(page.getByRole('alert')).toContainText(t('manual_match_error_unavailable'));
+
+		await title.fill('Recovered');
+		await year.fill('2022');
+		await submitSearch({ query: 'Recovered', year: '2022', type: 'movie' });
+		await expect(page.getByRole('list', { name: t('manual_match_results') })).toContainText(
+			'Recovered result'
+		);
+		await expect(
+			page.getByText(
+				t('manual_match_current_automatic', {
+					type: t('manual_match_type_movie'),
+					id: '71001'
+				})
+			)
+		).toBeVisible();
 	});
 
 	test('clears a real manual TMDB pin and records the resolution audit', async ({
@@ -68,19 +179,43 @@ test.describe
 		await expect(page.getByText(t('manual_match_audit_cleared'), { exact: true })).toBeVisible();
 	});
 
-	test('previews, confirms, verifies, and undoes the exact staged artwork', async ({
+	test('applies a warning-free exact plan in one click, verifies it, and undoes it', async ({
 		page,
 		scenario
 	}) => {
 		const itemId = scenario.primaryItems.alpha;
+		const endpoint = `/api/items/${itemId}/apply`;
 		await gotoHydrated(page, `/item/${itemId}?returnTo=%2Freview`);
 		await page.getByLabel(t('library_apply_method_label')).selectOption('plex');
-		await page.getByRole('button', { name: t('item_apply'), exact: true }).click();
-		await expect(page.getByText(/Plan: 2 uploads · 0 Kometa exports · 0 skipped/)).toBeVisible();
 
-		const jobId = await triggerJob(page, `/api/items/${itemId}/apply`, () =>
-			page.getByRole('button', { name: t('library_apply_confirm_yes') }).click()
-		);
+		const previewResponsePromise = page.waitForResponse((response) => {
+			const url = new URL(response.url());
+			return (
+				url.pathname === endpoint &&
+				response.request().method() === 'POST' &&
+				response.request().postDataJSON()?.method === 'plex'
+			);
+		});
+		const jobResponsePromise = page.waitForResponse((response) => {
+			const url = new URL(response.url());
+			const body = response.request().postDataJSON();
+			return (
+				url.pathname === endpoint &&
+				response.request().method() === 'POST' &&
+				typeof body?.planId === 'string' &&
+				typeof body?.digest === 'string'
+			);
+		});
+		await page.getByRole('button', { name: t('item_apply'), exact: true }).click();
+		const previewResponse = await previewResponsePromise;
+		expect(previewResponse.ok()).toBeTruthy();
+		expect(await previewResponse.json()).toMatchObject({
+			summary: { destinations: { server: 2, kometa: 0 }, skipCount: 0 }
+		});
+		const jobResponse = await jobResponsePromise;
+		expect(jobResponse.ok()).toBeTruthy();
+		const { jobId } = await jobResponse.json();
+		expect(jobId).toEqual(expect.any(Number));
 		await expectJobCompleted(page, jobId);
 		await expect(page.getByRole('status').filter({ hasText: t('item_msg_applied') })).toBeVisible();
 
@@ -270,5 +405,130 @@ test.describe
 			page.getByRole('status').filter({ hasText: /Restored \d+ collection artwork slots/ })
 		).toBeVisible({ timeout: 30_000 });
 		await expect(history).toBeVisible();
+	});
+
+	test('shows durable TMDB normalization and removes it only when the server-scoped count is zero', async ({
+		page,
+		runtime,
+		scenario
+	}) => {
+		const client = createClient({ url: `file:${runtime.databaseFile}` });
+		const now = Math.floor(Date.now() / 1000);
+		let legacyId;
+		let alphaLastSynced;
+		let priorRepairJobId;
+		const seededJobIds = [];
+		try {
+			const alpha = await client.execute({
+				sql: 'select last_synced_at from media_items where id = ? and server_instance_id = ?',
+				args: [scenario.primaryItems.alpha, scenario.primaryServerId]
+			});
+			alphaLastSynced = alpha.rows[0]?.last_synced_at ?? null;
+			const inserted = await client.execute({
+				sql: `insert into media_items (
+				 server_instance_id, rating_key, section_key, type, title, tmdb_id, media_type,
+				 resolved, manual_match_pinned, last_synced_at, updated_at
+				) values (?, 'e2e-legacy-removed', 'lib-shows-a', 'show',
+				 'Legacy Removed Show', '99991', 'movie', 1, 0, ?, ?)
+				returning id`,
+				args: [scenario.primaryServerId, now, now]
+			});
+			legacyId = Number(inserted.rows[0].id);
+			const priorRepair = await client.execute({
+				sql: `insert into jobs (
+				 server_instance_id, type, status, payload, result, attempt,
+				 processed, total, created_at, finished_at, updated_at
+				) values (?, 'tmdb_repair', 'completed', ?, ?, 1, 1, 1, ?, ?, ?)
+				returning id`,
+				args: [
+					scenario.primaryServerId,
+					JSON.stringify({ kind: 'tmdb_repair', serverInstanceId: scenario.primaryServerId }),
+					JSON.stringify({
+						summary: { processed: 1, succeeded: 1, failed: 0 },
+						tmdbRepair: { pendingBefore: 1, pendingAfter: 0 }
+					}),
+					now - 20,
+					now - 20,
+					now - 20
+				]
+			});
+			priorRepairJobId = Number(priorRepair.rows[0].id);
+			seededJobIds.push(priorRepairJobId);
+			for (let index = 0; index < 9; index += 1) {
+				const newer = await client.execute({
+					sql: `insert into jobs (
+					 server_instance_id, type, status, payload, result, attempt,
+					 processed, total, created_at, finished_at, updated_at
+					) values (?, 'sync', 'completed', ?, ?, 1, 1, 1, ?, ?, ?)
+					returning id`,
+					args: [
+						scenario.primaryServerId,
+						JSON.stringify({ kind: 'sync', serverInstanceId: scenario.primaryServerId }),
+						JSON.stringify({ summary: { processed: 1, succeeded: 1, failed: 0 } }),
+						now - 10 + index,
+						now - 10 + index,
+						now - 10 + index
+					]
+				});
+				seededJobIds.push(Number(newer.rows[0].id));
+			}
+
+			await gotoHydrated(page, '/library');
+			const banner = page.getByTestId('tmdb-repair-banner');
+			await expect(banner).toContainText(t('tmdb_repair_banner_pending', { count: 1 }));
+			const jobLink = banner.getByRole('link', {
+				name: t('tmdb_repair_banner_job', { id: priorRepairJobId })
+			});
+			await expect(jobLink).toHaveAttribute(
+				'href',
+				`/?job=${priorRepairJobId}#job-${priorRepairJobId}`
+			);
+			await jobLink.click();
+			await expect(page).toHaveURL(
+				new RegExp(`/\\?job=${priorRepairJobId}#job-${priorRepairJobId}$`, 'u')
+			);
+			await expect(page.locator(`#job-${priorRepairJobId}`)).toHaveCount(1);
+			await expect(page.locator(`#job-row-details-${priorRepairJobId}`)).toBeVisible();
+
+			await gotoHydrated(page, '/library');
+			const jobId = await triggerJob(page, '/api/tmdb-repair', () =>
+				page
+					.getByTestId('tmdb-repair-banner')
+					.getByRole('button', { name: t('tmdb_repair_banner_action') })
+					.click()
+			);
+			const stream = await page.request.get(`/api/jobs/${jobId}/stream`, { timeout: 60_000 });
+			expect(stream.ok()).toBeTruthy();
+			const snapshots = (await stream.text())
+				.split('\n')
+				.filter((line) => line.startsWith('data: '))
+				.map((line) => JSON.parse(line.slice(6)));
+			expect(snapshots.at(-1)).toMatchObject({ jobId, type: 'tmdb_repair', status: 'completed' });
+			await expect(banner).toBeHidden({ timeout: 15_000 });
+
+			const [legacy, alphaAfter] = await Promise.all([
+				client.execute({
+					sql: 'select source_removed_at from media_items where id = ?',
+					args: [legacyId]
+				}),
+				client.execute({
+					sql: 'select last_synced_at from media_items where id = ?',
+					args: [scenario.primaryItems.alpha]
+				})
+			]);
+			expect(legacy.rows[0].source_removed_at).not.toBeNull();
+			expect(alphaAfter.rows[0].last_synced_at ?? null).toBe(alphaLastSynced);
+		} finally {
+			if (seededJobIds.length) {
+				await client.execute({
+					sql: `delete from jobs where id in (${seededJobIds.map(() => '?').join(', ')})`,
+					args: seededJobIds
+				});
+			}
+			if (legacyId) {
+				await client.execute({ sql: 'delete from media_items where id = ?', args: [legacyId] });
+			}
+			client.close();
+		}
 	});
 });

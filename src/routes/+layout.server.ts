@@ -5,17 +5,22 @@ import { listManagedServers } from '$lib/server/server-instances';
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from '$lib/i18n/resolve';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { version } from '$lib/version';
+import { getTmdbRepairState } from '$lib/server/tmdb/repair';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
 	const [config, serverManagement] = await Promise.all([resolveConfig(), listManagedServers()]);
-	const activeJobs = serverManagement.activeServerId
-		? await activeJobCount(serverManagement.activeServerId)
-		: 0;
+	const [activeJobs, tmdbRepair] = serverManagement.activeServerId
+		? await Promise.all([
+				activeJobCount(serverManagement.activeServerId),
+				getTmdbRepairState(serverManagement.activeServerId)
+			])
+		: [0, { pendingCount: 0, job: null }];
 	const selectableServers = serverManagement.servers.filter(
 		(server) => server.enabled && !server.disconnectedAt
 	);
 	return {
 		activeJobs,
+		tmdbRepair,
 		version,
 		// A staged restore put the app in maintenance mode: writes are rejected until
 		// the process restarts, so every page shows the restart banner, not just Settings.

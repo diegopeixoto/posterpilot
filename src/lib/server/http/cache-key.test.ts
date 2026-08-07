@@ -20,4 +20,13 @@ describe('HTTP cache secret handling', () => {
 			'https://api.test/items'
 		);
 	});
+
+	it('separates semantically distinct cache namespaces for the same request', () => {
+		const movie = httpCacheKey('https://api.test/find/tt123', undefined, 'tmdb:movie');
+		const tv = httpCacheKey('https://api.test/find/tt123', undefined, 'tmdb:tv');
+
+		expect(movie).not.toBe(tv);
+		expect(movie).not.toContain('movie');
+		expect(tv).not.toContain('tv');
+	});
 });

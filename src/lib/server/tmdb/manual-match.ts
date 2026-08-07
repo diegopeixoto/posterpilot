@@ -20,6 +20,7 @@ export class ManualMatchError extends Error {
 export interface ManualMatchItem {
 	id: number;
 	serverInstanceId: string;
+	type: 'movie' | 'show';
 	title: string;
 	year: number | null;
 	tmdbId: string | null;
@@ -106,7 +107,7 @@ export interface ManualMatchRemote {
 		mediaType: TmdbMediaType,
 		language?: string
 	): Promise<TmdbManualCandidate | null>;
-	resolve(guids: PlexGuids): Promise<TmdbResolution | null>;
+	resolve(guids: PlexGuids, expectedMediaType: TmdbMediaType): Promise<TmdbResolution | null>;
 }
 
 export interface SearchManualMatchInput {
@@ -236,7 +237,7 @@ export function createManualMatchService(
 
 		let resolution: TmdbResolution | null;
 		try {
-			resolution = await remote.resolve(guids);
+			resolution = await remote.resolve(guids, current.type === 'show' ? 'tv' : 'movie');
 		} catch (error) {
 			const code =
 				error instanceof ManualMatchError && error.code === 'tmdb_not_configured'

@@ -19,7 +19,14 @@ import {
 	sanitizeJobErrorText,
 	type JobDescriptor
 } from './policy';
-import { runApplyJob, runAutomationJob, runDiscoverJob, runSyncJob, runUndoJob } from './tasks';
+import {
+	runApplyJob,
+	runAutomationJob,
+	runDiscoverJob,
+	runSyncJob,
+	runTmdbRepairJob,
+	runUndoJob
+} from './tasks';
 import type {
 	JobContext,
 	JobItemOutcomeInput,
@@ -643,6 +650,7 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 		validatePayload(payload);
 		let taskResult: WorkerTaskResult | undefined;
 		if (payload.kind === 'sync') taskResult = await runSyncJob(ctx, payload);
+		else if (payload.kind === 'tmdb_repair') taskResult = await runTmdbRepairJob(ctx, payload);
 		else if (payload.kind === 'discover') taskResult = await runDiscoverJob(ctx, payload);
 		else if (payload.kind === 'automation') {
 			taskResult = await runAutomationJob(ctx, payload);

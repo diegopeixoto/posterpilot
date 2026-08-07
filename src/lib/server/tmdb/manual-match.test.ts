@@ -13,6 +13,7 @@ function item(overrides: Partial<ManualMatchItem> = {}): ManualMatchItem {
 	return {
 		id: 7,
 		serverInstanceId: 'server-a',
+		type: 'movie',
 		title: 'Old title',
 		year: 2001,
 		tmdbId: '100',
@@ -190,7 +191,7 @@ describe('manual TMDB match domain', () => {
 		const { service, repository, remote } = fixture(item({ manualMatchPinned: true }));
 		const result = await service.clear('server-a', 7);
 		expect(repository.clear).toHaveBeenCalledWith('server-a', 7, NOW);
-		expect(remote.resolve).toHaveBeenCalledWith({ imdb: 'tt0000100' });
+		expect(remote.resolve).toHaveBeenCalledWith({ imdb: 'tt0000100' }, 'movie');
 		expect(repository.applyAutomaticResolution).toHaveBeenCalledWith(
 			'server-a',
 			7,
@@ -201,6 +202,14 @@ describe('manual TMDB match domain', () => {
 			})
 		);
 		expect(result.automaticResolution.status).toBe('resolved');
+	});
+
+	it('re-resolves a cleared show only in the TMDB TV namespace', async () => {
+		const { service, remote } = fixture(
+			item({ type: 'show', mediaType: 'tv', manualMatchPinned: true })
+		);
+		await service.clear('server-a', 7);
+		expect(remote.resolve).toHaveBeenCalledWith({ imdb: 'tt0000100' }, 'tv');
 	});
 
 	it('leaves a cleared item eligible without reviving stale candidates when no GUID remains', async () => {

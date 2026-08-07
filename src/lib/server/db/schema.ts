@@ -300,6 +300,7 @@ export const jobs = sqliteTable(
 			enum: [
 				'sync',
 				'full_rescan',
+				'tmdb_repair',
 				'discover',
 				'apply',
 				'undo',

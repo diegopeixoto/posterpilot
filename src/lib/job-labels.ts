@@ -30,6 +30,8 @@ export function jobTypeLabel(type: string): string {
 			return m.jobs_type_sync();
 		case 'full_rescan':
 			return m.jobs_type_full_rescan();
+		case 'tmdb_repair':
+			return m.jobs_type_tmdb_repair();
 		case 'discover':
 			return m.jobs_type_discover();
 		case 'apply':
@@ -64,6 +66,8 @@ export function jobPhaseLabel(phase: string | null, status = 'running'): string 
 			return m.jobs_phase_server_read();
 		case 'resolution':
 			return m.jobs_phase_resolution();
+		case 'tmdb_repair_scan':
+			return m.jobs_phase_tmdb_repair_scan();
 		case 'reconciliation':
 			return m.jobs_phase_reconciliation();
 		case 'artwork_observation':

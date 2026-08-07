@@ -14,6 +14,13 @@ export type JobPayload =
 			itemIds?: number[];
 	  }
 	| {
+			/** Selective normalization of legacy automatic cross-type TMDB matches. */
+			kind: 'tmdb_repair';
+			serverInstanceId: string;
+			/** Present only for a failed-item retry. */
+			itemIds?: number[];
+	  }
+	| {
 			kind: 'discover';
 			serverInstanceId: string;
 			itemIds?: number[];
@@ -33,6 +40,7 @@ export type JobExecutionKind = JobPayload['kind'];
 export type PersistedJobType =
 	| 'sync'
 	| 'full_rescan'
+	| 'tmdb_repair'
 	| 'discover'
 	| 'apply'
 	| 'undo'
@@ -75,6 +83,11 @@ export interface JobTaskResult {
 		failed: number;
 		skipped?: number;
 		interrupted?: number;
+	};
+	/** Present for the selective legacy TMDB normalization execution. */
+	tmdbRepair?: {
+		pendingBefore: number;
+		pendingAfter: number;
 	};
 	/** Internal, locale-neutral events emitted only after a user-initiated sync. */
 	automationEvents?: {

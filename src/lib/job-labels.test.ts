@@ -11,7 +11,7 @@ vi.mock('$lib/paraglide/messages', () => ({
 	)
 }));
 
-import { jobStatusLabel, jobTypeLabel } from './job-labels';
+import { jobPhaseLabel, jobStatusLabel, jobTypeLabel } from './job-labels';
 
 describe('localized durable job codes', () => {
 	beforeEach(() => {
@@ -30,5 +30,10 @@ describe('localized durable job codes', () => {
 	it('uses localized unknown labels without exposing future machine codes', () => {
 		expect(jobStatusLabel('future_status')).toBe('en:jobs_status_unknown');
 		expect(jobTypeLabel('future_job')).toBe('en:jobs_type_unknown');
+	});
+
+	it('labels the selective TMDB repair execution and its scan phase', () => {
+		expect(jobTypeLabel('tmdb_repair')).toBe('en:jobs_type_tmdb_repair');
+		expect(jobPhaseLabel('tmdb_repair_scan')).toBe('en:jobs_phase_tmdb_repair_scan');
 	});
 });

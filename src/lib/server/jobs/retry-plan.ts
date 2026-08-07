@@ -175,7 +175,7 @@ export function buildRetryPayloads(
 	plannedAt: string
 ): BuiltRetryPayload[] {
 	if (!outcomes.length) throw new JobRetryError('job_retry_no_eligible_outcomes');
-	if (parentPayload.kind === 'sync') {
+	if (parentPayload.kind === 'sync' || parentPayload.kind === 'tmdb_repair') {
 		return [
 			{
 				payload: { ...parentPayload, itemIds: requireItemIds(outcomes) },

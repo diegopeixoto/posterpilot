@@ -1,4 +1,4 @@
-import type { PlexGuids, TmdbResolution } from '$lib/server/types';
+import type { PlexGuids, TmdbMediaType, TmdbResolution } from '$lib/server/types';
 
 /**
  * Pure TMDB helpers: credential parsing, GUID precedence, and `find` parsing.
@@ -62,16 +62,17 @@ export function pickExternalId(guids: PlexGuids): ExternalIdSelection | null {
 }
 
 /**
- * Interpret a TMDB `find` response, preferring a movie match over a TV match.
+ * Interpret a TMDB `find` response within the caller's expected media namespace.
  *
  * @param json The parsed `find` endpoint payload.
+ * @param expectedMediaType The only result bucket that may satisfy the lookup.
  * @returns The resolved TMDB id and media type, or null when there are no results.
  */
-export function parseFindResult(json: unknown): TmdbResolution | null {
+export function parseFindResult(
+	json: unknown,
+	expectedMediaType: TmdbMediaType
+): TmdbResolution | null {
 	const data = (json ?? {}) as TmdbFindResult;
-	const movie = data.movie_results?.[0];
-	if (movie) return { tmdbId: String(movie.id), mediaType: 'movie' };
-	const tv = data.tv_results?.[0];
-	if (tv) return { tmdbId: String(tv.id), mediaType: 'tv' };
-	return null;
+	const result = expectedMediaType === 'movie' ? data.movie_results?.[0] : data.tv_results?.[0];
+	return result ? { tmdbId: String(result.id), mediaType: expectedMediaType } : null;
 }
