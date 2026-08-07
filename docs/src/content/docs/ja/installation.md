@@ -59,8 +59,8 @@ PosterPilot はシークレット設定（メディアサーバーのトーク�
 
 [Kometa マネージャー](../kometa-config-sync/)を使うには、`config.yml` のディレクトリを
 読み書き可能でマウントし、例として `KOMETA_CONFIG_PATH=/config/config.yml` を設定します。
-`posterpilot.yml` は同じ場所に書かれ、別メタデータパスは不要です。平文の Kometa
-シークレットを含むため、ボリュームの権限を保護してください。
+`posterpilot-movies.yml` と `posterpilot-shows.yml` は物理的に同じ場所へ書かれます。
+`KOMETA_METADATA_PATH_PREFIX`（既定 `config`）は別に、Kometa の実行環境から見える相対参照を指定します。物理パスではありません。平文の Kometa シークレットを含むため、ボリュームの権限を保護してください。
 
 ## Docker Compose（macOS）
 

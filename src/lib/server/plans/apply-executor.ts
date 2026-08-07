@@ -57,10 +57,25 @@ export interface ApplyPlanExecutionResult {
 
 export interface ApplyPlanExecutorDependencies {
 	serverRegistry: ApplyServerRegistry;
+	/**
+	 * Validate every plan-wide Kometa guard before any destination operation starts.
+	 * Mixed plans use this to fail closed before their first media-server effect.
+	 */
+	preflightKometa?(operations: readonly ApplyPlanOperation[]): Promise<void>;
 	writeKometa(
 		items: KometaItemInput[],
 		operations?: ApplyPlanOperation[],
-		isCancelled?: () => boolean
+		isCancelled?: () => boolean,
+		assertCommitOwned?: () => Promise<void>
+	): Promise<void>;
+	/**
+	 * Fence one exact Kometa file from preparation through durable outcome evidence.
+	 * Runtime adapters use this to serialize typed artwork commits with migration
+	 * journal installation without holding the fence around media-server work.
+	 */
+	withKometaCommit?(
+		operations: ApplyPlanOperation[],
+		commit: (assertOwned: () => Promise<void>) => Promise<void>
 	): Promise<void>;
 	prepareOperation?(
 		operation: ApplyPlanOperation,
@@ -185,6 +200,12 @@ export async function executeFrozenApplyPlan(
 	if (canonicalJsonDigest(payload).digest !== digest) {
 		throw new TypeError('Frozen apply payload does not match its digest');
 	}
+	const kometaOperations = payload.items.flatMap((item) =>
+		item.operations.filter((operation) => operation.destination === 'kometa')
+	);
+	if (kometaOperations.length > 0 && !hooks.isCancelled?.()) {
+		await dependencies.preflightKometa?.(kometaOperations);
+	}
 	const pendingItems: Array<{
 		item: ApplyPlanItem;
 		results: ApplyOperationExecutionResult[];
@@ -304,35 +325,70 @@ export async function executeFrozenApplyPlan(
 		left.localeCompare(right)
 	)) {
 		const operations = entries.flatMap((entry) => entry.operations);
-		let error: unknown = null;
-		try {
-			for (const operation of operations) {
+		const commit = async (assertOwned: () => Promise<void>): Promise<void> => {
+			let error: unknown = null;
+			try {
+				for (const operation of operations) {
+					if (hooks.isCancelled?.()) throw new Error('cancelled');
+					await dependencies.prepareOperation?.(operation, {});
+				}
 				if (hooks.isCancelled?.()) throw new Error('cancelled');
-				await dependencies.prepareOperation?.(operation, {});
+				await dependencies.writeKometa(
+					entries.map((entry) => kometaInput(entry.item, entry.operations)),
+					operations,
+					hooks.isCancelled,
+					assertOwned
+				);
+			} catch (caught) {
+				error = caught;
 			}
-			if (hooks.isCancelled?.()) throw new Error('cancelled');
-			await dependencies.writeKometa(
-				entries.map((entry) => kometaInput(entry.item, entry.operations)),
-				operations,
-				hooks.isCancelled
-			);
-		} catch (caught) {
-			error = caught;
-		}
-		for (const entry of entries) {
-			for (const operation of entry.operations) {
-				const result: ApplyOperationExecutionResult = {
-					operationId: operation.id,
-					destination: operation.destination,
-					targetId: operation.targetId,
-					slot: operation.slot,
-					status: error === null ? 'success' : 'failed',
-					...(error === null ? {} : { error: errorMessage(error) })
-				};
-				entry.results.push(await record(dependencies, operation, result));
+			for (const entry of entries) {
+				for (const operation of entry.operations) {
+					const result: ApplyOperationExecutionResult = {
+						operationId: operation.id,
+						destination: operation.destination,
+						targetId: operation.targetId,
+						slot: operation.slot,
+						status: error === null ? 'success' : 'failed',
+						...(error === null ? {} : { error: errorMessage(error) })
+					};
+					entry.results.push(await record(dependencies, operation, result));
+				}
 			}
-			await reportProgress(entry.item);
+		};
+		let commitStarted = false;
+		try {
+			if (dependencies.withKometaCommit) {
+				await dependencies.withKometaCommit(operations, async (assertOwned) => {
+					commitStarted = true;
+					await commit(assertOwned);
+				});
+			} else {
+				commitStarted = true;
+				await commit(async () => undefined);
+			}
+		} catch (error) {
+			// A plan-wide preflight ran before media-server effects. If another
+			// protocol writer wins the fence afterwards, surface one failed Kometa
+			// outcome per operation instead of aborting an already-partial mixed job.
+			// Once the commit callback starts, however, propagation is intentional:
+			// the destination/evidence boundary may have become indeterminate.
+			if (commitStarted) throw error;
+			for (const entry of entries) {
+				for (const operation of entry.operations) {
+					const result: ApplyOperationExecutionResult = {
+						operationId: operation.id,
+						destination: operation.destination,
+						targetId: operation.targetId,
+						slot: operation.slot,
+						status: 'failed',
+						error: errorMessage(error)
+					};
+					entry.results.push(await record(dependencies, operation, result));
+				}
+			}
 		}
+		for (const entry of entries) await reportProgress(entry.item);
 	}
 
 	const items: ApplyItemExecutionResult[] = [];

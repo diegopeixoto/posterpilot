@@ -4,6 +4,10 @@ import { saveSettings } from '$lib/server/config';
 import { loginByName, MediaServerLoginError } from '$lib/server/media-server/emby';
 import { logEvent } from '$lib/server/events';
 import { materializeLegacyServerInstance } from '$lib/server/server-instances';
+import {
+	LegacyServerMutationControlError,
+	withLegacyServerMutationControl
+} from '$lib/server/server-instances/legacy-mutation';
 
 /**
  * Log in to Jellyfin/Emby with a username + password, exchanging them for an access
@@ -33,19 +37,30 @@ export const POST: RequestHandler = async ({ request }) => {
 		// Make this the active server too, so the freshly stored credentials are
 		// actually used (otherwise tests/syncs keep resolving the previous server
 		// until the user separately presses Save).
-		if (flavor === 'jellyfin') {
-			await saveSettings({
-				serverType: 'jellyfin',
-				jellyfinUrl: baseUrl,
-				jellyfinApiKey: result.accessToken
-			});
-		} else {
-			await saveSettings({ serverType: 'emby', embyUrl: baseUrl, embyApiKey: result.accessToken });
-		}
-		await materializeLegacyServerInstance();
+		await withLegacyServerMutationControl(async ({ assertControlLockOwned, controlLease }) => {
+			if (flavor === 'jellyfin') {
+				await saveSettings(
+					{
+						serverType: 'jellyfin',
+						jellyfinUrl: baseUrl,
+						jellyfinApiKey: result.accessToken
+					},
+					controlLease
+				);
+			} else {
+				await saveSettings(
+					{ serverType: 'emby', embyUrl: baseUrl, embyApiKey: result.accessToken },
+					controlLease
+				);
+			}
+			await materializeLegacyServerInstance(await assertControlLockOwned());
+		});
 		await logEvent('info', 'settings', `Logged in to ${flavor}`, { user: result.userName });
 		return json({ ok: true, userName: result.userName });
 	} catch (e) {
+		if (e instanceof LegacyServerMutationControlError) {
+			return json({ error: { code: e.code } }, { status: 409 });
+		}
 		// 401 for rejected credentials, 502 for upstream/network failures. Only the
 		// curated login-error text is safe to surface; anything unexpected stays generic.
 		if (e instanceof MediaServerLoginError) {

@@ -13,21 +13,20 @@ This lives on its own top-level page, **`/kometa`** (the **Kometa** item in the
 main nav), not in Settings. It is opt-in and off by default: until you point
 PosterPilot at a `config.yml`, nothing about your Kometa config is read or written.
 
-:::note[Two Kometa files, two jobs]
-PosterPilot touches two different files, and they are easy to confuse:
+:::note[Configuration and metadata have different jobs]
+PosterPilot touches Kometa's configuration plus two generated metadata files:
 
-- **`posterpilot.yml`** — the _metadata_ file PosterPilot writes when you apply a
-  cover with the Kometa method. It holds `url_poster` / `url_background` entries
-  keyed by TMDB id. See [Apply a cover](/posterpilot/usage/#apply-a-cover).
+- **`posterpilot-movies.yml`** — movie artwork, keyed by TMDB id with IMDb as the
+  fallback when no TMDB id is available.
+- **`posterpilot-shows.yml`** — show, season, and episode artwork, keyed by TVDB
+  id with IMDb as the fallback when no TVDB id is available. The media type in
+  PosterPilot decides the namespace; a numeric YAML key is never used to guess it.
 - **`config.yml`** — Kometa's _own_ top-level configuration: connections,
   libraries, collection files, overlays, operations, and settings. This is the
   file the **Kometa manager** on this page manages.
 
-The manager wires the first file _into_ the second, so Kometa knows to read
-`posterpilot.yml`. PosterPilot writes `posterpilot.yml` into the **same directory
-as `config.yml`**, and the `metadata_files` entry references it by its bare
-basename (`posterpilot.yml`) — so there is exactly one file and the wiring always
-matches. No separate metadata path or mount is involved.
+See [Apply a cover](/posterpilot/usage/#apply-a-cover) for how those metadata
+files are populated.
 :::
 
 ## Turn it on
@@ -36,16 +35,26 @@ The Kometa manager is controlled by two settings, both of which follow the same
 [environment-overrides-UI precedence](/posterpilot/configuration/#environment-vs-the-settings-ui)
 as the rest of PosterPilot:
 
-| Variable             | Setting            | Default | Meaning                                                                                                                |
-| -------------------- | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `KOMETA_CONFIG_PATH` | Kometa config path | —       | Absolute path to Kometa's `config.yml`. **Empty or unset turns the Kometa manager off.**                              |
-| `KOMETA_CONFIG_MODE` | Kometa config mode | `merge` | `merge` (surgical — preserves your other keys and comments) or `own` (PosterPilot regenerates and fully owns the file). |
+| Variable                      | Setting                    | Default  | Meaning                                                                                                                |
+| ----------------------------- | -------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
+| `KOMETA_CONFIG_PATH`          | Kometa config path         | —        | Absolute path to Kometa's `config.yml`. **Empty or unset turns the Kometa manager off.**                              |
+| `KOMETA_CONFIG_MODE`          | Kometa config mode         | `merge`  | `merge` (surgical — preserves your other keys and comments) or `own` (PosterPilot regenerates and fully owns the file). |
+| `KOMETA_METADATA_PATH_PREFIX` | Metadata reference prefix | `config` | Relative directory Kometa sees at runtime. Use `.` (or clear the UI field) for bare filenames.                          |
 
-To use the manager, Kometa's config directory must also be mounted into the
-PosterPilot container with read/write access — see
+To use the manager, the output directory and Kometa's config must be available to
+the PosterPilot container with read/write access — see
 [Mount Kometa's config](/posterpilot/installation/#mount-kometas-config-for-config-sync).
-Because `posterpilot.yml` is co-located with `config.yml`, that one directory is
-all you need; there is no separate metadata mount.
+
+The physical output path and the value in Kometa's `file:` entry are deliberately
+separate. PosterPilot writes `posterpilot-movies.yml` and
+`posterpilot-shows.yml` beside each other in its configured output directory. The
+`file:` entries must instead describe the same files from **Kometa's runtime
+view**. With the default prefix they are
+`config/posterpilot-movies.yml` and `config/posterpilot-shows.yml`, even when the
+files are physically co-located with `config.yml` through a differently named
+container mount. Set the prefix to `.` only when Kometa resolves bare basenames
+from the correct directory. It is a relative reference prefix, not a host path,
+container path, URL, or YAML filename.
 
 ## The /kometa page
 
@@ -62,7 +71,7 @@ Below the hero, the page is organized into sub-sections:
    test is offered where it makes sense.
 2. **Libraries** — for each library you choose to manage: its collection files,
    overlay defaults, operations, per-library settings overrides, and the
-   `posterpilot.yml` metadata wiring. Libraries you do not select are left exactly
+   typed movie/show metadata wiring. Libraries you do not select are left exactly
    as they are.
 3. **Settings & webhooks** — a bounded set of global `settings:` and `webhooks:`
    keys you can opt to keep in sync.
@@ -85,9 +94,9 @@ is left alone.
   `ntfy`, `anidb`, and `mal`. The `plex` and `tmdb` blocks are pre-filled from
   PosterPilot's stored Plex base URL and token and your TMDB key. Kometa is
   Plex-only, so the manager targets a Plex server.
-- **The `libraries:` section** — each managed library, with `posterpilot.yml`
-  wired in under its `metadata_files` (as the co-located basename) so Kometa
-  applies the covers you exported.
+- **The `libraries:` section** — each managed library, with the matching
+  `posterpilot-movies.yml` or `posterpilot-shows.yml` reference wired under its
+  `metadata_files` so Kometa applies the covers you exported.
 - **Per-library `collection_files`** — the default collection sets you toggle for
   each library.
 - **Per-library `overlay_files`** — overlay defaults such as `mediastinger`,
@@ -109,6 +118,55 @@ enabled chart or overlay needs a connector you have not configured — for examp
 `tautulli:` block. The warning is non-blocking (it lists the missing connector
 alongside any anchor/alias warnings in the preview); fix the connector or proceed
 as you see fit.
+
+## Migrate from posterpilot.yml
+
+:::caution[Wait for the release]
+Do not rename, split, or rewire `posterpilot.yml` by hand. Wait until the
+PosterPilot release containing this migration is published on the
+[Releases page](https://github.com/diegopeixoto/posterpilot/releases), upgrade
+your PosterPilot instance, and then use the migration shown on `/kometa`.
+:::
+
+Existing installations may have one legacy `posterpilot.yml` where both movies
+and shows were keyed as though they shared the TMDB namespace. The migration
+normalizes that file into the two typed destinations described above.
+
+1. **Preview.** PosterPilot reads the legacy file, the bound Plex library, and its
+   own exact revision history. The preview shows structural fingerprints and
+   destination counts, not artwork URLs or credentials. Movies use TMDB and fall
+   back to IMDb; shows use TVDB and fall back to IMDb.
+2. **Resolve ambiguity.** A numeric legacy key can collide across media types, so
+   PosterPilot never guesses. An entry moves only when the library mapping or an
+   exact recorded revision proves its destination. Ambiguous entries are listed
+   separately. You can cancel and correct the match, or explicitly accept the
+   ambiguity and reapply those covers in PosterPilot after migration; reapplying
+   writes them to the correct typed file. Existing conflicting typed entries are
+   also left untouched for review.
+3. **Confirm.** PosterPilot first records a durable migration journal and protected
+   backups, writes and verifies **both** split files, and updates `config.yml`
+   last. The legacy `posterpilot.yml` is never modified or deleted.
+4. **Resume if needed.** A retry resumes the recorded operation from its verified
+   checkpoint. It does not reclassify against changed inputs. If a source or
+   target no longer matches either the previewed or already-written fingerprint,
+   PosterPilot stops and asks for a fresh review instead of overwriting it.
+
+When PosterPilot can safely prove ownership of the relevant `metadata_files`
+entries, it rewires `config.yml` automatically. Otherwise it writes the split
+files and gives you an exact per-library reference guide. **Do not paste that
+partial `libraries:` block over your configuration.** In each named library,
+replace only the `metadata_files` item whose `file` basename is
+`posterpilot.yml`; if there is no such item, add the shown typed item once.
+Preserve every sibling entry and library setting, and finish with exactly one
+typed reference and no active legacy reference. Verify the paths from Kometa's runtime before acknowledging
+completion in PosterPilot. That acknowledgment records your confirmation; it
+does not claim that PosterPilot inspected or verified the manual edit.
+
+The migration's **Rollback** action restores the protected pre-migration
+`config.yml` backup only when the current config still matches the migration's
+exact result. It deliberately keeps both split files, so generated artwork is not
+discarded and a later retry does not need to rebuild them. The legacy file also
+remains available throughout.
 
 ## Safety
 

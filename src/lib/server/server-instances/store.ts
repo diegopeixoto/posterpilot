@@ -27,6 +27,7 @@ export const ACTIVE_SERVER_INSTANCE_KEY = 'activeServerInstanceId';
 
 type Database = LibSQLDatabase<typeof schema>;
 type Executor = Pick<Database, 'select' | 'insert' | 'update' | 'delete'>;
+type ServerInstanceWriteFence = (database: Pick<Database, 'select'>) => Promise<void>;
 
 export interface ServerInstanceSummary {
 	id: string;
@@ -49,7 +50,7 @@ export interface ServerInstanceConnection extends ServerInstanceSummary {
 	capabilities: Record<string, unknown> | null;
 }
 
-export interface CreateServerInstanceInput {
+interface CreateServerInstanceInput {
 	name: string;
 	type: ServerInstanceType;
 	baseUrl: string;
@@ -287,7 +288,8 @@ export function createServerInstanceStore(
 
 	async function update(
 		id: string,
-		input: UpdateServerInstanceInput
+		input: UpdateServerInstanceInput,
+		assertWriteAuthorized?: ServerInstanceWriteFence
 	): Promise<ServerInstanceSummary> {
 		const replacementCredential = hasCredentialReplacement(input.credential)
 			? input.credential
@@ -299,6 +301,7 @@ export function createServerInstanceStore(
 
 		try {
 			return await database.transaction(async (tx) => {
+				await assertWriteAuthorized?.(tx);
 				const current = await findRow(tx, id);
 				if (!current) throw new ServerInstanceError('server_instance_not_found');
 
@@ -380,8 +383,12 @@ export function createServerInstanceStore(
 	}
 
 	/** Retain scoped history while revoking operational access and stored credentials. */
-	async function disconnect(id: string): Promise<ServerInstanceSummary> {
+	async function disconnect(
+		id: string,
+		assertWriteAuthorized?: ServerInstanceWriteFence
+	): Promise<ServerInstanceSummary> {
 		return database.transaction(async (tx) => {
+			await assertWriteAuthorized?.(tx);
 			const current = await findRow(tx, id);
 			if (!current) throw new ServerInstanceError('server_instance_not_found');
 			const now = clock();
@@ -472,7 +479,8 @@ export function createServerInstanceStore(
 	}
 
 	async function materializeLegacy(
-		connection: LegacyServerConnection
+		connection: LegacyServerConnection,
+		assertWriteAuthorized?: ServerInstanceWriteFence
 	): Promise<ServerInstanceSummary | null> {
 		assertServerInstanceType(connection.type);
 		const configured =
@@ -516,6 +524,7 @@ export function createServerInstanceStore(
 
 		try {
 			return await database.transaction(async (tx) => {
+				await assertWriteAuthorized?.(tx);
 				let row = await findRow(tx, LEGACY_SERVER_INSTANCE_ID);
 				if (!row && !configured) return null;
 

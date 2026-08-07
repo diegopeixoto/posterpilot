@@ -1,5 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { resolveConfig } from '$lib/server/config';
+import { assertNoPendingKometaConfigMutationWhileOwned } from '$lib/server/kometa/config-mutation-recovery';
+import { isKometaMigrationIncomplete } from '$lib/server/kometa/migration-journal';
+import { loadActiveKometaMigrationJournal } from '$lib/server/kometa/migration-store';
+import { withKometaMigrationControlLock } from '$lib/server/kometa/migration-control-lock';
 import { disableManagedServer } from '$lib/server/server-instances';
 import { serverInstanceErrorResponse } from '$lib/server/server-instances/http';
 import { ServerInstanceError } from '$lib/server/server-instances/validation';
@@ -7,7 +12,30 @@ import { ServerInstanceError } from '$lib/server/server-instances/validation';
 export const POST: RequestHandler = async ({ params }) => {
 	try {
 		if (!params.id) throw new ServerInstanceError('invalid_request');
-		return json({ server: await disableManagedServer(params.id) });
+		const serverInstanceId = params.id;
+		return await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			const config = await resolveConfig();
+			if (config.kometaServerInstanceId === serverInstanceId) {
+				try {
+					await assertNoPendingKometaConfigMutationWhileOwned(assertControlLockOwned);
+				} catch {
+					return json({ error: { code: 'kometa_config_recovery_required' } }, { status: 409 });
+				}
+			}
+			try {
+				const journal = await loadActiveKometaMigrationJournal();
+				if (
+					journal?.payload.serverInstanceId === serverInstanceId &&
+					isKometaMigrationIncomplete(journal)
+				) {
+					return json({ error: { code: 'kometa_migration_config_locked' } }, { status: 409 });
+				}
+			} catch {
+				return json({ error: { code: 'kometa_migration_config_locked' } }, { status: 409 });
+			}
+			const lease = await assertControlLockOwned();
+			return json({ server: await disableManagedServer(serverInstanceId, lease) });
+		});
 	} catch (error) {
 		return serverInstanceErrorResponse(error);
 	}

@@ -16,8 +16,8 @@ vi.mock('drizzle-orm', () => ({
 	// schema.ts uses `sql` only to describe partial indexes; this test never executes it.
 	sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })
 }));
-vi.mock('$lib/server/db', () => ({
-	db: {
+vi.mock('$lib/server/db', () => {
+	const database = {
 		select: () => ({
 			from: () => {
 				const all = [...h.store.entries()].map(([key, value]) => ({ key, value }));
@@ -44,8 +44,15 @@ vi.mock('$lib/server/db', () => ({
 				return Promise.resolve();
 			}
 		})
-	}
-}));
+	};
+	return {
+		db: {
+			...database,
+			transaction: async <T>(operation: (tx: typeof database) => Promise<T>): Promise<T> =>
+				operation(database)
+		}
+	};
+});
 
 import {
 	resolveConfig,
@@ -62,6 +69,7 @@ import {
 	getIncludedSectionsForServer,
 	setIncludedSectionsForServer
 } from './index';
+import type { KometaMigrationControlLease } from '$lib/server/kometa/migration-control-lock';
 
 beforeEach(() => {
 	for (const k of Object.keys(h.env)) delete h.env[k];
@@ -69,9 +77,10 @@ beforeEach(() => {
 });
 
 describe('resolveConfig — Kometa keys', () => {
-	it('defaults: config path empty (off), mode merge', async () => {
+	it('defaults: config path empty (off), metadata prefix config, mode merge', async () => {
 		const c = await resolveConfig();
 		expect(c.kometaConfigPath).toBe('');
+		expect(c.kometaMetadataPathPrefix).toBe('config');
 		expect(c.kometaConfigMode).toBe('merge');
 		expect(c.kometaServerInstanceId).toBe('legacy-default');
 	});
@@ -81,6 +90,32 @@ describe('resolveConfig — Kometa keys', () => {
 		expect((await resolveConfig()).kometaConfigPath).toBe('/db/config.yml');
 		h.env.KOMETA_CONFIG_PATH = '/env/config.yml';
 		expect((await resolveConfig()).kometaConfigPath).toBe('/env/config.yml');
+	});
+
+	it('canonicalizes the UI-writable metadata prefix with environment precedence', async () => {
+		await saveSettings({ kometaMetadataPathPrefix: './metadata/' });
+		expect(h.store.get('kometaMetadataPathPrefix')).toBe('metadata');
+		expect((await resolveConfig()).kometaMetadataPathPrefix).toBe('metadata');
+		expect((await publicConfig()).kometaMetadataPathPrefix).toBe('metadata');
+
+		h.env.KOMETA_METADATA_PATH_PREFIX = '.\\config\\nested\\';
+		const exposed = await publicConfig();
+		expect(exposed.kometaMetadataPathPrefix).toBe('config/nested');
+		expect(exposed.envManaged.kometaMetadataPathPrefix).toBe(true);
+	});
+
+	it('persists an explicit empty prefix separately from the config default', async () => {
+		await saveSettings({ kometaMetadataPathPrefix: '' });
+		expect(h.store.get('kometaMetadataPathPrefix')).toBe('.');
+		expect((await resolveConfig()).kometaMetadataPathPrefix).toBe('');
+	});
+
+	it('rejects an unsafe metadata prefix from persisted or environment configuration', async () => {
+		h.store.set('kometaMetadataPathPrefix', '../escape');
+		await expect(resolveConfig()).rejects.toMatchObject({ code: 'traversal' });
+		h.store.clear();
+		h.env.KOMETA_METADATA_PATH_PREFIX = 'C:\\config';
+		await expect(resolveConfig()).rejects.toMatchObject({ code: 'absolute' });
 	});
 
 	it('parses mode, treating anything but "own" as merge', async () => {
@@ -139,6 +174,16 @@ describe('saveSettings — clearing the ThePosterDB password', () => {
 		expect((await resolveConfig()).thePosterDbPassword).toBeNull();
 		expect((await publicConfig()).thePosterDbPasswordSet).toBe(false);
 	});
+
+	it('does not persist any setting when its migration-control lease was lost', async () => {
+		await expect(
+			saveSettings(
+				{ kometaServerInstanceId: 'server-b', kometaAssetsDir: '/data/kometa-b' },
+				'stale-control-lease' as KometaMigrationControlLease
+			)
+		).rejects.toMatchObject({ code: 'lost' });
+		expect(h.store).toEqual(new Map());
+	});
 });
 
 describe('Kometa selection KV accessors', () => {
@@ -154,13 +199,50 @@ describe('Kometa selection KV accessors', () => {
 	});
 
 	it('round-trips the last-applied snapshot', async () => {
-		expect(await getKometaLastApplied()).toBeNull();
+		const scope = {
+			serverInstanceId: 'server-a',
+			configPath: '/config/a/config.yml',
+			outputDirectory: '/config/a',
+			metadataPathPrefix: 'config'
+		};
+		expect(await getKometaLastApplied(scope)).toBeNull();
 		const snap = {
 			metadataPath: '/a/posterpilot.yml',
 			libraries: { Movies: { metadata: true, defaults: ['studio'] } },
 			managedSettingKeys: ['webhooks.error']
 		};
-		await setKometaLastApplied(snap);
-		expect(await getKometaLastApplied()).toEqual(snap);
+		await setKometaLastApplied(snap, scope);
+		expect(await getKometaLastApplied(scope)).toEqual(snap);
+		expect(
+			await getKometaLastApplied({
+				...scope,
+				serverInstanceId: 'server-b'
+			})
+		).toBeNull();
+		expect(
+			await getKometaLastApplied({
+				...scope,
+				configPath: '/config/b/config.yml',
+				outputDirectory: '/config/b'
+			})
+		).toBeNull();
+	});
+
+	it('does not let an unscoped legacy snapshot authorize merge ownership', async () => {
+		const legacy = {
+			metadataPath: 'posterpilot.yml',
+			libraries: { Movies: { metadata: true, defaults: ['studio'] } },
+			managedSettingKeys: []
+		};
+		h.store.set('kometaLastApplied', JSON.stringify(legacy));
+		expect(
+			await getKometaLastApplied({
+				serverInstanceId: 'legacy-default',
+				configPath: '/config/config.yml',
+				outputDirectory: '/config',
+				metadataPathPrefix: 'config'
+			})
+		).toBeNull();
+		expect(h.store.get('kometaLastApplied')).toBe(JSON.stringify(legacy));
 	});
 });

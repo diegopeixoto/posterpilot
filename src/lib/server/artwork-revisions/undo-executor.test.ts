@@ -330,11 +330,53 @@ function defaultKometa() {
 	};
 }
 
+function kometaUndoFixture(label: string) {
+	const current = {
+		state: 'present',
+		url: `https://images.invalid/${label}-current.jpg`
+	} as const;
+	const restore = {
+		state: 'present',
+		url: `https://images.invalid/${label}-prior.jpg`
+	} as const;
+	const desired = snapshot(`snapshot-kometa-${label}`, {
+		destination: 'kometa',
+		kind: 'poster',
+		state: 'present',
+		value: restore,
+		metadata: { kometaDestination: MOVIE_DESTINATION }
+	});
+	const snapshots = snapshotHarness([{ row: desired }]);
+	const kometa = defaultKometa();
+	kometa.setRaw(`metadata:\n  100:\n    url_poster: ${current.url}\n`);
+	const plan = builtPlan([
+		candidate({
+			revisionId: `revision-kometa-${label}`,
+			destination: 'kometa',
+			targetId: MOVIE_DESTINATION.key,
+			beforeSnapshotId: desired.id,
+			current: {
+				state: 'present',
+				fingerprint: kometaSlotFingerprint(current),
+				artworkVersion: null
+			},
+			snapshot: {
+				state: 'present',
+				fingerprint: kometaSlotFingerprint(restore),
+				restorable: true
+			}
+		})
+	]);
+	return { current, restore, desired, snapshots, kometa, plan };
+}
+
 function executorHarness(input: {
 	server?: MediaServer;
 	snapshots: SnapshotHarness;
 	ledger?: LedgerHarness;
 	kometa?: ReturnType<typeof defaultKometa>;
+	preflightKometa?: ArtworkUndoExecutorDependencies['preflightKometa'];
+	withKometaCommit?: ArtworkUndoExecutorDependencies['withKometaCommit'];
 	serverUnavailable?: boolean;
 }) {
 	const ledger = input.ledger ?? ledgerHarness();
@@ -348,8 +390,10 @@ function executorHarness(input: {
 		},
 		snapshots: input.snapshots.repository,
 		ledger: ledger.ledger,
+		preflightKometa: input.preflightKometa,
 		readKometa: kometa.read,
 		mutateKometa: kometa.mutate,
+		withKometaCommit: input.withKometaCommit,
 		clock: () => NOW
 	});
 	return { executor, ledger, kometa };
@@ -390,7 +434,16 @@ describe('server artwork undo execution', () => {
 				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
 			})
 		]);
-		const harness = executorHarness({ server: server.server, snapshots });
+		const preflightKometa = vi.fn(async () => {
+			throw new Error('Plex-only plans must not enter the Kometa fence');
+		});
+		const withKometaCommit = vi.fn();
+		const harness = executorHarness({
+			server: server.server,
+			snapshots,
+			preflightKometa,
+			withKometaCommit: withKometaCommit as ArtworkUndoExecutorDependencies['withKometaCommit']
+		});
 
 		const result = await execute(harness.executor, plan);
 
@@ -418,8 +471,196 @@ describe('server artwork undo execution', () => {
 		});
 		expect(harness.ledger.createGroup).toHaveBeenCalledTimes(1);
 		expect(harness.ledger.finalizeGroup).toHaveBeenCalledTimes(1);
+		expect(preflightKometa).not.toHaveBeenCalled();
+		expect(withKometaCommit).not.toHaveBeenCalled();
 		const publicResult = JSON.stringify(result);
 		expect(publicResult).not.toMatch(/https?:|\/private\/|storagePath|bytes|url/i);
+	});
+
+	it.each(['pending config checkpoint', 'corrupt config checkpoint', 'invalid Kometa guard'])(
+		'blocks a mixed undo before every Plex effect when preflight reports %s',
+		async (failure) => {
+			const restoreBytes = Uint8Array.from([9, 8, 7]);
+			const currentArtwork = artwork([1, 2, 3], 'mixed-current');
+			const serverDesired = snapshot('snapshot-mixed-server', {
+				destination: 'server',
+				kind: 'poster',
+				state: 'present',
+				sha256: sha256Bytes(restoreBytes),
+				storagePath: '/private/snapshots/mixed-server',
+				contentType: 'image/jpeg',
+				sizeBytes: restoreBytes.byteLength
+			});
+			const kometaCurrent = {
+				state: 'present',
+				url: 'https://images.invalid/mixed-current.jpg'
+			} as const;
+			const kometaRestore = {
+				state: 'present',
+				url: 'https://images.invalid/mixed-prior.jpg'
+			} as const;
+			const kometaDesired = snapshot('snapshot-mixed-kometa', {
+				destination: 'kometa',
+				kind: 'poster',
+				state: 'present',
+				value: kometaRestore,
+				metadata: { kometaDestination: MOVIE_DESTINATION }
+			});
+			const snapshots = snapshotHarness([
+				{ row: serverDesired, bytes: restoreBytes },
+				{ row: kometaDesired }
+			]);
+			const server = serverHarness({ current: currentArtwork });
+			const kometa = defaultKometa();
+			kometa.setRaw(`metadata:\n  100:\n    url_poster: ${kometaCurrent.url}\n`);
+			const plan = builtPlan([
+				candidate({
+					revisionId: 'revision-mixed-server',
+					beforeSnapshotId: serverDesired.id,
+					current: {
+						state: 'present',
+						fingerprint: sha256Bytes(currentArtwork.data),
+						artworkVersion: 5
+					},
+					snapshot: {
+						state: 'present',
+						fingerprint: sha256Bytes(restoreBytes),
+						restorable: true
+					}
+				}),
+				candidate({
+					revisionId: 'revision-mixed-kometa',
+					destination: 'kometa',
+					targetId: MOVIE_DESTINATION.key,
+					beforeSnapshotId: kometaDesired.id,
+					current: {
+						state: 'present',
+						fingerprint: kometaSlotFingerprint(kometaCurrent),
+						artworkVersion: null
+					},
+					snapshot: {
+						state: 'present',
+						fingerprint: kometaSlotFingerprint(kometaRestore),
+						restorable: true
+					}
+				})
+			]);
+			const preflightKometa = vi.fn(async () => {
+				throw new Error(failure);
+			});
+			const harness = executorHarness({
+				server: server.server,
+				snapshots,
+				kometa,
+				preflightKometa
+			});
+
+			await expect(execute(harness.executor, plan)).rejects.toThrow(failure);
+			expect(preflightKometa).toHaveBeenCalledWith([
+				{ serverInstanceId: 'server-1', destination: MOVIE_DESTINATION }
+			]);
+			expect(server.server.readArtwork).not.toHaveBeenCalled();
+			expect(server.applyPosterBytes).not.toHaveBeenCalled();
+			expect(kometa.read).not.toHaveBeenCalled();
+			expect(kometa.mutate).not.toHaveBeenCalled();
+			expect(harness.ledger.createGroup).not.toHaveBeenCalled();
+			expect(harness.ledger.records).toHaveLength(0);
+			expect(harness.ledger.finalizeGroup).not.toHaveBeenCalled();
+		}
+	);
+
+	it('records a stale Kometa outcome instead of throwing when the fence changes after preflight', async () => {
+		const restoreBytes = Uint8Array.from([7, 8, 9]);
+		const currentArtwork = artwork([1, 2, 3], 'mixed-race-current');
+		const serverDesired = snapshot('snapshot-mixed-race-server', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(restoreBytes),
+			storagePath: '/private/snapshots/mixed-race-server',
+			contentType: 'image/jpeg',
+			sizeBytes: restoreBytes.byteLength
+		});
+		const kometaCurrent = {
+			state: 'present',
+			url: 'https://images.invalid/mixed-race-current.jpg'
+		} as const;
+		const kometaRestore = {
+			state: 'present',
+			url: 'https://images.invalid/mixed-race-prior.jpg'
+		} as const;
+		const kometaDesired = snapshot('snapshot-mixed-race-kometa', {
+			destination: 'kometa',
+			kind: 'poster',
+			state: 'present',
+			value: kometaRestore,
+			metadata: { kometaDestination: MOVIE_DESTINATION }
+		});
+		const snapshots = snapshotHarness([
+			{ row: serverDesired, bytes: restoreBytes },
+			{ row: kometaDesired }
+		]);
+		const server = serverHarness({ current: currentArtwork });
+		const kometa = defaultKometa();
+		kometa.setRaw(`metadata:\n  100:\n    url_poster: ${kometaCurrent.url}\n`);
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-mixed-race-server',
+				beforeSnapshotId: serverDesired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(currentArtwork.data),
+					artworkVersion: 5
+				},
+				snapshot: {
+					state: 'present',
+					fingerprint: sha256Bytes(restoreBytes),
+					restorable: true
+				}
+			}),
+			candidate({
+				revisionId: 'revision-mixed-race-kometa',
+				destination: 'kometa',
+				targetId: MOVIE_DESTINATION.key,
+				beforeSnapshotId: kometaDesired.id,
+				current: {
+					state: 'present',
+					fingerprint: kometaSlotFingerprint(kometaCurrent),
+					artworkVersion: null
+				},
+				snapshot: {
+					state: 'present',
+					fingerprint: kometaSlotFingerprint(kometaRestore),
+					restorable: true
+				}
+			})
+		]);
+		const harness = executorHarness({
+			server: server.server,
+			snapshots,
+			kometa,
+			preflightKometa: vi.fn(async () => undefined),
+			withKometaCommit: vi.fn(async () => {
+				throw new Error('concurrent guard change');
+			})
+		});
+
+		const result = await execute(harness.executor, plan);
+
+		expect(server.applyPosterBytes).toHaveBeenCalledOnce();
+		expect(kometa.mutate).not.toHaveBeenCalled();
+		expect(result.status).toBe('partial');
+		expect(result.operations).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ destination: 'server', status: 'success' }),
+				expect.objectContaining({
+					destination: 'kometa',
+					status: 'failed',
+					errorCode: 'undo_stale_destination'
+				})
+			])
+		);
+		expect(harness.ledger.records).toHaveLength(2);
 	});
 
 	it('accepts a provider transcode only as best-effort verification', async () => {
@@ -615,7 +856,8 @@ describe('Kometa undo execution', () => {
 
 		expect(result.operations[0]).toMatchObject({ status: 'success', verification: 'exact' });
 		expect(kometa.mutate).toHaveBeenCalledWith(
-			expect.objectContaining({ destination: LEGACY_DESTINATION })
+			expect.objectContaining({ destination: LEGACY_DESTINATION }),
+			expect.any(Function)
 		);
 		expect(readKometaSlot(kometa.getRaw(), 100, ROOT_POSTER)).toEqual(restore);
 		expect(harness.ledger.records[0]).toMatchObject({
@@ -693,6 +935,76 @@ describe('Kometa undo execution', () => {
 			verification: 'exact',
 			provenance: { kometaDestination: MOVIE_DESTINATION }
 		});
+	});
+
+	it('keeps the Kometa commit fence through mutation, verification, and outcome evidence', async () => {
+		const fixture = kometaUndoFixture('fenced-outcome');
+		const events: string[] = [];
+		let fenced = false;
+		const originalRead = fixture.kometa.read.getMockImplementation()!;
+		const originalMutate = fixture.kometa.mutate.getMockImplementation()!;
+		fixture.kometa.read.mockImplementation(async (...args) => {
+			expect(fenced).toBe(true);
+			events.push('read');
+			return originalRead(...args);
+		});
+		fixture.kometa.mutate.mockImplementation(async (...args) => {
+			expect(fenced).toBe(true);
+			events.push('mutate');
+			return originalMutate(...args);
+		});
+		const ledger = ledgerHarness();
+		const withKometaCommit: ArtworkUndoExecutorDependencies['withKometaCommit'] = async (
+			_serverInstanceId,
+			_destination,
+			commit
+		) => {
+			fenced = true;
+			events.push('enter');
+			try {
+				const result = await commit(async () => {
+					expect(fenced).toBe(true);
+				});
+				expect(ledger.records).toHaveLength(1);
+				events.push('outcome');
+				return result;
+			} finally {
+				events.push('exit');
+				fenced = false;
+			}
+		};
+		const harness = executorHarness({
+			snapshots: fixture.snapshots,
+			kometa: fixture.kometa,
+			ledger,
+			withKometaCommit
+		});
+
+		const result = await execute(harness.executor, fixture.plan);
+
+		expect(result.operations[0]).toMatchObject({ status: 'success', verification: 'exact' });
+		expect(events).toEqual(['enter', 'read', 'mutate', 'read', 'outcome', 'exit']);
+	});
+
+	it('does not mutate or record an outcome after the Kometa control lease is lost', async () => {
+		const fixture = kometaUndoFixture('lease-lost');
+		const ledger = ledgerHarness();
+		const withKometaCommit: ArtworkUndoExecutorDependencies['withKometaCommit'] = async (
+			_serverInstanceId,
+			_destination,
+			commit
+		) => commit(async () => Promise.reject(new Error('lease lost')));
+		const harness = executorHarness({
+			snapshots: fixture.snapshots,
+			kometa: fixture.kometa,
+			ledger,
+			withKometaCommit
+		});
+
+		await expect(execute(harness.executor, fixture.plan)).rejects.toThrow('lease lost');
+		expect(fixture.kometa.mutate).not.toHaveBeenCalled();
+		expect(ledger.records).toHaveLength(0);
+		expect(ledger.finalizeGroup).not.toHaveBeenCalled();
 	});
 
 	it('skips an unproven legacy target without reading, mutating, or capturing YAML', async () => {

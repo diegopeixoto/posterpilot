@@ -38,8 +38,9 @@ Les volumes qui comptent :
   [gestionnaire Kometa](/posterpilot/fr/kometa-config-sync/), montez ce répertoire
   en **lecture/écriture** et faites pointer `KOMETA_CONFIG_PATH` vers le
   `config.yml` qu'il contient (par ex. `/config/config.yml`). PosterPilot écrit
-  `posterpilot.yml` dans ce même répertoire ; ce seul montage suffit donc au
-  gestionnaire. Voir
+  `posterpilot-movies.yml` et `posterpilot-shows.yml` dans ce même répertoire
+  physique ; `KOMETA_METADATA_PATH_PREFIX` décrit séparément les références vues
+  par le runtime Kometa. Voir
   [Monter la configuration de Kometa pour la synchronisation](#monter-la-configuration-de-kometa-pour-la-synchronisation).
 
 Le conteneur écoute par défaut sur le port **3000** (configurable via la variable
@@ -93,14 +94,14 @@ accessible et modifiable depuis l'intérieur du conteneur PosterPilot :
 2. **Faites pointer `KOMETA_CONFIG_PATH` vers le fichier monté** — par ex.
    `/config/config.yml`. Le laisser vide garde le gestionnaire Kometa désactivé.
 
-Ce seul répertoire suffit au gestionnaire : PosterPilot écrit `posterpilot.yml`
-dans le **même répertoire que `config.yml`** (côte à côte) et le référence dans
-`config.yml` par son simple nom de fichier ; il n'y a donc aucun chemin de
-métadonnées ni montage séparé à configurer. Ce montage s'ajoute au volume `/data`
-existant et au montage d'assets Kometa `/kometa`. Si votre installation Kometa
-garde `config.yml` et le dossier d'assets dans le même répertoire, vous pouvez
-monter ce seul répertoire et y faire pointer à la fois `KOMETA_ASSETS_DIR` et
-`KOMETA_CONFIG_PATH`.
+Ce seul répertoire physique suffit : PosterPilot écrit les deux fichiers typés à
+côté de `config.yml`. Leurs valeurs `file:` doivent toutefois correspondre à la
+vue du **runtime Kometa**. La valeur par défaut
+`KOMETA_METADATA_PATH_PREFIX=config` produit
+`config/posterpilot-movies.yml` et `config/posterpilot-shows.yml`; `.` produit des
+noms seuls. N'utilisez ni chemin hôte ni chemin absolu du conteneur.
+Les montages peuvent porter des noms différents entre conteneurs tant que ces
+références correspondent à la vue de Kometa.
 
 :::caution
 Kometa lit le jeton Plex et la clé TMDB depuis `config.yml` en clair ; le
@@ -146,6 +147,7 @@ services:
       # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
+      # KOMETA_METADATA_PATH_PREFIX: config
       # KOMETA_SERVER_INSTANCE_ID: legacy-default
     volumes:
       # Persistent app state (SQLite db + settings + history).
@@ -221,6 +223,7 @@ services:
       # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
+      # KOMETA_METADATA_PATH_PREFIX: config
       # KOMETA_SERVER_INSTANCE_ID: legacy-default
     volumes:
       - /mnt/user/appdata/posterpilot:/data

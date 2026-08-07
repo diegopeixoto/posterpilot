@@ -99,4 +99,15 @@ libraries:
 `)
 		).toEqual({ known: true, references: [] });
 	});
+
+	it('fails closed before traversing configs that exceed defensive limits', () => {
+		expect(classifyKometaLegacyConfig('libraries:\n  Movies: {}\n', { maxBytes: 8 }).known).toBe(
+			false
+		);
+		expect(
+			classifyKometaLegacyConfig('libraries:\n  Movies:\n    nested:\n      value: true\n', {
+				maxDepth: 3
+			}).known
+		).toBe(false);
+	});
 });

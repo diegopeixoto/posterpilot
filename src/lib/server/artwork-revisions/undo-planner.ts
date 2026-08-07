@@ -20,15 +20,13 @@ import {
 	mediaItems
 } from '$lib/server/db/schema';
 import {
-	isKometaDestinationV2,
-	isKometaLegacyDestinationV1,
 	kometaYamlMappingKey,
-	legacyKometaDestinationKey,
 	parseKometaDestinationKey,
 	parseKometaLegacyDestinationKey,
 	type KometaDestinationV2,
 	type KometaLegacyDestinationV1
 } from '$lib/server/kometa/destination';
+import { recordedKometaDestination } from '$lib/server/kometa/recorded-destination';
 import type { ApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
 import { canonicalJson, hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { sha256Bytes } from '$lib/server/revisions/verification';
@@ -136,7 +134,7 @@ export interface ArtworkUndoPlannerDependencies {
 	clock?: () => Date;
 }
 
-export interface CreateArtworkUndoPreviewInput {
+interface CreateArtworkUndoPreviewInput {
 	scope: UndoPlanScope;
 	ttlMs?: number;
 }
@@ -570,40 +568,6 @@ function classifySnapshot(
 	return value
 		? { state: 'present', fingerprint: kometaSlotFingerprint(value), restorable: true }
 		: { state: 'unavailable', fingerprint: null, restorable: false };
-}
-
-function recordField(value: unknown, key: string): unknown {
-	return value !== null && typeof value === 'object' && !Array.isArray(value)
-		? (value as Record<string, unknown>)[key]
-		: undefined;
-}
-
-function recordedKometaDestination(
-	provenance: Record<string, unknown> | null,
-	metadata: Record<string, unknown> | null
-): UndoKometaDestination | null {
-	// Released pre-split revisions stored only `{ tmdbId }` on the linked
-	// snapshot. At that time the writer path was unconditionally
-	// `posterpilot.yml`, so this proves the exact legacy file and mapping without
-	// deriving a split destination from the media item's current identity.
-	const historicalTmdbId = recordField(metadata, 'tmdbId');
-	const historical =
-		typeof historicalTmdbId === 'string'
-			? parseKometaLegacyDestinationKey(legacyKometaDestinationKey(historicalTmdbId))
-			: null;
-	const candidates = [
-		recordField(provenance, 'kometaDestination'),
-		recordField(metadata, 'kometaDestination'),
-		recordField(provenance, 'legacyKometaDestination'),
-		recordField(metadata, 'legacyKometaDestination'),
-		historical
-	].filter(
-		(candidate): candidate is UndoKometaDestination =>
-			isKometaDestinationV2(candidate) || isKometaLegacyDestinationV1(candidate)
-	);
-	if (candidates.length === 0) return null;
-	const [first] = candidates;
-	return candidates.every((candidate) => candidate.key === first.key) ? first : null;
 }
 
 function slotStateTargetPredicates(target: UndoPlanTarget): SQL[] {

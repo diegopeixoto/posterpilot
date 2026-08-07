@@ -8,6 +8,8 @@ import {
 	type KometaDestinationV2
 } from '$lib/server/kometa/destination';
 import { classifyKometaLegacyConfig } from '$lib/server/kometa/legacy-layout';
+import { canonicalConfigPath } from '$lib/server/kometa/config-io';
+import type { KometaMigrationCollisionState } from '$lib/server/kometa/migration-state';
 import { hashCanonicalJson } from './canonical-json';
 import {
 	applySlotKey,
@@ -42,7 +44,11 @@ interface InspectedKometaFile {
 
 export interface KometaCollisionGuardState {
 	migrationRequired: boolean;
-	reason: 'active_legacy_reference' | 'unknown_config_with_legacy_file' | null;
+	reason:
+		| 'active_legacy_reference'
+		| 'migration_incomplete'
+		| 'unknown_config_with_legacy_file'
+		| null;
 	fingerprint: string;
 }
 
@@ -51,6 +57,7 @@ export interface ApplyDestinationResolverOptions {
 	loadConfig?: () => Promise<AppConfig>;
 	/** Cache immutable config/file reads for one preview or freshness-validation pass. */
 	cacheKometaReads?: boolean;
+	loadMigrationState?: (serverInstanceId: string) => Promise<KometaMigrationCollisionState | null>;
 	readKometaState?: (
 		config: AppConfig,
 		destination: KometaDestinationV2,
@@ -102,7 +109,10 @@ function inspectKometaFile(path: string): InspectedKometaFile {
  * Freeze the active config and preserved legacy file into every Kometa snapshot.
  * This is intentionally read-only: migration owns all config/file mutation.
  */
-export function inspectKometaCollisionGuard(config: AppConfig): KometaCollisionGuardState {
+export function inspectKometaCollisionGuard(
+	config: AppConfig,
+	migration: KometaMigrationCollisionState | null = null
+): KometaCollisionGuardState {
 	const activeConfig = Boolean(config.kometaConfigPath);
 	const configFile = activeConfig
 		? inspectKometaFile(config.kometaConfigPath)
@@ -119,23 +129,58 @@ export function inspectKometaCollisionGuard(config: AppConfig): KometaCollisionG
 			? classifyKometaLegacyConfig(configFile.content)
 			: { known: false, references: [] as string[] };
 	const hasActiveLegacyReference = classification.references.length > 0;
-	const unknownConfigWithLegacyFile = legacyFile.exists && (!activeConfig || !classification.known);
+	const migrationScopeMatches =
+		migration?.serverInstanceId === config.kometaServerInstanceId &&
+		migration.metadataPathPrefix === config.kometaMetadataPathPrefix &&
+		canonicalConfigPath(migration.outputDirectory) ===
+			canonicalConfigPath(kometaOutputDirectory(config)) &&
+		((migration.configPath === null && !activeConfig) ||
+			(migration.configPath !== null &&
+				activeConfig &&
+				canonicalConfigPath(migration.configPath) ===
+					canonicalConfigPath(config.kometaConfigPath)));
+	// A non-terminal journal owns one global migration transaction. Scope drift
+	// must not make it disappear from apply/undo collision guards.
+	const migrationIncomplete =
+		migration !== null && migration.status !== 'completed' && migration.status !== 'rolled_back';
+	const manualBaselineMatches =
+		migrationScopeMatches &&
+		migration?.status === 'completed' &&
+		migration.activationEvidence === 'user_acknowledged';
+	const unknownConfigWithLegacyFile =
+		legacyFile.exists && (!activeConfig || !classification.known) && !manualBaselineMatches;
 	const reason = hasActiveLegacyReference
 		? ('active_legacy_reference' as const)
-		: unknownConfigWithLegacyFile
-			? ('unknown_config_with_legacy_file' as const)
-			: null;
+		: migrationIncomplete
+			? ('migration_incomplete' as const)
+			: unknownConfigWithLegacyFile
+				? ('unknown_config_with_legacy_file' as const)
+				: null;
 	const migrationRequired = reason !== null;
 	return {
 		migrationRequired,
 		reason,
 		fingerprint: hashCanonicalJson({
-			version: 1,
+			version: 2,
 			activeConfig,
 			configFile: configFile.fingerprint,
 			configKnown: classification.known,
 			activeLegacyReferences: classification.references,
 			legacyFile: legacyFile.fingerprint,
+			migration:
+				migration && (migrationIncomplete || migrationScopeMatches)
+					? {
+							migrationId: migration.migrationId,
+							status: migration.status,
+							scopeMatches: migrationScopeMatches,
+							completedAt: migration.completedAt,
+							activationEvidence: migration.activationEvidence,
+							configPath: migration.configPath,
+							outputDirectory: migration.outputDirectory,
+							metadataPathPrefix: migration.metadataPathPrefix
+						}
+					: null,
+			manualBaselineAccepted: manualBaselineMatches,
 			migrationRequired,
 			reason
 		})
@@ -280,11 +325,22 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 	const cacheKometaReads = options.cacheKometaReads ?? false;
 	let cachedConfig: Promise<AppConfig> | null = null;
 	let cachedGuard: KometaCollisionGuardState | null = null;
+	const cachedMigrationStates = new Map<string, Promise<KometaMigrationCollisionState | null>>();
 	const cachedDocuments = new Map<string, KometaDocumentState>();
 	const resolveKometaConfig = () => {
 		if (!cacheKometaReads) return loadConfig();
 		cachedConfig ??= loadConfig();
 		return cachedConfig;
+	};
+	const resolveMigrationState = (serverInstanceId: string) => {
+		if (!options.loadMigrationState) return Promise.resolve(null);
+		if (!cacheKometaReads) return options.loadMigrationState(serverInstanceId);
+		let pending = cachedMigrationStates.get(serverInstanceId);
+		if (!pending) {
+			pending = options.loadMigrationState(serverInstanceId);
+			cachedMigrationStates.set(serverInstanceId, pending);
+		}
+		return pending;
 	};
 
 	return async function resolveApplyDestinationSlots(
@@ -316,10 +372,13 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 					imdbId: input.target.item.identity.imdbId
 				})
 			: null;
+		const migrationState = config
+			? await resolveMigrationState(input.target.item.identity.serverInstanceId)
+			: null;
 		const kometaGuard = config
 			? cacheKometaReads
-				? (cachedGuard ??= inspectKometaCollisionGuard(config))
-				: inspectKometaCollisionGuard(config)
+				? (cachedGuard ??= inspectKometaCollisionGuard(config, migrationState))
+				: inspectKometaCollisionGuard(config, migrationState)
 			: null;
 		const kometaDocuments = cacheKometaReads
 			? cachedDocuments

@@ -19,7 +19,13 @@ import {
 	type Pair,
 	type YAMLMap
 } from 'yaml';
-import { readConfig, withConfigLock, writeConfigAtomic } from './config-io';
+import {
+	freezeConfigPath,
+	readConfigAtBinding,
+	recoverConfigQuarantineAtBinding,
+	withConfigLock,
+	writeConfigAtomicAtBinding
+} from './config-io';
 import {
 	assertManagedLogicalKeys,
 	findLogicalPair,
@@ -399,13 +405,15 @@ function mergeYamlDocument(raw: string | null, items: KometaItemInput[]): string
  *
  * @param dir Directory to write the file into (created recursively if needed).
  * @param items Items to export.
- * @param opts Optional current-file fingerprint validator.
+ * @param opts Optional current-file validator and commit-ownership assertion.
  */
 export async function writeKometaYaml(
 	dir: string,
 	items: KometaItemInput[],
 	opts: {
 		validateCurrent?: (raw: string | null) => void | Promise<void>;
+		/** Checked before quarantine recovery and again before synchronous publication. */
+		assertCommitOwned?: () => Promise<void>;
 		isCancelled?: () => boolean;
 	} = {}
 ): Promise<void> {
@@ -413,10 +421,18 @@ export async function writeKometaYaml(
 	const filePath = resolve(join(dir, filename));
 
 	await withConfigLock(filePath, async () => {
-		const current = readConfig(filePath);
+		// Freeze and read the same physical target inside the path lock. The bound
+		// CAS below rejects byte, inode, alias, or ancestor changes after validation.
+		const binding = freezeConfigPath(filePath);
+		await opts.assertCommitOwned?.();
+		recoverConfigQuarantineAtBinding(binding);
+		const current = readConfigAtBinding(binding);
 		await opts.validateCurrent?.(current);
-		if (opts.isCancelled?.()) throw new Error('cancelled');
 		const merged = mergeYamlDocument(current, items);
-		writeConfigAtomic(filePath, merged, new Date().toISOString());
+		await opts.assertCommitOwned?.();
+		if (opts.isCancelled?.()) throw new Error('cancelled');
+		writeConfigAtomicAtBinding(binding, merged, new Date().toISOString(), {
+			expectedSource: current
+		});
 	});
 }

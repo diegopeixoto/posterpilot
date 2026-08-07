@@ -9,7 +9,7 @@ import {
 	configureAutomationScheduler,
 	startAutomationScheduler
 } from '$lib/server/automation/scheduler-runtime';
-import { materializeLegacyServerInstance } from '$lib/server/server-instances';
+import { materializeLegacyServerInstanceAtBoot } from '$lib/server/server-instances/legacy-boot';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { registerServerLocaleStrategy } from '$lib/i18n/strategy.server';
 import { getAuthState } from '$lib/server/config';
@@ -32,7 +32,7 @@ await finalizeApplicationRestoreBoot(restoreBootResult);
 
 // Preserve the existing environment/persisted single-server connection as the
 // protected default instance before any scoped job or request can resolve it.
-await materializeLegacyServerInstance();
+await materializeLegacyServerInstanceAtBoot();
 
 // Migration 0008 wiped the thumbnail index (credential-bearing cached URLs must
 // not survive) but could not touch the files; drop any bytes with no index row

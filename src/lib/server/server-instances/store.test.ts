@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -156,6 +156,29 @@ describe('server instance encrypted CRUD', () => {
 		expect((await store().getConnection(created.id)).credential).toBe('token');
 	});
 
+	it('fences update and disconnect inside their write transactions', async () => {
+		const created = await store().create({
+			name: 'Plex',
+			type: 'plex',
+			baseUrl: 'http://plex:32400',
+			credential: 'token'
+		});
+		const rejectLostLease = vi.fn(async () => {
+			throw new Error('control lease lost');
+		});
+
+		await expect(
+			store().update(created.id, { name: 'Stale update' }, rejectLostLease)
+		).rejects.toThrow('control lease lost');
+		await expect(store().disconnect(created.id, rejectLostLease)).rejects.toThrow(
+			'control lease lost'
+		);
+
+		expect(rejectLostLease).toHaveBeenCalledTimes(2);
+		expect((await store().get(created.id))?.name).toBe('Plex');
+		expect((await store().get(created.id))?.disconnectedAt).toBeNull();
+	});
+
 	it('enforces normalized-name uniqueness only among enabled instances', async () => {
 		await store().create({
 			name: 'My Plex',
@@ -281,6 +304,24 @@ describe('active server persistence', () => {
 });
 
 describe('legacy configuration materialization', () => {
+	it('performs no legacy-row write when the transaction fence rejects a lost lease', async () => {
+		await expect(
+			store().materializeLegacy(
+				{
+					type: 'plex',
+					baseUrl: 'http://plex:32400',
+					credential: 'stale-token',
+					connectionSettings: null
+				},
+				async () => {
+					throw new Error('control lease lost');
+				}
+			)
+		).rejects.toThrow('control lease lost');
+		expect(await store().list()).toEqual([]);
+		expect(await activeSetting()).toBeUndefined();
+	});
+
 	it('creates one encrypted protected default, makes it active, and is byte-idempotent', async () => {
 		const connection = {
 			type: 'plex' as const,

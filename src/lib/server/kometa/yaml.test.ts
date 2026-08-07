@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	symlinkSync,
+	unlinkSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMap, isScalar, parse, parseDocument } from 'yaml';
@@ -684,6 +693,152 @@ describe('writeKometaYaml', () => {
 		resumeValidation();
 		await pending;
 		expect(existsSync(movieFile)).toBe(true);
+	});
+
+	it('fails closed when commit ownership is lost after current-file validation', async () => {
+		const original = 'metadata: {}\n';
+		writeFileSync(movieFile, original, 'utf8');
+		const order: string[] = [];
+		let ownershipChecks = 0;
+
+		await expect(
+			writeKometaYaml(
+				dir,
+				[
+					{
+						destination: movieDestination('550'),
+						title: 'Fight Club',
+						posterUrl: 'https://example.test/550.jpg'
+					}
+				],
+				{
+					validateCurrent: async () => {
+						await Promise.resolve();
+						order.push('validate');
+					},
+					assertCommitOwned: async () => {
+						ownershipChecks++;
+						if (ownershipChecks === 1) return;
+						order.push('assert-owned');
+						throw new Error('migration control lease lost');
+					}
+				}
+			)
+		).rejects.toThrow('migration control lease lost');
+
+		expect(order).toEqual(['validate', 'assert-owned']);
+		expect(readFileSync(movieFile, 'utf8')).toBe(original);
+	});
+
+	it('does not recover a quarantine after commit ownership was already lost', async () => {
+		const quarantine = join(dir, `.${MOVIE_FILENAME}.posterpilot-cas-quarantine`);
+		const predecessor = 'metadata: {}\n';
+		writeFileSync(quarantine, predecessor, 'utf8');
+
+		await expect(
+			writeKometaYaml(
+				dir,
+				[
+					{
+						destination: movieDestination('550'),
+						title: 'Fight Club',
+						posterUrl: 'https://example.test/550.jpg'
+					}
+				],
+				{
+					assertCommitOwned: async () => {
+						throw new Error('migration control lease lost');
+					}
+				}
+			)
+		).rejects.toThrow('migration control lease lost');
+
+		expect(existsSync(movieFile)).toBe(false);
+		expect(readFileSync(quarantine, 'utf8')).toBe(predecessor);
+	});
+
+	it('preserves an external edit that lands between validation and bound publication', async () => {
+		const original = 'metadata: {}\n';
+		const external = 'metadata:\n  external: { url_poster: https://external.test/edit.jpg }\n';
+		writeFileSync(movieFile, original, 'utf8');
+		let ownershipChecks = 0;
+
+		await expect(
+			writeKometaYaml(
+				dir,
+				[
+					{
+						destination: movieDestination('550'),
+						title: 'Fight Club',
+						posterUrl: 'https://example.test/550.jpg'
+					}
+				],
+				{
+					validateCurrent: (raw) => expect(raw).toBe(original),
+					assertCommitOwned: async () => {
+						ownershipChecks++;
+						if (ownershipChecks === 2) writeFileSync(movieFile, external, 'utf8');
+					}
+				}
+			)
+		).rejects.toThrow();
+
+		expect(readFileSync(movieFile, 'utf8')).toBe(external);
+		expect(readdirSync(dir).some((entry) => entry.includes('.posterpilot-bak-'))).toBe(false);
+	});
+
+	it('keeps a repointed alias on its external target after freezing the original file', async () => {
+		const managed = join(dir, 'managed-movies.yml');
+		const external = join(dir, 'external-movies.yml');
+		const original = 'metadata: {}\n';
+		const externalEdit = 'metadata:\n  external: { url_poster: https://external.test/edit.jpg }\n';
+		writeFileSync(managed, original, 'utf8');
+		writeFileSync(external, externalEdit, 'utf8');
+		symlinkSync(managed, movieFile);
+		let ownershipChecks = 0;
+
+		await writeKometaYaml(
+			dir,
+			[
+				{
+					destination: movieDestination('550'),
+					title: 'Fight Club',
+					posterUrl: 'https://example.test/550.jpg'
+				}
+			],
+			{
+				validateCurrent: (raw) => expect(raw).toBe(original),
+				assertCommitOwned: async () => {
+					ownershipChecks++;
+					if (ownershipChecks === 2) {
+						unlinkSync(movieFile);
+						symlinkSync(external, movieFile);
+					}
+				}
+			}
+		);
+
+		expect(parse(readFileSync(managed, 'utf8'))).toEqual({
+			metadata: { 550: { url_poster: 'https://example.test/550.jpg' } }
+		});
+		expect(readFileSync(movieFile, 'utf8')).toBe(externalEdit);
+		expect(readFileSync(external, 'utf8')).toBe(externalEdit);
+	});
+
+	it('creates a new typed file when its frozen nested parent does not exist yet', async () => {
+		const nested = join(dir, 'future', 'nested');
+
+		await writeKometaYaml(nested, [
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/550.jpg'
+			}
+		]);
+
+		expect(parse(readFileSync(join(nested, MOVIE_FILENAME), 'utf8'))).toEqual({
+			metadata: { 550: { url_poster: 'https://example.test/550.jpg' } }
+		});
 	});
 
 	it('rejects mixed split destinations before creating either file', async () => {

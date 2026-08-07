@@ -1,5 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { resolveConfig } from '$lib/server/config';
+import { assertNoPendingKometaConfigMutationWhileOwned } from '$lib/server/kometa/config-mutation-recovery';
+import { isKometaMigrationIncomplete } from '$lib/server/kometa/migration-journal';
+import { loadActiveKometaMigrationJournal } from '$lib/server/kometa/migration-store';
+import { withKometaMigrationControlLock } from '$lib/server/kometa/migration-control-lock';
 import { assertMutationsAllowed } from '$lib/server/maintenance';
 import { confirmServerPurge, previewServerPurge } from '$lib/server/server-instances/purge-runtime';
 
@@ -15,7 +20,10 @@ function responseError(error: unknown): Response {
 				? 400
 				: code === 'maintenance_mode'
 					? 503
-					: code.startsWith('server_purge_') || code.startsWith('plan_')
+					: code === 'kometa_config_recovery_required' ||
+						  code === 'kometa_migration_config_locked' ||
+						  code.startsWith('server_purge_') ||
+						  code.startsWith('plan_')
 						? 409
 						: 500;
 	return json({ error: { code } }, { status });
@@ -47,6 +55,7 @@ export const DELETE: RequestHandler = async ({ params, request }) => {
 	try {
 		assertMutationsAllowed();
 		if (!params.id) throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' });
+		const serverInstanceId = params.id;
 		const input = await body(request);
 		if (
 			input.confirm !== true ||
@@ -55,12 +64,41 @@ export const DELETE: RequestHandler = async ({ params, request }) => {
 		) {
 			throw Object.assign(new Error('invalid_request'), { code: 'invalid_request' });
 		}
-		return json({
-			result: await confirmServerPurge({
-				serverInstanceId: params.id,
-				planId: input.planId,
-				digest: input.digest
-			})
+		const planId = input.planId;
+		const digest = input.digest;
+		return await withKometaMigrationControlLock(async (assertControlLockOwned) => {
+			const config = await resolveConfig();
+			if (config.kometaServerInstanceId === serverInstanceId) {
+				try {
+					await assertNoPendingKometaConfigMutationWhileOwned(assertControlLockOwned);
+				} catch {
+					throw Object.assign(new Error('kometa_config_recovery_required'), {
+						code: 'kometa_config_recovery_required'
+					});
+				}
+			}
+			let migrationLocked: boolean;
+			try {
+				const journal = await loadActiveKometaMigrationJournal();
+				migrationLocked =
+					journal?.payload.serverInstanceId === serverInstanceId &&
+					isKometaMigrationIncomplete(journal);
+			} catch {
+				migrationLocked = true;
+			}
+			if (migrationLocked) {
+				throw Object.assign(new Error('kometa_migration_config_locked'), {
+					code: 'kometa_migration_config_locked'
+				});
+			}
+			await assertControlLockOwned();
+			return json({
+				result: await confirmServerPurge({
+					serverInstanceId,
+					planId,
+					digest
+				})
+			});
 		});
 	} catch (error) {
 		return responseError(error);

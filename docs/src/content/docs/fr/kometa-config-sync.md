@@ -15,24 +15,22 @@ paramètres. Elle est facultative et désactivée par défaut : tant que vous
 n'indiquez pas un `config.yml` à PosterPilot, rien de votre configuration Kometa
 n'est lu ni écrit.
 
-:::note[Deux fichiers Kometa, deux rôles]
-PosterPilot touche à deux fichiers différents, faciles à confondre :
+:::note[Configuration et métadonnées ont des rôles distincts]
+PosterPilot touche à la configuration de Kometa et à deux fichiers de métadonnées :
 
-- **`posterpilot.yml`** — le fichier de _métadonnées_ que PosterPilot écrit
-  lorsque vous appliquez un visuel avec la méthode Kometa. Il contient des
-  entrées `url_poster` / `url_background` indexées par identifiant TMDB. Voir
-  [Appliquer un visuel](/posterpilot/fr/usage/).
+- **`posterpilot-movies.yml`** — les visuels de films, indexés par identifiant TMDB,
+  avec IMDb comme solution de repli en l'absence d'identifiant TMDB.
+- **`posterpilot-shows.yml`** — les visuels de séries, saisons et épisodes,
+  indexés par identifiant TVDB, avec IMDb comme solution de repli en l'absence de
+  TVDB. Le type enregistré dans PosterPilot choisit l'espace de noms ; une clé
+  YAML numérique ne sert jamais à le deviner.
 - **`config.yml`** — la configuration de premier niveau _propre_ à Kometa :
   connexions, médiathèques, fichiers de collections, overlays, opérations et
   paramètres. C'est le fichier que gère le **gestionnaire Kometa** décrit sur
   cette page.
 
-Le gestionnaire raccorde le premier fichier _au_ second, pour que Kometa sache
-lire `posterpilot.yml`. PosterPilot écrit `posterpilot.yml` dans le **même
-répertoire que `config.yml`**, et l'entrée `metadata_files` le référence par son
-simple nom de fichier (`posterpilot.yml`) — il n'existe donc qu'un seul fichier et
-le raccordement correspond toujours. Aucun chemin de métadonnées ni montage séparé
-n'entre en jeu.
+Voir [Appliquer un visuel](/posterpilot/fr/usage/) pour savoir comment ces fichiers
+de métadonnées sont alimentés.
 :::
 
 ## L'activer
@@ -41,16 +39,24 @@ Le gestionnaire Kometa est contrôlé par deux réglages, qui suivent tous deux 
 même [règle de précédence — l'environnement prime sur l'interface des paramètres](/posterpilot/fr/configuration/)
 que le reste de PosterPilot :
 
-| Variable             | Paramètre                | Défaut  | Signification                                                                                                                          |
-| -------------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `KOMETA_CONFIG_PATH` | Chemin de config Kometa  | —       | Chemin absolu vers le `config.yml` de Kometa. **Vide ou non défini : le gestionnaire Kometa est désactivé.**                            |
-| `KOMETA_CONFIG_MODE` | Mode de config Kometa    | `merge` | `merge` (chirurgical — préserve vos autres clés et commentaires) ou `own` (PosterPilot régénère le fichier et en devient propriétaire). |
+| Variable                      | Paramètre                            | Défaut   | Signification                                                                                                                          |
+| ----------------------------- | ------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `KOMETA_CONFIG_PATH`          | Chemin de config Kometa              | —        | Chemin absolu vers le `config.yml` de Kometa. **Vide ou non défini : le gestionnaire Kometa est désactivé.**                            |
+| `KOMETA_CONFIG_MODE`          | Mode de config Kometa                | `merge`  | `merge` (chirurgical — préserve vos autres clés et commentaires) ou `own` (PosterPilot régénère le fichier et en devient propriétaire). |
+| `KOMETA_METADATA_PATH_PREFIX` | Préfixe de référence des métadonnées | `config` | Répertoire relatif visible par Kometa à l'exécution ; utilisez `.` (ou videz le champ UI) pour des noms seuls.                          |
 
 Pour utiliser le gestionnaire, le répertoire de configuration de Kometa doit
 aussi être monté dans le conteneur PosterPilot avec un accès en lecture/écriture —
 voir [Monter la configuration de Kometa](/posterpilot/fr/installation/).
-Comme `posterpilot.yml` se trouve à côté de `config.yml`, ce seul répertoire
-suffit ; il n'y a pas de montage de métadonnées séparé.
+
+Le chemin physique et la référence Kometa sont délibérément distincts.
+PosterPilot écrit les deux fichiers côte à côte dans son répertoire de sortie.
+Les valeurs `file:` doivent décrire ces mêmes fichiers depuis la vue du
+**runtime Kometa**. Avec le préfixe par défaut, elles valent
+`config/posterpilot-movies.yml` et `config/posterpilot-shows.yml`, même si un
+montage portant un autre nom place physiquement les fichiers à côté de
+`config.yml`. Le préfixe est relatif : n'utilisez ni chemin hôte, ni chemin absolu
+du conteneur, ni URL, ni nom de fichier YAML.
 
 ## La page /kometa
 
@@ -70,8 +76,8 @@ Sous ce bandeau, la page s'organise en sous-sections :
    et un test de connexion est proposé là où cela a du sens.
 2. **Médiathèques** — pour chaque médiathèque que vous choisissez de gérer : ses
    fichiers de collections, ses overlays par défaut, ses opérations, ses
-   surcharges de paramètres propres, et le raccordement des métadonnées
-   `posterpilot.yml`. Les médiathèques que vous ne sélectionnez pas restent
+   surcharges de paramètres propres, et le raccordement des métadonnées typées.
+   Les médiathèques que vous ne sélectionnez pas restent
    exactement telles quelles.
 3. **Paramètres et webhooks** — un ensemble délimité de clés globales `settings:`
    et `webhooks:` que vous pouvez choisir de garder synchronisées.
@@ -98,9 +104,9 @@ de `config.yml` est laissé tel quel.
   sont préremplis à partir de l'URL de base et du jeton Plex enregistrés dans
   PosterPilot, ainsi que de votre clé TMDB. Kometa ne fonctionne qu'avec Plex, le
   gestionnaire cible donc un serveur Plex.
-- **La section `libraries:`** — chaque médiathèque gérée, avec `posterpilot.yml`
-  raccordé sous ses `metadata_files` (par son nom de fichier, côte à côte) pour
-  que Kometa applique les visuels que vous avez exportés.
+- **La section `libraries:`** — chaque médiathèque gérée, avec la référence
+  `posterpilot-movies.yml` ou `posterpilot-shows.yml` appropriée sous ses
+  `metadata_files`, afin que Kometa applique les visuels exportés.
 - **`collection_files` par médiathèque** — les ensembles de collections par
   défaut que vous activez pour chaque médiathèque.
 - **`overlay_files` par médiathèque** — des overlays par défaut tels que
@@ -124,6 +130,53 @@ de notes, sans bloc `trakt:` / `tautulli:` correspondant. L'avertissement est no
 bloquant (il liste le connecteur manquant aux côtés des éventuels avertissements
 d'ancres/alias dans l'aperçu) ; corrigez le connecteur ou poursuivez comme bon
 vous semble.
+
+## Migrer l'ancien posterpilot.yml
+
+:::caution[Attendez la publication]
+Ne renommez, ne scindez et ne raccordez pas `posterpilot.yml` à la main. Attendez
+que la version PosterPilot contenant cette migration soit publiée dans
+[Releases](https://github.com/diegopeixoto/posterpilot/releases), mettez votre
+instance à niveau, puis utilisez la migration affichée dans `/kometa`.
+:::
+
+Une installation existante peut mélanger films et séries dans un unique
+`posterpilot.yml`, comme s'ils partageaient l'espace TMDB. La migration le normalise :
+
+1. **Aperçu.** PosterPilot compare le fichier hérité à la médiathèque Plex liée et
+   à son historique exact de révisions. L'aperçu ne montre que la structure, des
+   empreintes et des totaux — jamais d'URL de visuel ni d'identifiants secrets.
+   Les films utilisent TMDB avec IMDb comme solution de repli ; les séries, TVDB
+   avec le même repli vers IMDb.
+2. **Ambiguïtés.** Une clé numérique pouvant désigner plusieurs types,
+   PosterPilot ne devine jamais. Les entrées sans preuve sont isolées. Vous pouvez
+   corriger la correspondance ou accepter explicitement l'ambiguïté, terminer,
+   puis réappliquer ces visuels dans PosterPilot ; ils seront alors écrits dans le
+   bon fichier typé. Une entrée typée existante en conflit n'est pas écrasée.
+3. **Confirmation.** Un journal durable et des sauvegardes protégées sont d'abord
+   enregistrés. PosterPilot écrit et vérifie **les deux** fichiers typés, puis
+   modifie `config.yml` en dernier. L'ancien `posterpilot.yml` n'est jamais
+   modifié ni supprimé.
+4. **Nouvelle tentative et reprise.** Après une interruption, réessayer reprend au
+   point de contrôle vérifié, sans reclassification. Si un fichier ne correspond
+   plus ni à l'empreinte prévisualisée ni au résultat déjà écrit, l'opération
+   s'arrête pour un nouvel examen au lieu de l'écraser.
+
+Si PosterPilot peut prouver qu'il gère les entrées `metadata_files`, il raccorde
+automatiquement `config.yml`. Sinon, il écrit les fichiers typés et fournit un
+guide exact par médiathèque. **Ne collez pas ce bloc `libraries:` partiel par-dessus
+votre configuration.** Dans chaque médiathèque indiquée, remplacez uniquement
+l'élément `metadata_files` dont le basename de `file` est `posterpilot.yml` ; s'il
+n'existe pas, ajoutez une seule fois l'élément typé affiché. Conservez tous les
+éléments voisins et réglages de la médiathèque, puis terminez avec exactement une
+référence typée et aucune référence héritée active. Vérifiez les chemins depuis le runtime Kometa avant
+d'accuser réception de la fin dans PosterPilot. Cet accusé enregistre votre
+déclaration ; il ne prétend pas que PosterPilot a vérifié la modification manuelle.
+
+**Rollback** restaure la sauvegarde protégée de `config.yml` uniquement si la
+configuration actuelle correspond encore exactement au résultat de la migration.
+Les fichiers typés et le fichier hérité sont conservés : les visuels générés ne
+sont pas perdus et une nouvelle tentative n'a pas à les reconstruire.
 
 ## Sécurité
 

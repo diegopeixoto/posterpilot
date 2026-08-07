@@ -109,6 +109,93 @@ describe('applyPlan — libraries & defaults', () => {
 		expect(serialize(result.doc)).not.toContain(LEGACY_FILENAME);
 	});
 
+	it('keeps the physical basename separate from a canonical Kometa-visible prefix', () => {
+		const prefixed = buildPlan({
+			creds: CREDS,
+			metadataPathPrefix: './config/',
+			libraries: [
+				{
+					name: 'Movies',
+					defaults: [],
+					metadataFile: MOVIE_FILENAME,
+					metadataReference: `.\\config\\${MOVIE_FILENAME}`
+				}
+			]
+		});
+		expect(prefixed.libraries[0]).toMatchObject({
+			metadataFile: MOVIE_FILENAME,
+			metadataReference: `config/${MOVIE_FILENAME}`
+		});
+
+		const result = applyPlan(loadDoc(''), prefixed, null);
+		expect(result.doc.getIn(['libraries', 'Movies', 'metadata_files', 0, 'file'])).toBe(
+			`config/${MOVIE_FILENAME}`
+		);
+		expect(result.nextSnapshot).toMatchObject({
+			metadataPathPrefix: 'config',
+			libraries: {
+				Movies: { metadataReference: `config/${MOVIE_FILENAME}` }
+			}
+		});
+	});
+
+	it('rejects a reference with the wrong basename or a different prefix', () => {
+		const base = {
+			creds: CREDS,
+			metadataPathPrefix: 'config',
+			libraries: [
+				{
+					name: 'Movies',
+					defaults: [],
+					metadataFile: MOVIE_FILENAME,
+					metadataReference: `config/${SHOW_FILENAME}`
+				}
+			]
+		};
+		expect(() => buildPlan(base)).toThrow(/filename/i);
+		expect(() =>
+			buildPlan({
+				...base,
+				libraries: [{ ...base.libraries[0], metadataReference: `other/${MOVIE_FILENAME}` }]
+			})
+		).toThrow(/configured prefix/i);
+	});
+
+	it('changes only the owned full reference when the visible prefix changes', () => {
+		const source = loadDoc(`libraries:
+  Movies:
+    metadata_files:
+      - file: config/${MOVIE_FILENAME} # managed path
+      - file: user/custom.yml # user sibling
+`);
+		const prefixed = buildPlan({
+			creds: CREDS,
+			metadataPathPrefix: 'metadata',
+			libraries: [
+				{
+					name: 'Movies',
+					defaults: [],
+					metadataFile: MOVIE_FILENAME,
+					metadataReference: `metadata/${MOVIE_FILENAME}`
+				}
+			]
+		});
+		const result = applyPlan(source, prefixed, {
+			metadataPathPrefix: 'config',
+			libraries: {
+				Movies: { metadataReference: `config/${MOVIE_FILENAME}`, defaults: [] }
+			},
+			managedSettingKeys: []
+		});
+		const output = serialize(result.doc);
+		expect(output).toContain(`file: metadata/${MOVIE_FILENAME} # managed path`);
+		expect(output).not.toContain(`file: config/${MOVIE_FILENAME}`);
+		expect(output).toContain('file: user/custom.yml # user sibling');
+		expect(result.nextSnapshot.libraries.Movies.metadataReference).toBe(
+			`metadata/${MOVIE_FILENAME}`
+		);
+	});
+
 	it('is idempotent on re-sync (no new changes, no duplicates)', () => {
 		const doc = loadDoc(SAMPLE);
 		const first = applyPlan(doc, plan(), null);
@@ -163,7 +250,7 @@ describe('applyPlan — libraries & defaults', () => {
 		expect(output).toContain(`file: ${MOVIE_FILENAME} # managed note`);
 		expect(output).not.toContain(`file: ${SHOW_FILENAME}`);
 		expect(output).toContain('file: custom.yml # user sibling');
-		expect(result.nextSnapshot.libraries.Movies.metadataFile).toBe(MOVIE_FILENAME);
+		expect(result.nextSnapshot.libraries.Movies.metadataReference).toBe(MOVIE_FILENAME);
 		expect(result.changes).toContainEqual(
 			expect.objectContaining({
 				op: 'modify',
@@ -185,7 +272,7 @@ describe('applyPlan — libraries & defaults', () => {
 			plan({ libraries: [{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME }] }),
 			null
 		);
-		expect(first.nextSnapshot.libraries.Movies.metadataFile).toBeNull();
+		expect(first.nextSnapshot.libraries.Movies.metadataReference).toBeNull();
 		const deselected = applyPlan(
 			loadDoc(serialize(first.doc)),
 			plan({ libraries: [] }),
@@ -218,7 +305,7 @@ describe('applyPlan — libraries & defaults', () => {
 		expect(output).toContain('file: custom.yml # keep');
 		expect(result.nextSnapshot).not.toHaveProperty('metadataPath');
 		expect(result.nextSnapshot.libraries.Movies).toMatchObject({
-			metadataFile: MOVIE_FILENAME,
+			metadataReference: MOVIE_FILENAME,
 			defaults: []
 		});
 	});
@@ -241,7 +328,7 @@ describe('applyPlan — libraries & defaults', () => {
 		expect(result.warnings).toContain('libraries.Movies');
 		expect(result.nextSnapshot).not.toHaveProperty('metadataPath');
 		expect(result.nextSnapshot.libraries.Movies).toEqual({
-			metadataFile: LEGACY_FILENAME,
+			metadataReference: LEGACY_FILENAME,
 			defaults: []
 		});
 		expect(serialize(result.doc)).toContain(`file: ${LEGACY_FILENAME}`);

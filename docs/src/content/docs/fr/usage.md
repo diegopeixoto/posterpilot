@@ -272,11 +272,13 @@ complet.
 
 ### Comment Kometa consomme l'export
 
-PosterPilot écrit un unique fichier de métadonnées (par défaut `posterpilot.yml`)
-dans `KOMETA_ASSETS_DIR`, indexé par identifiant TMDB avec des entrées
-`url_poster` / `url_background`. Ajoutez ce fichier à la configuration de
-médiathèque de votre Kometa (par exemple sous `metadata_path` /
-`metadata_files`) pour que Kometa applique les visuels à sa prochaine exécution.
+PosterPilot écrit `posterpilot-movies.yml` et `posterpilot-shows.yml` dans son
+répertoire de sortie Kometa. Les films utilisent les identifiants TMDB, avec IMDb
+comme solution de repli ; les séries, TVDB avec le même repli vers IMDb. Ajoutez le fichier correspondant
+à chaque médiathèque sous `metadata_files`. Le
+[gestionnaire Kometa](../kometa-config-sync/) peut maintenir ces références et
+explique la différence entre le chemin physique et le préfixe `file:` visible par
+le runtime Kometa.
 
 ## Historique des visuels et annulation
 

@@ -32,8 +32,10 @@ The volumes that matter:
 - **Kometa's config dir** _(optional)_ — to manage Kometa's own `config.yml` with
   the [Kometa manager](/posterpilot/kometa-config-sync/), mount that directory
   **read/write** and point `KOMETA_CONFIG_PATH` at the `config.yml` inside it
-  (e.g. `/config/config.yml`). PosterPilot writes `posterpilot.yml` into that same
-  directory, so this one mount is all the manager needs. See
+  (e.g. `/config/config.yml`). PosterPilot writes `posterpilot-movies.yml` and
+  `posterpilot-shows.yml` into that same physical directory, so this one mount is
+  all the manager needs. `KOMETA_METADATA_PATH_PREFIX` separately describes the
+  references visible to Kometa at runtime. See
   [Mount Kometa's config for config sync](#mount-kometas-config-for-config-sync).
 
 The container listens on port **3000** by default (configurable via the `PORT`
@@ -80,13 +82,16 @@ from inside the PosterPilot container:
 2. **Point `KOMETA_CONFIG_PATH` at the mounted file** — e.g. `/config/config.yml`.
    Leaving it unset keeps the Kometa manager off.
 
-That single directory is all the manager needs: PosterPilot writes
-`posterpilot.yml` into the **same directory as `config.yml`** (co-located) and
-wires it into `config.yml` by its bare basename, so there is no separate metadata
-path or mount to configure. This is in addition to the existing `/data` volume and
-the `/kometa` Kometa assets mount. If your Kometa install keeps `config.yml` and
-the assets folder in the same directory, you can mount that one directory and point
-both `KOMETA_ASSETS_DIR` and `KOMETA_CONFIG_PATH` at it.
+That single physical directory is all the manager needs: PosterPilot writes the
+two typed metadata files beside `config.yml`. Their `file:` values are a separate
+concern and must match **Kometa's runtime view**. The default
+`KOMETA_METADATA_PATH_PREFIX=config` emits
+`config/posterpilot-movies.yml` and `config/posterpilot-shows.yml`; use `.` only
+if bare basenames resolve correctly inside Kometa. Do not put a host path
+or an absolute container path in this prefix. This is in addition to `/data` and
+the `/kometa` assets mount. If Kometa keeps config and assets in one host directory,
+you can mount that directory at both locations; the physical paths may differ
+between containers as long as the generated `file:` references match Kometa's view.
 
 :::caution
 Kometa reads the Plex token and TMDB key from `config.yml` in plaintext, so the
@@ -130,6 +135,7 @@ services:
       # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
+      # KOMETA_METADATA_PATH_PREFIX: config # Kometa runtime view, not a physical path
       # KOMETA_SERVER_INSTANCE_ID: legacy-default
     volumes:
       # Persistent app state (SQLite db + settings + history).
@@ -203,6 +209,7 @@ services:
       # APP_SECRET: ${APP_SECRET:-}
       # Optional — manage Kometa's own config.yml (Kometa manager):
       # KOMETA_CONFIG_PATH: /config/config.yml
+      # KOMETA_METADATA_PATH_PREFIX: config # Kometa runtime view, not a physical path
       # KOMETA_SERVER_INSTANCE_ID: legacy-default
     volumes:
       - /mnt/user/appdata/posterpilot:/data

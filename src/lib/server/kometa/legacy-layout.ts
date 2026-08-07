@@ -1,4 +1,5 @@
-import { isAlias, isMap, isScalar, isSeq, parseDocument, type Pair, type YAMLMap } from 'yaml';
+import { isAlias, isMap, isScalar, isSeq, type Pair, type YAMLMap } from 'yaml';
+import { parseBoundedKometaConfig, type KometaConfigYamlLimitOverrides } from './config-yaml';
 import { LEGACY_FILENAME } from './destination';
 
 function isYamlNull(value: unknown): boolean {
@@ -22,7 +23,6 @@ function librariesPair(root: YAMLMap): Pair | null {
 	const pairs = root.items.filter((pair) => isScalar(pair.key) && pair.key.value === 'libraries');
 	return pairs.length === 1 ? pairs[0] : null;
 }
-
 /** Match a Kometa-visible reference by basename, including Docker path prefixes. */
 export function isLegacyKometaMetadataReference(value: unknown): value is string {
 	if (typeof value !== 'string') return false;
@@ -35,18 +35,16 @@ export function isLegacyKometaMetadataReference(value: unknown): value is string
  * `known=false` makes callers fail closed when the active config shape cannot be
  * classified without guessing.
  */
-export function classifyKometaLegacyConfig(raw: string): {
+export function classifyKometaLegacyConfig(
+	raw: string,
+	limits: KometaConfigYamlLimitOverrides = {}
+): {
 	known: boolean;
 	references: string[];
 } {
-	let document: ReturnType<typeof parseDocument>;
-	try {
-		document = parseDocument(raw, { uniqueKeys: true });
-	} catch {
-		return { known: false, references: [] };
-	}
-	if (document.errors.length > 0) return { known: false, references: [] };
-	const root = document.contents;
+	const parsed = parseBoundedKometaConfig(raw, limits);
+	if (!parsed.ok) return { known: false, references: [] };
+	const root = parsed.document.contents;
 	if (isYamlNull(root)) return { known: true, references: [] };
 	if (!isMap(root)) return { known: false, references: [] };
 

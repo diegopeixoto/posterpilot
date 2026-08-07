@@ -18,6 +18,7 @@ type ManagementStore = Pick<
 	ServerInstanceStore,
 	'list' | 'getActive' | 'create' | 'update' | 'getConnection' | 'disconnect'
 >;
+type ManagementWriteFence = Exclude<Parameters<ServerInstanceStore['update']>[2], undefined>;
 
 export interface ServerConnectionCandidate {
 	serverId: string | null;
@@ -56,9 +57,9 @@ export interface UpdateManagedServerInput {
 	connectionSettings?: Record<string, unknown> | null;
 }
 
-export type ManagedConnectionStatus = 'healthy' | 'unauthorized' | 'unreachable';
+type ManagedConnectionStatus = 'healthy' | 'unauthorized' | 'unreachable';
 
-export interface ManagedConnectionTestResult {
+interface ManagedConnectionTestResult {
 	ok: boolean;
 	status: ManagedConnectionStatus;
 	serverId?: string;
@@ -109,6 +110,16 @@ export function createServerManagementService(
 ) {
 	const clock = options.clock ?? (() => new Date());
 	const providerFactory = options.providerFactory;
+	const updateStore = (
+		id: string,
+		input: UpdateServerInstanceInput,
+		assertWriteAuthorized?: ManagementWriteFence
+	) =>
+		assertWriteAuthorized
+			? store.update(id, input, assertWriteAuthorized)
+			: store.update(id, input);
+	const disconnectStore = (id: string, assertWriteAuthorized?: ManagementWriteFence) =>
+		assertWriteAuthorized ? store.disconnect(id, assertWriteAuthorized) : store.disconnect(id);
 
 	async function resolveCandidate(
 		input: TestManagedServerInput,
@@ -184,12 +195,20 @@ export function createServerManagementService(
 		};
 	}
 
-	async function recordOutcome(id: string, outcome: ConnectionTestOutcome): Promise<void> {
-		await store.update(id, {
-			connectionStatus: outcome.result.status,
-			lastTestedAt: outcome.testedAt,
-			...(outcome.result.ok ? { capabilities: outcome.capabilities } : {})
-		});
+	async function recordOutcome(
+		id: string,
+		outcome: ConnectionTestOutcome,
+		assertWriteAuthorized?: ManagementWriteFence
+	): Promise<void> {
+		await updateStore(
+			id,
+			{
+				connectionStatus: outcome.result.status,
+				lastTestedAt: outcome.testedAt,
+				...(outcome.result.ok ? { capabilities: outcome.capabilities } : {})
+			},
+			assertWriteAuthorized
+		);
 	}
 
 	function requireSuccessful(outcome: ConnectionTestOutcome): void {
@@ -235,7 +254,8 @@ export function createServerManagementService(
 
 	async function update(
 		id: string,
-		input: UpdateManagedServerInput
+		input: UpdateManagedServerInput,
+		assertWriteAuthorized?: ManagementWriteFence
 	): Promise<ServerInstanceSummary> {
 		const current = await store.getConnection(id);
 		if (current.disconnectedAt) throw new ServerInstanceError('server_instance_disconnected');
@@ -254,7 +274,7 @@ export function createServerManagementService(
 		if (input.name !== undefined) updates.name = input.name;
 		if (!hasConnectionInput) {
 			return Object.keys(updates).length > 0
-				? store.update(id, updates)
+				? updateStore(id, updates, assertWriteAuthorized)
 				: summaryFromConnection(current);
 		}
 
@@ -282,7 +302,7 @@ export function createServerManagementService(
 
 		if (!connectionChanged) {
 			return Object.keys(updates).length > 0
-				? store.update(id, updates)
+				? updateStore(id, updates, assertWriteAuthorized)
 				: summaryFromConnection(current);
 		}
 
@@ -290,14 +310,14 @@ export function createServerManagementService(
 		if (!outcome.result.ok) {
 			// Record the attempted test against this instance, but never replace the
 			// previously working connection details after a failed test.
-			await recordOutcome(id, outcome);
+			await recordOutcome(id, outcome, assertWriteAuthorized);
 			requireSuccessful(outcome);
 		}
 
 		updates.connectionStatus = 'healthy';
 		updates.lastTestedAt = outcome.testedAt;
 		updates.capabilities = outcome.capabilities;
-		return store.update(id, updates);
+		return updateStore(id, updates, assertWriteAuthorized);
 	}
 
 	async function enable(id: string): Promise<ServerInstanceSummary> {
@@ -317,16 +337,21 @@ export function createServerManagementService(
 		});
 	}
 
-	async function disable(id: string): Promise<ServerInstanceSummary> {
-		return store.update(id, { enabled: false });
+	async function disable(
+		id: string,
+		assertWriteAuthorized?: ManagementWriteFence
+	): Promise<ServerInstanceSummary> {
+		return updateStore(id, { enabled: false }, assertWriteAuthorized);
 	}
 
-	async function disconnect(id: string, confirmed: boolean): Promise<ServerInstanceSummary> {
+	async function disconnect(
+		id: string,
+		confirmed: boolean,
+		assertWriteAuthorized?: ManagementWriteFence
+	): Promise<ServerInstanceSummary> {
 		if (!confirmed) throw new ServerInstanceError('disconnect_confirmation_required');
-		return store.disconnect(id);
+		return disconnectStore(id, assertWriteAuthorized);
 	}
 
 	return { list, test, add, update, enable, disable, disconnect };
 }
-
-export type ServerManagementService = ReturnType<typeof createServerManagementService>;

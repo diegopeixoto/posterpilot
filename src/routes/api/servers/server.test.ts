@@ -8,7 +8,12 @@ const h = vi.hoisted(() => ({
 	enable: vi.fn(),
 	disable: vi.fn(),
 	activate: vi.fn(),
-	disconnect: vi.fn()
+	disconnect: vi.fn(),
+	resolveConfig: vi.fn(),
+	checkpointGuard: vi.fn(),
+	loadMigrationJournal: vi.fn(),
+	withControlLock: vi.fn(),
+	assertControlLockOwned: vi.fn()
 }));
 
 vi.mock('$lib/server/server-instances', () => ({
@@ -20,6 +25,16 @@ vi.mock('$lib/server/server-instances', () => ({
 	disableManagedServer: h.disable,
 	setActiveServerInstance: h.activate,
 	disconnectManagedServer: h.disconnect
+}));
+vi.mock('$lib/server/config', () => ({ resolveConfig: h.resolveConfig }));
+vi.mock('$lib/server/kometa/config-mutation-recovery', () => ({
+	assertNoPendingKometaConfigMutationWhileOwned: h.checkpointGuard
+}));
+vi.mock('$lib/server/kometa/migration-store', () => ({
+	loadActiveKometaMigrationJournal: h.loadMigrationJournal
+}));
+vi.mock('$lib/server/kometa/migration-control-lock', () => ({
+	withKometaMigrationControlLock: h.withControlLock
 }));
 
 import { ServerInstanceError } from '$lib/server/server-instances/validation';
@@ -76,6 +91,16 @@ describe('server-management API routes', () => {
 			if (!confirmed) throw new ServerInstanceError('disconnect_confirmation_required');
 			return { ...SERVER, enabled: false, credentialSet: false };
 		});
+		h.resolveConfig.mockResolvedValue({ kometaServerInstanceId: SERVER.id });
+		h.assertControlLockOwned.mockResolvedValue('lease');
+		h.checkpointGuard.mockImplementation(async (assertControlLockOwned: () => Promise<unknown>) =>
+			assertControlLockOwned()
+		);
+		h.loadMigrationJournal.mockResolvedValue(null);
+		h.withControlLock.mockImplementation(
+			async (operation: (assertOwned: () => Promise<unknown>) => Promise<unknown>) =>
+				operation(h.assertControlLockOwned)
+		);
 	});
 
 	it('lists only redacted summaries and the active id', async () => {
@@ -174,17 +199,124 @@ describe('server-management API routes', () => {
 	it('forwards secret-preserving edits and rejects an empty update', async () => {
 		let res = await response(PATCH, event({ name: 'Renamed', credential: '********' }));
 		expect(res.status).toBe(200);
-		expect(h.update).toHaveBeenCalledWith('server-1', {
-			name: 'Renamed',
-			type: undefined,
-			baseUrl: undefined,
-			credential: '********',
-			connectionSettings: undefined
-		});
+		expect(h.update).toHaveBeenCalledWith(
+			'server-1',
+			{
+				name: 'Renamed',
+				type: undefined,
+				baseUrl: undefined,
+				credential: '********',
+				connectionSettings: undefined
+			},
+			'lease'
+		);
 
 		res = await response(PATCH, event({ unrelated: true }));
 		expect(res.status).toBe(400);
 		expect(await res.json()).toEqual({ error: { code: 'invalid_request' } });
+	});
+
+	it('blocks every bound-server mutation that could invalidate config recovery', async () => {
+		const attempts = [
+			[PATCH, event({ baseUrl: 'http://plex-new:32400' }), h.update],
+			[DISABLE, event(), h.disable],
+			[DISCONNECT, event({ confirm: true }), h.disconnect]
+		] as const;
+
+		for (const [handler, value, mutation] of attempts) {
+			h.checkpointGuard.mockRejectedValueOnce(new Error('checkpoint corrupt'));
+			const res = await response(handler, value);
+			expect(res.status).toBe(409);
+			expect(await res.json()).toEqual({
+				error: { code: 'kometa_config_recovery_required' }
+			});
+			expect(mutation).not.toHaveBeenCalled();
+		}
+	});
+
+	it('renews the durable control lease immediately before each bound-server mutation', async () => {
+		const attempts = [
+			[PATCH, event({ baseUrl: 'http://plex-new:32400' }), h.update],
+			[DISABLE, event(), h.disable],
+			[DISCONNECT, event({ confirm: true }), h.disconnect]
+		] as const;
+
+		for (const [handler, value, mutation] of attempts) {
+			await response(handler, value);
+			const finalRenewal = h.assertControlLockOwned.mock.invocationCallOrder.at(-1);
+			const write = mutation.mock.invocationCallOrder.at(-1);
+			expect(finalRenewal).toBeDefined();
+			expect(write).toBeDefined();
+			expect(finalRenewal!).toBeLessThan(write!);
+			expect(mutation.mock.calls.at(-1)?.at(-1)).toBe('lease');
+		}
+	});
+
+	it('blocks binding-invalidating mutations while a Kometa migration is incomplete', async () => {
+		h.loadMigrationJournal.mockResolvedValue({
+			status: 'writing_splits',
+			payload: { serverInstanceId: SERVER.id }
+		});
+		const attempts = [
+			[PATCH, event({ credential: 'rotated-secret' }), h.update],
+			[DISABLE, event(), h.disable],
+			[DISCONNECT, event({ confirm: true }), h.disconnect]
+		] as const;
+
+		for (const [handler, value, mutation] of attempts) {
+			const res = await response(handler, value);
+			expect(res.status).toBe(409);
+			expect(await res.json()).toEqual({
+				error: { code: 'kometa_migration_config_locked' }
+			});
+			expect(mutation).not.toHaveBeenCalled();
+		}
+	});
+
+	it('still blocks the frozen journal server after the configured binding drifts elsewhere', async () => {
+		h.resolveConfig.mockResolvedValue({ kometaServerInstanceId: 'server-2' });
+		h.loadMigrationJournal.mockResolvedValue({
+			status: 'writing_splits',
+			payload: { serverInstanceId: SERVER.id }
+		});
+		const attempts = [
+			[PATCH, event({ credential: 'rotated-secret' }), h.update],
+			[DISABLE, event(), h.disable],
+			[DISCONNECT, event({ confirm: true }), h.disconnect]
+		] as const;
+
+		for (const [handler, value, mutation] of attempts) {
+			const res = await response(handler, value);
+			expect(res.status).toBe(409);
+			expect(await res.json()).toEqual({ error: { code: 'kometa_migration_config_locked' } });
+			expect(h.checkpointGuard).not.toHaveBeenCalled();
+			expect(mutation).not.toHaveBeenCalled();
+		}
+	});
+
+	it('fails closed when the bound server migration journal is unreadable', async () => {
+		h.loadMigrationJournal.mockRejectedValue(new Error('journal authentication failed'));
+
+		const res = await response(DISABLE, event());
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: { code: 'kometa_migration_config_locked' } });
+		expect(h.disable).not.toHaveBeenCalled();
+	});
+
+	it('does not apply the checkpoint guard to another server or a name-only edit', async () => {
+		h.resolveConfig.mockResolvedValue({ kometaServerInstanceId: 'server-2' });
+		let res = await response(PATCH, event({ baseUrl: 'http://plex-new:32400' }));
+		expect(res.status).toBe(200);
+		expect(h.checkpointGuard).not.toHaveBeenCalled();
+		expect(h.assertControlLockOwned).toHaveBeenCalledOnce();
+
+		h.withControlLock.mockClear();
+		h.assertControlLockOwned.mockClear();
+		res = await response(PATCH, event({ name: 'Renamed' }));
+		expect(res.status).toBe(200);
+		expect(h.withControlLock).not.toHaveBeenCalled();
+		expect(h.assertControlLockOwned).not.toHaveBeenCalled();
 	});
 
 	it('enables and disables only the addressed instance', async () => {
@@ -194,7 +326,7 @@ describe('server-management API routes', () => {
 
 		res = await response(DISABLE, event());
 		expect(res.status).toBe(200);
-		expect(h.disable).toHaveBeenCalledWith('server-1');
+		expect(h.disable).toHaveBeenCalledWith('server-1', 'lease');
 	});
 
 	it('activates only the addressed enabled instance', async () => {
@@ -213,7 +345,7 @@ describe('server-management API routes', () => {
 
 		res = await response(DISCONNECT, event({ confirm: true }));
 		expect(res.status).toBe(200);
-		expect(h.disconnect).toHaveBeenLastCalledWith('server-1', true);
+		expect(h.disconnect).toHaveBeenLastCalledWith('server-1', true, 'lease');
 	});
 
 	it('redacts unexpected exception messages behind a locale-neutral internal error', async () => {

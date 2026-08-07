@@ -2,11 +2,67 @@
 	import { invalidateAll } from '$app/navigation';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages';
+	import KometaMigrationPanel from '$lib/components/KometaMigrationPanel.svelte';
+	import {
+		canRepairKometaMigrationScope,
+		isKometaConfigMutationLocked,
+		kometaMigrationMutationBlocker
+	} from '$lib/kometa-config-mutation-policy';
+	import {
+		KometaMetadataPathPrefixError,
+		kometaMetadataReference,
+		normalizeKometaMetadataPathPrefix
+	} from '$lib/kometa-metadata-path';
 
 	let { data } = $props();
 	// Derived (not a one-time alias) so status/path/backups reflect reloaded data
 	// after invalidateAll() — e.g. enabling the manager from the inactive state.
 	const km = $derived(data.kometa);
+	const migrationStateUnavailable = $derived(Boolean(km.migrationStateError));
+	const configRecoveryLocked = $derived(Boolean(km.configCommitRecovery));
+	const migrationScopeLocked = $derived(
+		configRecoveryLocked ||
+			migrationStateUnavailable ||
+			isKometaConfigMutationLocked('structured', km.migration)
+	);
+	const migrationRawLocked = $derived(
+		configRecoveryLocked ||
+			migrationStateUnavailable ||
+			isKometaConfigMutationLocked('raw', km.migration)
+	);
+	const migrationRestoreLocked = $derived(
+		configRecoveryLocked ||
+			migrationStateUnavailable ||
+			isKometaConfigMutationLocked('restore', km.migration)
+	);
+	const migrationScopeRepairAllowed = $derived(
+		!configRecoveryLocked &&
+			!migrationStateUnavailable &&
+			canRepairKometaMigrationScope(km.migration)
+	);
+	const migrationHeaderLocked = $derived(migrationScopeLocked && !migrationScopeRepairAllowed);
+	let configRecoveryBusy = $state(false);
+	let configRecoveryError = $state<string | null>(null);
+	let configRecoveryNotice = $state<string | null>(null);
+	async function recoverConfirmedConfig() {
+		if (!km.configCommitRecovery?.canRecover || configRecoveryBusy) return;
+		configRecoveryBusy = true;
+		configRecoveryError = null;
+		configRecoveryNotice = null;
+		try {
+			const response = await fetch('/api/kometa/config/recover', { method: 'POST' });
+			if (!response.ok) throw new Error(String(response.status));
+			const result = (await response.json()) as { resolution?: unknown };
+			if (result.resolution === 'superseded') {
+				configRecoveryNotice = m.kometa_config_recovery_superseded();
+			}
+			await invalidateAll();
+		} catch {
+			configRecoveryError = m.kometa_config_recovery_failed();
+		} finally {
+			configRecoveryBusy = false;
+		}
+	}
 
 	type Section = 'connections' | 'libraries' | 'settings' | 'raw' | 'backups';
 	let section = $state<Section>('connections');
@@ -22,27 +78,107 @@
 	// svelte-ignore state_referenced_locally
 	let configPath = $state(data.config?.kometaConfigPath ?? km.configPath);
 	// svelte-ignore state_referenced_locally
+	let metadataPathPrefix = $state(data.config?.kometaMetadataPathPrefix ?? km.metadataPathPrefix);
+	// svelte-ignore state_referenced_locally
 	let mode = $state<'merge' | 'own'>(km.mode);
 	let savingHeader = $state(false);
 	let headerError = $state<string | null>(null);
+	let headerErrorSnapshot = $state<string | null>(null);
+	const headerSnapshot = $derived(JSON.stringify([configPath, metadataPathPrefix, mode]));
+	$effect(() => {
+		if (headerErrorSnapshot !== null && headerErrorSnapshot !== headerSnapshot) {
+			headerError = null;
+			headerErrorSnapshot = null;
+		}
+	});
+
+	function setHeaderError(message: string, snapshot = headerSnapshot): void {
+		headerError = message;
+		headerErrorSnapshot = snapshot;
+	}
+
+	const metadataPathValidation = $derived.by(() => {
+		try {
+			const normalized = normalizeKometaMetadataPathPrefix(metadataPathPrefix);
+			return {
+				valid: true as const,
+				normalized,
+				references: [
+					kometaMetadataReference(normalized, km.metadataFiles.movie),
+					kometaMetadataReference(normalized, km.metadataFiles.show)
+				]
+			};
+		} catch (error) {
+			return {
+				valid: false as const,
+				code: error instanceof KometaMetadataPathPrefixError ? error.code : 'reserved'
+			};
+		}
+	});
+
+	function metadataPathErrorMessage(code: unknown): string {
+		switch (code) {
+			case 'absolute':
+				return m.kometa_metadata_path_error_absolute();
+			case 'url':
+				return m.kometa_metadata_path_error_url();
+			case 'traversal':
+				return m.kometa_metadata_path_error_traversal();
+			case 'filename':
+				return m.kometa_metadata_path_error_filename();
+			default:
+				return m.kometa_metadata_path_error_format();
+		}
+	}
+
+	async function settingsErrorMessage(response: Response): Promise<string> {
+		const body = (await response.json().catch(() => null)) as {
+			error?: { code?: unknown; reason?: unknown };
+		} | null;
+		if (body?.error?.code === 'invalid_kometa_metadata_path_prefix') {
+			return metadataPathErrorMessage(body.error.reason);
+		}
+		if (body?.error?.code === 'kometa_migration_config_locked') {
+			return m.kometa_migration_config_locked_hint();
+		}
+		if (body?.error?.code === 'kometa_config_recovery_required') {
+			return m.kometa_config_recovery_hint();
+		}
+		return m.settings_save_failed();
+	}
 
 	async function saveHeader() {
-		savingHeader = true;
+		if (migrationHeaderLocked) return;
 		headerError = null;
+		headerErrorSnapshot = null;
+		if (!metadataPathValidation.valid) {
+			setHeaderError(metadataPathErrorMessage(metadataPathValidation.code));
+			return;
+		}
+		const submittedSnapshot = headerSnapshot;
+		savingHeader = true;
 		try {
 			const res = await fetch('/api/settings', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ kometaConfigPath: configPath, kometaConfigMode: mode })
+				body: JSON.stringify({
+					kometaConfigPath: configPath,
+					kometaConfigMode: mode,
+					kometaMetadataPathPrefix: metadataPathValidation.normalized
+				})
 			});
-			if (!res.ok) throw new Error(String(res.status));
-			// Changing the config path/mode points the manager at a different file, so
-			// recreate the page: a full reload re-initializes all form state from the
+			if (!res.ok) {
+				setHeaderError(await settingsErrorMessage(res), submittedSnapshot);
+				savingHeader = false;
+				return;
+			}
+			// Changing the config path, reference prefix, or mode changes the manager's
+			// exact targets. Recreate the page so all form state initializes from the
 			// new file. Otherwise connValues/libs/etc. stay seeded from the old file and
 			// a subsequent sync could write stale selections into the new config.
 			location.reload();
 		} catch {
-			headerError = m.settings_save_failed();
+			setHeaderError(m.settings_save_failed(), submittedSnapshot);
 			savingHeader = false;
 		}
 	}
@@ -171,7 +307,7 @@
 		return (await res.json()) as Result;
 	}
 	async function doPreview() {
-		if (busy || !bindingReady || headerDirty) return;
+		if (busy || !bindingReady || headerDirty || migrationScopeLocked) return;
 		busy = true;
 		error = null;
 		done = null;
@@ -186,7 +322,15 @@
 		}
 	}
 	async function doSync() {
-		if (busy || !bindingReady || headerDirty || !preview?.planId || !preview.digest) return;
+		if (
+			busy ||
+			!bindingReady ||
+			headerDirty ||
+			migrationScopeLocked ||
+			!preview?.planId ||
+			!preview.digest
+		)
+			return;
 		busy = true;
 		error = null;
 		try {
@@ -205,13 +349,14 @@
 			}
 		} catch {
 			error = m.kometa_request_failed();
+			await invalidateAll();
 		} finally {
 			busy = false;
 		}
 	}
 	// A preview authorizes only the currently visible inputs and header state.
 	$effect(() => {
-		JSON.stringify([selection(), configPath, mode]);
+		JSON.stringify([selection(), configPath, metadataPathPrefix, mode]);
 		preview = null;
 		done = null;
 	});
@@ -225,6 +370,7 @@
 		planId?: string | null;
 		digest?: string | null;
 		backupName?: string;
+		errorCode?: string;
 	};
 	let rawText = $state('');
 	let rawLoaded = $state(false);
@@ -243,7 +389,7 @@
 		}
 	}
 	async function previewRaw() {
-		if (!bindingReady || headerDirty) return;
+		if (!bindingReady || headerDirty || migrationRawLocked) return;
 		rawBusy = true;
 		rawMsg = null;
 		try {
@@ -258,13 +404,15 @@
 				? body.planId
 					? null
 					: m.kometa_preview_none()
-				: (body.parseError ?? m.kometa_request_failed());
+				: body.errorCode === 'kometa_migration_config_locked'
+					? m.kometa_migration_config_locked_hint()
+					: (body.parseError ?? m.kometa_request_failed());
 		} finally {
 			rawBusy = false;
 		}
 	}
 	async function confirmRaw() {
-		if (!rawPreview?.planId || !rawPreview.digest || rawBusy) return;
+		if (!rawPreview?.planId || !rawPreview.digest || rawBusy || migrationRawLocked) return;
 		rawBusy = true;
 		rawMsg = null;
 		try {
@@ -280,6 +428,7 @@
 		} catch {
 			rawMsg = m.kometa_request_failed();
 			rawPreview = null;
+			await invalidateAll();
 		} finally {
 			rawBusy = false;
 		}
@@ -300,7 +449,7 @@
 	let restoreBusy = $state(false);
 	let restoreError = $state<string | null>(null);
 	async function previewRestore(name: string) {
-		if (!bindingReady || headerDirty || restoreBusy) return;
+		if (!bindingReady || headerDirty || restoreBusy || migrationRestoreLocked) return;
 		restoreBusy = true;
 		restoreError = null;
 		try {
@@ -310,6 +459,10 @@
 				body: JSON.stringify({ name })
 			});
 			const body = (await res.json()) as RawPlanResult;
+			if (body.errorCode === 'kometa_migration_config_locked') {
+				restoreError = m.kometa_migration_config_locked_hint();
+				return;
+			}
 			if (!res.ok || !body.ok) throw new Error(body.parseError ?? String(res.status));
 			restorePreview = body;
 		} catch {
@@ -319,7 +472,8 @@
 		}
 	}
 	async function confirmRestore() {
-		if (!restorePreview?.planId || !restorePreview.digest || restoreBusy) return;
+		if (!restorePreview?.planId || !restorePreview.digest || restoreBusy || migrationRestoreLocked)
+			return;
 		restoreBusy = true;
 		restoreError = null;
 		const res = await fetch('/api/kometa/config/restore', {
@@ -332,6 +486,7 @@
 			restoreBusy = false;
 			restoreError = m.kometa_request_failed();
 			restorePreview = null;
+			await invalidateAll();
 		}
 	}
 	function fmtStamp(stamp: string): string {
@@ -339,7 +494,9 @@
 	}
 
 	const managedCount = $derived(libs.filter((l) => l.managed).length);
-	const headerDirty = $derived(configPath !== km.configPath || mode !== km.mode);
+	const headerDirty = $derived(
+		configPath !== km.configPath || mode !== km.mode || metadataPathPrefix !== km.metadataPathPrefix
+	);
 	const bindingReady = $derived(Boolean(km.serverBinding));
 	const bindingMessage = $derived(
 		km.serverBinding
@@ -350,6 +507,35 @@
 					? m.kometa_binding_unavailable()
 					: m.kometa_binding_missing()
 	);
+	const migrationPanelVisible = $derived(
+		km.migrationRequired || Boolean(km.migration) || migrationStateUnavailable
+	);
+	const migrationMutationDisabledMessage = $derived.by(() => {
+		if (km.configCommitRecovery) {
+			if (km.configCommitRecovery.status === 'unreadable') {
+				return m.kometa_config_recovery_unreadable_hint();
+			}
+			if (!km.configCommitRecovery.scopeMatches) {
+				return m.kometa_config_recovery_scope_changed_hint();
+			}
+			return m.kometa_config_recovery_hint();
+		}
+		const blocker = kometaMigrationMutationBlocker({
+			migrationScopeLocked,
+			bindingReady,
+			savingHeader,
+			headerDirty
+		});
+		if (blocker === 'binding') return bindingMessage;
+		if (blocker === 'saving_settings') return m.settings_saving();
+		if (blocker === 'dirty_settings') return m.kometa_save_header_first();
+		return null;
+	});
+	$effect(() => {
+		if (migrationScopeLocked) preview = null;
+		if (migrationRawLocked) rawPreview = null;
+		if (migrationRestoreLocked) restorePreview = null;
+	});
 </script>
 
 <svelte:head><title>{m.kometa_manager_title()} · PosterPilot</title></svelte:head>
@@ -408,40 +594,136 @@
 	</div>
 </div>
 
-<!-- Path + mode header -->
+<!-- Paths + mode header -->
 <div class="surface mt-4 flex flex-wrap items-end gap-3 p-4">
 	<div class="min-w-64 flex-1">
 		<label for="cfgPath" class="mb-1 block text-sm font-medium">{m.kometa_config_path()}</label>
 		<input
 			id="cfgPath"
 			bind:value={configPath}
-			disabled={data.config?.envManaged?.kometaConfigPath}
+			disabled={data.config?.envManaged?.kometaConfigPath || migrationHeaderLocked}
 			placeholder="/config/config.yml"
 			class="input w-full font-mono text-xs disabled:opacity-50"
 		/>
 	</div>
+	<div class="min-w-64 flex-1">
+		<label for="metadataPathPrefix" class="mb-1 block text-sm font-medium">
+			{m.kometa_metadata_path()}
+		</label>
+		<input
+			id="metadataPathPrefix"
+			bind:value={metadataPathPrefix}
+			disabled={data.config?.envManaged?.kometaMetadataPathPrefix || migrationHeaderLocked}
+			aria-describedby="metadataPathPrefixHint metadataPathPrefixFeedback"
+			aria-invalid={!metadataPathValidation.valid}
+			placeholder="config"
+			class="input w-full font-mono text-xs disabled:opacity-50"
+		/>
+		<p id="metadataPathPrefixHint" class="mt-1 max-w-xl text-[11px] text-neutral-400">
+			{m.kometa_metadata_path_hint()}
+		</p>
+		{#if metadataPathValidation.valid}
+			<p
+				id="metadataPathPrefixFeedback"
+				class="mt-1 break-all font-mono text-[11px] text-neutral-400"
+			>
+				{m.kometa_metadata_resolved({ path: metadataPathValidation.references.join(', ') })}
+			</p>
+		{:else}
+			<p id="metadataPathPrefixFeedback" class="mt-1 text-xs text-red-300" role="alert">
+				{metadataPathErrorMessage(metadataPathValidation.code)}
+			</p>
+		{/if}
+	</div>
 	<div>
 		<label for="cfgMode" class="mb-1 block text-sm font-medium">{m.kometa_mode()}</label>
-		<select id="cfgMode" bind:value={mode} class="input">
+		<select
+			id="cfgMode"
+			bind:value={mode}
+			disabled={data.config?.envManaged?.kometaConfigMode || migrationHeaderLocked}
+			class="input disabled:opacity-50"
+		>
 			<option value="merge">{m.kometa_mode_merge()}</option>
 			<option value="own">{m.kometa_mode_own()}</option>
 		</select>
 	</div>
-	<button onclick={saveHeader} disabled={savingHeader} class="btn btn-subtle px-4 py-2">
+	<button
+		onclick={saveHeader}
+		disabled={savingHeader ||
+			!headerDirty ||
+			migrationHeaderLocked ||
+			!metadataPathValidation.valid}
+		class="btn btn-subtle px-4 py-2"
+	>
 		{savingHeader ? m.settings_saving() : m.settings_save()}
 	</button>
 	{#if headerError}<span class="text-sm text-red-300" role="alert">{headerError}</span>{/if}
 </div>
 
+{#if km.configCommitRecovery}
+	<section class="surface mt-4 border-amber-500/30 p-4" aria-labelledby="configRecoveryTitle">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div class="max-w-3xl">
+				<h2 id="configRecoveryTitle" class="text-sm font-semibold text-amber-100">
+					{m.kometa_config_recovery_title()}
+				</h2>
+				<p class="mt-1 text-sm text-neutral-300">
+					{km.configCommitRecovery.status === 'unreadable'
+						? m.kometa_config_recovery_unreadable_hint()
+						: km.configCommitRecovery.scopeMatches
+							? m.kometa_config_recovery_hint()
+							: m.kometa_config_recovery_scope_changed_hint()}
+				</p>
+			</div>
+			<button
+				type="button"
+				onclick={recoverConfirmedConfig}
+				disabled={!km.configCommitRecovery.canRecover || configRecoveryBusy}
+				class="btn btn-primary shrink-0 disabled:opacity-50"
+			>
+				{configRecoveryBusy
+					? m.kometa_config_recovery_recovering()
+					: m.kometa_config_recovery_action()}
+			</button>
+		</div>
+		{#if configRecoveryError}
+			<p class="mt-3 text-sm text-red-300" role="alert">{configRecoveryError}</p>
+		{/if}
+	</section>
+{/if}
+
+{#if configRecoveryNotice}
+	<p class="surface mt-3 border-amber-500/30 p-3 text-sm text-amber-100" role="status">
+		{configRecoveryNotice}
+	</p>
+{/if}
+
+<KometaMigrationPanel
+	locale={data.locale}
+	required={km.migrationRequired}
+	reason={km.migrationReason}
+	migration={km.migration}
+	stateError={km.migrationStateError}
+	mutationDisabledMessage={migrationMutationDisabledMessage}
+	onChanged={invalidateAll}
+/>
+
+{#if migrationScopeLocked && !configRecoveryLocked}
+	<p class="surface mt-3 border-amber-500/30 p-3 text-sm text-amber-200" role="status">
+		{m.kometa_migration_config_locked_hint()}
+	</p>
+{/if}
+
 {#if !km.active}
 	<p class="mt-3 text-sm text-neutral-400">{m.kometa_setup_hint()}</p>
 {:else}
 	{#if mode === 'own'}<p class="mt-3 text-xs text-amber-400">{m.kometa_mode_own_warning()}</p>{/if}
-	<p class="mt-2 text-xs {bindingReady ? 'text-emerald-300' : 'text-amber-400'}">
-		{bindingMessage}
-	</p>
-	{#if headerDirty}
-		<p class="mt-1 text-xs text-amber-400" role="status">{m.kometa_save_header_first()}</p>
+	{#if bindingReady && !headerDirty && !savingHeader}
+		<p class="mt-2 text-xs text-emerald-300">{bindingMessage}</p>
+	{:else if !migrationPanelVisible && migrationMutationDisabledMessage}
+		<p class="mt-2 text-xs text-amber-400" role="status">
+			{migrationMutationDisabledMessage}
+		</p>
 	{/if}
 
 	<!-- Section tabs -->
@@ -515,7 +797,7 @@
 					<div class="flex items-center justify-between gap-3">
 						<label
 							class="flex items-center gap-2 text-sm font-medium"
-							class:text-neutral-500={!lib.supported}
+							class:text-neutral-400={!lib.supported}
 						>
 							<input type="checkbox" bind:checked={lib.managed} disabled={!lib.supported} />
 							{lib.title}
@@ -549,7 +831,7 @@
 								</p>
 								{#each km.catalog as g (g.id)}
 									<div class="mb-2">
-										<p class="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
+										<p class="mb-1 flex items-center gap-2 text-[11px] text-neutral-400">
 											<span>{g.label}</span>
 											{#if g.docUrl}<a
 													href={g.docUrl}
@@ -582,7 +864,7 @@
 								</p>
 								{#each km.overlayCatalog as g (g.id)}
 									<div class="mb-2">
-										<p class="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
+										<p class="mb-1 flex items-center gap-2 text-[11px] text-neutral-400">
 											<span>{g.label}</span>
 											{#if g.docUrl}<a
 													href={g.docUrl}
@@ -684,19 +966,24 @@
 			<textarea
 				bind:value={rawText}
 				aria-label={m.kometa_raw_editor_label()}
+				disabled={migrationRawLocked}
 				spellcheck="false"
-				class="input h-[28rem] w-full font-mono text-xs"
+				class="input h-112 w-full font-mono text-xs disabled:opacity-50"
 				placeholder={rawBusy ? '…' : ''}></textarea>
 			<div class="flex items-center gap-3">
 				<button
 					onclick={previewRaw}
-					disabled={rawBusy || !bindingReady || headerDirty}
+					disabled={rawBusy || !bindingReady || headerDirty || migrationRawLocked}
 					class="btn btn-subtle px-4 py-2"
 				>
 					{rawBusy ? m.kometa_previewing() : m.kometa_raw_preview()}
 				</button>
 				{#if rawPreview?.planId}
-					<button onclick={confirmRaw} disabled={rawBusy} class="btn btn-accent px-4 py-2">
+					<button
+						onclick={confirmRaw}
+						disabled={rawBusy || migrationRawLocked}
+						class="btn btn-accent px-4 py-2"
+					>
 						{rawBusy ? m.settings_saving() : m.kometa_raw_confirm()}
 					</button>
 					<button
@@ -723,9 +1010,9 @@
 								<li class="font-mono text-xs text-neutral-300">
 									<span class="text-amber-300">{change.op}</span>
 									{change.path}
-									{#if change.before != null}<span class="text-neutral-500">{change.before}</span
+									{#if change.before != null}<span class="text-neutral-400">{change.before}</span
 										>{/if}
-									{#if change.after != null}<span class="text-neutral-500">→ {change.after}</span
+									{#if change.after != null}<span class="text-neutral-400">→ {change.after}</span
 										>{/if}
 								</li>
 							{/each}
@@ -744,7 +1031,7 @@
 							<button
 								type="button"
 								onclick={() => previewRestore(b.name)}
-								disabled={!bindingReady || headerDirty || restoreBusy}
+								disabled={!bindingReady || headerDirty || restoreBusy || migrationRestoreLocked}
 								class="btn btn-ghost px-3 py-1 text-xs"
 							>
 								{m.kometa_restore_preview()}
@@ -770,9 +1057,9 @@
 								<li class="font-mono text-xs text-neutral-300">
 									<span class="text-amber-300">{change.op}</span>
 									{change.path}
-									{#if change.before != null}<span class="text-neutral-500">{change.before}</span
+									{#if change.before != null}<span class="text-neutral-400">{change.before}</span
 										>{/if}
-									{#if change.after != null}<span class="text-neutral-500">→ {change.after}</span
+									{#if change.after != null}<span class="text-neutral-400">→ {change.after}</span
 										>{/if}
 								</li>
 							{/each}
@@ -782,7 +1069,7 @@
 						{#if restorePreview.planId}
 							<button
 								onclick={confirmRestore}
-								disabled={restoreBusy}
+								disabled={restoreBusy || migrationRestoreLocked}
 								class="btn bg-red-900/50 px-4 py-2 text-red-200 hover:bg-red-900/70"
 								>{m.kometa_restore_confirm()}</button
 							>
@@ -803,7 +1090,7 @@
 		<div class="surface mt-6 flex items-center gap-3 p-4">
 			<button
 				onclick={doPreview}
-				disabled={busy || !bindingReady || headerDirty}
+				disabled={busy || !bindingReady || headerDirty || migrationScopeLocked}
 				class="btn btn-subtle px-4 py-2"
 			>
 				{busy ? m.kometa_previewing() : m.kometa_preview()}
@@ -813,6 +1100,7 @@
 				disabled={busy ||
 					!bindingReady ||
 					headerDirty ||
+					migrationScopeLocked ||
 					Boolean(km.parseError) ||
 					!preview?.planId}
 				class="btn btn-accent px-4 py-2"
@@ -838,8 +1126,14 @@
 					{#if preview.warnings.includes('kometa_migration_required')}
 						<p class="text-amber-300">{m.apply_skip_kometa_migration_required()}</p>
 					{/if}
+					{#if preview.warnings.includes('kometa_migration_config_locked')}
+						<p class="text-amber-300">{m.kometa_migration_config_locked_hint()}</p>
+					{/if}
 					{#if preview.warnings.includes('kometa_library_missing')}
 						<p class="text-amber-300">{m.kometa_library_missing_warning()}</p>
+					{/if}
+					{#if preview.warnings.includes('kometa_library_title_conflict')}
+						<p class="text-amber-300">{m.kometa_library_title_conflict_warning()}</p>
 					{/if}
 					{#if preview.warnings.includes('kometa_library_type_unsupported')}
 						<p class="text-amber-300">{m.kometa_library_type_unsupported_warning()}</p>
@@ -848,7 +1142,9 @@
 						(warning) =>
 							![
 								'kometa_migration_required',
+								'kometa_migration_config_locked',
 								'kometa_library_missing',
+								'kometa_library_title_conflict',
 								'kometa_library_type_unsupported'
 							].includes(warning)
 					)}
@@ -875,8 +1171,8 @@
 											: 'text-amber-300'}>{c.op}</span
 								>
 								<span class="text-neutral-300">{c.path}</span>
-								{#if c.before != null}<span class="text-neutral-500">{c.before}</span>{/if}
-								{#if c.after != null}<span class="text-neutral-500">→ {c.after}</span>{/if}
+								{#if c.before != null}<span class="text-neutral-400">{c.before}</span>{/if}
+								{#if c.after != null}<span class="text-neutral-400">→ {c.after}</span>{/if}
 							</li>
 						{/each}
 					</ul>

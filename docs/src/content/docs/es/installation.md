@@ -67,9 +67,11 @@ elementos ni historial. Sigue la [lista de migración multiservidor](../multi-se
 
 Para usar el [Gestor de Kometa](../kometa-config-sync/), monta con lectura/escritura
 el directorio que contiene `config.yml` y define, por ejemplo,
-`KOMETA_CONFIG_PATH=/config/config.yml`. `posterpilot.yml` se escribe junto a ese
-archivo; no hace falta otra ruta de metadatos. El volumen contiene secretos Kometa
-en texto plano, así que protege sus permisos.
+`KOMETA_CONFIG_PATH=/config/config.yml`. `posterpilot-movies.yml` y
+`posterpilot-shows.yml` se escriben físicamente junto a ese archivo.
+`KOMETA_METADATA_PATH_PREFIX` (por defecto `config`) define por separado las
+referencias relativas visibles desde el runtime de Kometa; no es una ruta física.
+El volumen contiene secretos Kometa en texto plano, así que protege sus permisos.
 
 ## Docker Compose (macOS)
 

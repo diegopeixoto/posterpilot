@@ -2,6 +2,10 @@ import { db } from '$lib/server/db';
 import { resolveConfig } from '$lib/server/config';
 import { createMediaServer } from '$lib/server/media-server';
 import { getEncryptionKey } from '$lib/server/secrets/key';
+import {
+	assertKometaMigrationControlLease,
+	type KometaMigrationControlLease
+} from '$lib/server/kometa/migration-control-lock';
 import { legacyServerConnectionFromConfig } from './legacy';
 import {
 	createServerManagementService,
@@ -9,7 +13,17 @@ import {
 	type TestManagedServerInput,
 	type UpdateManagedServerInput
 } from './management';
-import { createServerInstanceStore } from './store';
+import { createServerInstanceStore, type ServerInstanceStore } from './store';
+
+type ServerInstanceWriteFence = Exclude<Parameters<ServerInstanceStore['update']>[2], undefined>;
+
+function writeFenceForControlLease(
+	controlLease?: KometaMigrationControlLease
+): ServerInstanceWriteFence | undefined {
+	return controlLease
+		? (transaction) => assertKometaMigrationControlLease(transaction, controlLease)
+		: undefined;
+}
 
 // Deliberately lazy: hooks imports this module before migrations run, so resolving the
 // encryption key or touching `server_instances` at module evaluation would be premature.
@@ -66,17 +80,27 @@ export const addManagedServer = (input: AddManagedServerInput) =>
 	liveManagementService().add(input);
 export const testManagedServer = (input: TestManagedServerInput) =>
 	liveManagementService().test(input);
-export const updateManagedServer = (id: string, input: UpdateManagedServerInput) =>
-	liveManagementService().update(id, input);
+export const updateManagedServer = (
+	id: string,
+	input: UpdateManagedServerInput,
+	controlLease?: KometaMigrationControlLease
+) => liveManagementService().update(id, input, writeFenceForControlLease(controlLease));
 export const enableManagedServer = (id: string) => liveManagementService().enable(id);
-export const disableManagedServer = (id: string) => liveManagementService().disable(id);
-export const disconnectManagedServer = (id: string, confirmed: boolean) =>
-	liveManagementService().disconnect(id, confirmed);
+export const disableManagedServer = (id: string, controlLease?: KometaMigrationControlLease) =>
+	liveManagementService().disable(id, writeFenceForControlLease(controlLease));
+export const disconnectManagedServer = (
+	id: string,
+	confirmed: boolean,
+	controlLease?: KometaMigrationControlLease
+) => liveManagementService().disconnect(id, confirmed, writeFenceForControlLease(controlLease));
 
 /** Materialize the effective environment-over-persisted legacy connection exactly once. */
-export async function materializeLegacyServerInstance() {
+export async function materializeLegacyServerInstance(controlLease?: KometaMigrationControlLease) {
 	const config = await resolveConfig();
-	return liveStore().materializeLegacy(legacyServerConnectionFromConfig(config));
+	return liveStore().materializeLegacy(
+		legacyServerConnectionFromConfig(config),
+		writeFenceForControlLease(controlLease)
+	);
 }
 
 export * from './legacy';

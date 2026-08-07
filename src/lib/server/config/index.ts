@@ -7,9 +7,23 @@ import { parseLibrarySort, type LibrarySort } from '$lib/library-sort';
 import { getEncryptionKey } from '$lib/server/secrets/key';
 import { decryptSecret, encryptSecret } from '$lib/server/secrets/crypto';
 import type { KometaSnapshot } from '$lib/server/kometa/config';
+import {
+	kometaLastAppliedSettingKey,
+	parseKometaLastApplied,
+	serializeKometaLastApplied,
+	type KometaSnapshotScope
+} from '$lib/server/kometa/last-applied';
+import {
+	DEFAULT_KOMETA_METADATA_PATH_PREFIX,
+	normalizeKometaMetadataPathPrefix
+} from '$lib/server/kometa/reference-path';
 import { LEGACY_SERVER_INSTANCE_ID } from '$lib/server/server-instances/legacy';
+import {
+	assertKometaMigrationControlLease,
+	type KometaMigrationControlLease
+} from '$lib/server/kometa/migration-control-lock';
 
-export type { KometaSnapshot };
+export type { KometaSnapshot, KometaSnapshotScope };
 
 export type ApplyMethod = 'plex' | 'kometa' | 'both';
 
@@ -38,11 +52,13 @@ export interface AppConfig {
 	tmdbKey: string | null;
 	kometaAssetsDir: string;
 	/**
-	 * Path to Kometa's own `config.yml` that PosterPilot surgically syncs (distinct
-	 * from the assets dir, which is where `posterpilot.yml` is written). Empty string
-	 * means the config-sync feature is off.
+	 * Path to Kometa's own `config.yml` that PosterPilot surgically syncs. When set,
+	 * the typed movie/show metadata files are co-located with this config; otherwise
+	 * the assets directory remains their physical output. Empty disables config sync.
 	 */
 	kometaConfigPath: string;
+	/** Relative directory prefix Kometa uses to reference the co-located metadata files. */
+	kometaMetadataPathPrefix: string;
 	/** Whether PosterPilot surgically merges (`merge`) or fully owns (`own`) config.yml. */
 	kometaConfigMode: KometaConfigMode;
 	/** Named Plex instance explicitly bound to the Kometa target. */
@@ -119,6 +135,7 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	tmdbKey: 'TMDB_KEY',
 	kometaAssetsDir: 'KOMETA_ASSETS_DIR',
 	kometaConfigPath: 'KOMETA_CONFIG_PATH',
+	kometaMetadataPathPrefix: 'KOMETA_METADATA_PATH_PREFIX',
 	kometaConfigMode: 'KOMETA_CONFIG_MODE',
 	kometaServerInstanceId: 'KOMETA_SERVER_INSTANCE_ID',
 	mediuxDelayMs: 'MEDIUX_REQUEST_DELAY_MS',
@@ -151,6 +168,7 @@ const ENV_MAP: Record<ConfigKey, string> = {
 const DEFAULTS = {
 	serverType: 'plex' as ServerType,
 	kometaAssetsDir: './data/kometa',
+	kometaMetadataPathPrefix: DEFAULT_KOMETA_METADATA_PATH_PREFIX,
 	mediuxDelayMs: 2000,
 	mediuxConcurrency: 5,
 	httpCacheTtlDays: 7,
@@ -190,6 +208,7 @@ const WRITABLE_KEYS: ConfigKey[] = [
 	'tmdbKey',
 	'kometaAssetsDir',
 	'kometaConfigPath',
+	'kometaMetadataPathPrefix',
 	'kometaConfigMode',
 	'kometaServerInstanceId',
 	'mediuxDelayMs',
@@ -287,6 +306,9 @@ export async function resolveConfig(): Promise<AppConfig> {
 	const persisted = await loadSettings();
 	const method = rawValue('defaultApplyMethod', persisted) as ApplyMethod | undefined;
 	const kometaAssetsDir = rawValue('kometaAssetsDir', persisted) ?? DEFAULTS.kometaAssetsDir;
+	const kometaMetadataPathPrefix = normalizeKometaMetadataPathPrefix(
+		rawValue('kometaMetadataPathPrefix', persisted) ?? DEFAULTS.kometaMetadataPathPrefix
+	);
 	return {
 		serverType: parseServerType(rawValue('serverType', persisted)),
 		plexUrl: rawValue('plexUrl', persisted) ?? null,
@@ -299,6 +321,7 @@ export async function resolveConfig(): Promise<AppConfig> {
 		tmdbKey: rawValue('tmdbKey', persisted) ?? null,
 		kometaAssetsDir,
 		kometaConfigPath: rawValue('kometaConfigPath', persisted) ?? '',
+		kometaMetadataPathPrefix,
 		kometaConfigMode: rawValue('kometaConfigMode', persisted) === 'own' ? 'own' : 'merge',
 		kometaServerInstanceId:
 			rawValue('kometaServerInstanceId', persisted) ?? DEFAULTS.kometaServerInstanceId,
@@ -393,14 +416,17 @@ function scopedSettingsKey(base: string, serverInstanceId: string): string {
  * the "Libraries to sync" checklist instantly without a network round-trip.
  */
 export async function getCachedLibraries(
-	serverInstanceId: string = LEGACY_SERVER_INSTANCE_ID
+	serverInstanceId: string = LEGACY_SERVER_INSTANCE_ID,
+	database: SettingsDatabaseReader = db
 ): Promise<CachedLibrary[]> {
-	const scoped = await readKv(scopedSettingsKey(CACHED_LIBRARIES_KEY, serverInstanceId));
+	const scoped = await readKv(scopedSettingsKey(CACHED_LIBRARIES_KEY, serverInstanceId), database);
 	// Preserve the existing one-server installation cache until it is refreshed once
 	// under the new scoped key. Never expose that fallback to a different instance.
 	const value =
 		scoped ??
-		(serverInstanceId === LEGACY_SERVER_INSTANCE_ID ? await readKv(CACHED_LIBRARIES_KEY) : null);
+		(serverInstanceId === LEGACY_SERVER_INSTANCE_ID
+			? await readKv(CACHED_LIBRARIES_KEY, database)
+			: null);
 	if (!value) return [];
 	try {
 		const arr = JSON.parse(value);
@@ -463,15 +489,21 @@ export async function setIncludedSectionsForServer(
 const KOMETA_MANAGED_LIBRARIES_KEY = 'kometaManagedLibraries';
 const KOMETA_DEFAULT_COLLECTIONS_KEY = 'kometaDefaultCollections';
 const KOMETA_MANAGED_SETTINGS_KEY = 'kometaManagedSettings';
-const KOMETA_LAST_APPLIED_KEY = 'kometaLastApplied';
 
-async function readKv(key: string): Promise<string | null> {
-	const row = (await db.select().from(settings).where(eq(settings.key, key)).limit(1))[0];
+export type SettingsDatabaseReader = Pick<typeof db, 'select'>;
+type SettingsDatabaseWriter = Pick<typeof db, 'delete' | 'insert'>;
+
+async function readKv(key: string, database: SettingsDatabaseReader = db): Promise<string | null> {
+	const row = (await database.select().from(settings).where(eq(settings.key, key)).limit(1))[0];
 	return row?.value ?? null;
 }
 
-async function writeKv(key: string, value: string): Promise<void> {
-	await db
+async function writeKv(
+	key: string,
+	value: string,
+	database: Pick<typeof db, 'insert'> = db
+): Promise<void> {
+	await database
 		.insert(settings)
 		.values({ key, value })
 		.onConflictDoUpdate({ target: settings.key, set: { value } });
@@ -488,8 +520,10 @@ function parseStringArray(raw: string | null): string[] {
 }
 
 /** Section keys the user has marked as managed in Kometa's config. */
-export async function getKometaManagedLibraries(): Promise<string[]> {
-	return parseStringArray(await readKv(KOMETA_MANAGED_LIBRARIES_KEY));
+export async function getKometaManagedLibraries(
+	database: SettingsDatabaseReader = db
+): Promise<string[]> {
+	return parseStringArray(await readKv(KOMETA_MANAGED_LIBRARIES_KEY, database));
 }
 
 export async function setKometaManagedLibraries(sectionKeys: string[]): Promise<void> {
@@ -530,25 +564,30 @@ export async function getKometaManagedSettings(): Promise<Record<string, string>
 	}
 }
 
-export async function setKometaManagedSettings(values: Record<string, string>): Promise<void> {
-	await writeKv(KOMETA_MANAGED_SETTINGS_KEY, JSON.stringify(values));
+/** The exact-scope last-applied snapshot used to compute safe removals. */
+export async function getKometaLastApplied(
+	scope: KometaSnapshotScope,
+	database: SettingsDatabaseReader = db
+): Promise<KometaSnapshot | null> {
+	const raw = await readKv(kometaLastAppliedSettingKey(scope), database);
+	return raw === null ? null : parseKometaLastApplied(raw, scope);
 }
 
-/** The last-applied snapshot used to compute removals on the next sync. */
-export async function getKometaLastApplied(): Promise<KometaSnapshot | null> {
-	const raw = await readKv(KOMETA_LAST_APPLIED_KEY);
-	if (!raw) return null;
-	try {
-		const obj = JSON.parse(raw);
-		if (!obj || typeof obj !== 'object') return null;
-		return obj as KometaSnapshot;
-	} catch {
-		return null;
-	}
+export async function setKometaLastApplied(
+	snapshot: KometaSnapshot,
+	scope: KometaSnapshotScope
+): Promise<void> {
+	await writeKv(kometaLastAppliedSettingKey(scope), serializeKometaLastApplied(scope, snapshot));
 }
 
-export async function setKometaLastApplied(snapshot: KometaSnapshot): Promise<void> {
-	await writeKv(KOMETA_LAST_APPLIED_KEY, JSON.stringify(snapshot));
+export interface KometaConfigMutationStateCommit {
+	managedSettings: Record<string, string>;
+	structured?: {
+		managedLibraries: string[];
+		defaultCollections: Record<string, string[]>;
+		lastApplied: KometaSnapshot;
+		scope: KometaSnapshotScope;
+	};
 }
 
 // ── Optional authentication (internal KV, not WRITABLE_KEYS) ───────────────────
@@ -647,21 +686,40 @@ export {
 } from '$lib/server/posters/score-weights';
 
 /** Persist UI-supplied settings. Empty string clears a key. Ignores non-writable keys. */
-export async function saveSettings(values: Partial<Record<ConfigKey, string>>): Promise<void> {
+export async function saveSettings(
+	values: Partial<Record<ConfigKey, string>>,
+	controlLease?: KometaMigrationControlLease
+): Promise<void> {
 	const entries = Object.entries(values).filter(([k]) => WRITABLE_KEYS.includes(k as ConfigKey));
 	const encKey = getEncryptionKey();
-	for (const [key, value] of entries) {
-		if (value === '' || value === undefined) {
-			await db.delete(settings).where(eq(settings.key, key));
-		} else {
-			// Secrets are encrypted at rest; everything else is stored verbatim.
-			const stored = isSecretKey(key) ? encryptSecret(value, encKey) : value;
-			await db
-				.insert(settings)
-				.values({ key, value: stored })
-				.onConflictDoUpdate({ target: settings.key, set: { value: stored } });
+	const persist = async (database: SettingsDatabaseWriter): Promise<void> => {
+		for (const [key, value] of entries) {
+			// `.` is the persisted representation of an explicit empty Kometa-visible
+			// prefix. A truly missing row retains the safer `config` default.
+			const normalizedValue =
+				key === 'kometaMetadataPathPrefix' && value !== undefined
+					? normalizeKometaMetadataPathPrefix(value) || '.'
+					: value;
+			if (normalizedValue === '' || normalizedValue === undefined) {
+				await database.delete(settings).where(eq(settings.key, key));
+			} else {
+				// Secrets are encrypted at rest; everything else is stored verbatim.
+				const stored = isSecretKey(key) ? encryptSecret(normalizedValue, encKey) : normalizedValue;
+				await database
+					.insert(settings)
+					.values({ key, value: stored })
+					.onConflictDoUpdate({ target: settings.key, set: { value: stored } });
+			}
 		}
+	};
+	if (controlLease) {
+		await db.transaction(async (tx) => {
+			await assertKometaMigrationControlLease(tx, controlLease);
+			await persist(tx);
+		});
+		return;
 	}
+	await persist(db);
 }
 
 /**
@@ -679,6 +737,7 @@ export interface PublicConfig {
 	tmdbKeySet: boolean;
 	kometaAssetsDir: string;
 	kometaConfigPath: string;
+	kometaMetadataPathPrefix: string;
 	kometaConfigMode: KometaConfigMode;
 	kometaServerInstanceId: string | null;
 	mediuxDelayMs: number;
@@ -734,6 +793,7 @@ export async function publicConfig(serverInstanceId?: string): Promise<PublicCon
 		tmdbKeySet: c.tmdbKey !== null,
 		kometaAssetsDir: c.kometaAssetsDir,
 		kometaConfigPath: c.kometaConfigPath,
+		kometaMetadataPathPrefix: c.kometaMetadataPathPrefix,
 		kometaConfigMode: c.kometaConfigMode,
 		kometaServerInstanceId: c.kometaServerInstanceId,
 		mediuxDelayMs: c.mediuxDelayMs,

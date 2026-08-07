@@ -13,11 +13,8 @@ import {
 	getKometaManagedLibraries,
 	getKometaManagedSettings,
 	resolveConfig,
-	setKometaDefaultCollections,
-	setKometaLastApplied,
-	setKometaManagedLibraries,
-	setKometaManagedSettings,
-	type AppConfig
+	type AppConfig,
+	type KometaSnapshotScope
 } from '$lib/server/config';
 import { logEvent } from '$lib/server/events';
 import {
@@ -41,11 +38,18 @@ import {
 } from './config';
 import type { KometaConfigMode } from '$lib/server/config';
 import {
+	canonicalConfigPath,
+	clearConfigCommitProofAtBinding,
+	freezeConfigPath,
 	listBackups,
-	readBackup,
+	prepareConfigCommitProofAtBinding,
+	readBackupAtBinding,
 	readConfig,
+	readConfigAtBinding,
+	recoverConfigQuarantineAtBinding,
+	validateConfigPathBinding,
 	withConfigLock,
-	writeConfigAtomic,
+	writeConfigAtomicAtBinding,
 	type BackupInfo
 } from './config-io';
 import {
@@ -55,6 +59,7 @@ import {
 	type KometaMetadataFilename
 } from './destination';
 import { classifyKometaLegacyConfig } from './legacy-layout';
+import { kometaMetadataReference, kometaMetadataReferenceBasename } from './reference-path';
 import { DEFAULT_COLLECTION_GROUPS, knownDefaults, type DefaultGroup } from './defaults-catalog';
 import { MANAGED_SETTINGS, type ManagedSettingDef } from './managed-settings';
 import {
@@ -78,6 +83,7 @@ import {
 	assertKometaConfigPlanPayload,
 	kometaFileFingerprint,
 	kometaProposedFingerprint,
+	kometaStructuredDependencyFingerprint,
 	rawKometaChanges,
 	type KometaConfigPlanAction,
 	type KometaConfigPlanPayload
@@ -87,6 +93,78 @@ import {
 	operationPlanStore,
 	type OperationPlan
 } from '$lib/server/plans/operation-plan-store';
+import {
+	inspectKometaCollisionGuard,
+	kometaOutputDirectory
+} from '$lib/server/plans/apply-destinations';
+import { loadKometaMigrationJournalForGuard } from './migration-store';
+import type { KometaMigrationJournalV1 } from './migration-journal';
+import { kometaMigrationCollisionState, type PublicKometaMigrationState } from './migration-state';
+import { loadCurrentKometaMigrationState } from './migration';
+import {
+	isKometaConfigMutationLocked,
+	type KometaConfigMutationAction
+} from '$lib/kometa-config-mutation-policy';
+import { withKometaMigrationControlLock } from './migration-control-lock';
+import { PhysicalPathInspectionError } from './physical-path-alias';
+import {
+	createKometaConfigMutationCheckpoint,
+	discardKometaConfigMutationCheckpoint,
+	loadKometaConfigMutationCheckpoint,
+	prepareKometaConfigMutationCheckpoint
+} from './config-mutation-checkpoint';
+import {
+	assertNoPendingKometaConfigMutationWhileOwned,
+	completePreparedKometaConfigMutation,
+	publicKometaConfigMutationRecoveryState,
+	type PublicKometaConfigMutationRecovery
+} from './config-mutation-recovery';
+
+function kometaSnapshotScope(config: AppConfig, serverInstanceId: string): KometaSnapshotScope {
+	return {
+		serverInstanceId,
+		configPath: config.kometaConfigPath ? canonicalConfigPath(config.kometaConfigPath) : null,
+		outputDirectory: canonicalConfigPath(kometaOutputDirectory(config)),
+		metadataPathPrefix: config.kometaMetadataPathPrefix
+	};
+}
+
+function migrationJournalScopeMatches(
+	config: AppConfig,
+	serverInstanceId: string,
+	journal: KometaMigrationJournalV1 | null
+): boolean {
+	if (!journal) return false;
+	return (
+		journal.payload.serverInstanceId === serverInstanceId &&
+		canonicalConfigPath(journal.payload.outputDirectory) ===
+			canonicalConfigPath(kometaOutputDirectory(config)) &&
+		journal.payload.metadataPathPrefix === config.kometaMetadataPathPrefix &&
+		Boolean(journal.payload.config.path) === Boolean(config.kometaConfigPath) &&
+		(journal.payload.config.path === null ||
+			(canonicalConfigPath(journal.payload.config.path) ===
+				canonicalConfigPath(config.kometaConfigPath) &&
+				journal.payload.config.mode === config.kometaConfigMode))
+	);
+}
+
+async function configMutationLocked(
+	config: AppConfig,
+	serverInstanceId: string,
+	action: KometaConfigMutationAction
+): Promise<boolean> {
+	if (await loadKometaConfigMutationCheckpoint()) return true;
+	const journal = await loadKometaMigrationJournalForGuard(serverInstanceId);
+	return isKometaConfigMutationLocked(
+		action,
+		journal
+			? {
+					status: journal.status,
+					scopeMatches: migrationJournalScopeMatches(config, serverInstanceId, journal)
+				}
+			: null
+	);
+}
 
 export { type SyncSelectionInput } from './selection';
 
@@ -100,7 +178,10 @@ export interface KometaTabState {
 	resolvedConfigPath: string;
 	/** True when the configured path is relative (fragile in Docker — CWD is /app). */
 	configPathRelative: boolean;
+	/** Canonical Kometa-visible prefix, kept separate from the physical output directory. */
+	metadataPathPrefix: string;
 	metadataFiles: { movie: typeof MOVIE_FILENAME; show: typeof SHOW_FILENAME };
+	metadataReferences: { movie: string; show: string };
 	exists: boolean;
 	parseError: string | null;
 	/** Client-safe identity of the exact Plex instance that owns this target. */
@@ -145,6 +226,13 @@ export interface KometaTabState {
 	globals: { settings: Record<string, string>; webhooksSet: string[] };
 	backups: BackupInfo[];
 	consistency: ConsistencyWarning[];
+	/** Durable split-layout migration state; exact YAML/provider URLs are redacted. */
+	migration: PublicKometaMigrationState | null;
+	migrationStateError: 'journal_unreadable' | null;
+	migrationRequired: boolean;
+	migrationReason: 'active_legacy_reference' | 'unknown_config_with_legacy_file' | null;
+	/** Redacted durable recovery state for an interrupted, already-confirmed config save. */
+	configCommitRecovery: PublicKometaConfigMutationRecovery | null;
 }
 
 /** Result of a preview or sync, with secrets redacted for the browser. */
@@ -200,7 +288,13 @@ const POSTERPILOT_METADATA_FILES = new Set<string>([
 ]);
 
 class KometaLibraryPlanError extends Error {
-	constructor(readonly code: 'kometa_library_missing' | 'kometa_migration_required') {
+	constructor(
+		readonly code:
+			| 'kometa_library_missing'
+			| 'kometa_library_title_conflict'
+			| 'kometa_migration_required'
+			| 'kometa_migration_config_locked'
+	) {
 		super(code);
 		this.name = 'KometaLibraryPlanError';
 	}
@@ -236,9 +330,11 @@ async function planFromSelections(
 	const cached = await getCachedLibraries(binding.id);
 	const libraryByKey = new Map(cached.map((library) => [library.key, library]));
 	const supportedLibraryKeys = new Set<string>();
+	const selectedLibraryKeys = [...new Set(sel.libraries)];
+	const selectedKeyByTitle = new Map<string, string>();
 	const warnings = new Set<string>();
 	const libraries: Parameters<typeof buildPlan>[0]['libraries'] = [];
-	for (const key of sel.libraries) {
+	for (const key of selectedLibraryKeys) {
 		const library = libraryByKey.get(key);
 		if (!library?.title) throw new KometaLibraryPlanError('kometa_library_missing');
 		const metadataFile = metadataFileForLibraryType(library.type);
@@ -246,6 +342,14 @@ async function planFromSelections(
 			warnings.add('kometa_library_type_unsupported');
 			continue;
 		}
+		const existingKey = selectedKeyByTitle.get(library.title);
+		// Kometa libraries are keyed by title in YAML. Two authoritative sections
+		// cannot safely share that key: one would overwrite the other's typed file
+		// and snapshot ownership. Fail closed until the source titles are distinct.
+		if (existingKey !== undefined && existingKey !== key) {
+			throw new KometaLibraryPlanError('kometa_library_title_conflict');
+		}
+		selectedKeyByTitle.set(library.title, key);
 		supportedLibraryKeys.add(key);
 		libraries.push({
 			name: library.title,
@@ -253,12 +357,13 @@ async function planFromSelections(
 			overlays: knownOverlays(sel.overlays[key] ?? []),
 			operations: sel.operations[key] ?? {},
 			settingsOverrides: sel.librarySettings[key] ?? {},
-			metadataFile
+			metadataFile,
+			metadataReference: kometaMetadataReference(config.kometaMetadataPathPrefix, metadataFile)
 		});
 	}
 	const selection: SyncSelectionInput = {
 		...sel,
-		libraries: sel.libraries.filter((key) => supportedLibraryKeys.has(key)),
+		libraries: selectedLibraryKeys.filter((key) => supportedLibraryKeys.has(key)),
 		defaults: recordsForLibraries(sel.defaults, supportedLibraryKeys),
 		overlays: recordsForLibraries(sel.overlays, supportedLibraryKeys),
 		operations: recordsForLibraries(sel.operations, supportedLibraryKeys),
@@ -310,6 +415,7 @@ async function planFromSelections(
 	return {
 		plan: buildPlan({
 			creds: { plexUrl: binding.plexUrl, plexToken: binding.plexToken, tmdbKey: config.tmdbKey },
+			metadataPathPrefix: config.kometaMetadataPathPrefix,
 			libraries,
 			settings,
 			settingKeep,
@@ -372,7 +478,23 @@ export async function loadKometaState(): Promise<KometaTabState> {
 	}
 
 	const cached = binding ? await getCachedLibraries(binding.id) : [];
+	let migrationJournal: KometaMigrationJournalV1 | null = null;
+	let migration: PublicKometaMigrationState | null = null;
+	let migrationStateError: KometaTabState['migrationStateError'] = null;
+	try {
+		migrationJournal = await loadKometaMigrationJournalForGuard(
+			binding?.id ?? config.kometaServerInstanceId
+		);
+		if (migrationJournal) migration = await loadCurrentKometaMigrationState();
+	} catch {
+		migrationStateError = 'journal_unreadable';
+	}
+	const migrationGuard = inspectKometaCollisionGuard(
+		config,
+		kometaMigrationCollisionState(migrationJournal)
+	);
 	const storedManagedSettings = await getKometaManagedSettings();
+	const configCommitRecovery = await publicKometaConfigMutationRecoveryState();
 	const currentManagedSettings = readManagedSettingValues(doc);
 	const managedSettings: Record<string, string> = {};
 	const managedSettingSecretsSet: string[] = [];
@@ -414,7 +536,10 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			overlays: readDefaultList(doc, name, 'overlay_files'),
 			operations: readScalarMap(doc, ['libraries', name, 'operations']),
 			settings: readScalarMap(doc, ['libraries', name, 'settings']),
-			hasMetadata: metadataFiles.some((file) => POSTERPILOT_METADATA_FILES.has(file)),
+			hasMetadata: metadataFiles.some((file) => {
+				const basename = kometaMetadataReferenceBasename(file);
+				return basename !== null && POSTERPILOT_METADATA_FILES.has(basename);
+			}),
 			metadataFiles
 		};
 	}
@@ -426,6 +551,7 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			plexToken: binding?.plexToken ?? null,
 			tmdbKey: config.tmdbKey
 		},
+		metadataPathPrefix: config.kometaMetadataPathPrefix,
 		libraries: Object.entries(libraryState).map(([name, s]) => ({
 			name,
 			defaults: s.collections,
@@ -440,7 +566,12 @@ export async function loadKometaState(): Promise<KometaTabState> {
 		configPath: config.kometaConfigPath,
 		resolvedConfigPath: active ? resolve(config.kometaConfigPath) : '',
 		configPathRelative: active && !config.kometaConfigPath.startsWith('/'),
+		metadataPathPrefix: config.kometaMetadataPathPrefix,
 		metadataFiles: { movie: MOVIE_FILENAME, show: SHOW_FILENAME },
+		metadataReferences: {
+			movie: kometaMetadataReference(config.kometaMetadataPathPrefix, MOVIE_FILENAME),
+			show: kometaMetadataReference(config.kometaMetadataPathPrefix, SHOW_FILENAME)
+		},
 		exists,
 		parseError,
 		serverBinding: binding ? { id: binding.id, name: binding.name } : null,
@@ -466,7 +597,13 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			).map((def) => def.key)
 		},
 		backups: active && exists ? listBackups(config.kometaConfigPath) : [],
-		consistency: checkConsistency(currentPlan, doc)
+		consistency: checkConsistency(currentPlan, doc),
+		migration,
+		migrationStateError,
+		migrationRequired: migrationGuard.migrationRequired,
+		migrationReason:
+			migrationGuard.reason === 'migration_incomplete' ? null : migrationGuard.reason,
+		configCommitRecovery
 	};
 }
 
@@ -571,10 +708,30 @@ function computeSync(
 	return { res: applyPlan(doc, plan, snapshot), dropped: [], willScaffold: false };
 }
 
+async function withCurrentConfigReadLock<T>(
+	operation: (config: AppConfig, pathBinding: ReturnType<typeof freezeConfigPath>) => Promise<T>
+): Promise<T | null> {
+	for (;;) {
+		const initial = await resolveConfig();
+		if (!initial.kometaConfigPath) return null;
+		const attempt = await withConfigLock(initial.kometaConfigPath, async () => {
+			const current = await resolveConfig();
+			if (current.kometaConfigPath !== initial.kometaConfigPath) {
+				return { retry: true as const };
+			}
+			const pathBinding = freezeConfigPath(current.kometaConfigPath);
+			return { retry: false as const, value: await operation(current, pathBinding) };
+		});
+		if (!attempt.retry) return attempt.value;
+	}
+}
+
 /** Compute the diff a sync would make, without writing anything. */
-export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> {
-	const config = await resolveConfig();
-	if (!config.kometaConfigPath) return inactiveResult();
+async function previewSyncAtBinding(
+	sel: SyncSelectionInput,
+	config: AppConfig,
+	pathBinding: ReturnType<typeof freezeConfigPath>
+): Promise<SyncResult> {
 	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
 	if (!resolvedBinding.binding) {
 		return bindingErrorResult(
@@ -583,7 +740,14 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		);
 	}
 	const binding = resolvedBinding.binding;
-	const raw = readConfig(config.kometaConfigPath);
+	if (await configMutationLocked(config, binding.id, 'structured')) {
+		return libraryPlanErrorResult(
+			config,
+			readConfig(config.kometaConfigPath),
+			new KometaLibraryPlanError('kometa_migration_config_locked')
+		);
+	}
+	const raw = readConfigAtBinding(pathBinding);
 	const sourceDoc = loadDoc(raw ?? '');
 	if (sourceDoc.errors.length > 0) {
 		return parseErrorResult(config.kometaConfigMode, sourceDoc.errors[0].message);
@@ -600,7 +764,7 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		);
 	}
 	const [snapshot, storedManagedSettings] = await Promise.all([
-		getKometaLastApplied(),
+		getKometaLastApplied(kometaSnapshotScope(config, binding.id)),
 		getKometaManagedSettings()
 	]);
 	let planned: Awaited<ReturnType<typeof planFromSelections>>;
@@ -627,14 +791,22 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 	const warnings = [...new Set([...out.res.warnings, ...planningWarnings])];
 	const payload = jsonSafe<KometaConfigPlanPayload>({
 		type: KOMETA_CONFIG_PLAN_KIND,
-		version: 1,
+		version: 2,
 		action: 'structured',
 		serverInstanceId: binding.id,
 		serverName: binding.name,
 		configPath: config.kometaConfigPath,
+		pathBinding,
 		mode: config.kometaConfigMode,
+		sourceContent: raw,
 		sourceFingerprint: kometaFileFingerprint(raw),
 		proposedFingerprint: kometaProposedFingerprint(proposedContent),
+		structuredDependencyFingerprint: kometaStructuredDependencyFingerprint({
+			serverInstanceId: binding.id,
+			plexUrl: binding.plexUrl,
+			plexToken: binding.plexToken,
+			tmdbKey: config.tmdbKey
+		}),
 		proposedContent,
 		display: {
 			changes: out.res.changes,
@@ -666,6 +838,14 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 	};
 }
 
+export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> {
+	return (
+		(await withCurrentConfigReadLock((config, binding) =>
+			previewSyncAtBinding(sel, config, binding)
+		)) ?? inactiveResult()
+	);
+}
+
 /** Result of a raw-editor/restore preview or confirmation. */
 export interface RawResult {
 	ok: boolean;
@@ -687,9 +867,12 @@ export interface RawResult {
 
 /** Read the current raw config text (for the raw editor). */
 export async function loadRaw(): Promise<{ active: boolean; text: string }> {
-	const config = await resolveConfig();
-	if (!config.kometaConfigPath) return { active: false, text: '' };
-	return { active: true, text: readConfig(config.kometaConfigPath) ?? '' };
+	return (
+		(await withCurrentConfigReadLock(async (_config, binding) => ({
+			active: true,
+			text: readConfigAtBinding(binding) ?? ''
+		}))) ?? { active: false, text: '' }
+	);
 }
 
 function rawBindingError(status: Exclude<KometaServerBindingStatus, 'ready'>): RawResult {
@@ -702,31 +885,44 @@ function rawBindingError(status: Exclude<KometaServerBindingStatus, 'ready'>): R
 }
 
 /** Validate raw YAML and issue a single-use exact-content preview. */
-export async function previewRawConfig(text: string): Promise<RawResult> {
-	const config = await resolveConfig();
-	if (!config.kometaConfigPath) return { ok: false, active: false, parseError: null };
+async function previewRawConfigAtBinding(
+	text: string,
+	config: AppConfig,
+	pathBinding: ReturnType<typeof freezeConfigPath>
+): Promise<RawResult> {
 	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
 	if (!resolvedBinding.binding) {
 		return rawBindingError(resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>);
 	}
 	const binding = resolvedBinding.binding;
+	if (await configMutationLocked(config, binding.id, 'raw')) {
+		return {
+			ok: false,
+			active: true,
+			parseError: null,
+			errorCode: 'kometa_migration_config_locked'
+		};
+	}
 	const doc = loadDoc(text);
 	if (doc.errors.length) return { ok: false, active: true, parseError: doc.errors[0].message };
-	const raw = readConfig(config.kometaConfigPath);
+	const raw = readConfigAtBinding(pathBinding);
 	const diff = rawKometaChanges(raw, text);
 	if (kometaFileFingerprint(raw) === kometaFileFingerprint(text)) {
 		return { ok: true, active: true, parseError: null, changes: [], planId: null };
 	}
 	const payload: KometaConfigPlanPayload = {
 		type: KOMETA_CONFIG_PLAN_KIND,
-		version: 1,
+		version: 2,
 		action: 'raw',
 		serverInstanceId: binding.id,
 		serverName: binding.name,
 		configPath: config.kometaConfigPath,
+		pathBinding,
 		mode: config.kometaConfigMode,
+		sourceContent: raw,
 		sourceFingerprint: kometaFileFingerprint(raw),
 		proposedFingerprint: kometaProposedFingerprint(text),
+		structuredDependencyFingerprint: null,
 		proposedContent: text,
 		display: {
 			changes: diff.changes,
@@ -755,18 +951,36 @@ export async function previewRawConfig(text: string): Promise<RawResult> {
 	};
 }
 
+export async function previewRawConfig(text: string): Promise<RawResult> {
+	return (
+		(await withCurrentConfigReadLock((config, binding) =>
+			previewRawConfigAtBinding(text, config, binding)
+		)) ?? { ok: false, active: false, parseError: null }
+	);
+}
+
 /** Read a backup, diff it against current bytes, and issue a bound restore preview. */
-export async function previewRestoreConfig(name: string): Promise<RawResult> {
-	const config = await resolveConfig();
-	if (!config.kometaConfigPath) return { ok: false, active: false, parseError: null };
+async function previewRestoreConfigAtBinding(
+	name: string,
+	config: AppConfig,
+	pathBinding: ReturnType<typeof freezeConfigPath>
+): Promise<RawResult> {
 	const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
 	if (!resolvedBinding.binding) {
 		return rawBindingError(resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>);
 	}
 	const binding = resolvedBinding.binding;
+	if (await configMutationLocked(config, binding.id, 'restore')) {
+		return {
+			ok: false,
+			active: true,
+			parseError: null,
+			errorCode: 'kometa_migration_config_locked'
+		};
+	}
 	let backupContent: string;
 	try {
-		backupContent = readBackup(config.kometaConfigPath, name);
+		backupContent = readBackupAtBinding(pathBinding, name);
 	} catch (error) {
 		return {
 			ok: false,
@@ -776,7 +990,7 @@ export async function previewRestoreConfig(name: string): Promise<RawResult> {
 	}
 	const doc = loadDoc(backupContent);
 	if (doc.errors.length) return { ok: false, active: true, parseError: doc.errors[0].message };
-	const raw = readConfig(config.kometaConfigPath);
+	const raw = readConfigAtBinding(pathBinding);
 	const diff = rawKometaChanges(raw, backupContent);
 	if (kometaFileFingerprint(raw) === kometaFileFingerprint(backupContent)) {
 		return {
@@ -790,14 +1004,17 @@ export async function previewRestoreConfig(name: string): Promise<RawResult> {
 	}
 	const payload: KometaConfigPlanPayload = {
 		type: KOMETA_CONFIG_PLAN_KIND,
-		version: 1,
+		version: 2,
 		action: 'restore',
 		serverInstanceId: binding.id,
 		serverName: binding.name,
 		configPath: config.kometaConfigPath,
+		pathBinding,
 		mode: config.kometaConfigMode,
+		sourceContent: raw,
 		sourceFingerprint: kometaFileFingerprint(raw),
 		proposedFingerprint: kometaProposedFingerprint(backupContent),
+		structuredDependencyFingerprint: null,
 		proposedContent: backupContent,
 		display: {
 			changes: diff.changes,
@@ -830,6 +1047,14 @@ export async function previewRestoreConfig(name: string): Promise<RawResult> {
 	};
 }
 
+export async function previewRestoreConfig(name: string): Promise<RawResult> {
+	return (
+		(await withCurrentConfigReadLock((config, binding) =>
+			previewRestoreConfigAtBinding(name, config, binding)
+		)) ?? { ok: false, active: false, parseError: null }
+	);
+}
+
 async function validateStoredKometaPlan(
 	request: ConfirmKometaPlanRequest,
 	expectedAction: KometaConfigPlanAction
@@ -858,65 +1083,169 @@ async function confirmKometaConfigPlan(
 ): Promise<{ payload: KometaConfigPlanPayload; backup: boolean }> {
 	const initial = await validateStoredKometaPlan(request, expectedAction);
 	return withConfigLock(initial.payload.configPath, async () => {
-		const pending = await validateStoredKometaPlan(request, expectedAction);
-		const config = await resolveConfig();
-		const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
-		if (
-			!resolvedBinding.binding ||
-			resolvedBinding.binding.id !== pending.payload.serverInstanceId ||
-			config.kometaConfigPath !== pending.payload.configPath ||
-			config.kometaConfigMode !== pending.payload.mode
-		) {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
+		const { consumed, backup } = await withKometaMigrationControlLock(
+			async (assertControlLockOwned) => {
+				const pending = await validateStoredKometaPlan(request, expectedAction);
+				try {
+					await assertNoPendingKometaConfigMutationWhileOwned(assertControlLockOwned);
+				} catch {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
+				const config = await resolveConfig();
+				const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+				const binding = resolvedBinding.binding;
+				if (
+					!binding ||
+					binding.id !== pending.payload.serverInstanceId ||
+					config.kometaConfigPath !== pending.payload.configPath ||
+					config.kometaConfigMode !== pending.payload.mode ||
+					(expectedAction === 'structured' &&
+						(pending.payload.structured?.nextSnapshot.metadataPathPrefix !==
+							config.kometaMetadataPathPrefix ||
+							pending.payload.structuredDependencyFingerprint !==
+								kometaStructuredDependencyFingerprint({
+									serverInstanceId: binding.id,
+									plexUrl: binding.plexUrl,
+									plexToken: binding.plexToken,
+									tmdbKey: config.tmdbKey
+								})))
+				) {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
+				if (await configMutationLocked(config, binding.id, expectedAction)) {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
 
-		const current = readConfig(pending.payload.configPath);
-		if (
-			expectedAction === 'structured' &&
-			current !== null &&
-			requiresKometaLayoutMigration(current)
-		) {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		if (kometaFileFingerprint(current) !== pending.payload.sourceFingerprint) {
-			throw new OperationPlanError('plan_stale', request.planId);
-		}
-		if (pending.payload.restore) {
-			let backupContent: string;
-			try {
-				backupContent = readBackup(pending.payload.configPath, pending.payload.restore.backupName);
-			} catch {
-				throw new OperationPlanError('plan_stale', request.planId);
+				const pathBinding = validateConfigPathBinding(pending.payload.pathBinding);
+				if (canonicalConfigPath(config.kometaConfigPath) !== pathBinding.canonicalPath) {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
+				await assertControlLockOwned();
+				recoverConfigQuarantineAtBinding(pathBinding);
+				let current: string | null;
+				try {
+					current = readConfigAtBinding(pathBinding);
+				} catch (error) {
+					if (error instanceof PhysicalPathInspectionError) {
+						throw new OperationPlanError('plan_stale', request.planId);
+					}
+					throw error;
+				}
+				if (
+					expectedAction === 'structured' &&
+					current !== null &&
+					requiresKometaLayoutMigration(current)
+				) {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
+				if (
+					current !== pending.payload.sourceContent ||
+					kometaFileFingerprint(current) !== pending.payload.sourceFingerprint
+				) {
+					throw new OperationPlanError('plan_stale', request.planId);
+				}
+				if (pending.payload.restore) {
+					let backupContent: string;
+					try {
+						backupContent = readBackupAtBinding(pathBinding, pending.payload.restore.backupName);
+					} catch {
+						throw new OperationPlanError('plan_stale', request.planId);
+					}
+					if (
+						kometaFileFingerprint(backupContent) !== pending.payload.restore.backupFingerprint ||
+						kometaProposedFingerprint(backupContent) !== pending.payload.proposedFingerprint
+					) {
+						throw new OperationPlanError('plan_stale', request.planId);
+					}
+				}
+
+				let managedSettings = await getKometaManagedSettings();
+				if (pending.payload.structured) {
+					managedSettings = pending.payload.structured.selection.settings;
+				}
+				const nextManagedSettings = syncStoredSecretSettings(
+					managedSettings,
+					pending.payload.proposedContent
+				);
+				const stateCommit = {
+					managedSettings: nextManagedSettings,
+					structured: pending.payload.structured
+						? {
+								managedLibraries: pending.payload.structured.selection.libraries,
+								defaultCollections: pending.payload.structured.selection.defaults,
+								lastApplied: pending.payload.structured.nextSnapshot,
+								scope: kometaSnapshotScope(config, binding.id)
+							}
+						: undefined
+				};
+				const checkpoint = createKometaConfigMutationCheckpoint({
+					planId: pending.id,
+					planDigest: pending.digest,
+					action: pending.payload.action,
+					configMode: pending.payload.mode,
+					metadataPathPrefix: config.kometaMetadataPathPrefix,
+					serverInstanceId: pending.payload.serverInstanceId,
+					pathBinding,
+					sourceContent: pending.payload.sourceContent,
+					sourceFingerprint: pending.payload.sourceFingerprint,
+					proposedContent: pending.payload.proposedContent,
+					proposedFingerprint: pending.payload.proposedFingerprint,
+					structuredDependencyFingerprint: pending.payload.structuredDependencyFingerprint,
+					stateCommit
+				});
+				// Reserve and fsync the exact proof inode before the checkpoint becomes
+				// visible. A writer that later loses its lease can consume this inode,
+				// but can never recreate it after recovery cancels the attempt.
+				await assertControlLockOwned();
+				prepareConfigCommitProofAtBinding(
+					pathBinding,
+					checkpoint.proofToken,
+					checkpoint.proposedContent
+				);
+				const prepareLease = await assertControlLockOwned();
+				await prepareKometaConfigMutationCheckpoint(checkpoint, prepareLease);
+
+				let consumed: OperationPlan<KometaConfigPlanPayload>;
+				try {
+					consumed = await operationPlanStore.consume<KometaConfigPlanPayload>(request.planId, {
+						kind: KOMETA_CONFIG_PLAN_KIND,
+						digest: request.digest,
+						serverInstanceId: pending.payload.serverInstanceId
+					});
+				} catch (error) {
+					const discardLease = await assertControlLockOwned();
+					await discardKometaConfigMutationCheckpoint(checkpoint, discardLease);
+					clearConfigCommitProofAtBinding(
+						checkpoint.pathBinding,
+						checkpoint.proofToken,
+						checkpoint.proposedContent
+					);
+					throw error;
+				}
+				// Renew immediately before the synchronous file CAS. The control lock remains
+				// held until every derived ownership setting and the checkpoint are durable.
+				await assertControlLockOwned();
+				let backup: string | null;
+				try {
+					({ backup } = writeConfigAtomicAtBinding(
+						consumed.payload.pathBinding,
+						consumed.payload.proposedContent,
+						new Date().toISOString(),
+						{
+							expectedSource: consumed.payload.sourceContent,
+							proofToken: checkpoint.proofToken,
+							preparedProof: true
+						}
+					));
+				} catch (error) {
+					if (error instanceof PhysicalPathInspectionError) {
+						throw new OperationPlanError('plan_stale', request.planId);
+					}
+					throw error;
+				}
+				await completePreparedKometaConfigMutation(checkpoint, assertControlLockOwned);
+				return { consumed, backup };
 			}
-			if (
-				kometaFileFingerprint(backupContent) !== pending.payload.restore.backupFingerprint ||
-				kometaProposedFingerprint(backupContent) !== pending.payload.proposedFingerprint
-			) {
-				throw new OperationPlanError('plan_stale', request.planId);
-			}
-		}
-
-		const consumed = await operationPlanStore.consume<KometaConfigPlanPayload>(request.planId, {
-			kind: KOMETA_CONFIG_PLAN_KIND,
-			digest: request.digest,
-			serverInstanceId: pending.payload.serverInstanceId
-		});
-		const { backup } = writeConfigAtomic(
-			consumed.payload.configPath,
-			consumed.payload.proposedContent,
-			new Date().toISOString()
-		);
-
-		let managedSettings = await getKometaManagedSettings();
-		if (consumed.payload.structured) {
-			const { selection, nextSnapshot } = consumed.payload.structured;
-			await setKometaManagedLibraries(selection.libraries);
-			await setKometaDefaultCollections(selection.defaults);
-			await setKometaLastApplied(nextSnapshot);
-			managedSettings = selection.settings;
-		}
-		await setKometaManagedSettings(
-			syncStoredSecretSettings(managedSettings, consumed.payload.proposedContent)
 		);
 
 		await logEvent(

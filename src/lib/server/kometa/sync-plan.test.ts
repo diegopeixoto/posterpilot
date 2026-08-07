@@ -13,7 +13,25 @@ const h = vi.hoisted(() => ({
 	setKometaManagedLibraries: vi.fn(),
 	setKometaDefaultCollections: vi.fn(),
 	setKometaManagedSettings: vi.fn(),
-	setKometaLastApplied: vi.fn()
+	setKometaLastApplied: vi.fn(),
+	commitKometaConfigMutationState: vi.fn(),
+	configCheckpoint: null as Record<string, unknown> | null,
+	proofSequence: 0,
+	migrationState: null as Record<string, unknown> | null,
+	loadCurrentMigrationState: vi.fn(),
+	migrationJournal: null as null | {
+		migrationId: string;
+		status: string;
+		activationEvidence: null;
+		completedAt: null;
+		payload: {
+			serverInstanceId: string;
+			outputDirectory: string;
+			metadataPathPrefix: string;
+			config: { path: string | null; mode: string };
+			references: { movie: string; show: string };
+		};
+	}
 }));
 
 vi.mock('$lib/server/db', async () => {
@@ -34,6 +52,9 @@ vi.mock('$lib/server/db', async () => {
 			consumed_at INTEGER
 		)
 	`);
+	await client.execute(
+		`CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)`
+	);
 	return { db: drizzle(client, { schema }), migrateDb: async () => undefined };
 });
 
@@ -44,6 +65,23 @@ vi.mock('$lib/server/config', () => ({
 	getKometaLastApplied: async () => null,
 	getKometaManagedLibraries: async () => [],
 	getKometaManagedSettings: async () => h.managedSettings,
+	commitKometaConfigMutationState: async (state: {
+		managedSettings: Record<string, string>;
+		structured?: {
+			managedLibraries: string[];
+			defaultCollections: Record<string, string[]>;
+			lastApplied: unknown;
+			scope: unknown;
+		};
+	}) => {
+		h.commitKometaConfigMutationState(state);
+		if (state.structured) {
+			await h.setKometaManagedLibraries(state.structured.managedLibraries);
+			await h.setKometaDefaultCollections(state.structured.defaultCollections);
+			await h.setKometaLastApplied(state.structured.lastApplied, state.structured.scope);
+		}
+		await h.setKometaManagedSettings(state.managedSettings);
+	},
 	setKometaDefaultCollections: h.setKometaDefaultCollections,
 	setKometaLastApplied: h.setKometaLastApplied,
 	setKometaManagedLibraries: h.setKometaManagedLibraries,
@@ -51,12 +89,82 @@ vi.mock('$lib/server/config', () => ({
 }));
 
 vi.mock('$lib/server/events', () => ({ logEvent: h.logEvent }));
+vi.mock('./config-mutation-checkpoint', () => ({
+	loadKometaConfigMutationCheckpoint: async () => h.configCheckpoint,
+	createKometaConfigMutationCheckpoint: (input: Record<string, unknown>) => ({
+		type: 'kometa_config_mutation_checkpoint',
+		version: 1,
+		status: 'prepared',
+		checkpointId: `checkpoint-${++h.proofSequence}`,
+		proofToken: `proof-${String(h.proofSequence).padStart(8, '0')}`,
+		...input
+	}),
+	prepareKometaConfigMutationCheckpoint: async (checkpoint: Record<string, unknown>) => {
+		h.configCheckpoint = checkpoint;
+		return checkpoint;
+	},
+	discardKometaConfigMutationCheckpoint: async (checkpoint: Record<string, unknown>) => {
+		if (h.configCheckpoint === checkpoint) h.configCheckpoint = null;
+	}
+}));
+vi.mock('./config-mutation-recovery', () => ({
+	publicKometaConfigMutationRecoveryState: async () => null,
+	assertNoPendingKometaConfigMutationWhileOwned: async (
+		assertControlLockOwned: () => Promise<unknown>
+	) => {
+		if (h.configCheckpoint) throw new Error('kometa_config_recovery_required');
+		return assertControlLockOwned();
+	},
+	completePreparedKometaConfigMutation: async (
+		checkpoint: {
+			stateCommit: {
+				managedSettings: Record<string, string>;
+				structured?: {
+					managedLibraries: string[];
+					defaultCollections: Record<string, string[]>;
+					lastApplied: unknown;
+					scope: unknown;
+				};
+			};
+		},
+		assertControlLockOwned: () => Promise<unknown>
+	) => {
+		await assertControlLockOwned();
+		const state = checkpoint.stateCommit;
+		h.commitKometaConfigMutationState(state);
+		if (state.structured) {
+			await h.setKometaManagedLibraries(state.structured.managedLibraries);
+			await h.setKometaDefaultCollections(state.structured.defaultCollections);
+			await h.setKometaLastApplied(state.structured.lastApplied, state.structured.scope);
+		}
+		await h.setKometaManagedSettings(state.managedSettings);
+		h.configCheckpoint = null;
+		return { ...checkpoint, status: 'completed' };
+	}
+}));
+vi.mock('./migration-store', () => ({
+	loadKometaMigrationJournalForGuard: async (serverInstanceId: string) => {
+		if (
+			h.migrationJournal &&
+			h.migrationJournal.status !== 'completed' &&
+			h.migrationJournal.status !== 'rolled_back'
+		) {
+			return h.migrationJournal;
+		}
+		return h.migrationJournal?.payload.serverInstanceId === serverInstanceId
+			? h.migrationJournal
+			: null;
+	}
+}));
+vi.mock('./migration', () => ({
+	loadCurrentKometaMigrationState: h.loadCurrentMigrationState
+}));
 vi.mock('./server-binding', () => ({
-	resolveKometaServerBinding: async () => ({
+	resolveKometaServerBinding: async (serverInstanceId: string | null) => ({
 		status: 'ready',
 		binding: {
-			id: 'server-a',
-			name: 'Plex A',
+			id: serverInstanceId ?? 'legacy-default',
+			name: serverInstanceId === 'server-a' ? 'Plex A' : 'Plex B',
 			plexUrl: 'http://plex-a',
 			plexToken: 'plex-secret'
 		}
@@ -65,7 +173,9 @@ vi.mock('./server-binding', () => ({
 }));
 
 import { db } from '$lib/server/db';
-import { operationPlans } from '$lib/server/db/schema';
+import { operationPlans, settings } from '$lib/server/db/schema';
+import { operationPlanStore } from '$lib/server/plans/operation-plan-store';
+import { createKometaMigrationControlLock } from './migration-control-lock';
 import {
 	confirmRawConfig,
 	confirmRestoreConfig,
@@ -92,6 +202,28 @@ function selection(libraries: string[]) {
 	};
 }
 
+function migrationJournal(
+	status: string,
+	overrides: { metadataPathPrefix?: string } = {}
+): NonNullable<typeof h.migrationJournal> {
+	return {
+		migrationId: 'migration-fixture',
+		status,
+		activationEvidence: null,
+		completedAt: null,
+		payload: {
+			serverInstanceId: 'server-a',
+			outputDirectory: directory,
+			metadataPathPrefix: overrides.metadataPathPrefix ?? 'config',
+			config: { path: configPath, mode: 'merge' },
+			references: {
+				movie: `config/${MOVIE_FILENAME}`,
+				show: `config/${SHOW_FILENAME}`
+			}
+		}
+	};
+}
+
 beforeAll(() => {
 	directory = mkdtempSync(join(tmpdir(), 'posterpilot-kometa-plan-'));
 	configPath = join(directory, 'config.yml');
@@ -100,8 +232,10 @@ beforeAll(() => {
 beforeEach(async () => {
 	vi.clearAllMocks();
 	await db.delete(operationPlans);
+	await db.delete(settings);
 	h.config = {
 		kometaConfigPath: configPath,
+		kometaMetadataPathPrefix: 'config',
 		kometaConfigMode: 'merge',
 		kometaServerInstanceId: 'server-a',
 		kometaAssetsDir: directory,
@@ -109,6 +243,10 @@ beforeEach(async () => {
 	};
 	h.managedSettings = {};
 	h.cachedLibraries = [];
+	h.migrationState = null;
+	h.loadCurrentMigrationState.mockImplementation(async () => h.migrationState);
+	h.migrationJournal = null;
+	h.configCheckpoint = null;
 	writeFileSync(configPath, 'settings:\n  cache: true\n', 'utf8');
 });
 
@@ -130,16 +268,114 @@ describe('Kometa raw/restore exact confirmation', () => {
 		const written = parse(readFileSync(configPath, 'utf8')) as {
 			libraries: Record<string, { metadata_files: { file: string }[] }>;
 		};
-		expect(written.libraries.Movies.metadata_files).toEqual([{ file: MOVIE_FILENAME }]);
-		expect(written.libraries['TV Shows'].metadata_files).toEqual([{ file: SHOW_FILENAME }]);
+		expect(written.libraries.Movies.metadata_files).toEqual([{ file: `config/${MOVIE_FILENAME}` }]);
+		expect(written.libraries['TV Shows'].metadata_files).toEqual([
+			{ file: `config/${SHOW_FILENAME}` }
+		]);
 		expect(h.setKometaLastApplied).toHaveBeenCalledWith(
 			expect.objectContaining({
+				metadataPathPrefix: 'config',
 				libraries: expect.objectContaining({
-					Movies: expect.objectContaining({ metadataFile: MOVIE_FILENAME }),
-					'TV Shows': expect.objectContaining({ metadataFile: SHOW_FILENAME })
+					Movies: expect.objectContaining({
+						metadataReference: `config/${MOVIE_FILENAME}`
+					}),
+					'TV Shows': expect.objectContaining({
+						metadataReference: `config/${SHOW_FILENAME}`
+					})
 				})
+			}),
+			expect.objectContaining({
+				serverInstanceId: 'server-a',
+				configPath: expect.stringContaining('/config.yml'),
+				outputDirectory: expect.stringContaining('posterpilot-kometa-plan-'),
+				metadataPathPrefix: 'config'
 			})
 		);
+	});
+
+	it('deduplicates repeated section keys before freezing config and snapshot ownership', async () => {
+		h.cachedLibraries = [{ key: '1', title: 'Movies', type: 'movie' }];
+
+		const preview = await previewSync(selection(['1', '1']));
+		expect(preview.planId).toBeTruthy();
+		await runSync({ planId: preview.planId!, digest: preview.digest! });
+
+		expect(h.setKometaManagedLibraries).toHaveBeenCalledWith(['1']);
+		expect(h.setKometaLastApplied).toHaveBeenCalledWith(
+			expect.objectContaining({
+				libraries: {
+					Movies: expect.objectContaining({
+						metadataReference: `config/${MOVIE_FILENAME}`
+					})
+				}
+			}),
+			expect.any(Object)
+		);
+	});
+
+	it('fails closed when distinct selected sections collide on one Kometa library title', async () => {
+		h.cachedLibraries = [
+			{ key: '1', title: 'Shared', type: 'movie' },
+			{ key: '2', title: 'Shared', type: 'show' }
+		];
+
+		const preview = await previewSync(selection(['1', '2']));
+
+		expect(preview).toMatchObject({
+			planId: null,
+			digest: null,
+			warnings: ['kometa_library_title_conflict'],
+			changes: []
+		});
+		expect(await db.select().from(operationPlans)).toHaveLength(0);
+	});
+
+	it('ignores an unsupported section when its title matches a supported library', async () => {
+		h.cachedLibraries = [
+			{ key: '1', title: 'Shared', type: 'movie' },
+			{ key: '2', title: 'Shared', type: 'artist' }
+		];
+
+		const preview = await previewSync(selection(['1', '2']));
+
+		expect(preview.planId).toBeTruthy();
+		expect(preview.warnings).toContain('kometa_library_type_unsupported');
+		expect(preview.warnings).not.toContain('kometa_library_title_conflict');
+	});
+
+	it('recognizes prefixed PosterPilot files by basename, including Windows references', async () => {
+		writeFileSync(
+			configPath,
+			`libraries:
+  Movies:
+    metadata_files:
+      - file: config/${MOVIE_FILENAME}
+  TV Shows:
+    metadata_files:
+      - file: config\\${SHOW_FILENAME}
+`,
+			'utf8'
+		);
+		const state = await loadKometaState();
+		expect(state.libraryState.Movies.hasMetadata).toBe(true);
+		expect(state.libraryState['TV Shows'].hasMetadata).toBe(true);
+		expect(state.metadataFiles).toEqual({ movie: MOVIE_FILENAME, show: SHOW_FILENAME });
+		expect(state.metadataReferences).toEqual({
+			movie: `config/${MOVIE_FILENAME}`,
+			show: `config/${SHOW_FILENAME}`
+		});
+	});
+
+	it('rejects a structured confirmation when the visible prefix changes after preview', async () => {
+		h.cachedLibraries = [{ key: '1', title: 'Movies', type: 'movie' }];
+		const preview = await previewSync(selection(['1']));
+		expect(preview.planId).toBeTruthy();
+
+		h.config.kometaMetadataPathPrefix = 'metadata';
+		await expect(
+			runSync({ planId: preview.planId!, digest: preview.digest! })
+		).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
 	});
 
 	it('requires the dedicated migration before structured sync rewires a legacy reference', async () => {
@@ -186,6 +422,209 @@ settings:
 		});
 		expect(await db.select().from(operationPlans)).toHaveLength(0);
 		expect(readFileSync(configPath, 'utf8')).toBe(unknownConfig);
+	});
+
+	it('blocks every normal config preview while an in-scope migration is resumable', async () => {
+		h.migrationJournal = migrationJournal('config_written');
+		const backupName = 'config.yml.posterpilot-bak-migration-lock';
+		writeFileSync(join(directory, backupName), 'settings:\n  cache: restored\n', 'utf8');
+
+		const [structured, raw, restore] = await Promise.all([
+			previewSync(selection([])),
+			previewRawConfig('settings:\n  cache: false\n'),
+			previewRestoreConfig(backupName)
+		]);
+
+		expect(structured).toMatchObject({
+			planId: null,
+			warnings: ['kometa_migration_config_locked']
+		});
+		expect(raw).toMatchObject({
+			ok: false,
+			errorCode: 'kometa_migration_config_locked'
+		});
+		expect(restore).toMatchObject({
+			ok: false,
+			errorCode: 'kometa_migration_config_locked'
+		});
+		expect(await db.select().from(operationPlans)).toHaveLength(0);
+	});
+
+	it('uses the recovery-aware migration projection in the Kometa page loader', async () => {
+		h.migrationJournal = migrationJournal('recovery_required');
+		h.migrationState = {
+			migrationId: 'migration-recovery',
+			status: 'recovery_required',
+			scopeMatches: true,
+			canResume: false,
+			canRestartPreview: false,
+			canAbandon: false,
+			canRollback: true,
+			recoveryGuidance: 'proposed_safe_to_rollback'
+		};
+
+		const state = await loadKometaState();
+
+		expect(h.loadCurrentMigrationState).toHaveBeenCalledOnce();
+		expect(state.migration).toMatchObject({
+			status: 'recovery_required',
+			scopeMatches: true,
+			canRollback: true,
+			recoveryGuidance: 'proposed_safe_to_rollback'
+		});
+		expect(state.migrationStateError).toBeNull();
+	});
+
+	it('keeps the frozen migration visible and guarded after the configured binding drifts A to B', async () => {
+		h.migrationJournal = migrationJournal('writing_splits');
+		h.config.kometaServerInstanceId = 'server-b';
+		h.migrationState = {
+			migrationId: 'migration-fixture',
+			status: 'writing_splits',
+			scopeMatches: false,
+			frozenScope: { serverInstanceId: 'server-a' },
+			canResume: false,
+			canRollback: false
+		};
+
+		const state = await loadKometaState();
+
+		expect(state.migration).toMatchObject({
+			migrationId: 'migration-fixture',
+			scopeMatches: false,
+			frozenScope: { serverInstanceId: 'server-a' }
+		});
+		expect(state.migrationRequired).toBe(true);
+		expect(state.migrationStateError).toBeNull();
+	});
+
+	it('allows only raw preview while manual wiring awaits acknowledgment', async () => {
+		h.migrationJournal = migrationJournal('awaiting_manual_wiring');
+
+		const structured = await previewSync(selection([]));
+		const raw = await previewRawConfig('settings:\n  cache: false\n');
+
+		expect(structured).toMatchObject({
+			planId: null,
+			warnings: ['kometa_migration_config_locked']
+		});
+		expect(raw).toMatchObject({ ok: true, action: 'raw' });
+		expect(raw.planId).toBeTruthy();
+	});
+
+	it('rechecks the migration journal under the config lock before confirmation', async () => {
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+		expect(preview.planId).toBeTruthy();
+
+		h.migrationJournal = migrationJournal('prepared');
+		await expect(
+			confirmRawConfig({ planId: preview.planId!, digest: preview.digest! })
+		).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
+	});
+
+	it('preserves an external edit that lands after plan consumption but before publish', async () => {
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+		expect(preview.planId).toBeTruthy();
+		const consumeSpy = vi.spyOn(operationPlanStore, 'consume');
+		consumeSpy.mockImplementationOnce(async (planId, expected) => {
+			consumeSpy.mockRestore();
+			const consumed = await operationPlanStore.consume(planId, expected);
+			writeFileSync(configPath, 'settings:\n  cache: external\n', 'utf8');
+			return consumed;
+		});
+
+		await expect(
+			confirmRawConfig({ planId: preview.planId!, digest: preview.digest! })
+		).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: external\n');
+	});
+
+	it('finishes config persistence before a second process can install a migration journal', async () => {
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+		expect(preview.planId).toBeTruthy();
+		let releasePersistence!: () => void;
+		let persistenceEntered!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			persistenceEntered = resolve;
+		});
+		const release = new Promise<void>((resolve) => {
+			releasePersistence = resolve;
+		});
+		h.setKometaManagedSettings.mockImplementationOnce(async () => {
+			persistenceEntered();
+			await release;
+		});
+
+		const confirmation = confirmRawConfig({ planId: preview.planId!, digest: preview.digest! });
+		await entered;
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: false\n');
+
+		const secondProcessLock = createKometaMigrationControlLock(db, {
+			leaseMs: 2_000,
+			pollIntervalMs: 5,
+			owner: () => 'migration-process'
+		});
+		let migrationEntered = false;
+		const migration = secondProcessLock(async () => {
+			migrationEntered = true;
+			h.migrationJournal = migrationJournal('prepared');
+		});
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(migrationEntered).toBe(false);
+
+		releasePersistence();
+		await confirmation;
+		await migration;
+		expect(migrationEntered).toBe(true);
+		expect(h.migrationJournal?.status).toBe('prepared');
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: false\n');
+	});
+
+	it('rechecks the journal after a second process wins the migration control lock', async () => {
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+		expect(preview.planId).toBeTruthy();
+		const secondProcessLock = createKometaMigrationControlLock(db, {
+			leaseMs: 2_000,
+			pollIntervalMs: 5,
+			owner: () => 'migration-process'
+		});
+		let releaseMigration!: () => void;
+		let migrationEntered!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			migrationEntered = resolve;
+		});
+		const release = new Promise<void>((resolve) => {
+			releaseMigration = resolve;
+		});
+		const migration = secondProcessLock(async () => {
+			h.migrationJournal = migrationJournal('prepared');
+			migrationEntered();
+			await release;
+		});
+		await entered;
+
+		const confirmation = confirmRawConfig({ planId: preview.planId!, digest: preview.digest! });
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
+		releaseMigration();
+		await migration;
+
+		await expect(confirmation).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
+	});
+
+	it('keeps config locked when an active journal has drifted to another metadata scope', async () => {
+		h.migrationJournal = migrationJournal('prepared', { metadataPathPrefix: 'other-scope' });
+
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+
+		expect(preview).toMatchObject({
+			ok: false,
+			active: true,
+			errorCode: 'kometa_migration_config_locked'
+		});
+		expect(preview.planId).toBeUndefined();
 	});
 
 	it('fails visibly and without a plan for a missing cached library', async () => {
@@ -249,6 +688,35 @@ settings:
 		await expect(
 			runSync({ planId: preview.planId!, digest: preview.digest! })
 		).rejects.toMatchObject({ code: 'plan_consumed' });
+	});
+
+	it('commits structured DB ownership even when the confirmed file bytes are unchanged', async () => {
+		const empty = selection([]);
+		const first = await previewSync(empty);
+		await runSync({ planId: first.planId!, digest: first.digest! });
+		h.setKometaManagedLibraries.mockClear();
+		h.setKometaManagedSettings.mockClear();
+
+		const noOp = await previewSync(empty);
+		expect(noOp.planId).toBeTruthy();
+		expect(noOp.changes).toEqual([]);
+		await expect(runSync({ planId: noOp.planId!, digest: noOp.digest! })).resolves.toMatchObject({
+			active: true,
+			backup: false
+		});
+		expect(h.setKometaManagedLibraries).toHaveBeenCalledWith([]);
+		expect(h.setKometaManagedSettings).toHaveBeenCalled();
+	});
+
+	it('rejects a structured confirmation when a rendered credential changes after preview', async () => {
+		const preview = await previewSync(selection([]));
+		expect(preview.planId).toBeTruthy();
+		h.config.tmdbKey = 'rotated-tmdb-secret';
+
+		await expect(
+			runSync({ planId: preview.planId!, digest: preview.digest! })
+		).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
 	});
 
 	it('returns only webhook set-state in SSR and preserves a masked value on sync', async () => {

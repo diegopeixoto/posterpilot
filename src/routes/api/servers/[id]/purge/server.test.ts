@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
 	preview: vi.fn(),
 	confirm: vi.fn(),
-	maintenance: vi.fn()
+	maintenance: vi.fn(),
+	resolveConfig: vi.fn(),
+	checkpointGuard: vi.fn(),
+	loadMigrationJournal: vi.fn(),
+	withControlLock: vi.fn(),
+	assertControlLockOwned: vi.fn()
 }));
 
 vi.mock('$lib/server/server-instances/purge-runtime', () => ({
@@ -11,6 +16,16 @@ vi.mock('$lib/server/server-instances/purge-runtime', () => ({
 	confirmServerPurge: h.confirm
 }));
 vi.mock('$lib/server/maintenance', () => ({ assertMutationsAllowed: h.maintenance }));
+vi.mock('$lib/server/config', () => ({ resolveConfig: h.resolveConfig }));
+vi.mock('$lib/server/kometa/config-mutation-recovery', () => ({
+	assertNoPendingKometaConfigMutationWhileOwned: h.checkpointGuard
+}));
+vi.mock('$lib/server/kometa/migration-store', () => ({
+	loadActiveKometaMigrationJournal: h.loadMigrationJournal
+}));
+vi.mock('$lib/server/kometa/migration-control-lock', () => ({
+	withKometaMigrationControlLock: h.withControlLock
+}));
 
 import { DELETE, POST } from './+server';
 
@@ -50,6 +65,16 @@ describe('/api/servers/[id]/purge', () => {
 			snapshotFilesReleased: 2,
 			snapshotFilesReleaseFailed: 0
 		});
+		h.resolveConfig.mockResolvedValue({ kometaServerInstanceId: 'server-a' });
+		h.assertControlLockOwned.mockResolvedValue('lease');
+		h.checkpointGuard.mockImplementation(async (assertControlLockOwned: () => Promise<unknown>) =>
+			assertControlLockOwned()
+		);
+		h.loadMigrationJournal.mockResolvedValue(null);
+		h.withControlLock.mockImplementation(
+			async (operation: (assertOwned: () => Promise<unknown>) => Promise<unknown>) =>
+				operation(h.assertControlLockOwned)
+		);
 	});
 
 	it('POST returns the exact non-mutating impact preview', async () => {
@@ -82,6 +107,74 @@ describe('/api/servers/[id]/purge', () => {
 			planId: 'purge-plan-1',
 			digest: 'a'.repeat(64)
 		});
+		const finalRenewal = h.assertControlLockOwned.mock.invocationCallOrder.at(-1);
+		const purge = h.confirm.mock.invocationCallOrder.at(-1);
+		expect(finalRenewal).toBeDefined();
+		expect(purge).toBeDefined();
+		expect(finalRenewal!).toBeLessThan(purge!);
+	});
+
+	it('blocks purging the bound Kometa server while config recovery is pending', async () => {
+		h.checkpointGuard.mockRejectedValueOnce(new Error('checkpoint corrupt'));
+
+		const response = await DELETE(
+			deleteEvent({ confirm: true, planId: 'purge-plan-1', digest: 'a'.repeat(64) })
+		);
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: { code: 'kometa_config_recovery_required' }
+		});
+		expect(h.confirm).not.toHaveBeenCalled();
+	});
+
+	it('blocks permanent purge while the bound server has an incomplete migration', async () => {
+		h.loadMigrationJournal.mockResolvedValue({
+			status: 'recovery_required',
+			payload: { serverInstanceId: 'server-a' }
+		});
+
+		const response = await DELETE(
+			deleteEvent({ confirm: true, planId: 'purge-plan-1', digest: 'a'.repeat(64) })
+		);
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: { code: 'kometa_migration_config_locked' }
+		});
+		expect(h.confirm).not.toHaveBeenCalled();
+	});
+
+	it('blocks purging the frozen journal server after the configured binding drifts elsewhere', async () => {
+		h.resolveConfig.mockResolvedValue({ kometaServerInstanceId: 'server-b' });
+		h.loadMigrationJournal.mockResolvedValue({
+			status: 'recovery_required',
+			payload: { serverInstanceId: 'server-a' }
+		});
+
+		const response = await DELETE(
+			deleteEvent({ confirm: true, planId: 'purge-plan-1', digest: 'a'.repeat(64) })
+		);
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: { code: 'kometa_migration_config_locked' }
+		});
+		expect(h.checkpointGuard).not.toHaveBeenCalled();
+		expect(h.confirm).not.toHaveBeenCalled();
+	});
+
+	it('allows purging another server without consulting the checkpoint', async () => {
+		h.resolveConfig.mockResolvedValue({ kometaServerInstanceId: 'server-b' });
+
+		const response = await DELETE(
+			deleteEvent({ confirm: true, planId: 'purge-plan-1', digest: 'a'.repeat(64) })
+		);
+
+		expect(response.status).toBe(200);
+		expect(h.checkpointGuard).not.toHaveBeenCalled();
+		expect(h.assertControlLockOwned).toHaveBeenCalledOnce();
+		expect(h.confirm).toHaveBeenCalledOnce();
 	});
 
 	it('rejects missing explicit confirmation before calling the service', async () => {
