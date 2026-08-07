@@ -37,7 +37,7 @@ ThePosterDB はアカウントなしで動作しますが、一部のページ�
 
 `DEFAULT_APPLY_METHOD` は `plex`（サーバー直接）、`kometa`、`both`。操作ごとの変更は保存済み既定値を変えません。
 
-`posterpilot.yml` は `KOMETA_ASSETS_DIR` に出力しますが、`KOMETA_CONFIG_PATH` があれば `config.yml` と同じディレクトリです。`KOMETA_SERVER_INSTANCE_ID` は正確な Plex インスタンスを指定します。[Kometa マネージャー](../kometa-config-sync/)を参照してください。
+`posterpilot-movies.yml`（TMDB）と `posterpilot-shows.yml`（TVDB、なければ IMDb）を `KOMETA_ASSETS_DIR` に出力します。`KOMETA_CONFIG_PATH` があれば `config.yml` と同じディレクトリです。`KOMETA_SERVER_INSTANCE_ID` は正確な Plex インスタンスを指定し、`KOMETA_METADATA_PATH_PREFIX` は物理パスではなく Kometa から見える相対参照を指定します。[Kometa マネージャー](../kometa-config-sync/)を参照してください。
 
 ## 自動化、バックアップ、診断
 
@@ -62,10 +62,11 @@ ThePosterDB はアカウントなしで動作しますが、一部のページ�
 | `EMBY_URL` | — | Emby ベース URL。 |
 | `EMBY_API_KEY` | — | Emby キー／トークン（シークレット）。 |
 | `TMDB_KEY` | — | TMDB v3 または v4 bearer/JWT（シークレット）。 |
-| `KOMETA_ASSETS_DIR` | `./data/kometa`（Docker: `/kometa`） | config path がない場合の `posterpilot.yml` 出力先。 |
+| `KOMETA_ASSETS_DIR` | `./data/kometa`（Docker: `/kometa`） | config path がない場合の型別 YAML 出力先。 |
 | `KOMETA_CONFIG_PATH` | — | `config.yml` 絶対パス。空ならマネージャー無効。 |
 | `KOMETA_CONFIG_MODE` | `merge` | `merge` または `own`。 |
 | `KOMETA_SERVER_INSTANCE_ID` | `legacy-default` | Kometa に結び付ける Plex。 |
+| `KOMETA_METADATA_PATH_PREFIX` | `config` | Kometa 実行環境から見える相対ディレクトリ。`.` はファイル名だけ。 |
 | `DEFAULT_APPLY_METHOD` | `both` | `plex`、`kometa`、`both`。 |
 | `INCLUDED_SECTIONS` | すべて | カンマ区切りキー。環境設定はサーバー別選択より優先。 |
 | `PROVIDER_MEDIUX` | 有効 | MediUX を有効化。 |

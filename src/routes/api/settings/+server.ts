@@ -13,6 +13,10 @@ import {
 	materializeLegacyServerInstance
 } from '$lib/server/server-instances';
 import { resolveKometaServerBinding } from '$lib/server/kometa/server-binding';
+import {
+	KometaMetadataPathPrefixError,
+	normalizeKometaMetadataPathPrefix
+} from '$lib/server/kometa/reference-path';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -42,6 +46,23 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 			includedSections = value as string[];
 			includedSectionsChanged = true;
+		} else if (key === 'kometaMetadataPathPrefix' && typeof value === 'string') {
+			try {
+				payload.kometaMetadataPathPrefix = normalizeKometaMetadataPathPrefix(value);
+			} catch (error) {
+				if (error instanceof KometaMetadataPathPrefixError) {
+					return json(
+						{
+							error: {
+								code: 'invalid_kometa_metadata_path_prefix',
+								reason: error.code
+							}
+						},
+						{ status: 400 }
+					);
+				}
+				throw error;
+			}
 		} else if (typeof value === 'string') {
 			(payload as Record<string, string>)[key] = value;
 		}

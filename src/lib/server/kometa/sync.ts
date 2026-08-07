@@ -17,7 +17,8 @@ import {
 	setKometaLastApplied,
 	setKometaManagedLibraries,
 	setKometaManagedSettings,
-	type AppConfig
+	type AppConfig,
+	type KometaSnapshotScope
 } from '$lib/server/config';
 import { logEvent } from '$lib/server/events';
 import {
@@ -41,6 +42,7 @@ import {
 } from './config';
 import type { KometaConfigMode } from '$lib/server/config';
 import {
+	canonicalConfigPath,
 	listBackups,
 	readBackup,
 	readConfig,
@@ -55,6 +57,7 @@ import {
 	type KometaMetadataFilename
 } from './destination';
 import { classifyKometaLegacyConfig } from './legacy-layout';
+import { kometaMetadataReference, kometaMetadataReferenceBasename } from './reference-path';
 import { DEFAULT_COLLECTION_GROUPS, knownDefaults, type DefaultGroup } from './defaults-catalog';
 import { MANAGED_SETTINGS, type ManagedSettingDef } from './managed-settings';
 import {
@@ -87,6 +90,66 @@ import {
 	operationPlanStore,
 	type OperationPlan
 } from '$lib/server/plans/operation-plan-store';
+import {
+	inspectKometaCollisionGuard,
+	kometaOutputDirectory
+} from '$lib/server/plans/apply-destinations';
+import { loadKometaMigrationJournal } from './migration-store';
+import type { KometaMigrationJournalV1 } from './migration-journal';
+import {
+	kometaMigrationCollisionState,
+	publicKometaMigrationState,
+	type PublicKometaMigrationState
+} from './migration-state';
+import {
+	isKometaConfigMutationLocked,
+	type KometaConfigMutationAction
+} from '$lib/kometa-config-mutation-policy';
+
+function kometaSnapshotScope(config: AppConfig, serverInstanceId: string): KometaSnapshotScope {
+	return {
+		serverInstanceId,
+		configPath: config.kometaConfigPath ? canonicalConfigPath(config.kometaConfigPath) : null,
+		outputDirectory: canonicalConfigPath(kometaOutputDirectory(config)),
+		metadataPathPrefix: config.kometaMetadataPathPrefix
+	};
+}
+
+function migrationJournalScopeMatches(
+	config: AppConfig,
+	serverInstanceId: string,
+	journal: KometaMigrationJournalV1 | null
+): boolean {
+	if (!journal) return false;
+	return (
+		journal.payload.serverInstanceId === serverInstanceId &&
+		canonicalConfigPath(journal.payload.outputDirectory) ===
+			canonicalConfigPath(kometaOutputDirectory(config)) &&
+		journal.payload.metadataPathPrefix === config.kometaMetadataPathPrefix &&
+		Boolean(journal.payload.config.path) === Boolean(config.kometaConfigPath) &&
+		(journal.payload.config.path === null ||
+			(canonicalConfigPath(journal.payload.config.path) ===
+				canonicalConfigPath(config.kometaConfigPath) &&
+				journal.payload.config.mode === config.kometaConfigMode))
+	);
+}
+
+async function configMutationLocked(
+	config: AppConfig,
+	serverInstanceId: string,
+	action: KometaConfigMutationAction
+): Promise<boolean> {
+	const journal = await loadKometaMigrationJournal(serverInstanceId);
+	return isKometaConfigMutationLocked(
+		action,
+		journal
+			? {
+					status: journal.status,
+					scopeMatches: migrationJournalScopeMatches(config, serverInstanceId, journal)
+				}
+			: null
+	);
+}
 
 export { type SyncSelectionInput } from './selection';
 
@@ -100,7 +163,10 @@ export interface KometaTabState {
 	resolvedConfigPath: string;
 	/** True when the configured path is relative (fragile in Docker — CWD is /app). */
 	configPathRelative: boolean;
+	/** Canonical Kometa-visible prefix, kept separate from the physical output directory. */
+	metadataPathPrefix: string;
 	metadataFiles: { movie: typeof MOVIE_FILENAME; show: typeof SHOW_FILENAME };
+	metadataReferences: { movie: string; show: string };
 	exists: boolean;
 	parseError: string | null;
 	/** Client-safe identity of the exact Plex instance that owns this target. */
@@ -145,6 +211,11 @@ export interface KometaTabState {
 	globals: { settings: Record<string, string>; webhooksSet: string[] };
 	backups: BackupInfo[];
 	consistency: ConsistencyWarning[];
+	/** Durable split-layout migration state; exact YAML/provider URLs are redacted. */
+	migration: PublicKometaMigrationState | null;
+	migrationStateError: 'journal_unreadable' | null;
+	migrationRequired: boolean;
+	migrationReason: 'active_legacy_reference' | 'unknown_config_with_legacy_file' | null;
 }
 
 /** Result of a preview or sync, with secrets redacted for the browser. */
@@ -200,7 +271,12 @@ const POSTERPILOT_METADATA_FILES = new Set<string>([
 ]);
 
 class KometaLibraryPlanError extends Error {
-	constructor(readonly code: 'kometa_library_missing' | 'kometa_migration_required') {
+	constructor(
+		readonly code:
+			| 'kometa_library_missing'
+			| 'kometa_migration_required'
+			| 'kometa_migration_config_locked'
+	) {
 		super(code);
 		this.name = 'KometaLibraryPlanError';
 	}
@@ -253,7 +329,8 @@ async function planFromSelections(
 			overlays: knownOverlays(sel.overlays[key] ?? []),
 			operations: sel.operations[key] ?? {},
 			settingsOverrides: sel.librarySettings[key] ?? {},
-			metadataFile
+			metadataFile,
+			metadataReference: kometaMetadataReference(config.kometaMetadataPathPrefix, metadataFile)
 		});
 	}
 	const selection: SyncSelectionInput = {
@@ -310,6 +387,7 @@ async function planFromSelections(
 	return {
 		plan: buildPlan({
 			creds: { plexUrl: binding.plexUrl, plexToken: binding.plexToken, tmdbKey: config.tmdbKey },
+			metadataPathPrefix: config.kometaMetadataPathPrefix,
 			libraries,
 			settings,
 			settingKeep,
@@ -372,6 +450,19 @@ export async function loadKometaState(): Promise<KometaTabState> {
 	}
 
 	const cached = binding ? await getCachedLibraries(binding.id) : [];
+	let migrationJournal: KometaMigrationJournalV1 | null = null;
+	let migrationStateError: KometaTabState['migrationStateError'] = null;
+	if (binding) {
+		try {
+			migrationJournal = await loadKometaMigrationJournal(binding.id);
+		} catch {
+			migrationStateError = 'journal_unreadable';
+		}
+	}
+	const migrationGuard = inspectKometaCollisionGuard(
+		config,
+		kometaMigrationCollisionState(migrationJournal)
+	);
 	const storedManagedSettings = await getKometaManagedSettings();
 	const currentManagedSettings = readManagedSettingValues(doc);
 	const managedSettings: Record<string, string> = {};
@@ -414,7 +505,10 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			overlays: readDefaultList(doc, name, 'overlay_files'),
 			operations: readScalarMap(doc, ['libraries', name, 'operations']),
 			settings: readScalarMap(doc, ['libraries', name, 'settings']),
-			hasMetadata: metadataFiles.some((file) => POSTERPILOT_METADATA_FILES.has(file)),
+			hasMetadata: metadataFiles.some((file) => {
+				const basename = kometaMetadataReferenceBasename(file);
+				return basename !== null && POSTERPILOT_METADATA_FILES.has(basename);
+			}),
 			metadataFiles
 		};
 	}
@@ -426,6 +520,7 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			plexToken: binding?.plexToken ?? null,
 			tmdbKey: config.tmdbKey
 		},
+		metadataPathPrefix: config.kometaMetadataPathPrefix,
 		libraries: Object.entries(libraryState).map(([name, s]) => ({
 			name,
 			defaults: s.collections,
@@ -440,7 +535,12 @@ export async function loadKometaState(): Promise<KometaTabState> {
 		configPath: config.kometaConfigPath,
 		resolvedConfigPath: active ? resolve(config.kometaConfigPath) : '',
 		configPathRelative: active && !config.kometaConfigPath.startsWith('/'),
+		metadataPathPrefix: config.kometaMetadataPathPrefix,
 		metadataFiles: { movie: MOVIE_FILENAME, show: SHOW_FILENAME },
+		metadataReferences: {
+			movie: kometaMetadataReference(config.kometaMetadataPathPrefix, MOVIE_FILENAME),
+			show: kometaMetadataReference(config.kometaMetadataPathPrefix, SHOW_FILENAME)
+		},
 		exists,
 		parseError,
 		serverBinding: binding ? { id: binding.id, name: binding.name } : null,
@@ -466,7 +566,15 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			).map((def) => def.key)
 		},
 		backups: active && exists ? listBackups(config.kometaConfigPath) : [],
-		consistency: checkConsistency(currentPlan, doc)
+		consistency: checkConsistency(currentPlan, doc),
+		migration: publicKometaMigrationState(migrationJournal, {
+			scopeMatches: binding
+				? migrationJournalScopeMatches(config, binding.id, migrationJournal)
+				: false
+		}),
+		migrationStateError,
+		migrationRequired: migrationGuard.migrationRequired,
+		migrationReason: migrationGuard.reason === 'migration_incomplete' ? null : migrationGuard.reason
 	};
 }
 
@@ -583,6 +691,13 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		);
 	}
 	const binding = resolvedBinding.binding;
+	if (await configMutationLocked(config, binding.id, 'structured')) {
+		return libraryPlanErrorResult(
+			config,
+			readConfig(config.kometaConfigPath),
+			new KometaLibraryPlanError('kometa_migration_config_locked')
+		);
+	}
 	const raw = readConfig(config.kometaConfigPath);
 	const sourceDoc = loadDoc(raw ?? '');
 	if (sourceDoc.errors.length > 0) {
@@ -600,7 +715,7 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		);
 	}
 	const [snapshot, storedManagedSettings] = await Promise.all([
-		getKometaLastApplied(),
+		getKometaLastApplied(kometaSnapshotScope(config, binding.id)),
 		getKometaManagedSettings()
 	]);
 	let planned: Awaited<ReturnType<typeof planFromSelections>>;
@@ -710,6 +825,14 @@ export async function previewRawConfig(text: string): Promise<RawResult> {
 		return rawBindingError(resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>);
 	}
 	const binding = resolvedBinding.binding;
+	if (await configMutationLocked(config, binding.id, 'raw')) {
+		return {
+			ok: false,
+			active: true,
+			parseError: null,
+			errorCode: 'kometa_migration_config_locked'
+		};
+	}
 	const doc = loadDoc(text);
 	if (doc.errors.length) return { ok: false, active: true, parseError: doc.errors[0].message };
 	const raw = readConfig(config.kometaConfigPath);
@@ -764,6 +887,14 @@ export async function previewRestoreConfig(name: string): Promise<RawResult> {
 		return rawBindingError(resolvedBinding.status as Exclude<KometaServerBindingStatus, 'ready'>);
 	}
 	const binding = resolvedBinding.binding;
+	if (await configMutationLocked(config, binding.id, 'restore')) {
+		return {
+			ok: false,
+			active: true,
+			parseError: null,
+			errorCode: 'kometa_migration_config_locked'
+		};
+	}
 	let backupContent: string;
 	try {
 		backupContent = readBackup(config.kometaConfigPath, name);
@@ -861,12 +992,19 @@ async function confirmKometaConfigPlan(
 		const pending = await validateStoredKometaPlan(request, expectedAction);
 		const config = await resolveConfig();
 		const resolvedBinding = await resolveKometaServerBinding(config.kometaServerInstanceId);
+		const binding = resolvedBinding.binding;
 		if (
-			!resolvedBinding.binding ||
-			resolvedBinding.binding.id !== pending.payload.serverInstanceId ||
+			!binding ||
+			binding.id !== pending.payload.serverInstanceId ||
 			config.kometaConfigPath !== pending.payload.configPath ||
-			config.kometaConfigMode !== pending.payload.mode
+			config.kometaConfigMode !== pending.payload.mode ||
+			(expectedAction === 'structured' &&
+				pending.payload.structured?.nextSnapshot.metadataPathPrefix !==
+					config.kometaMetadataPathPrefix)
 		) {
+			throw new OperationPlanError('plan_stale', request.planId);
+		}
+		if (await configMutationLocked(config, binding.id, expectedAction)) {
 			throw new OperationPlanError('plan_stale', request.planId);
 		}
 
@@ -912,7 +1050,7 @@ async function confirmKometaConfigPlan(
 			const { selection, nextSnapshot } = consumed.payload.structured;
 			await setKometaManagedLibraries(selection.libraries);
 			await setKometaDefaultCollections(selection.defaults);
-			await setKometaLastApplied(nextSnapshot);
+			await setKometaLastApplied(nextSnapshot, kometaSnapshotScope(config, binding.id));
 			managedSettings = selection.settings;
 		}
 		await setKometaManagedSettings(

@@ -84,7 +84,8 @@ Escolha o método (padrão `DEFAULT_APPLY_METHOD`):
 
 - **Servidor direto (`plex`)** — captura o estado anterior, grava pela instância
   Plex/Jellyfin/Emby ativa, bloqueia campo quando suportado e verifica o resultado.
-- **Kometa** — atualiza `posterpilot.yml`, preserva conteúdo alheio e verifica o YAML.
+- **Kometa** — atualiza `posterpilot-movies.yml` ou `posterpilot-shows.yml`,
+  preserva conteúdo alheio e verifica o YAML.
 - **Ambos** — executa destinos independentes; um pode falhar sem esconder o outro.
 
 Primeiro gere a **prévia exata** com itens, slots, candidatos, estado atual, destinos
@@ -100,9 +101,12 @@ correspondente é skip; falha de um slot não interrompe os demais.
 
 ### Como o Kometa consome a exportação
 
-`posterpilot.yml` usa IDs TMDB e `url_poster` / `url_background`, com temporadas e
-episódios aninhados. Inclua esse arquivo em `metadata_files` da biblioteca do Kometa;
-o [Gerenciador do Kometa](../kometa-config-sync/) pode fazer esse vínculo.
+`posterpilot-movies.yml` usa IDs TMDB, com IMDb como fallback quando não há um ID
+TMDB. `posterpilot-shows.yml` usa IDs TVDB, com IMDb como fallback quando não há um
+ID TVDB, e aninha temporadas e episódios. Inclua o arquivo correspondente
+em `metadata_files`; o [Gerenciador do Kometa](../kometa-config-sync/) pode manter
+o vínculo e explica a diferença entre o caminho físico e o prefixo `file:` visto
+pelo runtime do Kometa.
 
 ## Verificação, histórico e desfazer
 

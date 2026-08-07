@@ -50,7 +50,7 @@ Library はサーバー側で種類、ライブラリ、有効／無視、ポス
 方法を選びます（`DEFAULT_APPLY_METHOD` から開始）。
 
 - **直接サーバー (`plex`)** — 以前の状態を保存し、アクティブ Plex／Jellyfin／Emby へ書き、対応時にロックして検証します。
-- **Kometa** — `posterpilot.yml` を更新し、無関係な内容を保持して YAML を検証します。
+- **Kometa** — `posterpilot-movies.yml` または `posterpilot-shows.yml` を更新し、無関係な内容を保持して YAML を検証します。
 - **両方** — 宛先は独立し、一方の失敗が他方を隠しません。
 
 まず項目、スロット、候補、現在状態、宛先、スキップの**正確なプレビュー**を作ります。別の確認は期限付き 1 回限りで、選択／指紋に結び付いています。何か変わると書き込まず、再プレビューが必要です。警告のないプラン — スキップが 0 件で書き込みが 1 件以上 — はワンクリックで適用され、PosterPilot が同じ操作の中で確認を発行します。スキップがあれば明示的な確認に戻り、**適用して次へ**は常にダイアログを保持します。
@@ -59,7 +59,7 @@ Library はサーバー側で種類、ライブラリ、有効／無視、ポス
 
 ### Kometa がエクスポートを消費する方法
 
-`posterpilot.yml` は TMDB ID と `url_poster` / `url_background`（シーズン／エピソードは入れ子）を使います。Kometa ライブラリの `metadata_files` に追加するか、[Kometa マネージャー](../kometa-config-sync/)で接続します。
+`posterpilot-movies.yml` は TMDB ID（なければ IMDb）、`posterpilot-shows.yml` は TVDB ID（なければ IMDb）を使い、シーズン／エピソードを入れ子にします。対応するファイルを Kometa ライブラリの `metadata_files` に追加してください。[Kometa マネージャー](../kometa-config-sync/)では接続に加えて、物理パスと Kometa の実行環境から見える `file:` プレフィックスの違いも説明しています。
 
 ## 検証、履歴、元に戻す
 

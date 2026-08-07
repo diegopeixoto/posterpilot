@@ -58,8 +58,8 @@ PosterPilot 会对密钥设置（媒体服务器 token 和提供方 API 密钥�
 
 使用 [Kometa 管理器](../kometa-config-sync/)时，请把 `config.yml` 所在目录以
 可读写方式挂载，并设置如 `KOMETA_CONFIG_PATH=/config/config.yml`。
-`posterpilot.yml` 会写在同一目录，无需另一个元数据路径。该卷包含 Kometa
-明文密钥，请保护文件权限。
+`posterpilot-movies.yml` 和 `posterpilot-shows.yml` 会实际写在同一目录。
+`KOMETA_METADATA_PATH_PREFIX`（默认 `config`）另外指定 Kometa 运行时可见的相对引用，并不是物理路径。该卷包含 Kometa 明文密钥，请保护文件权限。
 
 ## Docker Compose（macOS）
 

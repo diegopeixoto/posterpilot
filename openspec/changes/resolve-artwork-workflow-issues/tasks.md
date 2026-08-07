@@ -42,20 +42,20 @@
 - [x] 4.5 Carry versioned typed destination identity through frozen plans, file fingerprints, locks, previews, verification, revisions, and undo
 - [x] 4.6 Preserve provable legacy revision destinations and reject unsafe legacy undo instead of inferring a split file
 - [x] 4.7 Add a protective block that prevents new mixed-kind legacy exports from silently colliding while leaving direct apply available
-- [ ] 4.8 Finish Kometa config planning so each managed library references exactly one authoritative typed file, including a validated Kometa-visible relative prefix when required
+- [x] 4.8 Finish Kometa config planning so each managed library references exactly one authoritative typed file, including a validated Kometa-visible relative prefix when required
 - [x] 4.9 Test equal numeric movie/show IDs, provider-type disagreement, IMDb fallback, stale plans, per-file isolation, partial failure, and typed undo
 
 ## 5. Recoverable Kometa Migration
 
-- [ ] 5.1 Detect legacy file/config references and build a pure classifier using authoritative database mappings and revision provenance
-- [ ] 5.2 Build a redacted migration preview containing fingerprints, typed/re-keyed entries, ambiguous entries, split-file diffs, and per-library config changes
-- [ ] 5.3 Implement deterministic multi-file locking, fingerprint revalidation, backups, atomic split-file writes, and post-write verification
-- [ ] 5.4 Update backed-up `config.yml` only after both split files verify and make interrupted or failed migration retries idempotent
-- [ ] 5.5 Preserve `posterpilot.yml` untouched and expose an explicit rollback path through the config backup
-- [ ] 5.6 Provide exact manual config snippets and acknowledgment state when PosterPilot does not manage `config.yml`
-- [ ] 5.7 Build localized Kometa manager states for required, preview, ambiguous, stale, failed, manual-wiring, completed, and rollback guidance
-- [ ] 5.8 Add integration tests for confident and ambiguous classification, stale/cancelled preview, each write failure boundary, merge/own modes, manual config, and legacy preservation
-- [ ] 5.9 Run check/test/build/lint and Kometa browser flows for the split-file migration phase
+- [x] 5.1 Detect legacy file/config references and build a pure classifier using authoritative database mappings and revision provenance
+- [x] 5.2 Build a redacted migration preview containing fingerprints, typed/re-keyed entries, ambiguous entries, split-file diffs, and per-library config changes
+- [x] 5.3 Implement deterministic multi-file locking, fingerprint revalidation, backups, atomic split-file writes, and post-write verification
+- [x] 5.4 Update backed-up `config.yml` only after both split files verify and make interrupted or failed migration retries idempotent
+- [x] 5.5 Preserve `posterpilot.yml` untouched and expose an explicit rollback path through the config backup
+- [x] 5.6 Provide exact manual config snippets and acknowledgment state when PosterPilot does not manage `config.yml`
+- [x] 5.7 Build localized Kometa manager states for required, preview, ambiguous, stale, failed, manual-wiring, completed, and rollback guidance
+- [x] 5.8 Add integration tests for confident and ambiguous classification, stale/cancelled preview, each write failure boundary, merge/own modes, manual config, and legacy preservation
+- [x] 5.9 Run check/test/build/lint and Kometa browser flows for the split-file migration phase
 
 ## 6. TMDB Artwork Language and Complete Candidate Inventory
 
@@ -110,7 +110,7 @@
 - [ ] 11.1 Add every new/changed message to en, es, zh, ja, pt-BR, and fr and run catalog-parity checks in each implementation phase
 - [ ] 11.2 Document type-safe TMDB repair, banner semantics, manual pins, and why full rescan is only a fallback
 - [ ] 11.3 Document original-versus-preview bandwidth behavior, artwork language policy, load-more limits, provider order semantics, and preview controls
-- [ ] 11.4 Document split Kometa files, mapping namespaces, migration/manual-wiring steps, ambiguity handling, backup, and rollback
+- [x] 11.4 Document split Kometa files, mapping namespaces, migration/manual-wiring steps, ambiguity handling, backup, and rollback
 - [ ] 11.5 Document exact coverage meanings and explicitly distinguish exported metadata from downstream application
 - [ ] 11.6 Run `bun run fallow` and apply only unambiguous dead-code fixes
 - [ ] 11.7 Run final `bun run check`, `bun run test`, `bun run build`, `bun run lint`, and all relevant `bun run test:e2e` flows

@@ -57,29 +57,56 @@ function cleanKey(raw: string): string {
 	return key;
 }
 
-function safePreviewLine(line: string, stack: { indent: number; key: string }[]): string {
-	const inlineSecret = /(?:token|api[_-]?key|apikey|client_secret|secret|password)\s*:/i;
-	if (inlineSecret.test(line.replace(/^\s*#.*$/, ''))) {
-		return `${line.match(/^\s*/)?.[0] ?? ''}***`;
-	}
-	const match = /^(\s*)([^#][^:]*):(?:\s*(.*))?$/.exec(line);
-	if (!match) return line.slice(0, 240);
-	const indent = match[1].replace(/\t/g, '  ').length;
+interface PreviewPathEntry {
+	indent: number;
+	key: string;
+	redactChildren: boolean;
+}
+
+const SECRET_KEY =
+	/(?:token|api[_-]?key|apikey|access[_-]?key|client[_-]?secret|secret|password|passphrase|credential(?:s)?|authorization|cookie|private[_ -]?key|session[_-]?(?:id|key)|jwt)$/i;
+const INLINE_SECRET =
+	/(?:token|api[_-]?key|apikey|access[_-]?key|client[_-]?secret|secret|password|passphrase|credential(?:s)?|authorization|cookie|private[_ -]?key|session[_-]?(?:id|key)|jwt)\s*[:=]/i;
+const PRIVATE_MATERIAL =
+	/(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|-----BEGIN PGP PRIVATE KEY BLOCK-----|\bBearer\s+[A-Za-z0-9._~+/=-]{8,})/i;
+
+function safePreviewLine(line: string, stack: PreviewPathEntry[]): string {
+	const inlineUrl = /(?:https?|ftp):\/\/[^\s#]+/i;
+	const whitespace = line.match(/^\s*/)?.[0] ?? '';
+	const indent = whitespace.replace(/\t/g, '  ').length;
 	while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+	if (stack.some((entry) => entry.redactChildren) && line.trim() !== '') {
+		return `${whitespace}***`;
+	}
+	const urlScalar = /^(\s*)(-\s*)?(?:https?|ftp):\/\//i.exec(line);
+	if (urlScalar) return `${urlScalar[1]}${urlScalar[2] ?? ''}***`;
+	const match = /^(\s*)([^#][^:]*):(?:\s*(.*))?$/.exec(line);
+	if (!match) {
+		return inlineUrl.test(line) || INLINE_SECRET.test(line) || PRIVATE_MATERIAL.test(line)
+			? `${whitespace}***`
+			: line.slice(0, 240);
+	}
 	const key = cleanKey(match[2]);
 	const path = [...stack.map((entry) => entry.key), key].join('.');
 	const value = match[3] ?? '';
-	const secret =
-		SECRET_PATHS.has(path) ||
-		/(?:token|api[_-]?key|apikey|client_secret|secret|password)$/i.test(key);
-	stack.push({ indent, key });
-	if (secret && value.trim() !== '') return `${match[1]}${match[2]}: ***`;
+	const secret = SECRET_PATHS.has(path) || SECRET_KEY.test(key);
+	const trimmedValue = value.trim();
+	const blockValue = /(?:^|\s)[|>](?:[+-]?\d?|\d?[+-]?)\s*(?:#.*)?$/.test(trimmedValue);
+	stack.push({ indent, key, redactChildren: secret && (trimmedValue === '' || blockValue) });
+	if (
+		secret ||
+		inlineUrl.test(value) ||
+		INLINE_SECRET.test(value) ||
+		PRIVATE_MATERIAL.test(value)
+	) {
+		return `${match[1]}${match[2]}: ***`;
+	}
 	return line.slice(0, 240);
 }
 
 /** Redact secret-looking YAML scalars while preserving line numbers for a raw diff. */
 export function safeYamlPreviewLines(content: string): string[] {
-	const stack: { indent: number; key: string }[] = [];
+	const stack: PreviewPathEntry[] = [];
 	return content.split(/\r?\n/).map((line) => safePreviewLine(line, stack));
 }
 

@@ -50,7 +50,7 @@ description: 同步、审核、修正匹配、暂存海报、确认精确计划�
 选择方式（初始为 `DEFAULT_APPLY_METHOD`）：
 
 - **直接服务器 (`plex`)** — 保存先前状态，通过当前 Plex／Jellyfin／Emby 写入，在支持时锁定并验证。
-- **Kometa** — 更新 `posterpilot.yml`，保留无关内容并验证 YAML。
+- **Kometa** — 更新 `posterpilot-movies.yml` 或 `posterpilot-shows.yml`，保留无关内容并验证 YAML。
 - **二者** — 目的地独立；一处失败不会隐藏另一处结果。
 
 先生成项目、槽位、候选、当前状态、目的地和跳过项的**精确预览**。独立确认使用会过期、单次使用并绑定选择／指纹的计划。任一内容变化都会拒绝写入并要求重新预览。无警告的计划——没有跳过项且至少有一次写入——一键即可应用：PosterPilot 会在同一操作中自行确认。存在跳过项会恢复显式确认，**应用并转到下一项**始终保留其对话框。
@@ -59,7 +59,7 @@ description: 同步、审核、修正匹配、暂存海报、确认精确计划�
 
 ### Kometa 如何使用导出
 
-`posterpilot.yml` 按 TMDB ID 使用 `url_poster` / `url_background`，季和单集嵌套。将其加入 Kometa 媒体库的 `metadata_files`，或由 [Kometa 管理器](../kometa-config-sync/)建立引用。
+`posterpilot-movies.yml` 使用 TMDB ID，没有时回退到 IMDb；`posterpilot-shows.yml` 使用 TVDB ID，没有时也回退到 IMDb，并嵌套季和单集。请把对应文件加入 Kometa 媒体库的 `metadata_files`。[Kometa 管理器](../kometa-config-sync/)可以维护引用，并说明物理路径与 Kometa 运行时可见的 `file:` 前缀之间的区别。
 
 ## 验证、历史与撤销
 

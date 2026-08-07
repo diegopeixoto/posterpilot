@@ -13,7 +13,16 @@ const h = vi.hoisted(() => ({
 	setKometaManagedLibraries: vi.fn(),
 	setKometaDefaultCollections: vi.fn(),
 	setKometaManagedSettings: vi.fn(),
-	setKometaLastApplied: vi.fn()
+	setKometaLastApplied: vi.fn(),
+	migrationJournal: null as null | {
+		status: string;
+		payload: {
+			serverInstanceId: string;
+			outputDirectory: string;
+			metadataPathPrefix: string;
+			config: { path: string | null; mode: string };
+		};
+	}
 }));
 
 vi.mock('$lib/server/db', async () => {
@@ -34,6 +43,9 @@ vi.mock('$lib/server/db', async () => {
 			consumed_at INTEGER
 		)
 	`);
+	await client.execute(
+		`CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)`
+	);
 	return { db: drizzle(client, { schema }), migrateDb: async () => undefined };
 });
 
@@ -51,6 +63,9 @@ vi.mock('$lib/server/config', () => ({
 }));
 
 vi.mock('$lib/server/events', () => ({ logEvent: h.logEvent }));
+vi.mock('./migration-store', () => ({
+	loadKometaMigrationJournal: async () => h.migrationJournal
+}));
 vi.mock('./server-binding', () => ({
 	resolveKometaServerBinding: async () => ({
 		status: 'ready',
@@ -92,6 +107,21 @@ function selection(libraries: string[]) {
 	};
 }
 
+function migrationJournal(
+	status: string,
+	overrides: { metadataPathPrefix?: string } = {}
+): NonNullable<typeof h.migrationJournal> {
+	return {
+		status,
+		payload: {
+			serverInstanceId: 'server-a',
+			outputDirectory: directory,
+			metadataPathPrefix: overrides.metadataPathPrefix ?? 'config',
+			config: { path: configPath, mode: 'merge' }
+		}
+	};
+}
+
 beforeAll(() => {
 	directory = mkdtempSync(join(tmpdir(), 'posterpilot-kometa-plan-'));
 	configPath = join(directory, 'config.yml');
@@ -102,6 +132,7 @@ beforeEach(async () => {
 	await db.delete(operationPlans);
 	h.config = {
 		kometaConfigPath: configPath,
+		kometaMetadataPathPrefix: 'config',
 		kometaConfigMode: 'merge',
 		kometaServerInstanceId: 'server-a',
 		kometaAssetsDir: directory,
@@ -109,6 +140,7 @@ beforeEach(async () => {
 	};
 	h.managedSettings = {};
 	h.cachedLibraries = [];
+	h.migrationJournal = null;
 	writeFileSync(configPath, 'settings:\n  cache: true\n', 'utf8');
 });
 
@@ -130,16 +162,64 @@ describe('Kometa raw/restore exact confirmation', () => {
 		const written = parse(readFileSync(configPath, 'utf8')) as {
 			libraries: Record<string, { metadata_files: { file: string }[] }>;
 		};
-		expect(written.libraries.Movies.metadata_files).toEqual([{ file: MOVIE_FILENAME }]);
-		expect(written.libraries['TV Shows'].metadata_files).toEqual([{ file: SHOW_FILENAME }]);
+		expect(written.libraries.Movies.metadata_files).toEqual([{ file: `config/${MOVIE_FILENAME}` }]);
+		expect(written.libraries['TV Shows'].metadata_files).toEqual([
+			{ file: `config/${SHOW_FILENAME}` }
+		]);
 		expect(h.setKometaLastApplied).toHaveBeenCalledWith(
 			expect.objectContaining({
+				metadataPathPrefix: 'config',
 				libraries: expect.objectContaining({
-					Movies: expect.objectContaining({ metadataFile: MOVIE_FILENAME }),
-					'TV Shows': expect.objectContaining({ metadataFile: SHOW_FILENAME })
+					Movies: expect.objectContaining({
+						metadataReference: `config/${MOVIE_FILENAME}`
+					}),
+					'TV Shows': expect.objectContaining({
+						metadataReference: `config/${SHOW_FILENAME}`
+					})
 				})
+			}),
+			expect.objectContaining({
+				serverInstanceId: 'server-a',
+				configPath: expect.stringContaining('/config.yml'),
+				outputDirectory: expect.stringContaining('posterpilot-kometa-plan-'),
+				metadataPathPrefix: 'config'
 			})
 		);
+	});
+
+	it('recognizes prefixed PosterPilot files by basename, including Windows references', async () => {
+		writeFileSync(
+			configPath,
+			`libraries:
+  Movies:
+    metadata_files:
+      - file: config/${MOVIE_FILENAME}
+  TV Shows:
+    metadata_files:
+      - file: config\\${SHOW_FILENAME}
+`,
+			'utf8'
+		);
+		const state = await loadKometaState();
+		expect(state.libraryState.Movies.hasMetadata).toBe(true);
+		expect(state.libraryState['TV Shows'].hasMetadata).toBe(true);
+		expect(state.metadataFiles).toEqual({ movie: MOVIE_FILENAME, show: SHOW_FILENAME });
+		expect(state.metadataReferences).toEqual({
+			movie: `config/${MOVIE_FILENAME}`,
+			show: `config/${SHOW_FILENAME}`
+		});
+	});
+
+	it('rejects a structured confirmation when the visible prefix changes after preview', async () => {
+		h.cachedLibraries = [{ key: '1', title: 'Movies', type: 'movie' }];
+		const preview = await previewSync(selection(['1']));
+		expect(preview.planId).toBeTruthy();
+
+		h.config.kometaMetadataPathPrefix = 'metadata';
+		await expect(
+			runSync({ planId: preview.planId!, digest: preview.digest! })
+		).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
 	});
 
 	it('requires the dedicated migration before structured sync rewires a legacy reference', async () => {
@@ -186,6 +266,66 @@ settings:
 		});
 		expect(await db.select().from(operationPlans)).toHaveLength(0);
 		expect(readFileSync(configPath, 'utf8')).toBe(unknownConfig);
+	});
+
+	it('blocks every normal config preview while an in-scope migration is resumable', async () => {
+		h.migrationJournal = migrationJournal('config_written');
+		const backupName = 'config.yml.posterpilot-bak-migration-lock';
+		writeFileSync(join(directory, backupName), 'settings:\n  cache: restored\n', 'utf8');
+
+		const [structured, raw, restore] = await Promise.all([
+			previewSync(selection([])),
+			previewRawConfig('settings:\n  cache: false\n'),
+			previewRestoreConfig(backupName)
+		]);
+
+		expect(structured).toMatchObject({
+			planId: null,
+			warnings: ['kometa_migration_config_locked']
+		});
+		expect(raw).toMatchObject({
+			ok: false,
+			errorCode: 'kometa_migration_config_locked'
+		});
+		expect(restore).toMatchObject({
+			ok: false,
+			errorCode: 'kometa_migration_config_locked'
+		});
+		expect(await db.select().from(operationPlans)).toHaveLength(0);
+	});
+
+	it('allows only raw preview while manual wiring awaits acknowledgment', async () => {
+		h.migrationJournal = migrationJournal('awaiting_manual_wiring');
+
+		const structured = await previewSync(selection([]));
+		const raw = await previewRawConfig('settings:\n  cache: false\n');
+
+		expect(structured).toMatchObject({
+			planId: null,
+			warnings: ['kometa_migration_config_locked']
+		});
+		expect(raw).toMatchObject({ ok: true, action: 'raw' });
+		expect(raw.planId).toBeTruthy();
+	});
+
+	it('rechecks the migration journal under the config lock before confirmation', async () => {
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+		expect(preview.planId).toBeTruthy();
+
+		h.migrationJournal = migrationJournal('prepared');
+		await expect(
+			confirmRawConfig({ planId: preview.planId!, digest: preview.digest! })
+		).rejects.toMatchObject({ code: 'plan_stale' });
+		expect(readFileSync(configPath, 'utf8')).toBe('settings:\n  cache: true\n');
+	});
+
+	it('does not let a migration journal from another metadata scope lock config', async () => {
+		h.migrationJournal = migrationJournal('prepared', { metadataPathPrefix: 'other-scope' });
+
+		const preview = await previewRawConfig('settings:\n  cache: false\n');
+
+		expect(preview).toMatchObject({ ok: true, action: 'raw' });
+		expect(preview.planId).toBeTruthy();
 	});
 
 	it('fails visibly and without a plan for a missing cached library', async () => {

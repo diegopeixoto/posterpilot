@@ -300,18 +300,22 @@ restore readiness, and rollback.
 
 ## Kometa export
 
-When you apply a cover with the Kometa method, PosterPilot writes
-Kometa/PMM-compatible YAML (`url_poster` / `url_background`, keyed by TMDB id) into
-the directory named by `KOMETA_ASSETS_DIR` (default `/kometa` in Docker). If
+When you apply a cover with the Kometa method, PosterPilot writes two
+Kometa/PMM-compatible YAML files (`url_poster` / `url_background`) into the
+directory named by `KOMETA_ASSETS_DIR` (default `/kometa` in Docker). Movies use
+TMDB ids in `posterpilot-movies.yml`; shows use TVDB ids with IMDb fallback in
+`posterpilot-shows.yml`. If
 `KOMETA_CONFIG_PATH` is set, the effective output directory is the directory that
-contains that `config.yml`, keeping `posterpilot.yml` co-located. Mount it read/write
-so Kometa can consume the file on its next run. See [Usage](../usage/#apply-a-cover).
+contains that `config.yml`. Mount it read/write so Kometa can consume the files on
+its next run. See [Usage](../usage/#apply-a-cover).
 
 That export is a _metadata_ file. PosterPilot can also surgically manage Kometa's
 **own `config.yml`** — every service connector, per-library collections, overlays
 and operations, global settings and webhooks, plus a raw editor for anything else
-— and wire `posterpilot.yml` into it for you (co-located in the same directory as
-`config.yml`). This lives on its own [Kometa manager page](/posterpilot/kometa-config-sync/).
+— and wire the matching typed metadata file into each library. Physical output
+paths and Kometa-visible `file:` references are separate; configure the latter
+with `KOMETA_METADATA_PATH_PREFIX`. This lives on its own
+[Kometa manager page](/posterpilot/kometa-config-sync/).
 
 ![PosterPilot Kometa manager showing the config path, management mode, and connection sections](/posterpilot/screenshots/kometa-manager.webp)
 
@@ -361,6 +365,7 @@ and are locked in the UI.
 | `KOMETA_CONFIG_PATH`      | Kometa config path        | —                                     | Path to Kometa's own `config.yml` to manage. Empty/unset = Kometa manager off.                |
 | `KOMETA_CONFIG_MODE`      | Kometa config mode        | `merge`                               | `merge` (surgical — preserves your other keys and comments) or `own` (regenerate the whole file). |
 | `KOMETA_SERVER_INSTANCE_ID` | Kometa Plex binding     | `legacy-default`                      | Exact named Plex instance used by every Kometa preview/write; non-Plex bindings are rejected. |
+| `KOMETA_METADATA_PATH_PREFIX` | Kometa metadata reference prefix | `config`                       | Relative directory visible to Kometa at runtime; `.` uses bare filenames.                     |
 | `DEFAULT_APPLY_METHOD`    | Default apply method      | `both`                                | Default apply method: `plex`, `kometa`, or `both`.                                            |
 | `INCLUDED_SECTIONS`       | Included sections         | all movie/show                        | Library section keys to sync; comma-separated (env) or a JSON array (persisted). Empty = all. |
 | `PROVIDER_MEDIUX`         | MediUX provider           | on                                    | Enable the MediUX provider.                                                                   |

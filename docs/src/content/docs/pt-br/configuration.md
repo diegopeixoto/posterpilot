@@ -62,9 +62,11 @@ resolução e proporção. A mesma configuração determinística vale na prévi
 `DEFAULT_APPLY_METHOD` aceita `plex` (servidor direto), `kometa` ou `both`. É o
 valor inicial; escolher outro em uma ação não altera o padrão salvo.
 
-O export grava `posterpilot.yml` em `KOMETA_ASSETS_DIR`; com
-`KOMETA_CONFIG_PATH`, grava ao lado do `config.yml`. `KOMETA_SERVER_INSTANCE_ID`
-deve indicar uma instância Plex exata. Veja o [Gerenciador do Kometa](../kometa-config-sync/).
+O export grava `posterpilot-movies.yml` (TMDB) e `posterpilot-shows.yml` (TVDB, com
+fallback IMDb) em `KOMETA_ASSETS_DIR`; com `KOMETA_CONFIG_PATH`, grava ao lado de
+`config.yml`. `KOMETA_SERVER_INSTANCE_ID` deve indicar uma instância Plex exata.
+`KOMETA_METADATA_PATH_PREFIX` define a referência relativa vista pelo Kometa, não
+o caminho físico. Veja o [Gerenciador do Kometa](../kometa-config-sync/).
 
 ## Automação, backup e diagnóstico
 
@@ -100,10 +102,11 @@ suportados são `en`, `es`, `zh`, `ja`, `pt-BR` e `fr`.
 | `EMBY_URL` | — | URL base do Emby. |
 | `EMBY_API_KEY` | — | Chave/token Emby (segredo). |
 | `TMDB_KEY` | — | Chave v3 ou bearer/JWT v4 do TMDB (segredo). |
-| `KOMETA_ASSETS_DIR` | `./data/kometa` (`/kometa` no Docker) | Diretório de `posterpilot.yml` sem config path. |
+| `KOMETA_ASSETS_DIR` | `./data/kometa` (`/kometa` no Docker) | Diretório dos YAMLs tipados sem config path. |
 | `KOMETA_CONFIG_PATH` | — | Caminho absoluto do `config.yml`; vazio desativa o gerenciador. |
 | `KOMETA_CONFIG_MODE` | `merge` | `merge` ou `own`. |
 | `KOMETA_SERVER_INSTANCE_ID` | `legacy-default` | Instância Plex exata vinculada ao Kometa. |
+| `KOMETA_METADATA_PATH_PREFIX` | `config` | Diretório relativo visto pelo runtime do Kometa; `.` usa nomes simples. |
 | `DEFAULT_APPLY_METHOD` | `both` | `plex`, `kometa` ou `both`. |
 | `INCLUDED_SECTIONS` | todas | Chaves separadas por vírgula; ambiente substitui seleção por servidor. |
 | `PROVIDER_MEDIUX` | ligado | Habilita MediUX. |

@@ -157,6 +157,7 @@ for the complete reference:
 | `KOMETA_ASSETS_DIR`                                      | where exported Kometa YAML is written (default `/kometa`)         |
 | `KOMETA_CONFIG_PATH`                                     | path to Kometa's own `config.yml` to manage (empty = feature off) |
 | `KOMETA_CONFIG_MODE`                                     | `merge` (default, surgical) or `own` (regenerate the whole file)  |
+| `KOMETA_METADATA_PATH_PREFIX`                            | Kometa-visible relative metadata prefix (default `config`)        |
 | `LOG_DIR`                                                | rotating log file folder (default `/data/logs` in Docker)         |
 | `EVENT_RETENTION`                                        | max activity-log rows kept in the db (default `2000`)             |
 | `DATABASE_URL`                                           | libsql file URL (default `file:/data/posterpilot.db` in Docker)   |
@@ -172,8 +173,9 @@ Two volumes matter:
   YAML lands where Kometa reads it.
 - _(optional)_ a **Kometa config dir** (read/write) if you want PosterPilot to
   manage Kometa's own `config.yml` — then set `KOMETA_CONFIG_PATH` to the mounted
-  file, e.g. `/kometa-config/config.yml`. PosterPilot co-locates `posterpilot.yml`
-  in that same directory, so this single mount is all the manager needs.
+  file, e.g. `/kometa-config/config.yml`. PosterPilot co-locates the type-safe
+  movie/show metadata files there; `KOMETA_METADATA_PATH_PREFIX` separately
+  describes the relative path visible inside Kometa.
 
 ### Unraid
 
@@ -208,22 +210,26 @@ then browse to the container on port 3000.
 
 ## How Kometa consumes the export
 
-posterpilot writes a single metadata file (default `posterpilot.yml`) into
-`KOMETA_ASSETS_DIR`, keyed by TMDB id with `url_poster` / `url_background`
-entries — the same shape the legacy scraper produced. Add that file to your
-Kometa library config (e.g. under `metadata_path`/`metadata_files`) so Kometa
-applies the covers on its next run. Re-applying updates entries in place.
+PosterPilot writes two type-safe metadata files: `posterpilot-movies.yml` uses
+TMDB movie IDs with IMDb fallback, while `posterpilot-shows.yml` uses TVDB IDs
+with IMDb fallback.
+Both contain `url_poster` / `url_background` entries and are written to
+`KOMETA_ASSETS_DIR` (or beside managed `config.yml`). Reference only the matching
+file from each Kometa library. Re-applying updates entries in place.
 
 Optionally, PosterPilot can also **manage Kometa's own `config.yml`** for you on a
 dedicated **`/kometa` manager page** (a top-level nav item, not a Settings tab) —
 structured forms for every service connector (`plex`, `tmdb`, `tautulli`, `trakt`,
 `radarr`, `sonarr`, …), per-library collections, overlays and operations, global
-settings and webhooks, plus a raw `config.yml` editor for anything else. The
-`libraries` section gets `posterpilot.yml` wired in automatically, co-located in
-the **same directory as `config.yml`** (no separate metadata path). Set
-`KOMETA_CONFIG_PATH` (and mount Kometa's config dir) to enable it. It defaults to a
-surgical `merge` that preserves your hand-written keys and comments; an `own` mode
-(`KOMETA_CONFIG_MODE=own`) lets PosterPilot regenerate and fully own the file.
+settings and webhooks, plus a raw `config.yml` editor for anything else. Each
+managed library gets exactly one authoritative reference:
+`posterpilot-movies.yml` for movies or `posterpilot-shows.yml` for shows. Both are
+co-located with **`config.yml`**. Set `KOMETA_CONFIG_PATH` (and mount Kometa's
+config dir) to enable it; `KOMETA_METADATA_PATH_PREFIX` separately describes the
+relative path Kometa sees at runtime (`config` by default, `.` for bare names).
+The manager defaults to a surgical `merge` that preserves your hand-written keys
+and comments; an `own` mode (`KOMETA_CONFIG_MODE=own`) lets PosterPilot regenerate
+and fully own the file.
 Every write is previewed first and leaves a timestamped backup you can restore. See
 the [Kometa manager](https://diegopeixoto.github.io/posterpilot/kometa-config-sync/)
 docs for details.

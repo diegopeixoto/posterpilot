@@ -232,6 +232,7 @@ function config(serverInstanceId: string | null = 'server-a'): AppConfig {
 		kometaAssetsDir: '/kometa',
 		kometaConfigPath: '/kometa/config.yml',
 		kometaConfigMode: 'merge',
+		kometaMetadataPathPrefix: 'config',
 		kometaServerInstanceId: serverInstanceId,
 		mediuxDelayMs: 0,
 		mediuxConcurrency: 1,

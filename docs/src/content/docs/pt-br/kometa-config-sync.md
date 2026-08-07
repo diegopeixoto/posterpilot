@@ -7,15 +7,14 @@ Além de [exportar artwork como metadados](../usage/#como-o-kometa-consome-a-exp
 o PosterPilot pode gerenciar o `config.yml` do Kometa na página **`/kometa`**. O
 recurso é opcional: sem um caminho configurado, nenhum arquivo é lido ou gravado.
 
-:::note[Dois arquivos]
-- **`posterpilot.yml`** contém `url_poster` / `url_background` por TMDB e é escrito
-  quando você aplica pelo destino Kometa.
+:::note[Configuração e metadados têm funções diferentes]
+- **`posterpilot-movies.yml`** contém artwork de filmes no namespace TMDB, com
+  IMDb como fallback quando não há um ID TMDB.
+- **`posterpilot-shows.yml`** contém artwork de séries, temporadas e episódios no
+  namespace TVDB, com IMDb como fallback quando não há TVDB. O tipo registrado no
+  PosterPilot decide o namespace; uma chave numérica nunca é usada para adivinhar.
 - **`config.yml`** contém conexões, bibliotecas, coleções, overlays, operações e
   configurações do próprio Kometa.
-
-Quando `KOMETA_CONFIG_PATH` existe, `posterpilot.yml` é gravado no mesmo diretório
-de `config.yml` e referenciado pelo nome do arquivo. Não há um segundo caminho de
-metadados.
 :::
 
 ## Ativar e montar
@@ -25,11 +24,20 @@ metadados.
 | `KOMETA_CONFIG_PATH` | vazio | Caminho absoluto montado para `config.yml`; vazio desativa o gerenciador. |
 | `KOMETA_CONFIG_MODE` | `merge` | `merge` preserva conteúdo não gerenciado; `own` regenera o arquivo inteiro. |
 | `KOMETA_SERVER_INSTANCE_ID` | servidor legado | Instância Plex nomeada vinculada ao Kometa. |
+| `KOMETA_METADATA_PATH_PREFIX` | `config` | Diretório relativo visto pelo runtime do Kometa; use `.` (ou limpe o campo na UI) para nomes simples. |
 
 Monte o diretório de configuração no contêiner com leitura/escrita. Veja
 [Instalação](../installation/#montar-a-configuração-do-kometa) para um exemplo.
 Kometa é exclusivo do Plex: Jellyfin/Emby e o empréstimo implícito de credenciais de
 outra instância são recusados.
+
+O caminho físico não é a referência do Kometa. O PosterPilot grava os dois arquivos
+lado a lado no diretório de saída configurado. Já os valores `file:` precisam
+descrever esses arquivos pela visão do **runtime do Kometa**. Com o prefixo padrão,
+as referências são `config/posterpilot-movies.yml` e
+`config/posterpilot-shows.yml`, mesmo quando outro nome de mount deixa os arquivos
+fisicamente ao lado de `config.yml`. O prefixo é relativo: não use caminho do host,
+caminho absoluto do contêiner, URL ou nome de arquivo YAML.
 
 ## Áreas gerenciadas
 
@@ -58,6 +66,52 @@ O plano emitido pelo servidor expira, só pode ser usado uma vez e está vincula
 fingerprint do arquivo, à instância Plex, ao modo e ao conteúdo completo proposto.
 Alterar qualquer entrada invalida a prévia. Arquivo, conteúdo ou token obsoleto,
 alterado, expirado ou reutilizado não grava nada.
+
+## Migrar o posterpilot.yml legado
+
+:::caution[Aguarde a release]
+Não renomeie, divida nem reconecte `posterpilot.yml` manualmente. Aguarde a release
+do PosterPilot que contém esta migração aparecer na página de
+[Releases](https://github.com/diegopeixoto/posterpilot/releases), atualize a sua
+instância e só então use a migração exibida em `/kometa`.
+:::
+
+Instalações existentes podem ter filmes e séries no mesmo `posterpilot.yml`, como
+se ambos compartilhassem o namespace TMDB. A migração normaliza esse arquivo:
+
+1. **Prévia.** O PosterPilot cruza o legado com a biblioteca Plex vinculada e com
+   seu histórico exato de revisões. A prévia exibe estrutura, fingerprints e
+   contagens, nunca URLs de artwork ou credenciais. Filmes usam TMDB e, sem ele,
+   IMDb; séries usam TVDB e, sem ele, IMDb.
+2. **Ambiguidades.** Uma chave numérica pode colidir entre tipos, então o
+   PosterPilot não adivinha. Entradas sem prova ficam separadas. Você pode corrigir
+   o match ou aceitar explicitamente a ambiguidade, concluir a migração e reaplicar
+   essas capas no PosterPilot; a reaplicação grava no arquivo tipado correto.
+   Conteúdo conflitante já presente nos arquivos de destino também não é sobrescrito.
+3. **Confirmação.** Um journal durável e backups protegidos são gravados primeiro.
+   O PosterPilot grava e verifica **os dois** arquivos tipados e só depois altera
+   `config.yml`. O `posterpilot.yml` legado nunca é alterado nem apagado.
+4. **Retry/resume.** Depois de uma interrupção, repetir a operação retoma o
+   checkpoint verificado, sem reclassificar entradas. Se algum arquivo não tiver o
+   fingerprint da prévia nem o resultado já gravado, a operação para para nova
+   revisão em vez de sobrescrevê-lo.
+
+Quando consegue provar que gerencia as entradas `metadata_files`, o PosterPilot
+atualiza `config.yml` automaticamente. Caso contrário, ele grava os arquivos
+tipados e mostra um guia exato por biblioteca. **Não cole esse bloco parcial de
+`libraries:` por cima da sua configuração.** Em cada biblioteca indicada,
+substitua somente o item de `metadata_files` cujo basename de `file` seja
+`posterpilot.yml`; se ele não existir, adicione uma vez o item tipado exibido.
+Preserve todos os itens irmãos e configurações da biblioteca e termine com
+exatamente uma referência tipada e nenhuma referência legada ativa. Confira os caminhos pela visão do runtime
+do Kometa antes de reconhecer a conclusão no PosterPilot. Esse reconhecimento
+registra a sua confirmação; não significa que o PosterPilot verificou a edição
+manual.
+
+**Rollback** restaura o backup protegido de `config.yml` somente se a configuração
+atual ainda for exatamente o resultado da migração. Os arquivos tipados e o legado
+são preservados, portanto o artwork gerado não é descartado e uma nova tentativa
+não precisa reconstruí-lo.
 
 ## Editor bruto
 

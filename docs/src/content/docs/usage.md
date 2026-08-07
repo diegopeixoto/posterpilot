@@ -193,8 +193,9 @@ selection, destination, current artwork, and source state:
   named provider, locks where supported, rereads the result, and records exact or
   best-effort verification according to that instance's capabilities.
 - **Kometa export.** Writes Kometa/PMM-compatible YAML — `url_poster` (and
-  `url_background` when a background is staged), keyed by TMDB id — into the
-  configured Kometa assets directory, without contacting the media server. Your
+  `url_background` when a background is staged) — into the configured Kometa
+  output directory, without contacting the media server. Movies use TMDB ids with
+  IMDb fallback; shows use TVDB ids with IMDb fallback. Your
   existing Kometa instance applies the covers on its next run. Re-applying updates
   the entry in place rather than duplicating it.
 - **Both.** Performs the direct upload _and_ writes the Kometa YAML, recording each
@@ -223,10 +224,13 @@ full contract.
 
 ### How Kometa consumes the export
 
-PosterPilot writes a single metadata file (default `posterpilot.yml`) into
-`KOMETA_ASSETS_DIR`, keyed by TMDB id with `url_poster` / `url_background`
-entries. Add that file to your Kometa library config (e.g. under
-`metadata_path` / `metadata_files`) so Kometa applies the covers on its next run.
+PosterPilot writes `posterpilot-movies.yml` and `posterpilot-shows.yml` into its
+Kometa output directory. Movie entries use TMDB ids, falling back to IMDb when
+TMDB is unavailable; show entries use TVDB ids, falling back to IMDb when TVDB is
+unavailable. Wire the matching file into each
+Kometa library under `metadata_files`. The [Kometa manager](../kometa-config-sync/)
+can maintain those references and explains why the physical output path is
+separate from Kometa's runtime-visible `file:` prefix.
 
 ## Artwork history and undo
 

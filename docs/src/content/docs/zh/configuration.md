@@ -37,7 +37,7 @@ ThePosterDB 无需账号即可使用，但它在部分页面会向匿名访问�
 
 `DEFAULT_APPLY_METHOD` 可为 `plex`（直接服务器）、`kometa` 或 `both`。单次操作切换不会修改已保存默认值。
 
-导出通常写入 `KOMETA_ASSETS_DIR`；设置 `KOMETA_CONFIG_PATH` 后，`posterpilot.yml` 会与 `config.yml` 同目录。`KOMETA_SERVER_INSTANCE_ID` 必须指向准确的 Plex 实例。参阅 [Kometa 管理器](../kometa-config-sync/)。
+导出把 `posterpilot-movies.yml`（TMDB）和 `posterpilot-shows.yml`（TVDB，没有时回退 IMDb）写入 `KOMETA_ASSETS_DIR`；设置 `KOMETA_CONFIG_PATH` 后会与 `config.yml` 同目录。`KOMETA_SERVER_INSTANCE_ID` 必须指向准确的 Plex 实例；`KOMETA_METADATA_PATH_PREFIX` 指定 Kometa 可见的相对引用，而非物理路径。参阅 [Kometa 管理器](../kometa-config-sync/)。
 
 ## 自动化、备份与诊断
 
@@ -62,10 +62,11 @@ ThePosterDB 无需账号即可使用，但它在部分页面会向匿名访问�
 | `EMBY_URL` | — | Emby 基础 URL。 |
 | `EMBY_API_KEY` | — | Emby 密钥／令牌。 |
 | `TMDB_KEY` | — | TMDB v3 或 v4 bearer/JWT。 |
-| `KOMETA_ASSETS_DIR` | `./data/kometa`（Docker `/kometa`） | 未设置 config path 时 `posterpilot.yml` 的目录。 |
+| `KOMETA_ASSETS_DIR` | `./data/kometa`（Docker `/kometa`） | 未设置 config path 时分类 YAML 的目录。 |
 | `KOMETA_CONFIG_PATH` | — | `config.yml` 绝对路径；空值禁用管理器。 |
 | `KOMETA_CONFIG_MODE` | `merge` | `merge` 或 `own`。 |
 | `KOMETA_SERVER_INSTANCE_ID` | `legacy-default` | Kometa 绑定的准确 Plex 实例。 |
+| `KOMETA_METADATA_PATH_PREFIX` | `config` | Kometa 运行时可见的相对目录；`.` 仅使用文件名。 |
 | `DEFAULT_APPLY_METHOD` | `both` | `plex`、`kometa` 或 `both`。 |
 | `INCLUDED_SECTIONS` | 全部 | 逗号分隔的媒体库键；环境值覆盖各服务器选择。 |
 | `PROVIDER_MEDIUX` | 开 | 启用 MediUX。 |

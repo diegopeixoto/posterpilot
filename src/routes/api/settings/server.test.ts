@@ -105,6 +105,39 @@ describe('POST /api/settings artwork ranking', () => {
 		expect(h.saveSettings).toHaveBeenCalledWith({ thePosterDbPassword: '' });
 	});
 
+	it('canonicalizes a safe Kometa-visible metadata prefix before saving', async () => {
+		const response = await POST({
+			request: request({ kometaMetadataPathPrefix: '.\\config\\metadata\\' })
+		} as Parameters<typeof POST>[0]);
+		expect(response.status).toBe(200);
+		expect(h.saveSettings).toHaveBeenCalledWith({
+			kometaMetadataPathPrefix: 'config/metadata'
+		});
+	});
+
+	it('preserves an explicit empty Kometa metadata prefix', async () => {
+		const response = await POST({
+			request: request({ kometaMetadataPathPrefix: '' })
+		} as Parameters<typeof POST>[0]);
+		expect(response.status).toBe(200);
+		expect(h.saveSettings).toHaveBeenCalledWith({ kometaMetadataPathPrefix: '' });
+	});
+
+	it.each([
+		['../escape', 'traversal'],
+		['/absolute', 'absolute'],
+		['config/posterpilot-movies.yml', 'filename']
+	])('rejects unsafe Kometa metadata prefix %j', async (prefix, reason) => {
+		const response = await POST({
+			request: request({ kometaMetadataPathPrefix: prefix })
+		} as Parameters<typeof POST>[0]);
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			error: { code: 'invalid_kometa_metadata_path_prefix', reason }
+		});
+		expect(h.saveSettings).not.toHaveBeenCalled();
+	});
+
 	it('persists the regular configuration and complete ranking together', async () => {
 		const response = await POST({
 			request: request({ defaultApplyMethod: 'plex', ranking: validRanking })

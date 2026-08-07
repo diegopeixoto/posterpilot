@@ -349,21 +349,22 @@ l'état de préparation à la restauration et le retour en arrière.
 
 ## Export Kometa
 
-Quand vous appliquez une couverture avec la méthode Kometa, PosterPilot écrit du
-YAML compatible Kometa/PMM (`url_poster` / `url_background`, indexé par
-identifiant TMDB) dans le répertoire désigné par `KOMETA_ASSETS_DIR` (par défaut
-`/kometa` dans Docker). Si `KOMETA_CONFIG_PATH` est défini, le répertoire de
-sortie effectif est celui qui contient ce `config.yml`, ce qui garde
-`posterpilot.yml` au même endroit. Montez-le en lecture/écriture pour que Kometa
-puisse consommer le fichier à sa prochaine exécution. Voir
+Quand vous appliquez une couverture avec la méthode Kometa, PosterPilot écrit
+deux YAML compatibles Kometa/PMM (`url_poster` / `url_background`) dans le
+répertoire désigné par `KOMETA_ASSETS_DIR` (par défaut `/kometa` dans Docker).
+`posterpilot-movies.yml` utilise TMDB ; `posterpilot-shows.yml`, TVDB avec IMDb
+comme solution de repli. Si `KOMETA_CONFIG_PATH` est défini, le répertoire de
+sortie effectif est celui qui contient ce `config.yml`. Montez-le en
+lecture/écriture pour que Kometa puisse consommer les fichiers. Voir
 [Utilisation](../usage/).
 
 Cet export est un fichier de _métadonnées_. PosterPilot peut aussi gérer
 chirurgicalement le **`config.yml` propre** de Kometa — chaque connecteur de
 service, les collections par médiathèque, les overlays et opérations, les
 paramètres globaux et les webhooks, plus un éditeur brut pour tout le reste — et
-y raccorder `posterpilot.yml` pour vous (placé dans le même répertoire que
-`config.yml`). Tout cela vit sur sa propre
+y raccorder le fichier typé correspondant. Le chemin physique et la référence
+`file:` visible par Kometa sont distincts ; configurez cette dernière avec
+`KOMETA_METADATA_PATH_PREFIX`. Tout cela vit sur sa propre
 [page du gestionnaire Kometa](/posterpilot/fr/kometa-config-sync/).
 
 ![Gestionnaire Kometa de PosterPilot montrant le chemin de configuration, le mode de gestion et les sections de connexion](/posterpilot/screenshots/kometa-manager.webp)
@@ -417,6 +418,7 @@ l'environnement, ils prennent la priorité et sont verrouillés dans l'interface
 | `KOMETA_CONFIG_PATH`      | Chemin de config Kometa          | —                                      | Chemin du `config.yml` propre à Kometa à gérer. Vide/non défini = gestionnaire Kometa désactivé.  |
 | `KOMETA_CONFIG_MODE`      | Mode de config Kometa            | `merge`                                | `merge` (chirurgical — préserve vos autres clés et commentaires) ou `own` (régénère tout le fichier). |
 | `KOMETA_SERVER_INSTANCE_ID` | Liaison Plex de Kometa         | `legacy-default`                       | Instance Plex nommée exacte utilisée par chaque aperçu/écriture Kometa ; les liaisons non-Plex sont rejetées. |
+| `KOMETA_METADATA_PATH_PREFIX` | Préfixe des métadonnées Kometa | `config`                              | Répertoire relatif visible par le runtime Kometa ; `.` utilise les noms de fichiers seuls. |
 | `DEFAULT_APPLY_METHOD`    | Méthode d'application par défaut | `both`                                 | Méthode d'application par défaut : `plex`, `kometa` ou `both`.                                    |
 | `INCLUDED_SECTIONS`       | Sections incluses                | toutes films/séries                    | Clés des sections de médiathèque à synchroniser ; séparées par des virgules (env) ou tableau JSON (persisté). Vide = toutes. |
 | `PROVIDER_MEDIUX`         | Fournisseur MediUX               | activé                                 | Active le fournisseur MediUX.                                                                     |
