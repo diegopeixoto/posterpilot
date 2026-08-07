@@ -6,8 +6,8 @@ import { embyLikeProvider } from './emby';
  * lands behind the existing one(s). Jellyfin/Infuse show `BackdropImageTags[0]`, and
  * v0.9.0's post-write verification reads that same [0]; when the prior backdrop stays
  * at [0] the write is reported as `artwork_unchanged_after_write` and the user keeps
- * seeing the old art. Applying a background must therefore clear the existing backdrops
- * first so the new one is the sole (index 0) backdrop.
+ * seeing the old art. Applying a background must append the replacement and then remove
+ * exactly the prior backdrop count so the new one becomes the sole (index 0) backdrop.
  *
  * Crucially, `BackdropImageTags` is ordered by resolution, NOT by the index that
  * `DELETE /Images/Backdrop/{i}` uses, so deletion must not trust a response-derived
@@ -64,6 +64,37 @@ describe('applyBackground replaces instead of appending', () => {
 		await provider.applyBackgroundBytes!('item-2', new Uint8Array([1]).buffer, 'image/jpeg');
 
 		expect(backdrops()).toEqual(['new']);
+	});
+
+	it('preserves every prior backdrop and sends no delete when the upload fails', async () => {
+		const backdrops = ['old-a', 'old-b'];
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = new URL(input instanceof Request ? input.url : input.toString());
+			const method = init?.method ?? 'GET';
+			if (url.pathname === '/Items' && url.searchParams.get('ids') === 'item-failed') {
+				return new Response(
+					JSON.stringify({ Items: [{ Id: 'item-failed', BackdropImageTags: [...backdrops] }] }),
+					{ status: 200, headers: { 'content-type': 'application/json' } }
+				);
+			}
+			if (method === 'POST' && url.pathname === '/Items/item-failed/Images/Backdrop') {
+				return new Response('upload failed', { status: 500, statusText: 'Internal Server Error' });
+			}
+			if (method === 'DELETE' && url.pathname.startsWith('/Items/item-failed/Images/Backdrop/')) {
+				backdrops.splice(0, 1);
+				return new Response(null, { status: 204 });
+			}
+			throw new Error(`Unexpected ${method} ${url.pathname}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await expect(
+			provider.applyBackgroundBytes!('item-failed', new Uint8Array([9, 9, 9]).buffer, 'image/jpeg')
+		).rejects.toThrow('rejected the image upload: HTTP 500 Internal Server Error');
+
+		expect(backdrops).toEqual(['old-a', 'old-b']);
+		expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0);
 	});
 
 	it('still writes the backdrop when the count read fails, skipping the prune', async () => {

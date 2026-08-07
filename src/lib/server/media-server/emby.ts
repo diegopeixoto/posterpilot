@@ -303,12 +303,12 @@ export function embyLikeProvider(
 	 * post-write verification reads that same [0], sees it unchanged, and fails the
 	 * operation (`artwork_unchanged_after_write`).
 	 *
-	 * We clear every existing backdrop FIRST, then post the new one, so it is the only
-	 * (hence index 0) backdrop. Deletion is done by repeatedly removing index 0 rather
-	 * than iterating a captured list: Jellyfin returns `BackdropImageTags` ordered by
-	 * resolution, NOT by the internal index that `DELETE /Images/Backdrop/{i}` uses, so
-	 * deleting by a response-derived index removes the wrong image (it can delete the
-	 * freshly written high-res backdrop). Deleting index 0 N times is order-independent.
+	 * We capture the existing count, append the new image, then remove exactly that many
+	 * backdrops by repeatedly deleting index 0. Posting first keeps the operation
+	 * non-destructive when upload fails. Deleting by count rather than response-derived
+	 * indices is also important because Jellyfin returns `BackdropImageTags` ordered by
+	 * resolution, NOT by the internal index that `DELETE /Images/Backdrop/{i}` uses.
+	 * After N index-0 removals, the appended image is the sole remaining backdrop.
 	 */
 	async function postBackdropReplacing(
 		itemId: string,
@@ -326,6 +326,8 @@ export function embyLikeProvider(
 		} catch {
 			// remaining stays 0: skip pruning, still write the new backdrop.
 		}
+		// Never destroy the current artwork until the replacement upload has succeeded.
+		await postImage(itemId, 'Backdrop', data, contentType);
 		while (remaining > 0) {
 			try {
 				const res = await fetch(`${base}/Items/${encodeURIComponent(itemId)}/Images/Backdrop/0`, {
@@ -333,15 +335,14 @@ export function embyLikeProvider(
 					headers,
 					signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
 				});
-				// 404 => already gone; a hard error => stop pruning but still write the new one
-				// below (a stale backdrop is cosmetic; failing the whole apply is worse).
+				// 404 => already gone; a hard error => stop pruning. The new backdrop is
+				// already present, and retaining stale extras is safer than failing the apply.
 				if (!res.ok && res.status !== 404) break;
 			} catch {
 				break;
 			}
 			remaining -= 1;
 		}
-		await postImage(itemId, 'Backdrop', data, contentType);
 	}
 
 	async function deleteCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
