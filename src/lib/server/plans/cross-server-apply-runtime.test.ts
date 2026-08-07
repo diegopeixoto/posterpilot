@@ -24,6 +24,7 @@ vi.mock('$lib/server/db', async () => {
 			tvdb_id TEXT,
 			media_type TEXT,
 			selection_updated_at INTEGER,
+			selection_revision INTEGER DEFAULT 0 NOT NULL,
 			source_removed_at INTEGER,
 			updated_at INTEGER NOT NULL
 		);

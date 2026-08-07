@@ -59,7 +59,10 @@ beforeEach(async () => {
 			selected_background_url text,
 			selected_poster_candidate_id integer,
 			selected_background_candidate_id integer,
+			selected_poster_provider text,
+			selected_background_provider text,
 			selection_updated_at integer,
+			selection_revision integer DEFAULT 0 NOT NULL,
 			artwork_version integer NOT NULL,
 			source_removed_at integer,
 			updated_at integer NOT NULL
@@ -74,6 +77,7 @@ beforeEach(async () => {
 			design_family text,
 			language text,
 			url text NOT NULL,
+			preview_url text,
 			kind text NOT NULL,
 			season integer,
 			episode integer,
@@ -135,9 +139,12 @@ beforeEach(async () => {
 			(201, 'server-a', 2, 'mediux', 'set-second', 'curator', NULL, 'en',
 			 'https://api.mediux.pro/assets/201', 'poster', NULL, NULL, 2000, 3000, 1, 0),
 			(202, 'server-a', 2, 'tmdb', 'tmdb', NULL, NULL, NULL,
-			 'https://image.tmdb.org/t/p/w1280/background', 'background', NULL, NULL, 1920, 1080, 1, 0),
+				 'https://image.tmdb.org/t/p/w1280/background', 'background', NULL, NULL, 1920, 1080, 1, 0),
 			(301, 'server-b', 3, 'mediux', 'set-other', 'curator', NULL, 'en',
-			 'https://api.mediux.pro/assets/301', 'poster', NULL, NULL, 2000, 3000, 1, 0);
+				 'https://api.mediux.pro/assets/301', 'poster', NULL, NULL, 2000, 3000, 1, 0);
+		UPDATE poster_candidates
+		SET preview_url = 'https://images.example.test/previews/101.jpg'
+		WHERE id = 101;
 	`);
 	store = createCollectionSuggestionStore(database, async () => ({
 		weights: DEFAULT_SCORE_WEIGHTS,
@@ -180,11 +187,22 @@ describe('collection suggestion store', () => {
 				currentPoster: mediaItems.currentPosterUrl,
 				currentBackground: mediaItems.currentBackgroundUrl,
 				poster: mediaItems.selectedPosterCandidateId,
+				posterUrl: mediaItems.selectedPosterUrl,
 				background: mediaItems.selectedBackgroundCandidateId,
-				backgroundUrl: mediaItems.selectedBackgroundUrl
+				backgroundUrl: mediaItems.selectedBackgroundUrl,
+				posterProvider: mediaItems.selectedPosterProvider,
+				backgroundProvider: mediaItems.selectedBackgroundProvider,
+				selectionRevision: mediaItems.selectionRevision
 			})
 			.from(mediaItems);
-		expect(rows.find((row) => row.id === 1)).toMatchObject({ poster: 101, background: 102 });
+		expect(rows.find((row) => row.id === 1)).toMatchObject({
+			poster: 101,
+			posterUrl: 'https://api.mediux.pro/assets/101',
+			background: 102,
+			posterProvider: 'mediux',
+			backgroundProvider: 'mediux',
+			selectionRevision: 1
+		});
 		expect(rows.find((row) => row.id === 2)).toMatchObject({
 			poster: 201,
 			background: null,
@@ -211,12 +229,16 @@ describe('collection suggestion store', () => {
 		const selection = {
 			selectedPosterUrl: mediaItems.selectedPosterUrl,
 			selectedPosterCandidateId: mediaItems.selectedPosterCandidateId,
-			selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId
+			selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId,
+			selectedPosterProvider: mediaItems.selectedPosterProvider,
+			selectionRevision: mediaItems.selectionRevision
 		};
 		let [item] = await database.select(selection).from(mediaItems).where(eq(mediaItems.id, 1));
 		expect(item).toMatchObject({
 			selectedPosterCandidateId: 103,
-			selectedBackgroundCandidateId: 102
+			selectedBackgroundCandidateId: 102,
+			selectedPosterProvider: 'mediux',
+			selectionRevision: 2
 		});
 
 		await store.clearMemberSelection({
@@ -229,7 +251,9 @@ describe('collection suggestion store', () => {
 		expect(item).toMatchObject({
 			selectedPosterUrl: null,
 			selectedPosterCandidateId: null,
-			selectedBackgroundCandidateId: 102
+			selectedBackgroundCandidateId: 102,
+			selectedPosterProvider: null,
+			selectionRevision: 3
 		});
 	});
 
@@ -293,7 +317,10 @@ describe('collection suggestion store', () => {
 
 	it('serves candidate preview sources only inside the selected collection scope', async () => {
 		await expect(store.getCandidatePreviewSource('server-a', 'collection-a', 101)).resolves.toBe(
-			'https://api.mediux.pro/assets/101'
+			'https://images.example.test/previews/101.jpg'
+		);
+		await expect(store.getCandidatePreviewSource('server-a', 'collection-a', 102)).resolves.toBe(
+			'https://api.mediux.pro/assets/102'
 		);
 		await expect(
 			store.getCandidatePreviewSource('server-a', 'collection-a', 301)

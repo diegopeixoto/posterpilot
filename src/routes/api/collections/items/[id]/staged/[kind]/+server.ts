@@ -5,6 +5,7 @@ import {
 	safeStagedArtworkContentType,
 	safeStagedArtworkUrl
 } from '$lib/server/collections/staged-artwork-url';
+import { getStagedRootArtworkSource } from '$lib/server/collections/staged-artwork-source';
 import { getMediaItem } from '$lib/server/queries';
 import { getActiveServerInstance } from '$lib/server/server-instances';
 import { getOrFetchThumb } from '$lib/server/posters/thumb-cache';
@@ -23,7 +24,10 @@ export const GET: RequestHandler = async ({ params }) => {
 	const item = await getMediaItem(id, active.id);
 	if (!item) throw error(404, 'item not found');
 	const selected = params.kind === 'poster' ? item.selectedPosterUrl : item.selectedBackgroundUrl;
-	const source = selected ? safeStagedArtworkUrl(selected) : null;
+	const preferred = await getStagedRootArtworkSource(item, params.kind);
+	const source =
+		(preferred ? safeStagedArtworkUrl(preferred) : null) ??
+		(selected ? safeStagedArtworkUrl(selected) : null);
 	if (!source) throw error(404, 'staged artwork not available');
 
 	try {

@@ -4,9 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('$lib/server/db', () => ({ db: {} }));
 import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
 import { selectAutomaticArtwork } from '$lib/server/posters/automatic-selection';
-import { canonicalJsonDigest } from './canonical-json';
+import {
+	RemoteArtworkDownloadError,
+	type RemoteArtworkDownloadErrorCode
+} from '$lib/server/remote-artwork';
+import { canonicalJsonDigest, hashCanonicalJson } from './canonical-json';
 import { confirmApplyPlan, exactApplyPreviewResponse } from './apply-api';
-import { executeFrozenApplyPlan } from './apply-executor';
+import { executeFrozenApplyPlan, type ApplyPlanExecutorDependencies } from './apply-executor';
 import {
 	applySlotKey,
 	type ApplyPlanDestination,
@@ -21,6 +25,7 @@ import {
 	type ApplyPlannerItemData,
 	type PlannerCandidateSnapshot
 } from './apply-planner';
+import { assertApplyPlanFresh, assertApplyPlanPayload } from './apply-plan-validation';
 import {
 	OperationPlanError,
 	type CreateOperationPlanInput,
@@ -42,7 +47,8 @@ function data(mediaItemId: number): ApplyPlannerItemData {
 		tvdbId: null,
 		mediaType: 'movie' as const,
 		updatedAt: '2026-07-10T11:00:00.000Z',
-		selectionUpdatedAt: '2026-07-10T11:01:00.000Z'
+		selectionUpdatedAt: '2026-07-10T11:01:00.000Z',
+		selectionRevision: 1
 	};
 	const candidate = (id: number, slot: ApplySlot): PlannerCandidateSnapshot => ({
 		candidateId: id,
@@ -213,9 +219,74 @@ function setup() {
 	return { items, planner, store, loadItemData, resolveDestinationSlots };
 }
 
+function asLegacyRevisionlessPlan(payload: ApplyPlanPayloadV1): ApplyPlanPayloadV1 {
+	const legacy = structuredClone(payload);
+	if (legacy.context.source === 'cross_server') {
+		Reflect.deleteProperty(legacy.context.sourceItem, 'selectionRevision');
+	}
+	for (const item of legacy.items) {
+		Reflect.deleteProperty(item.target, 'selectionRevision');
+		Reflect.deleteProperty(item.selectionFrom, 'selectionRevision');
+		for (const operation of item.operations) {
+			Reflect.deleteProperty(operation.target, 'selectionRevision');
+		}
+		item.selectionFingerprint = hashCanonicalJson({
+			selectionUpdatedAt: item.selectionFrom.selectionUpdatedAt,
+			discoveryFingerprint: item.discovery.fingerprint,
+			selections: item.selections
+		});
+		item.sourceFingerprint = hashCanonicalJson({
+			target: item.target,
+			selectionFrom: item.selectionFrom,
+			selectionFingerprint: item.selectionFingerprint,
+			currentStateFingerprint: item.currentStateFingerprint,
+			operations: item.operations.map((operation) => operation.id),
+			skips: item.skips
+		});
+	}
+	legacy.sourceFingerprint = hashCanonicalJson({
+		context: legacy.context,
+		defaults: legacy.defaults,
+		items: legacy.items.map((item) => item.sourceFingerprint)
+	});
+	return legacy;
+}
+
 describe('frozen apply flow', () => {
+	it('accepts a revisionless v1 payload only while the migrated selection revision is zero', async () => {
+		const fixture = setup();
+		fixture.items[0].item.identity.selectionRevision = 0;
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'server'
+		});
+		const legacy = asLegacyRevisionlessPlan(preview.payload);
+
+		expect(() => assertApplyPlanPayload(legacy)).not.toThrow();
+		await expect(
+			assertApplyPlanFresh(legacy, {
+				loadItemData: fixture.loadItemData,
+				resolveDestinationSlots: fixture.resolveDestinationSlots
+			})
+		).resolves.toBeUndefined();
+
+		fixture.items[0].item.identity.selectionRevision = 1;
+		await expect(
+			assertApplyPlanFresh(legacy, {
+				loadItemData: fixture.loadItemData,
+				resolveDestinationSlots: fixture.resolveDestinationSlots
+			})
+		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
 	it('executes exactly the per-item/per-slot operations returned by preview', async () => {
 		const fixture = setup();
+		fixture.items[0].candidates[0].provider = 'tmdb';
+		fixture.items[0].candidates[0].url = 'https://image.tmdb.org/t/p/w500/flow-poster.jpg';
+		fixture.items[0].candidates[1].provider = 'tmdb';
+		fixture.items[0].candidates[1].url = 'https://image.tmdb.org/t/p/w1280/flow-background.jpg';
 		const preview = await fixture.planner({
 			context: { source: 'bulk', resultSetFingerprint: 'result-set-a' },
 			targets: [
@@ -251,7 +322,7 @@ describe('frozen apply flow', () => {
 
 		const applyPosterUrl = vi.fn(async () => undefined);
 		const applyBackgroundUrl = vi.fn(async () => undefined);
-		const writeKometa = vi.fn(async () => undefined);
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(async () => undefined);
 		const result = await executeFrozenApplyPlan(queued!.planId, queued!.digest, queued!.plan, {
 			serverRegistry: {
 				resolve: async () => ({
@@ -287,6 +358,16 @@ describe('frozen apply flow', () => {
 		});
 
 		const planned = response.items.flatMap((item) => item.operations);
+		expect(
+			planned
+				.filter((operation) => operation.target.mediaItemId === 1)
+				.map((operation) => operation.selection.url)
+		).toEqual([
+			'https://image.tmdb.org/t/p/original/flow-background.jpg',
+			'https://image.tmdb.org/t/p/original/flow-poster.jpg',
+			'https://image.tmdb.org/t/p/original/flow-background.jpg',
+			'https://image.tmdb.org/t/p/original/flow-poster.jpg'
+		]);
 		const executed = result.items.flatMap((item) => item.operations);
 		expect(executed.map((row) => row.operationId)).toEqual(planned.map((row) => row.id));
 		expect(applyPosterUrl.mock.calls).toEqual(
@@ -304,8 +385,132 @@ describe('frozen apply flow', () => {
 				.map((operation) => [operation.targetId, operation.selection.url])
 		);
 		expect(writeKometa).toHaveBeenCalledTimes(2);
+		expect(writeKometa.mock.calls[0]?.[0][0]).toMatchObject({
+			posterUrl: 'https://image.tmdb.org/t/p/original/flow-poster.jpg',
+			backgroundUrl: 'https://image.tmdb.org/t/p/original/flow-background.jpg'
+		});
 		expect(result.summary).toMatchObject({ operationCount: 8, succeeded: 8, failed: 0 });
 	});
+
+	it('delegates coordinated server mutations without invoking the URL fallback', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'server'
+		});
+		const applyPosterUrl = vi.fn(async () => undefined);
+		const applyBackgroundUrl = vi.fn(async () => undefined);
+		const prepareOperation = vi.fn(async () => undefined);
+		const executeServerOperation = vi.fn(async () => undefined);
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: {
+							type: 'plex',
+							applyPosterUrl,
+							applyPosterBytes: vi.fn(),
+							applyBackgroundUrl,
+							applyBackgroundBytes: vi.fn()
+						} as never
+					})
+				},
+				writeKometa: vi.fn(),
+				prepareOperation,
+				executeServerOperation
+			}
+		);
+
+		expect(prepareOperation).toHaveBeenCalledTimes(2);
+		expect(executeServerOperation).toHaveBeenCalledTimes(2);
+		expect(applyPosterUrl).not.toHaveBeenCalled();
+		expect(applyBackgroundUrl).not.toHaveBeenCalled();
+		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
+	});
+
+	it.each([
+		['timeout', 'remote_artwork_timeout'],
+		['size limit', 'remote_artwork_too_large'],
+		['invalid MIME', 'remote_artwork_content_type_invalid'],
+		['redirect policy', 'remote_artwork_redirect_limit'],
+		['host policy', 'remote_artwork_target_not_allowed']
+	] satisfies [string, RemoteArtworkDownloadErrorCode][])(
+		'never mutates Plex when the %s preflight rejects',
+		async (_label, code) => {
+			const fixture = setup();
+			for (const candidate of fixture.items[0].candidates) {
+				candidate.url = `${candidate.url}?api_key=must-stay-redacted`;
+			}
+			const preview = await fixture.planner({
+				context: { source: 'single' },
+				targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+				selectionMode: 'auto',
+				method: 'server'
+			});
+			const applyPosterUrl = vi.fn(async () => undefined);
+			const applyBackgroundUrl = vi.fn(async () => undefined);
+			const prepareOperation = vi.fn(async () => {
+				throw new RemoteArtworkDownloadError(code);
+			});
+
+			const result = await executeFrozenApplyPlan(
+				preview.plan!.id,
+				preview.plan!.digest,
+				preview.payload,
+				{
+					serverRegistry: {
+						resolve: async () => ({
+							serverInstanceId: 'server-a',
+							fingerprint: 'server-fingerprint',
+							server: {
+								type: 'plex',
+								identity: { instanceId: 'server-a', name: 'Server A', type: 'plex' },
+								capabilities: {
+									posterWrite: 'supported',
+									backgroundWrite: 'supported',
+									seasonWrite: 'supported',
+									episodeWrite: 'supported',
+									fieldLock: 'supported',
+									currentImageRetrieval: 'supported',
+									artworkDelete: 'unsupported',
+									evidence: 'provider_contract',
+									limitations: ['artwork_delete_unavailable']
+								},
+								testConnection: vi.fn(),
+								listLibraries: vi.fn(),
+								listItems: vi.fn(),
+								listSeasons: vi.fn(),
+								listEpisodes: vi.fn(),
+								applyPosterUrl,
+								applyPosterBytes: vi.fn(),
+								applyBackgroundUrl,
+								lockField: vi.fn()
+							}
+						})
+					},
+					writeKometa: vi.fn(),
+					prepareOperation
+				}
+			);
+
+			expect(prepareOperation).toHaveBeenCalledTimes(2);
+			expect(applyPosterUrl).not.toHaveBeenCalled();
+			expect(applyBackgroundUrl).not.toHaveBeenCalled();
+			expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 0, failed: 2 });
+			for (const operation of result.items[0].operations) {
+				expect(operation).toMatchObject({ status: 'failed', error: code });
+				expect(operation.error).not.toContain('must-stay-redacted');
+			}
+		}
+	);
 
 	it('continues independent collection member writes after one operation fails', async () => {
 		const fixture = setup();
@@ -480,6 +685,64 @@ describe('frozen apply flow', () => {
 				}
 			)
 		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
+	it('keeps a legacy TMDB stored selection fresh after freezing its canonical URL', async () => {
+		const fixture = setup();
+		const item = fixture.items[0];
+		item.candidates[0].provider = 'tmdb';
+		item.candidates[0].url = 'https://image.tmdb.org/t/p/w500/fresh-poster.jpg';
+		item.storedSelections = [
+			{
+				slot: item.candidates[0].slot,
+				candidateId: null,
+				url: item.candidates[0].url,
+				provider: null,
+				setId: null,
+				setAuthor: null
+			}
+		];
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'stored',
+			method: 'server'
+		});
+		expect(preview.payload.items[0].selections[0].url).toBe(
+			'https://image.tmdb.org/t/p/original/fresh-poster.jpg'
+		);
+		item.candidates[0].url = 'https://image.tmdb.org/t/p/w780/fresh-poster.jpg';
+		item.storedSelections[0].url = item.candidates[0].url;
+		const enqueue = vi.fn(async () => 99);
+
+		await expect(
+			confirmApplyPlan(
+				{
+					planId: preview.plan!.id,
+					digest: preview.plan!.digest,
+					serverInstanceId: 'server-a'
+				},
+				{
+					store: fixture.store,
+					loadItemData: fixture.loadItemData,
+					resolveDestinationSlots: fixture.resolveDestinationSlots,
+					enqueue
+				}
+			)
+		).resolves.toMatchObject({ jobId: 99 });
+		expect(enqueue).toHaveBeenCalledWith(
+			expect.objectContaining({
+				plan: expect.objectContaining({
+					items: [
+						expect.objectContaining({
+							selections: [
+								expect.objectContaining({ url: preview.payload.items[0].selections[0].url })
+							]
+						})
+					]
+				})
+			})
+		);
 	});
 
 	it('enforces server scope and rejects replay after the single consume', async () => {

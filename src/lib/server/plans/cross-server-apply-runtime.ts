@@ -26,7 +26,8 @@ const identityProjection = {
 	tvdbId: mediaItems.tvdbId,
 	mediaType: mediaItems.mediaType,
 	updatedAt: mediaItems.updatedAt,
-	selectionUpdatedAt: mediaItems.selectionUpdatedAt
+	selectionUpdatedAt: mediaItems.selectionUpdatedAt,
+	selectionRevision: mediaItems.selectionRevision
 } as const;
 
 function iso(value: Date | null): string | null {
@@ -78,7 +79,8 @@ export const databaseCrossServerMatchRepository: CrossServerMatchRepository = {
 			items: rows.map((row) => ({
 				...row,
 				updatedAt: iso(row.updatedAt),
-				selectionUpdatedAt: iso(row.selectionUpdatedAt)
+				selectionUpdatedAt: iso(row.selectionUpdatedAt),
+				selectionRevision: row.selectionRevision
 			}))
 		};
 	}

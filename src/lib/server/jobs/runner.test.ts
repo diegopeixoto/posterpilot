@@ -60,7 +60,7 @@ import {
 	recoverExpiredLeases
 } from './runner';
 import { enterMaintenanceMode, resetMaintenanceModeForTests } from '$lib/server/maintenance';
-import { canonicalJsonDigest } from '$lib/server/plans/canonical-json';
+import { canonicalJsonDigest, hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { buildApplyPlanPayload, type FrozenApplyJobPayload } from '$lib/server/plans/apply-plan';
 import {
 	freezeAutomationOccurrence,
@@ -345,9 +345,10 @@ describe('job runner', () => {
 			tvdbId: null,
 			mediaType: 'movie' as const,
 			updatedAt: '2026-07-10T12:00:00.000Z',
-			selectionUpdatedAt: '2026-07-10T12:00:00.000Z'
+			selectionUpdatedAt: '2026-07-10T12:00:00.000Z',
+			selectionRevision: 1
 		};
-		const selection = {
+		const selectionIdentity = {
 			selectionSource: 'stored' as const,
 			sourceItem: {
 				serverInstanceId: identity.serverInstanceId,
@@ -368,8 +369,11 @@ describe('job runner', () => {
 			stale: false,
 			score: null,
 			width: null,
-			height: null,
-			fingerprint: 'selection-fingerprint'
+			height: null
+		};
+		const selection = {
+			...selectionIdentity,
+			fingerprint: hashCanonicalJson(selectionIdentity)
 		};
 		const plan = buildApplyPlanPayload({
 			plannedAt: '2026-07-10T12:00:00.000Z',

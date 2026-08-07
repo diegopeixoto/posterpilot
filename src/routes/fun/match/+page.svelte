@@ -119,7 +119,7 @@
 				>
 					<div class="aspect-[2/3] overflow-hidden bg-neutral-950">
 						<img
-							src={`/api/thumb?url=${encodeURIComponent(candidate!.url)}`}
+							src={`/api/thumb?url=${encodeURIComponent(candidate!.previewUrl ?? candidate!.url)}`}
 							alt=""
 							onerror={() => unavailable(candidate!.id)}
 							class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
@@ -135,7 +135,7 @@
 	{:else if data.selectedItem && winner}
 		<div class="surface mx-auto max-w-md overflow-hidden border-accent-800" aria-busy={staging}>
 			<img
-				src={`/api/thumb?url=${encodeURIComponent(winner.url)}`}
+				src={`/api/thumb?url=${encodeURIComponent(winner.previewUrl ?? winner.url)}`}
 				alt={m.fun_match_winner()}
 				class="aspect-[2/3] w-full object-cover"
 			/>

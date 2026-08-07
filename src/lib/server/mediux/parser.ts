@@ -168,10 +168,16 @@ export function parseListingSets(
 		const candidate: MediuxCandidate = {
 			setId,
 			setAuthor: authors.get(setId) ?? null,
+			providerAssetId: m[1],
 			url: `${ASSET_BASE}/${m[1]}`,
+			previewUrl: null,
 			kind: mapped.kind,
 			season: mapped.season,
-			episode: mapped.episode
+			episode: mapped.episode,
+			width: null,
+			height: null,
+			language: null,
+			languageProvenance: 'unknown'
 		};
 		if (!bySet.has(setId)) {
 			bySet.set(setId, []);

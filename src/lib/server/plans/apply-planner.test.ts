@@ -60,6 +60,7 @@ function identity(
 		mediaType: 'movie',
 		updatedAt: '2026-07-10T11:00:00.000Z',
 		selectionUpdatedAt: '2026-07-10T11:05:00.000Z',
+		selectionRevision: 1,
 		...overrides
 	};
 }
@@ -297,6 +298,106 @@ describe('unified apply planner', () => {
 		expect(item.sourceFingerprint).toMatch(/^[0-9a-f]{64}$/);
 		expect(preview.payload.sourceFingerprint).toMatch(/^[0-9a-f]{64}$/);
 		expect((await store.load(preview.plan!.id))?.payload).toEqual(preview.payload);
+	});
+
+	it('canonicalizes legacy TMDB staging before both destination operations and plan digest', async () => {
+		const data = itemData('server-a', 17);
+		const legacyUrl = 'https://image.tmdb.org/t/p/w500/legacy-poster.jpg';
+		data.candidates = [
+			candidate(
+				data.item.identity,
+				171,
+				{ kind: 'poster', season: null, episode: null },
+				{
+					provider: 'tmdb',
+					providerAssetId: 'legacy-poster.jpg',
+					url: legacyUrl
+				}
+			)
+		];
+		data.storedSelections = [
+			{
+				slot: { kind: 'poster', season: null, episode: null },
+				candidateId: null,
+				url: legacyUrl,
+				provider: null,
+				setId: null,
+				setAuthor: null
+			}
+		];
+
+		const first = await createTestPlanner([data]).planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 17 }],
+			selectionMode: 'stored',
+			method: 'both'
+		});
+		const canonicalUrl = 'https://image.tmdb.org/t/p/original/legacy-poster.jpg';
+		expect(first.payload.items[0].selections).toEqual([
+			expect.objectContaining({
+				candidateId: 171,
+				provider: 'tmdb',
+				url: canonicalUrl
+			})
+		]);
+		expect(first.payload.items[0].operations).toHaveLength(2);
+		expect(first.payload.items[0].operations.map((operation) => operation.destination)).toEqual([
+			'kometa',
+			'server'
+		]);
+		expect(
+			first.payload.items[0].operations.every(
+				(operation) => operation.selection.url === canonicalUrl
+			)
+		).toBe(true);
+
+		data.candidates[0].url = 'https://image.tmdb.org/t/p/w780/legacy-poster.jpg';
+		data.storedSelections[0].url = data.candidates[0].url;
+		const second = await createTestPlanner([data]).planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 17 }],
+			selectionMode: 'stored',
+			method: 'both'
+		});
+		expect(second.payload).toEqual(first.payload);
+		expect(second.plan?.digest).toBe(first.plan?.digest);
+	});
+
+	it('preserves a custom TMDB-shaped staged URL byte-for-byte in the plan', async () => {
+		const data = itemData('server-a', 18, { candidates: [] });
+		const customUrl = 'https://image.tmdb.org/t/p/w500/custom-poster.jpg';
+		data.candidates = [
+			candidate(
+				data.item.identity,
+				181,
+				{ kind: 'poster', season: null, episode: null },
+				{ provider: 'tmdb', providerAssetId: '/custom-poster.jpg', url: customUrl }
+			)
+		];
+		data.storedSelections = [
+			{
+				slot: { kind: 'poster', season: null, episode: null },
+				candidateId: null,
+				url: customUrl,
+				provider: 'custom',
+				setId: null,
+				setAuthor: null
+			}
+		];
+
+		const preview = await createTestPlanner([data]).planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 18 }],
+			selectionMode: 'stored',
+			method: 'server'
+		});
+
+		expect(preview.payload.items[0].selections[0]).toMatchObject({
+			candidateId: null,
+			provider: 'custom',
+			url: customUrl
+		});
+		expect(preview.payload.items[0].operations[0].selection.url).toBe(customUrl);
 	});
 
 	it('uses persisted root and child selections for review context without auto-selecting', async () => {

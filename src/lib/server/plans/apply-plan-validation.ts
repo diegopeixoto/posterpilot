@@ -3,7 +3,10 @@ import {
 	APPLY_PLAN_KIND,
 	APPLY_PLAN_VERSION,
 	applySlotKey,
+	type ApplyItemIdentity,
+	type ApplySelectionMode,
 	type ApplyPlanPayloadV1,
+	type FrozenDiscoverySnapshot,
 	type FrozenArtworkSelection
 } from './apply-plan';
 import {
@@ -12,8 +15,11 @@ import {
 	freezeApplyStoredSelection,
 	type ApplyItemRef,
 	type ApplyPlannerItemData,
+	type PlannerCandidateSnapshot,
+	type PlannerStoredSelection,
 	type ResolveApplyDestinationsInput
 } from './apply-planner';
+import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
 
 export type ApplyPlanValidationErrorCode = 'invalid_plan' | 'plan_stale' | 'plan_scope_mismatch';
 
@@ -45,6 +51,231 @@ function failStale(message: string): never {
 
 function same(a: unknown, b: unknown): boolean {
 	return canonicalJson(a) === canonicalJson(b);
+}
+
+function validSelectionRevision(identity: import('./apply-plan').ApplyItemIdentity): boolean {
+	return (
+		!Object.hasOwn(identity, 'selectionRevision') ||
+		(Number.isSafeInteger(identity.selectionRevision) && identity.selectionRevision >= 0)
+	);
+}
+
+function sameFrozenIdentity(
+	current: import('./apply-plan').ApplyItemIdentity,
+	planned: import('./apply-plan').ApplyItemIdentity
+): boolean {
+	if (Object.hasOwn(planned, 'selectionRevision')) return same(current, planned);
+	if (current.selectionRevision !== 0) return false;
+	const { selectionRevision: _selectionRevision, ...legacyCurrent } = current;
+	return same(legacyCurrent, planned);
+}
+
+function legacyV1CandidateComparable(candidate: PlannerCandidateSnapshot) {
+	return {
+		candidateId: candidate.candidateId,
+		serverInstanceId: candidate.serverInstanceId,
+		mediaItemId: candidate.mediaItemId,
+		discoveryRunId: candidate.discoveryRunId,
+		provider: candidate.provider,
+		providerAssetId: candidate.providerAssetId,
+		setId: candidate.setId,
+		setAuthor: candidate.setAuthor,
+		designFamily: candidate.designFamily,
+		language: candidate.language,
+		url: candidate.url,
+		slot: candidate.slot,
+		resolvedTmdbId: candidate.resolvedTmdbId,
+		resolvedMediaType: candidate.resolvedMediaType,
+		width: candidate.width,
+		height: candidate.height,
+		score: candidate.score,
+		active: candidate.active,
+		stale: candidate.stale,
+		lastSeenAt: candidate.lastSeenAt
+	};
+}
+
+/** Reproduce the discovery identity emitted before canonical artwork URLs shipped. */
+function freezeLegacyV1DiscoverySnapshot(data: ApplyPlannerItemData): FrozenDiscoverySnapshot {
+	const candidates = [...data.candidates]
+		.sort((a, b) => a.candidateId - b.candidateId)
+		.map(legacyV1CandidateComparable);
+	const active = candidates.filter((candidate) => candidate.active);
+	return {
+		status: data.item.discovery.status,
+		runId: data.item.discovery.runId,
+		completedAt: data.item.discovery.completedAt,
+		resolvedTmdbId: data.item.identity.tmdbId,
+		resolvedMediaType: data.item.identity.mediaType,
+		candidateIds: active.map((candidate) => candidate.candidateId),
+		candidateCount: active.length,
+		fingerprint: hashCanonicalJson({
+			status: data.item.discovery.status,
+			runId: data.item.discovery.runId,
+			completedAt: data.item.discovery.completedAt,
+			resolvedTmdbId: data.item.identity.tmdbId,
+			resolvedMediaType: data.item.identity.mediaType,
+			candidates
+		})
+	};
+}
+
+function freezeLegacyV1CandidateSelection(
+	candidate: PlannerCandidateSnapshot,
+	selectionSource: ApplySelectionMode,
+	sourceItem: ApplyItemIdentity,
+	scoreOverride?: number | null
+): FrozenArtworkSelection {
+	const selection = {
+		selectionSource,
+		sourceItem: {
+			serverInstanceId: sourceItem.serverInstanceId,
+			mediaItemId: sourceItem.mediaItemId
+		},
+		slot: candidate.slot,
+		candidateId: candidate.candidateId,
+		url: candidate.url,
+		provider: candidate.provider,
+		providerAssetId: candidate.providerAssetId,
+		setId: candidate.setId,
+		setAuthor: candidate.setAuthor,
+		designFamily: candidate.designFamily,
+		language: candidate.language,
+		discoveryRunId: candidate.discoveryRunId,
+		resolvedTmdbId: candidate.resolvedTmdbId,
+		resolvedMediaType: candidate.resolvedMediaType,
+		stale: candidate.stale,
+		score: scoreOverride ?? candidate.score,
+		width: candidate.width,
+		height: candidate.height
+	};
+	return { ...selection, fingerprint: hashCanonicalJson(selection) };
+}
+
+function freezeLegacyV1StoredSelection(
+	stored: PlannerStoredSelection,
+	data: ApplyPlannerItemData,
+	planned: FrozenArtworkSelection | undefined
+): FrozenArtworkSelection {
+	const matched =
+		stored.candidateId === null
+			? null
+			: data.candidates.find(
+					(candidate) =>
+						candidate.candidateId === stored.candidateId &&
+						candidate.url === stored.url &&
+						applySlotKey(candidate.slot) === applySlotKey(stored.slot)
+				);
+	if (matched) {
+		return freezeLegacyV1CandidateSelection(matched, 'stored', data.item.identity);
+	}
+
+	const persisted = stored.persisted;
+	const legacyStandalone =
+		planned?.selectionSource === 'stored' &&
+		planned.candidateId === null &&
+		planned.provider === null &&
+		planned.providerAssetId === null &&
+		planned.setAuthor === null &&
+		planned.designFamily === null &&
+		planned.language === null &&
+		planned.discoveryRunId === null &&
+		planned.stale === false &&
+		planned.score === null &&
+		planned.width === null &&
+		planned.height === null &&
+		stored.url === planned.url &&
+		applySlotKey(stored.slot) === applySlotKey(planned.slot);
+	const customBackfill =
+		legacyStandalone &&
+		persisted?.candidateId === null &&
+		persisted?.provider === 'custom' &&
+		persisted.setId === planned.setId &&
+		stored.candidateId === null &&
+		stored.provider === 'custom' &&
+		stored.setId === persisted.setId &&
+		stored.setAuthor === null;
+	// Mirror migration 0010's temporary match tables: other providers match only
+	// byte-identical URLs, while TMDB size variants share one trusted asset identity.
+	const migrationMatches = legacyStandalone
+		? data.candidates.filter(
+				(candidate) =>
+					candidate.serverInstanceId === data.item.identity.serverInstanceId &&
+					candidate.mediaItemId === data.item.identity.mediaItemId &&
+					applySlotKey(candidate.slot) === applySlotKey(stored.slot) &&
+					(candidate.url === stored.url ||
+						(candidate.provider === 'tmdb' &&
+							equivalentProviderArtworkUrls(candidate.url, stored.url, 'tmdb')))
+			)
+		: [];
+	const tmdbCandidate =
+		legacyStandalone &&
+		persisted?.provider === 'tmdb' &&
+		stored.candidateId !== null &&
+		stored.provider === 'tmdb'
+			? migrationMatches.find(
+					(candidate) =>
+						candidate.candidateId === stored.candidateId &&
+						candidate.provider === 'tmdb' &&
+						candidate.url !== stored.url &&
+						stored.setId === candidate.setId &&
+						stored.setAuthor === candidate.setAuthor
+				)
+			: null;
+	// Without a raw id, 0010 backfilled only when every match had one provider.
+	const uniquelyBackfilledProvider =
+		persisted?.candidateId === null &&
+		persisted.setId === planned?.setId &&
+		new Set(migrationMatches.map((candidate) => candidate.provider)).size === 1 &&
+		migrationMatches[0]?.provider === 'tmdb';
+	// With a raw id, require the loader to resolve that exact migrated candidate.
+	// Root staging has no set column; 0010 fills child set ids from the candidate.
+	const preservedCandidateId =
+		tmdbCandidate !== null &&
+		tmdbCandidate !== undefined &&
+		persisted?.candidateId !== null &&
+		persisted?.candidateId !== undefined &&
+		persisted.candidateId === stored.candidateId &&
+		persisted.candidateId === tmdbCandidate.candidateId &&
+		planned?.setId === null &&
+		persisted.setId === (stored.slot.season === null ? null : tmdbCandidate.setId);
+	const tmdbBackfill =
+		tmdbCandidate !== null &&
+		tmdbCandidate !== undefined &&
+		(uniquelyBackfilledProvider || preservedCandidateId);
+	const provider = customBackfill || tmdbBackfill ? null : stored.provider;
+	const setId = customBackfill || tmdbBackfill ? (planned?.setId ?? null) : stored.setId;
+	const setAuthor = customBackfill || tmdbBackfill ? null : stored.setAuthor;
+	const selection = {
+		selectionSource: 'stored' as const,
+		sourceItem: {
+			serverInstanceId: data.item.identity.serverInstanceId,
+			mediaItemId: data.item.identity.mediaItemId
+		},
+		slot: stored.slot,
+		candidateId: null,
+		url: stored.url,
+		provider,
+		providerAssetId: null,
+		setId,
+		setAuthor,
+		designFamily: null,
+		language: null,
+		discoveryRunId: null,
+		resolvedTmdbId: data.item.identity.tmdbId,
+		resolvedMediaType: data.item.identity.mediaType,
+		stale: false,
+		score: null,
+		width: null,
+		height: null
+	};
+	return { ...selection, fingerprint: hashCanonicalJson(selection) };
+}
+
+function validFrozenSelectionFingerprint(selection: FrozenArtworkSelection): boolean {
+	if (!/^[0-9a-f]{64}$/.test(selection.fingerprint)) return false;
+	const { fingerprint, ...identity } = selection;
+	return hashCanonicalJson(identity) === fingerprint;
 }
 
 function sortedUnique(values: string[]): string[] {
@@ -193,6 +424,12 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 	let actionableItemCount = 0;
 	let serverCount = 0;
 	let kometaCount = 0;
+	const revisionFormats = new Set(
+		payload.items.map((item) => Object.hasOwn(item?.selectionFrom ?? {}, 'selectionRevision'))
+	);
+	if (revisionFormats.size > 1) {
+		failInvalid('Mixed frozen apply identity formats');
+	}
 
 	for (const item of payload.items) {
 		if (
@@ -209,22 +446,34 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 		const itemKey = `${item.target.serverInstanceId}:${item.target.mediaItemId}`;
 		if (itemKeys.has(itemKey)) failInvalid('Duplicate frozen apply target');
 		itemKeys.add(itemKey);
-		if (!item.target.serverInstanceId || !Number.isInteger(item.target.mediaItemId)) {
+		if (
+			!item.target.serverInstanceId ||
+			!Number.isInteger(item.target.mediaItemId) ||
+			!validSelectionRevision(item.target) ||
+			!validSelectionRevision(item.selectionFrom) ||
+			Object.hasOwn(item.target, 'selectionRevision') !==
+				Object.hasOwn(item.selectionFrom, 'selectionRevision')
+		) {
 			failInvalid('Invalid frozen apply target');
 		}
 		if (!/^[0-9a-f]{64}$/.test(item.sourceFingerprint)) {
 			failInvalid('Invalid frozen item fingerprint');
 		}
+		const selectionsBySlot = new Map<string, FrozenArtworkSelection>();
 		for (const selection of item.selections) {
 			if (
 				!selection ||
 				!validSlot(selection.slot) ||
 				!selection.url ||
+				!validFrozenSelectionFingerprint(selection) ||
 				selection.sourceItem.serverInstanceId !== item.selectionFrom.serverInstanceId ||
 				selection.sourceItem.mediaItemId !== item.selectionFrom.mediaItemId
 			) {
 				failInvalid('Invalid frozen artwork selection');
 			}
+			const key = applySlotKey(selection.slot);
+			if (selectionsBySlot.has(key)) failInvalid('Duplicate frozen artwork selection slot');
+			selectionsBySlot.set(key, selection);
 		}
 		if (item.operations.length > 0) actionableItemCount++;
 		operationCount += item.operations.length;
@@ -247,7 +496,10 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			if (!same(operation.target, item.target) || !validSlot(operation.slot)) {
 				failInvalid('Frozen operation target or slot does not match its item');
 			}
+			const itemSelection = selectionsBySlot.get(applySlotKey(operation.slot));
 			if (
+				!itemSelection ||
+				!same(operation.selection, itemSelection) ||
 				operation.selection.sourceItem.serverInstanceId !== item.selectionFrom.serverInstanceId ||
 				operation.selection.sourceItem.mediaItemId !== item.selectionFrom.mediaItemId ||
 				applySlotKey(operation.selection.slot) !== applySlotKey(operation.slot)
@@ -271,6 +523,9 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 		}
 
 		const selectionFingerprint = hashCanonicalJson({
+			...(Object.hasOwn(item.selectionFrom, 'selectionRevision')
+				? { selectionRevision: item.selectionFrom.selectionRevision }
+				: {}),
 			selectionUpdatedAt: item.selectionFrom.selectionUpdatedAt,
 			discoveryFingerprint: item.discovery.fingerprint,
 			selections: item.selections
@@ -366,14 +621,37 @@ function sortedDestinations(
 
 function currentSelection(
 	planned: FrozenArtworkSelection,
-	data: ApplyPlannerItemData
+	data: ApplyPlannerItemData,
+	legacyV1: boolean
 ): FrozenArtworkSelection | null {
+	if (legacyV1) {
+		if (planned.selectionSource === 'auto') {
+			const candidate = data.candidates.find(
+				(row) =>
+					row.candidateId === planned.candidateId &&
+					row.active &&
+					row.provider === planned.provider &&
+					row.url === planned.url &&
+					applySlotKey(row.slot) === applySlotKey(planned.slot)
+			);
+			return candidate
+				? freezeLegacyV1CandidateSelection(candidate, 'auto', data.item.identity, planned.score)
+				: null;
+		}
+
+		const stored = data.storedSelections.find(
+			(row) => row.url === planned.url && applySlotKey(row.slot) === applySlotKey(planned.slot)
+		);
+		return stored ? freezeLegacyV1StoredSelection(stored, data, planned) : null;
+	}
+
 	if (planned.selectionSource === 'auto') {
 		const candidate = data.candidates.find(
 			(row) =>
 				row.candidateId === planned.candidateId &&
 				row.active &&
-				row.url === planned.url &&
+				row.provider === planned.provider &&
+				equivalentProviderArtworkUrls(row.url, planned.url, planned.provider) &&
 				applySlotKey(row.slot) === applySlotKey(planned.slot)
 		);
 		return candidate
@@ -381,10 +659,17 @@ function currentSelection(
 			: null;
 	}
 
-	const stored = data.storedSelections.find(
-		(row) => row.url === planned.url && applySlotKey(row.slot) === applySlotKey(planned.slot)
-	);
-	return stored ? freezeApplyStoredSelection(stored, data) : null;
+	for (const stored of data.storedSelections) {
+		if (applySlotKey(stored.slot) !== applySlotKey(planned.slot)) continue;
+		const frozen = freezeApplyStoredSelection(stored, data);
+		if (
+			frozen.provider === planned.provider &&
+			equivalentProviderArtworkUrls(frozen.url, planned.url, planned.provider)
+		) {
+			return frozen;
+		}
+	}
+	return null;
 }
 
 /**
@@ -409,14 +694,15 @@ export async function assertApplyPlanFresh(
 	};
 
 	for (const plannedItem of payload.items) {
+		const legacyV1 = !Object.hasOwn(plannedItem.selectionFrom, 'selectionRevision');
 		const [target, selectionFrom] = await Promise.all([
 			load(plannedItem.target),
 			load(plannedItem.selectionFrom)
 		]);
 		if (!target || !selectionFrom) failStale('A frozen apply item is no longer available');
 		if (
-			!same(target.item.identity, plannedItem.target) ||
-			!same(selectionFrom.item.identity, plannedItem.selectionFrom)
+			!sameFrozenIdentity(target.item.identity, plannedItem.target) ||
+			!sameFrozenIdentity(selectionFrom.item.identity, plannedItem.selectionFrom)
 		) {
 			failStale('A frozen apply item or pending selection changed');
 		}
@@ -433,20 +719,33 @@ export async function assertApplyPlanFresh(
 		) {
 			failStale('Frozen apply eligibility changed');
 		}
-		if (!same(freezeApplyDiscoverySnapshot(selectionFrom), plannedItem.discovery)) {
+		const currentDiscovery = legacyV1
+			? freezeLegacyV1DiscoverySnapshot(selectionFrom)
+			: freezeApplyDiscoverySnapshot(selectionFrom);
+		if (!same(currentDiscovery, plannedItem.discovery)) {
 			failStale('Frozen artwork candidates changed');
 		}
 
 		const selections = plannedItem.selections;
 		for (const plannedSelection of selections) {
-			const current = currentSelection(plannedSelection, selectionFrom);
+			const current = currentSelection(plannedSelection, selectionFrom, legacyV1);
 			if (!current || current.fingerprint !== plannedSelection.fingerprint) {
 				failStale('A frozen artwork selection changed');
 			}
 		}
 		if (payload.defaults.selectionMode === 'stored') {
 			const currentStored = selectionFrom.storedSelections
-				.map((selection) => freezeApplyStoredSelection(selection, selectionFrom))
+				.map((selection) =>
+					legacyV1
+						? freezeLegacyV1StoredSelection(
+								selection,
+								selectionFrom,
+								selections.find(
+									(planned) => applySlotKey(planned.slot) === applySlotKey(selection.slot)
+								)
+							)
+						: freezeApplyStoredSelection(selection, selectionFrom)
+				)
 				.sort((a, b) => selectionKey(a).localeCompare(selectionKey(b)));
 			const plannedStored = [...selections].sort((a, b) =>
 				selectionKey(a).localeCompare(selectionKey(b))

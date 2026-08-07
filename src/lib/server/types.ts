@@ -79,21 +79,30 @@ export interface TmdbMetadata {
 // --- MediaUX ---
 
 export type CandidateKind = 'poster' | 'background' | 'season' | 'title_card';
+export type ArtworkLanguageProvenance = 'tagged' | 'untagged' | 'unknown';
 
 export interface MediuxCandidate {
 	setId: string;
 	/** Uploader/author of the owning set, when present in the payload. */
 	setAuthor: string | null;
-	/** Absolute asset URL, e.g. https://api.mediux.pro/assets/<file_id> */
+	/** Stable provider-native identity when the source reports one. */
+	providerAssetId: string | null;
+	/** Canonical destination asset, e.g. https://api.mediux.pro/assets/<file_id>. */
 	url: string;
+	/** Smaller representation of the same asset when the provider offers one. */
+	previewUrl: string | null;
 	kind: CandidateKind;
 	/** Season number for season posters / title cards; null otherwise. */
 	season: number | null;
 	/** Episode number for title cards; null otherwise. */
 	episode: number | null;
 	/** Image pixel dimensions when the provider reports them; used for scoring. */
-	width?: number | null;
-	height?: number | null;
+	width: number | null;
+	height: number | null;
+	/** Normalized ISO 639-1 code when the source tags the image. */
+	language: string | null;
+	/** Distinguishes explicit untagged images from missing legacy metadata. */
+	languageProvenance: ArtworkLanguageProvenance;
 }
 
 export interface MediuxSet {

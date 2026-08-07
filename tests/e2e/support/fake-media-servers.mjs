@@ -149,10 +149,11 @@ function jellyfinFixture() {
 
 	function enriched(item) {
 		const current = artwork.get(item.Id);
+		const backdrops = [current?.background, current?.pendingBackground].filter(Boolean);
 		return {
 			...item,
 			...(current?.poster ? { ImageTags: { Primary: current.poster.tag } } : {}),
-			...(current?.background ? { BackdropImageTags: [current.background.tag] } : {})
+			...(backdrops.length ? { BackdropImageTags: backdrops.map((entry) => entry.tag) } : {})
 		};
 	}
 
@@ -298,17 +299,26 @@ function createJellyfinServer() {
 				const encoded = (await bodyBuffer(request)).toString('utf8');
 				const bytes = Buffer.from(encoded, 'base64');
 				const slots = current ?? {};
-				slots[kind] = {
+				const uploaded = {
 					tag: `upload-${fixture.nextRevision()}-${kind}`,
 					bytes: bytes.length ? bytes : colorFromText(`fallback:${id}:${kind}`)
 				};
+				// Jellyfin appends Backdrop uploads. Keep the old index 0 until the
+				// provider explicitly prunes it, matching the production API contract.
+				if (kind === 'background' && slots.background) slots.pendingBackground = uploaded;
+				else slots[kind] = uploaded;
 				fixture.artwork.set(id, slots);
 				response.writeHead(204);
 				response.end();
 				return;
 			}
 			if (request.method === 'DELETE') {
-				if (current) delete current[kind];
+				if (current && kind === 'background' && current.pendingBackground) {
+					current.background = current.pendingBackground;
+					delete current.pendingBackground;
+				} else if (current) {
+					delete current[kind];
+				}
 				response.writeHead(204);
 				response.end();
 				return;

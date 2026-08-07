@@ -19,11 +19,14 @@ import type {
 	ApplyPlanExecutionResult
 } from '$lib/server/plans/apply-executor';
 import type { ApplyPlanOperation } from '$lib/server/plans/apply-plan';
+import { RemoteArtworkDownloadError, type RemoteArtworkFetch } from '$lib/server/remote-artwork';
 import { sha256Bytes } from '$lib/server/revisions/verification';
 import {
 	createArtworkApplyCoordinator,
+	preflightServerArtwork,
 	trustedProviderArtworkUrl,
-	type ArtworkApplyCoordinator
+	type ArtworkApplyCoordinator,
+	type ArtworkApplyCoordinatorOptions
 } from './apply-coordinator';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore } from './snapshot-store';
@@ -94,7 +97,8 @@ function operation(input: {
 			tvdbId: null,
 			mediaType: 'movie',
 			updatedAt: NOW.toISOString(),
-			selectionUpdatedAt: NOW.toISOString()
+			selectionUpdatedAt: NOW.toISOString(),
+			selectionRevision: 1
 		},
 		targetId: input.targetId ?? `source-${mediaItemId}`,
 		slot,
@@ -174,14 +178,19 @@ function executionResult(
 	};
 }
 
-function coordinator(): ArtworkApplyCoordinator {
+function coordinator(
+	preflight: NonNullable<ArtworkApplyCoordinatorOptions['fetchArtworkBytes']> = async (url) => ({
+		bytes: bytes(url),
+		contentType: 'image/jpeg'
+	})
+): ArtworkApplyCoordinator {
 	return createArtworkApplyCoordinator({
 		snapshots,
 		ledger,
 		planId: 'plan-global',
 		kometaAssetsDirectory: kometaDirectory,
 		clock: () => NOW,
-		fetchArtworkBytes: async (url) => bytes(url)
+		fetchArtworkBytes: preflight
 	});
 }
 
@@ -344,6 +353,169 @@ afterEach(async () => {
 });
 
 describe('ArtworkApplyCoordinator', () => {
+	it.each([
+		{ kind: 'poster' as const, bytesMethod: 'applyPosterBytes' as const },
+		{ kind: 'background' as const, bytesMethod: 'applyBackgroundBytes' as const }
+	])(
+		'applies the exact preflighted bytes and content type to Plex $kind without a URL fetch',
+		async ({ kind, bytesMethod }) => {
+			const expectedBytes = bytes(`exact ${kind} bytes`);
+			const preflight = vi.fn(async () => ({
+				bytes: expectedBytes,
+				contentType: 'image/png'
+			}));
+			const subject = coordinator(preflight);
+			const planned = operation({ id: `plex-${kind}-bytes`, kind });
+			const beforeArtwork = artwork(`before ${kind}`, `before-${kind}`, kind);
+			planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+			let liveArtwork = beforeArtwork;
+			const applyPosterUrl = vi.fn(async () => undefined);
+			const applyBackgroundUrl = vi.fn(async () => undefined);
+			const applyPosterBytes = vi.fn(
+				async (_targetId: string, data: ArrayBuffer, contentType?: string) => {
+					liveArtwork = {
+						kind: 'poster',
+						url: 'https://plex.invalid/uploaded-poster',
+						identity: 'uploaded-poster',
+						data,
+						contentType: contentType ?? 'application/octet-stream'
+					};
+				}
+			);
+			const applyBackgroundBytes = vi.fn(
+				async (_targetId: string, data: ArrayBuffer, contentType?: string) => {
+					liveArtwork = {
+						kind: 'background',
+						url: 'https://plex.invalid/uploaded-background',
+						identity: 'uploaded-background',
+						data,
+						contentType: contentType ?? 'application/octet-stream'
+					};
+				}
+			);
+			const server = {
+				type: 'plex',
+				readArtwork: vi.fn(async () => liveArtwork),
+				applyPosterUrl,
+				applyPosterBytes,
+				applyBackgroundUrl,
+				applyBackgroundBytes
+			} as unknown as MediaServer;
+
+			await subject.prepareOperation(planned, { server });
+			await subject.executeServerOperation(planned, { server });
+			const result = await subject.recordOutcome(planned, successfulWrite(planned), { server });
+			await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+				'Server operation was not prepared'
+			);
+
+			expect(preflight).toHaveBeenCalledWith(planned.selection.url);
+			expect(server[bytesMethod]).toHaveBeenCalledWith(
+				planned.targetId,
+				expectedBytes,
+				'image/png'
+			);
+			expect(applyPosterUrl).not.toHaveBeenCalled();
+			expect(applyBackgroundUrl).not.toHaveBeenCalled();
+			expect(result).toMatchObject({ status: 'success', verification: 'exact' });
+			const [revision] = await database.select().from(artworkRevisions);
+			expect(revision).toMatchObject({ applyMethod: 'server_bytes', outcome: 'success' });
+		}
+	);
+
+	it.each(['snapshot', 'ledger'] as const)(
+		'releases prepared bytes when $s outcome recording fails and is converted',
+		async (failurePoint) => {
+			const planned = operation({ id: `record-${failurePoint}-failure` });
+			const beforeArtwork = artwork('before record failure', 'before-record-failure');
+			planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+			const server = serverReader(
+				beforeArtwork,
+				artwork('after record failure', 'after-record-failure')
+			);
+			let captureCount = 0;
+			const failingSnapshots: ArtworkSnapshotRepository =
+				failurePoint === 'snapshot'
+					? {
+							...snapshots,
+							captureServer: vi.fn(
+								async (input: Parameters<ArtworkSnapshotRepository['captureServer']>[0]) => {
+									captureCount += 1;
+									if (captureCount === 3) throw new Error('snapshot record failed');
+									return snapshots.captureServer(input);
+								}
+							)
+						}
+					: snapshots;
+			const failingLedger: ArtworkRevisionLedger =
+				failurePoint === 'ledger'
+					? {
+							...ledger,
+							recordOutcome: vi.fn(async () => {
+								throw new Error('ledger record failed');
+							})
+						}
+					: ledger;
+			const subject = createArtworkApplyCoordinator({
+				snapshots: failingSnapshots,
+				ledger: failingLedger,
+				planId: 'plan-global',
+				kometaAssetsDirectory: kometaDirectory,
+				clock: () => NOW,
+				fetchArtworkBytes: async () => ({
+					bytes: bytes('prepared record failure bytes'),
+					contentType: 'image/jpeg'
+				})
+			});
+
+			await subject.prepareOperation(planned, { server });
+			const converted = await subject
+				.recordOutcome(planned, successfulWrite(planned), { server })
+				.catch(
+					(error: unknown): ApplyOperationExecutionResult => ({
+						...successfulWrite(planned),
+						status: 'failed',
+						error: `Outcome record failed: ${error instanceof Error ? error.message : String(error)}`
+					})
+				);
+
+			expect(converted).toMatchObject({
+				status: 'failed',
+				error: expect.stringContaining(`${failurePoint} record failed`)
+			});
+			await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+				'Server operation was not prepared'
+			);
+		}
+	);
+
+	it('uses a safe JPEG content type for the legacy ArrayBuffer preflight seam', async () => {
+		const expectedBytes = bytes('legacy seam bytes');
+		const subject = coordinator(async () => expectedBytes);
+		const planned = operation({ id: 'legacy-array-buffer-seam' });
+		const beforeArtwork = artwork('before legacy seam', 'before-legacy');
+		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		let liveArtwork = beforeArtwork;
+		const applyPosterBytes = vi.fn(async (_id, data: ArrayBuffer, contentType?: string) => {
+			liveArtwork = {
+				kind: 'poster',
+				url: 'https://server.invalid/uploaded-legacy',
+				identity: 'uploaded-legacy',
+				data,
+				contentType: contentType ?? 'application/octet-stream'
+			};
+		});
+		const server = {
+			readArtwork: vi.fn(async () => liveArtwork),
+			applyPosterBytes
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await subject.executeServerOperation(planned, { server });
+
+		expect(applyPosterBytes).toHaveBeenCalledWith(planned.targetId, expectedBytes, 'image/jpeg');
+	});
+
 	it('captures original, prior, and after bytes, verifies exactly, and advances artwork version', async () => {
 		const subject = coordinator();
 		const planned = operation({ id: 'exact-server' });
@@ -399,7 +571,8 @@ describe('ArtworkApplyCoordinator', () => {
 	});
 
 	it('accepts changed provider evidence as best-effort and advances the verified version', async () => {
-		const subject = coordinator();
+		const preflight = vi.fn(async (url: string) => bytes(url));
+		const subject = coordinator(preflight);
 		const planned = operation({ id: 'best-effort' });
 		const beforeArtwork = artwork('before bytes', 'before-id');
 		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
@@ -414,6 +587,7 @@ describe('ArtworkApplyCoordinator', () => {
 			verification: 'best_effort',
 			artworkVersion: 1
 		});
+		expect(preflight).toHaveBeenCalledOnce();
 		const [revision] = await database.select().from(artworkRevisions);
 		const [slotState] = await database.select().from(artworkSlotStates);
 		const [group] = await database.select().from(artworkRevisionGroups);
@@ -497,8 +671,90 @@ describe('ArtworkApplyCoordinator', () => {
 				server: serverReader(artwork('externally changed', 'external-id'))
 			})
 		).rejects.toThrow(/changed before/);
-		expect(await database.select().from(artworkSnapshots)).toHaveLength(2);
+		expect(await database.select().from(artworkSnapshots)).toHaveLength(0);
 		expect(await database.select().from(artworkRevisionGroups)).toHaveLength(1);
+	});
+
+	it('blocks an external change during download before snapshots or writes are created', async () => {
+		const planned = operation({ id: 'changed-during-download' });
+		const beforeArtwork = artwork('planned current', 'planned-current');
+		const externalArtwork = artwork('external during download', 'external-during-download');
+		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		let liveArtwork = beforeArtwork;
+		const applyPosterUrl = vi.fn(async () => undefined);
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => liveArtwork),
+			applyPosterUrl,
+			applyPosterBytes
+		} as unknown as MediaServer;
+		const subject = coordinator(async () => {
+			liveArtwork = externalArtwork;
+			return { bytes: bytes('downloaded candidate'), contentType: 'image/webp' };
+		});
+
+		await expect(subject.prepareOperation(planned, { server })).rejects.toThrow(/changed before/);
+		expect(applyPosterUrl).not.toHaveBeenCalled();
+		expect(applyPosterBytes).not.toHaveBeenCalled();
+		expect(await database.select().from(artworkSnapshots)).toHaveLength(0);
+
+		const recorded = await subject.recordOutcome(
+			planned,
+			{ ...successfulWrite(planned), status: 'failed', error: 'destination changed' },
+			{ server }
+		);
+		await subject.finalize(executionResult([planned], [recorded]));
+		const [revision] = await database.select().from(artworkRevisions);
+		const [after] = await database.select().from(artworkSnapshots);
+		expect(revision).toMatchObject({
+			beforeSnapshotId: null,
+			afterSnapshotId: after?.id,
+			outcome: 'failed'
+		});
+		expect(await snapshots.readBytes(after!)).toEqual(Buffer.from('external during download'));
+	});
+
+	it('rechecks the prepared snapshot and blocks an external change before apply', async () => {
+		const planned = operation({ id: 'changed-after-prepare' });
+		const beforeArtwork = artwork('prepared prior', 'prepared-prior');
+		const externalArtwork = artwork('external before apply', 'external-before-apply');
+		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		let liveArtwork = beforeArtwork;
+		const applyPosterUrl = vi.fn(async () => undefined);
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => liveArtwork),
+			applyPosterUrl,
+			applyPosterBytes
+		} as unknown as MediaServer;
+		const subject = coordinator(async () => ({
+			bytes: bytes('downloaded candidate'),
+			contentType: 'image/avif'
+		}));
+
+		await subject.prepareOperation(planned, { server });
+		liveArtwork = externalArtwork;
+		const writeError = await subject
+			.executeServerOperation(planned, { server })
+			.catch((error: unknown) => error);
+		expect(writeError).toBeInstanceOf(Error);
+		expect(String(writeError)).toContain('changed before');
+		expect(applyPosterUrl).not.toHaveBeenCalled();
+		expect(applyPosterBytes).not.toHaveBeenCalled();
+
+		const recorded = await subject.recordOutcome(
+			planned,
+			{ ...successfulWrite(planned), status: 'failed', error: String(writeError) },
+			{ server }
+		);
+		await subject.finalize(executionResult([planned], [recorded]));
+		const [revision] = await database.select().from(artworkRevisions);
+		const rows = await database.select().from(artworkSnapshots);
+		const prior = rows.find((row) => row.id === revision?.beforeSnapshotId);
+		const after = rows.find((row) => row.id === revision?.afterSnapshotId);
+		expect(revision).toMatchObject({ outcome: 'failed', verification: 'failed' });
+		expect(await snapshots.readBytes(prior!)).toEqual(Buffer.from('prepared prior'));
+		expect(await snapshots.readBytes(after!)).toEqual(Buffer.from('external before apply'));
 	});
 
 	it('preserves absent Kometa original/prior snapshots and records an exact present value', async () => {
@@ -561,6 +817,33 @@ describe('ArtworkApplyCoordinator', () => {
 		).toThrow(/changed before/);
 	});
 
+	it('releases Kometa entries after each outcome without breaking the remaining sequence', async () => {
+		const subject = coordinator();
+		const poster = operation({
+			id: 'kometa-sequence-poster',
+			destination: 'kometa',
+			kind: 'poster',
+			tmdbId: '101'
+		});
+		const background = operation({
+			id: 'kometa-sequence-background',
+			destination: 'kometa',
+			kind: 'background',
+			tmdbId: '101'
+		});
+		await subject.prepareOperation(poster, {});
+		await subject.prepareOperation(background, {});
+		const raw = `metadata:\n  101:\n    url_poster: ${poster.selection.url}\n    url_background: ${background.selection.url}\n`;
+		await writeFile(join(kometaDirectory, DEFAULT_FILENAME), raw, 'utf8');
+
+		expect(() => subject.assertKometaFresh([poster, background], '')).not.toThrow();
+		await subject.recordOutcome(poster, successfulWrite(poster), {});
+		expect(() => subject.assertKometaFresh([poster], '')).toThrow('not prepared');
+		expect(() => subject.assertKometaFresh([background], '')).not.toThrow();
+		await subject.recordOutcome(background, successfulWrite(background), {});
+		expect(() => subject.assertKometaFresh([background], '')).toThrow('not prepared');
+	});
+
 	it('uses one group per server and finalizes mixed outcomes as partial', async () => {
 		const subject = coordinator();
 		const exact = operation({ id: 'group-exact', kind: 'poster' });
@@ -578,10 +861,16 @@ describe('ArtworkApplyCoordinator', () => {
 		const exactResult = await subject.recordOutcome(exact, successfulWrite(exact), {
 			server: exactServer
 		});
+		await expect(subject.executeServerOperation(exact, { server: exactServer })).rejects.toThrow(
+			'not prepared'
+		);
 		await subject.prepareOperation(mismatch, { server: mismatchServer });
 		const mismatchResult = await subject.recordOutcome(mismatch, successfulWrite(mismatch), {
 			server: mismatchServer
 		});
+		await expect(
+			subject.executeServerOperation(mismatch, { server: mismatchServer })
+		).rejects.toThrow('not prepared');
 
 		const [pendingGroup] = await database.select().from(artworkRevisionGroups);
 		expect(await database.select().from(artworkRevisionGroups)).toHaveLength(1);
@@ -599,6 +888,103 @@ describe('ArtworkApplyCoordinator', () => {
 			}
 		});
 		expect(await database.select().from(artworkRevisions)).toHaveLength(2);
+	});
+});
+
+describe('preflightServerArtwork', () => {
+	it('uses the strict provider allowlist for the initial URL and every redirect hop', async () => {
+		const initialFetch = vi.fn<RemoteArtworkFetch>();
+		await expect(
+			preflightServerArtwork('https://artwork.example/not-really-tmdb.jpg', 'tmdb', initialFetch)
+		).rejects.toMatchObject({ code: 'remote_artwork_target_not_allowed' });
+		expect(initialFetch).not.toHaveBeenCalled();
+
+		const redirectFetch = vi.fn<RemoteArtworkFetch>(
+			async () =>
+				new Response(null, {
+					status: 302,
+					headers: { location: 'https://artwork.example/pivot.jpg' }
+				})
+		);
+		await expect(
+			preflightServerArtwork(
+				'https://image.tmdb.org/t/p/original/poster.jpg',
+				'tmdb',
+				redirectFetch
+			)
+		).rejects.toMatchObject({ code: 'remote_artwork_target_not_allowed' });
+		expect(redirectFetch).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		{ label: 'custom', provider: 'custom' },
+		{ label: 'providerless legacy', provider: null }
+	])('preserves $label URLs under the safe custom redirect policy', async ({ provider }) => {
+		const fetchImpl = vi.fn<RemoteArtworkFetch>(
+			async () =>
+				new Response(new Uint8Array([1, 2, 3]), {
+					headers: { 'content-type': 'image/jpeg' }
+				})
+		);
+
+		await expect(
+			preflightServerArtwork('http://legacy-artwork.example/poster.jpg', provider, fetchImpl)
+		).resolves.toEqual({
+			bytes: new Uint8Array([1, 2, 3]).buffer,
+			contentType: 'image/jpeg'
+		});
+		expect(fetchImpl).toHaveBeenCalledOnce();
+	});
+
+	it('fails closed for unknown provider provenance', async () => {
+		const fetchImpl = vi.fn<RemoteArtworkFetch>();
+		await expect(
+			preflightServerArtwork(
+				'https://legacy-artwork.example/poster.jpg',
+				'unknown-provider',
+				fetchImpl
+			)
+		).rejects.toMatchObject({ code: 'remote_artwork_target_not_allowed' });
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{
+			label: 'an invalid MIME type',
+			response: () =>
+				new Response(new Uint8Array([1]), { headers: { 'content-type': 'text/html' } }),
+			code: 'remote_artwork_content_type_invalid'
+		},
+		{
+			label: 'an oversized body',
+			response: () =>
+				new Response(new Uint8Array([1]), {
+					headers: {
+						'content-type': 'image/jpeg',
+						'content-length': String(50 * 1024 * 1024 + 1)
+					}
+				}),
+			code: 'remote_artwork_too_large'
+		}
+	])('propagates $label as a failed preflight', async ({ response, code }) => {
+		await expect(
+			preflightServerArtwork('https://image.tmdb.org/t/p/original/poster.jpg', 'tmdb', async () =>
+				response()
+			)
+		).rejects.toMatchObject({ code });
+	});
+
+	it('does not swallow bounded downloader errors or expose a signed source URL', async () => {
+		const failure = new RemoteArtworkDownloadError('remote_artwork_timeout');
+		const signedUrl =
+			'https://image.tmdb.org/t/p/original/poster.jpg?api_key=should-never-be-reported';
+		const error = await preflightServerArtwork(signedUrl, 'tmdb', async () => {
+			throw failure;
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBe(failure);
+		expect(String(error)).not.toContain('should-never-be-reported');
+		expect(String(error)).not.toContain(signedUrl);
 	});
 });
 
@@ -639,5 +1025,13 @@ describe('trustedProviderArtworkUrl', () => {
 		expect(trustedProviderArtworkUrl('https://api.mediux.pro/assets/1', 'unknown')).toBe(false);
 		expect(trustedProviderArtworkUrl('https://api.mediux.pro/assets/1', null)).toBe(false);
 		expect(trustedProviderArtworkUrl('not-a-url', 'mediux')).toBe(false);
+	});
+
+	it('rejects embedded credentials and non-default ports on trusted hosts', () => {
+		expect(trustedProviderArtworkUrl('https://user:secret@image.tmdb.org/a.jpg', 'tmdb')).toBe(
+			false
+		);
+		expect(trustedProviderArtworkUrl('https://image.tmdb.org:8443/a.jpg', 'tmdb')).toBe(false);
+		expect(trustedProviderArtworkUrl('https://image.tmdb.org.evil.test/a.jpg', 'tmdb')).toBe(false);
 	});
 });

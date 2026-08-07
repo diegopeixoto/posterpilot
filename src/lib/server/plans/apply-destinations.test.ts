@@ -19,7 +19,8 @@ function input(serverInstanceId = 'server-a'): ResolveApplyDestinationsInput {
 		tvdbId: null,
 		mediaType: 'movie' as const,
 		updatedAt: null,
-		selectionUpdatedAt: null
+		selectionUpdatedAt: null,
+		selectionRevision: 0
 	};
 	const target = {
 		item: {

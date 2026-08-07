@@ -2,6 +2,14 @@ import { join } from 'node:path';
 import { readConfig } from '$lib/server/kometa/config-io';
 import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
+import {
+	downloadRemoteArtwork,
+	RemoteArtworkDownloadError,
+	safeArtworkRedirectPolicy,
+	type DownloadedRemoteArtwork,
+	type RemoteArtworkFetch,
+	type RemoteArtworkUrlValidator
+} from '$lib/server/remote-artwork';
 import type {
 	ApplyOperationExecutionContext,
 	ApplyOperationExecutionResult,
@@ -27,7 +35,9 @@ interface PreparedServerOperation {
 	destination: 'server';
 	beforeSnapshotId: string;
 	beforeArtwork: ServerArtwork | null | undefined;
-	expectedSha256: string | null;
+	expectedBytes: ArrayBuffer;
+	expectedContentType: string;
+	expectedSha256: string;
 }
 
 interface PreparedKometaOperation {
@@ -49,7 +59,13 @@ export interface ArtworkApplyCoordinatorOptions {
 	};
 	kometaAssetsDirectory: string;
 	clock?: () => Date;
-	fetchArtworkBytes?: (url: string) => Promise<ArrayBuffer | null>;
+	/**
+	 * Test/integration seam; null or empty results fail the mandatory preflight.
+	 * ArrayBuffer remains accepted for backwards compatibility and is treated as JPEG.
+	 */
+	fetchArtworkBytes?: (
+		url: string
+	) => Promise<ArrayBuffer | Pick<DownloadedRemoteArtwork, 'bytes' | 'contentType'> | null>;
 }
 
 function safeNow(clock: () => Date): Date {
@@ -58,22 +74,35 @@ function safeNow(clock: () => Date): Date {
 	return now;
 }
 
-async function defaultFetchArtworkBytes(url: string): Promise<ArrayBuffer | null> {
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), 15_000);
-	try {
-		const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
-		if (!response.ok) return null;
-		return response.arrayBuffer();
-	} catch {
-		return null;
-	} finally {
-		clearTimeout(timeout);
-	}
+const MAX_PREFLIGHT_ARTWORK_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Validate and download the exact frozen selection before any media-server mutation.
+ * Known provider provenance stays on its strict asset-host allowlist. Custom and
+ * providerless legacy selections keep their original URL semantics and use the
+ * redirect policy shared by the media-server adapters.
+ */
+export async function preflightServerArtwork(
+	url: string,
+	provider: string | null,
+	fetchImpl?: RemoteArtworkFetch
+): Promise<Pick<DownloadedRemoteArtwork, 'bytes' | 'contentType'>> {
+	const validateUrl: RemoteArtworkUrlValidator =
+		provider === null || provider === 'custom'
+			? safeArtworkRedirectPolicy
+			: (target) => trustedProviderArtworkUrl(target, provider);
+	const downloaded = await downloadRemoteArtwork(url, {
+		maxBytes: MAX_PREFLIGHT_ARTWORK_BYTES,
+		timeoutMs: 30_000,
+		maxRedirects: 3,
+		validateUrl,
+		...(fetchImpl ? { fetchImpl } : {})
+	});
+	return { bytes: downloaded.bytes, contentType: downloaded.contentType };
 }
 
 /** Exported for direct unit testing of the per-provider artwork host allowlist. */
-export function trustedProviderArtworkUrl(url: string, provider: string | null): boolean {
+export function trustedProviderArtworkUrl(url: string | URL, provider: string | null): boolean {
 	if (!provider) return false;
 	let parsed: URL;
 	try {
@@ -81,7 +110,8 @@ export function trustedProviderArtworkUrl(url: string, provider: string | null):
 	} catch {
 		return false;
 	}
-	if (parsed.protocol !== 'https:') return false;
+	if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port)
+		return false;
 	const host = parsed.hostname.toLowerCase();
 	switch (provider) {
 		case 'mediux':
@@ -106,6 +136,34 @@ export function trustedProviderArtworkUrl(url: string, provider: string | null):
 
 function serverArtworkKind(operation: ApplyPlanOperation): 'poster' | 'background' {
 	return operation.slot.kind === 'background' ? 'background' : 'poster';
+}
+
+function preparedArtwork(
+	result: ArrayBuffer | Pick<DownloadedRemoteArtwork, 'bytes' | 'contentType'> | null
+): Pick<DownloadedRemoteArtwork, 'bytes' | 'contentType'> {
+	if (!result) throw new RemoteArtworkDownloadError('remote_artwork_empty');
+	const downloaded =
+		result instanceof ArrayBuffer ? { bytes: result, contentType: 'image/jpeg' } : result;
+	if (downloaded.bytes.byteLength === 0) {
+		throw new RemoteArtworkDownloadError('remote_artwork_empty');
+	}
+	return downloaded;
+}
+
+function artworkFingerprint(artwork: ServerArtwork | null | undefined): string | null | undefined {
+	return artwork === undefined ? undefined : artwork === null ? null : sha256Bytes(artwork.data);
+}
+
+function assertArtworkMatches(
+	actual: ServerArtwork | null | undefined,
+	expectedFingerprint: string | null | undefined
+): void {
+	if (actual === undefined || expectedFingerprint === undefined) {
+		throw new Error('Current server artwork could not be verified before the artwork write');
+	}
+	if (artworkFingerprint(actual) !== expectedFingerprint) {
+		throw new Error('Frozen destination changed before the artwork write');
+	}
 }
 
 function snapshotState(value: KometaSlotSnapshotValue): 'present' | 'absent' {
@@ -170,6 +228,11 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 	}
 
 	async function prepareServer(operation: ApplyPlanOperation, server?: MediaServer): Promise<void> {
+		const expected = preparedArtwork(
+			options.fetchArtworkBytes
+				? await options.fetchArtworkBytes(operation.selection.url)
+				: await preflightServerArtwork(operation.selection.url, operation.selection.provider)
+		);
 		let beforeArtwork: ServerArtwork | null | undefined;
 		if (server?.readArtwork) {
 			try {
@@ -177,6 +240,9 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			} catch {
 				beforeArtwork = undefined;
 			}
+		}
+		if (beforeArtwork !== undefined) {
+			assertArtworkMatches(beforeArtwork, operation.current.fingerprint);
 		}
 
 		const scope = {
@@ -191,25 +257,48 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			destination: 'server',
 			beforeSnapshotId: before.id,
 			beforeArtwork,
-			expectedSha256: null
+			expectedBytes: expected.bytes,
+			expectedContentType: expected.contentType,
+			expectedSha256: sha256Bytes(expected.bytes)
 		});
-		if (beforeArtwork !== undefined) {
-			const liveFingerprint = beforeArtwork ? sha256Bytes(beforeArtwork.data) : null;
-			if (liveFingerprint !== operation.current.fingerprint) {
-				throw new Error('Frozen destination changed before the artwork write');
-			}
+	}
+
+	async function executeServerOperation(
+		operation: ApplyPlanOperation,
+		context: ApplyOperationExecutionContext
+	): Promise<void> {
+		const captured = prepared.get(operation.id);
+		if (captured?.destination !== 'server') {
+			throw new Error('Server operation was not prepared');
 		}
-		const expectedBytes = options.fetchArtworkBytes
-			? await options.fetchArtworkBytes(operation.selection.url)
-			: trustedProviderArtworkUrl(operation.selection.url, operation.selection.provider)
-				? await defaultFetchArtworkBytes(operation.selection.url)
-				: null;
-		prepared.set(operation.id, {
-			destination: 'server',
-			beforeSnapshotId: before.id,
-			beforeArtwork,
-			expectedSha256: expectedBytes ? sha256Bytes(expectedBytes) : null
-		});
+		const server = context.server;
+		if (!server?.readArtwork) {
+			throw new Error('Current server artwork cannot be rechecked before the artwork write');
+		}
+		let liveArtwork: ServerArtwork | null | undefined;
+		try {
+			liveArtwork = await server.readArtwork(operation.targetId, serverArtworkKind(operation));
+		} catch {
+			liveArtwork = undefined;
+		}
+		assertArtworkMatches(liveArtwork, artworkFingerprint(captured.beforeArtwork));
+
+		if (operation.slot.kind === 'background') {
+			if (!server.applyBackgroundBytes) {
+				throw new Error('Target server does not support background artwork bytes');
+			}
+			await server.applyBackgroundBytes(
+				operation.targetId,
+				captured.expectedBytes,
+				captured.expectedContentType
+			);
+			return;
+		}
+		await server.applyPosterBytes(
+			operation.targetId,
+			captured.expectedBytes,
+			captured.expectedContentType
+		);
 	}
 
 	async function prepareKometa(operation: ApplyPlanOperation): Promise<void> {
@@ -305,7 +394,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			kind: operation.slot.kind,
 			season: operation.slot.season,
 			episode: operation.slot.episode,
-			applyMethod: 'server_url',
+			applyMethod: 'server_bytes',
 			sourceProvider: operation.selection.provider,
 			provenance: safeSelectionProvenance(operation),
 			priorFingerprint:
@@ -426,10 +515,14 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		result: ApplyOperationExecutionResult,
 		context: ApplyOperationExecutionContext
 	): Promise<ApplyOperationExecutionResult> {
-		const groupId = await ensureGroup(operation.target.serverInstanceId);
-		return operation.destination === 'server'
-			? recordServerOutcome(operation, result, context.server, groupId)
-			: recordKometaOutcome(operation, result, groupId);
+		try {
+			const groupId = await ensureGroup(operation.target.serverInstanceId);
+			return operation.destination === 'server'
+				? await recordServerOutcome(operation, result, context.server, groupId)
+				: await recordKometaOutcome(operation, result, groupId);
+		} finally {
+			prepared.delete(operation.id);
+		}
 	}
 
 	function assertKometaFresh(operations: ApplyPlanOperation[], raw: string | null): void {
@@ -464,7 +557,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		}
 	}
 
-	return { prepareOperation, recordOutcome, assertKometaFresh, finalize };
+	return { prepareOperation, executeServerOperation, recordOutcome, assertKometaFresh, finalize };
 }
 
 export type ArtworkApplyCoordinator = ReturnType<typeof createArtworkApplyCoordinator>;

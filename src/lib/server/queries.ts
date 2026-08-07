@@ -31,6 +31,7 @@ import {
 import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 import { PROVIDERS } from './posters/providers';
 import { providerAvailability } from './posters/providers/availability';
+import { findStagedArtworkCandidate } from './posters/selection-preview';
 import { resolveConfig } from './config';
 import { rankFunItems, type PickFilter } from './fun-pick';
 import {
@@ -547,6 +548,7 @@ export async function listPosterMatchCandidates(itemId: number, serverInstanceId
 		.select({
 			id: posterCandidates.id,
 			url: posterCandidates.url,
+			previewUrl: posterCandidates.previewUrl,
 			provider: posterCandidates.provider,
 			setId: posterCandidates.setId,
 			setAuthor: posterCandidates.setAuthor,
@@ -729,7 +731,27 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 	const enabledProviders = PROVIDERS.filter(
 		(p) => providerAvailability(p.id, config) === 'available'
 	).map((p) => p.id);
-	const candidates = enabledProviders.length
+	const enabledProviderIds = new Set<string>(enabledProviders);
+	const candidateAccess: SQL[] = [];
+	if (enabledProviders.length > 0) {
+		candidateAccess.push(
+			and(eq(posterCandidates.active, true), inArray(posterCandidates.provider, enabledProviders))!
+		);
+	}
+	if (item.selectedPosterUrl) {
+		candidateAccess.push(
+			and(eq(posterCandidates.kind, 'poster'), eq(posterCandidates.url, item.selectedPosterUrl))!
+		);
+	}
+	if (item.selectedBackgroundUrl) {
+		candidateAccess.push(
+			and(
+				eq(posterCandidates.kind, 'background'),
+				eq(posterCandidates.url, item.selectedBackgroundUrl)
+			)!
+		);
+	}
+	const loadedCandidates = candidateAccess.length
 		? await db
 				.select()
 				.from(posterCandidates)
@@ -737,12 +759,28 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 					and(
 						eq(posterCandidates.serverInstanceId, item.serverInstanceId),
 						eq(posterCandidates.mediaItemId, id),
-						eq(posterCandidates.active, true),
-						inArray(posterCandidates.provider, enabledProviders)
+						or(...candidateAccess)
 					)
 				)
 				.orderBy(posterCandidates.id)
 		: [];
+	const candidates = loadedCandidates.filter(
+		(candidate) => candidate.active && enabledProviderIds.has(candidate.provider)
+	);
+	const selectedPosterCandidate = findStagedArtworkCandidate(loadedCandidates, {
+		mediaItemId: item.id,
+		kind: 'poster',
+		url: item.selectedPosterUrl,
+		candidateId: item.selectedPosterCandidateId,
+		provider: item.selectedPosterProvider
+	});
+	const selectedBackgroundCandidate = findStagedArtworkCandidate(loadedCandidates, {
+		mediaItemId: item.id,
+		kind: 'background',
+		url: item.selectedBackgroundUrl,
+		candidateId: item.selectedBackgroundCandidateId,
+		provider: item.selectedBackgroundProvider
+	});
 	const history = await db
 		.select()
 		.from(appliedPosters)
@@ -773,6 +811,11 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 		candidates,
 		sets: groupCandidatesBySet(candidates),
 		providerGroups: groupByProvider(candidates),
+		selectedRootPreviews: {
+			poster: selectedPosterCandidate?.previewUrl ?? selectedPosterCandidate?.url ?? null,
+			background:
+				selectedBackgroundCandidate?.previewUrl ?? selectedBackgroundCandidate?.url ?? null
+		},
 		history,
 		childSelections: childSelectionRows
 	};

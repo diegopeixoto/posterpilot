@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { rmSync } from 'node:fs';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/posters/service', () => ({ autoSelectArtwork: vi.fn() }));
@@ -18,14 +19,16 @@ vi.mock('$lib/server/db', async () => {
 	const { createClient } = await import('@libsql/client');
 	const { drizzle } = await import('drizzle-orm/libsql');
 	const { migrate } = await import('drizzle-orm/libsql/migrator');
+	const { randomUUID } = await import('node:crypto');
 	const schema = await import('$lib/server/db/schema');
-	const client = createClient({ url: ':memory:' });
+	const testDatabasePath = `/tmp/posterpilot-apply-planner-db-${randomUUID()}.db`;
+	const client = createClient({ url: `file:${testDatabasePath}` });
 	const db = drizzle(client, { schema });
 	await migrate(db, { migrationsFolder: './drizzle' });
-	return { db, migrateDb: async () => undefined };
+	return { db, migrateDb: async () => undefined, testClient: client, testDatabasePath };
 });
 
-import { db } from '$lib/server/db';
+import * as databaseModule from '$lib/server/db';
 import {
 	artworkSlotStates,
 	childSelections,
@@ -35,6 +38,19 @@ import {
 	serverInstances
 } from '$lib/server/db/schema';
 import { loadDatabaseApplyPlannerItemData } from './apply-planner-db';
+
+const { db } = databaseModule;
+const testDatabase = databaseModule as typeof databaseModule & {
+	testClient: { close(): void };
+	testDatabasePath: string;
+};
+
+afterAll(async () => {
+	await testDatabase.testClient.close();
+	for (const suffix of ['', '-shm', '-wal']) {
+		rmSync(`${testDatabase.testDatabasePath}${suffix}`, { force: true });
+	}
+});
 
 beforeEach(async () => {
 	await db.delete(childSelections);
@@ -68,8 +84,11 @@ describe('database apply-planner snapshot', () => {
 				artworkVersion: 7,
 				selectedPosterUrl: 'https://images.example/poster.jpg',
 				selectedPosterCandidateId: 1,
+				selectedPosterProvider: 'mediux',
 				selectedBackgroundUrl: 'https://custom.example/background.jpg',
+				selectedBackgroundProvider: 'custom',
 				selectionUpdatedAt: new Date('2026-07-10T11:00:00Z'),
+				selectionRevision: 3,
 				discoveryStatus: 'succeeded',
 				discoveryCompletedAt: new Date('2026-07-10T10:59:00Z'),
 				lastSyncedAt: new Date('2026-07-10T10:00:00Z')
@@ -157,7 +176,8 @@ describe('database apply-planner snapshot', () => {
 			mediaItemId: item.id,
 			sourceId: 'plex-42',
 			tmdbId: '42',
-			mediaType: 'tv'
+			mediaType: 'tv',
+			selectionRevision: 3
 		});
 		expect(snapshot?.item.discovery).toEqual({
 			status: 'succeeded',
@@ -180,6 +200,7 @@ describe('database apply-planner snapshot', () => {
 				expect.objectContaining({
 					candidateId: null,
 					url: 'https://custom.example/background.jpg',
+					provider: 'custom',
 					slot: { kind: 'background', season: null, episode: null }
 				}),
 				expect.objectContaining({
@@ -200,6 +221,198 @@ describe('database apply-planner snapshot', () => {
 					slot: { kind: 'title_card', season: 1, episode: 2 },
 					fingerprint: 'title-card-before',
 					artworkVersion: 2
+				})
+			])
+		);
+	});
+
+	it('retains raw migrated provenance while enriching legacy TMDB root and child selections', async () => {
+		await db.insert(serverInstances).values({
+			id: 'server-a',
+			name: 'Cinema',
+			normalizedName: 'cinema',
+			type: 'plex'
+		});
+		const [item] = await db
+			.insert(mediaItems)
+			.values({
+				serverInstanceId: 'server-a',
+				ratingKey: 'plex-legacy',
+				sectionKey: 'shows',
+				type: 'show',
+				title: 'Legacy',
+				tmdbId: '99',
+				mediaType: 'tv',
+				selectedPosterUrl: 'https://image.tmdb.org/t/p/original/legacy-root.jpg',
+				selectedPosterCandidateId: null,
+				selectedPosterProvider: 'tmdb',
+				selectionRevision: 0
+			})
+			.returning();
+		const candidates = await db
+			.insert(posterCandidates)
+			.values([
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/legacy-root.jpg',
+					setId: 'tmdb-root',
+					url: 'https://image.tmdb.org/t/p/w500/legacy-root.jpg',
+					kind: 'poster' as const,
+					active: true,
+					stale: false
+				},
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/legacy-child.jpg',
+					setId: 'tmdb-child',
+					url: 'https://image.tmdb.org/t/p/w500/legacy-child.jpg',
+					kind: 'title_card' as const,
+					season: 1,
+					episode: 2,
+					active: true,
+					stale: false
+				}
+			])
+			.returning();
+		await db.insert(childSelections).values({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id,
+			kind: 'title_card',
+			season: 1,
+			episode: 2,
+			url: 'https://image.tmdb.org/t/p/original/legacy-child.jpg',
+			candidateId: null,
+			provider: 'tmdb',
+			setId: null
+		});
+
+		const snapshot = await loadDatabaseApplyPlannerItemData({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id
+		});
+
+		expect(snapshot?.storedSelections).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					candidateId: candidates[0].id,
+					provider: 'tmdb',
+					setId: 'tmdb-root',
+					url: 'https://image.tmdb.org/t/p/original/legacy-root.jpg',
+					slot: { kind: 'poster', season: null, episode: null },
+					persisted: { candidateId: null, provider: 'tmdb', setId: null }
+				}),
+				expect.objectContaining({
+					candidateId: candidates[1].id,
+					provider: 'tmdb',
+					setId: 'tmdb-child',
+					url: 'https://image.tmdb.org/t/p/original/legacy-child.jpg',
+					slot: { kind: 'title_card', season: 1, episode: 2 },
+					persisted: { candidateId: null, provider: 'tmdb', setId: null }
+				})
+			])
+		);
+	});
+
+	it('preserves migrated candidate ids across reverse and non-original TMDB variants', async () => {
+		await db.insert(serverInstances).values({
+			id: 'server-a',
+			name: 'Cinema',
+			normalizedName: 'cinema',
+			type: 'plex'
+		});
+		const [item] = await db
+			.insert(mediaItems)
+			.values({
+				serverInstanceId: 'server-a',
+				ratingKey: 'plex-reverse',
+				sectionKey: 'shows',
+				type: 'show',
+				title: 'Reverse',
+				tmdbId: '88',
+				mediaType: 'tv',
+				selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/reverse-root.jpg',
+				selectedPosterCandidateId: null,
+				selectedPosterProvider: 'tmdb',
+				selectionRevision: 0
+			})
+			.returning();
+		const candidates = await db
+			.insert(posterCandidates)
+			.values([
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/reverse-root.jpg',
+					setId: 'tmdb-reverse-root',
+					url: 'https://image.tmdb.org/t/p/original/reverse-root.jpg',
+					kind: 'poster' as const,
+					active: true,
+					stale: false
+				},
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/reverse-child.jpg',
+					setId: 'tmdb-reverse-child',
+					url: 'https://image.tmdb.org/t/p/w500/reverse-child.jpg',
+					kind: 'title_card' as const,
+					season: 2,
+					episode: 3,
+					active: true,
+					stale: false
+				}
+			])
+			.returning();
+		await db
+			.update(mediaItems)
+			.set({ selectedPosterCandidateId: candidates[0].id })
+			.where(eq(mediaItems.id, item.id));
+		await db.insert(childSelections).values({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id,
+			kind: 'title_card',
+			season: 2,
+			episode: 3,
+			url: 'https://image.tmdb.org/t/p/w780/reverse-child.jpg',
+			candidateId: candidates[1].id,
+			provider: 'tmdb',
+			setId: 'tmdb-reverse-child'
+		});
+
+		const snapshot = await loadDatabaseApplyPlannerItemData({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id
+		});
+
+		expect(snapshot?.storedSelections).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					candidateId: candidates[0].id,
+					url: 'https://image.tmdb.org/t/p/w500/reverse-root.jpg',
+					provider: 'tmdb',
+					setId: 'tmdb-reverse-root',
+					persisted: {
+						candidateId: candidates[0].id,
+						provider: 'tmdb',
+						setId: null
+					}
+				}),
+				expect.objectContaining({
+					candidateId: candidates[1].id,
+					url: 'https://image.tmdb.org/t/p/w780/reverse-child.jpg',
+					provider: 'tmdb',
+					setId: 'tmdb-reverse-child',
+					persisted: {
+						candidateId: candidates[1].id,
+						provider: 'tmdb',
+						setId: 'tmdb-reverse-child'
+					}
 				})
 			])
 		);

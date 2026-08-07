@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from '$lib/server/db/schema';
 import {
@@ -167,7 +167,10 @@ const invalidatedIdentityFields = {
 	selectedBackgroundUrl: null,
 	selectedPosterCandidateId: null,
 	selectedBackgroundCandidateId: null,
+	selectedPosterProvider: null,
+	selectedBackgroundProvider: null,
 	selectionUpdatedAt: null,
+	selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
 	overview: null,
 	tagline: null,
 	genres: null,

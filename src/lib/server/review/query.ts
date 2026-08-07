@@ -10,6 +10,7 @@ import {
 import { REVIEW_STATES, type ReviewState } from './state';
 import { reviewStateExpression } from './state-sql';
 import { buildReviewDashboardSummary } from './dashboard-summary';
+import { resolveStagedArtworkPreview } from '$lib/server/posters/selection-preview';
 
 export type ReviewAvailability = 'candidates' | 'mediux' | 'none';
 export type ReviewSort = 'priority' | 'updated' | 'title' | 'year';
@@ -35,6 +36,7 @@ export interface ReviewPageOptions {
 export interface ReviewCandidateSummary {
 	id: number;
 	url: string;
+	previewUrl: string | null;
 	kind: 'poster' | 'background';
 	provider: string;
 	setId: string;
@@ -128,6 +130,10 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 				backdropUrl: mediaItems.backdropUrl,
 				selectedPosterUrl: mediaItems.selectedPosterUrl,
 				selectedBackgroundUrl: mediaItems.selectedBackgroundUrl,
+				selectedPosterCandidateId: mediaItems.selectedPosterCandidateId,
+				selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId,
+				selectedPosterProvider: mediaItems.selectedPosterProvider,
+				selectedBackgroundProvider: mediaItems.selectedBackgroundProvider,
 				hasCandidates: mediaItems.hasCandidates,
 				hasMediux: mediaItems.hasMediux,
 				ignored: mediaItems.ignored,
@@ -165,6 +171,20 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 	]);
 
 	const ids = rows.map((row) => row.id);
+	// At most two ids per row and the page is capped at 100. This keeps the
+	// inactive lookup bounded while retaining provenance for already-staged slots.
+	const selectedCandidateIds = [
+		...new Set(
+			rows.flatMap((row) =>
+				[row.selectedPosterCandidateId, row.selectedBackgroundCandidateId].filter(
+					(value): value is number => value !== null
+				)
+			)
+		)
+	];
+	const visibleCandidateCondition = selectedCandidateIds.length
+		? or(eq(posterCandidates.active, true), inArray(posterCandidates.id, selectedCandidateIds))
+		: eq(posterCandidates.active, true);
 	const [candidates, failedSlots] = ids.length
 		? await Promise.all([
 				db
@@ -172,8 +192,10 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 						id: posterCandidates.id,
 						mediaItemId: posterCandidates.mediaItemId,
 						url: posterCandidates.url,
+						previewUrl: posterCandidates.previewUrl,
 						kind: posterCandidates.kind,
 						provider: posterCandidates.provider,
+						active: posterCandidates.active,
 						setId: posterCandidates.setId,
 						setAuthor: posterCandidates.setAuthor,
 						score: posterCandidates.score,
@@ -184,8 +206,10 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 						and(
 							eq(posterCandidates.serverInstanceId, filter.serverInstanceId),
 							inArray(posterCandidates.mediaItemId, ids),
-							eq(posterCandidates.active, true),
-							or(eq(posterCandidates.kind, 'poster'), eq(posterCandidates.kind, 'background'))
+							visibleCandidateCondition,
+							or(eq(posterCandidates.kind, 'poster'), eq(posterCandidates.kind, 'background')),
+							isNull(posterCandidates.season),
+							isNull(posterCandidates.episode)
 						)
 					)
 					.orderBy(
@@ -222,12 +246,20 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 
 	const items = rows.map((item) => {
 		const own = candidates.filter((candidate) => candidate.mediaItemId === item.id);
+		const previewCandidates = own.filter(
+			(candidate) =>
+				candidate.active ||
+				(candidate.kind === 'poster' && candidate.id === item.selectedPosterCandidateId) ||
+				(candidate.kind === 'background' && candidate.id === item.selectedBackgroundCandidateId)
+		);
+		const activeOwn = own.filter((candidate) => candidate.active);
 		const first = (kind: 'poster' | 'background'): ReviewCandidateSummary | null => {
-			const candidate = own.find((entry) => entry.kind === kind);
+			const candidate = activeOwn.find((entry) => entry.kind === kind);
 			return candidate
 				? {
 						id: candidate.id,
 						url: candidate.url,
+						previewUrl: candidate.previewUrl,
 						kind,
 						provider: candidate.provider,
 						setId: candidate.setId,
@@ -240,6 +272,20 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 		return {
 			item: {
 				...item,
+				selectedPosterPreviewUrl: resolveStagedArtworkPreview(previewCandidates, {
+					mediaItemId: item.id,
+					kind: 'poster',
+					url: item.selectedPosterUrl,
+					candidateId: item.selectedPosterCandidateId,
+					provider: item.selectedPosterProvider
+				}),
+				selectedBackgroundPreviewUrl: resolveStagedArtworkPreview(previewCandidates, {
+					mediaItemId: item.id,
+					kind: 'background',
+					url: item.selectedBackgroundUrl,
+					candidateId: item.selectedBackgroundCandidateId,
+					provider: item.selectedBackgroundProvider
+				}),
 				hasCurrentPoster: item.hasCurrentPoster === 1,
 				hasCurrentBackground: item.hasCurrentBackground === 1
 			},

@@ -10,6 +10,7 @@ import {
 import { resolveConfig } from '$lib/server/config';
 import { autoSelectArtwork } from '$lib/server/posters/service';
 import { getProviderPriority, getScoreWeights } from '$lib/server/posters/score-weights';
+import { storedArtworkMatchesCandidate } from '$lib/server/tmdb/artwork-url';
 import { operationPlanStore } from './operation-plan-store';
 import {
 	createApplyPlanner,
@@ -55,22 +56,24 @@ function findCandidate(
 	candidates: PlannerCandidateSnapshot[],
 	candidateId: number | null,
 	url: string,
-	slot: ApplySlot
+	slot: ApplySlot,
+	provider: string | null
 ): PlannerCandidateSnapshot | null {
+	const matchesSelection = (candidate: PlannerCandidateSnapshot) =>
+		slotKey(candidate.slot) === slotKey(slot) &&
+		storedArtworkMatchesCandidate({
+			storedUrl: url,
+			storedProvider: provider,
+			candidateUrl: candidate.url,
+			candidateProvider: candidate.provider
+		});
 	if (candidateId !== null) {
 		const byId = candidates.find(
-			(candidate) =>
-				candidate.candidateId === candidateId &&
-				candidate.url === url &&
-				slotKey(candidate.slot) === slotKey(slot)
+			(candidate) => candidate.candidateId === candidateId && matchesSelection(candidate)
 		);
 		if (byId) return byId;
 	}
-	return (
-		candidates.find(
-			(candidate) => candidate.url === url && slotKey(candidate.slot) === slotKey(slot)
-		) ?? null
-	);
+	return candidates.find(matchesSelection) ?? null;
 }
 
 function storedSelection(
@@ -83,14 +86,25 @@ function storedSelection(
 		setId: string | null;
 	}
 ): PlannerStoredSelection {
-	const candidate = findCandidate(candidates, input.candidateId, input.url, input.slot);
+	const candidate = findCandidate(
+		candidates,
+		input.candidateId,
+		input.url,
+		input.slot,
+		input.provider
+	);
 	return {
 		slot: input.slot,
 		candidateId: candidate?.candidateId ?? null,
 		url: input.url,
 		provider: candidate?.provider ?? input.provider,
 		setId: candidate?.setId ?? input.setId,
-		setAuthor: candidate?.setAuthor ?? null
+		setAuthor: candidate?.setAuthor ?? null,
+		persisted: {
+			candidateId: input.candidateId,
+			provider: input.provider,
+			setId: input.setId
+		}
 	};
 }
 
@@ -189,7 +203,7 @@ export async function loadDatabaseApplyPlannerItemData(
 					slot: { kind: 'poster', season: null, episode: null },
 					candidateId: item.selectedPosterCandidateId,
 					url: item.selectedPosterUrl,
-					provider: null,
+					provider: item.selectedPosterProvider,
 					setId: null
 				})
 			);
@@ -200,7 +214,7 @@ export async function loadDatabaseApplyPlannerItemData(
 					slot: { kind: 'background', season: null, episode: null },
 					candidateId: item.selectedBackgroundCandidateId,
 					url: item.selectedBackgroundUrl,
-					provider: null,
+					provider: item.selectedBackgroundProvider,
 					setId: null
 				})
 			);
@@ -267,7 +281,8 @@ export async function loadDatabaseApplyPlannerItemData(
 					tvdbId: item.tvdbId,
 					mediaType: item.mediaType,
 					updatedAt: iso(item.updatedAt),
-					selectionUpdatedAt: iso(item.selectionUpdatedAt)
+					selectionUpdatedAt: iso(item.selectionUpdatedAt),
+					selectionRevision: item.selectionRevision
 				},
 				ignored: item.ignored,
 				sourceRemoved: item.sourceRemovedAt !== null,

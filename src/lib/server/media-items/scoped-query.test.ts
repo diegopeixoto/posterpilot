@@ -36,7 +36,7 @@ beforeEach(async () => {
 			type: 'jellyfin'
 		}
 	]);
-	const items = Array.from({ length: 517 }, (_, index) => ({
+	const items = Array.from({ length: 1_100 }, (_, index) => ({
 		serverInstanceId: 'server-a',
 		ratingKey: `item-${index + 1}`,
 		sectionKey: 'movies',
@@ -62,21 +62,21 @@ afterEach(async () => {
 
 describe('requireScopedMediaItemsById', () => {
 	it('queries a large caller scope in bounded batches and preserves first-seen order', async () => {
-		const ids = Array.from({ length: 517 }, (_, index) => index + 1);
-		const requested = [ids[516], ...ids.slice(0, 516), ids[516]];
+		const ids = Array.from({ length: 1_100 }, (_, index) => index + 1);
+		const requested = [ids[1_099], ...ids.slice(0, 1_099), ids[1_099]];
 
 		const rows = await requireScopedMediaItemsById(database, 'server-a', requested);
 
-		expect(rows.map((row) => row.id)).toEqual([517, ...ids.slice(0, 516)]);
-		expect(queries).toHaveLength(2);
-		expect(queries.map((query) => query.params.length)).toEqual([501, 18]);
+		expect(rows.map((row) => row.id)).toEqual([1_100, ...ids.slice(0, 1_099)]);
+		expect(queries).toHaveLength(3);
+		expect(queries.map((query) => query.params.length)).toEqual([501, 501, 101]);
 	});
 
 	it('rejects cross-server, absent, and invalid ids without widening the scope', async () => {
 		await expect(
-			requireScopedMediaItemsById(database, 'server-a', [1, 518])
+			requireScopedMediaItemsById(database, 'server-a', [1, 1_101])
 		).rejects.toBeInstanceOf(MediaItemScopeMismatchError);
-		await expect(requireScopedMediaItemsById(database, 'server-a', [999])).rejects.toBeInstanceOf(
+		await expect(requireScopedMediaItemsById(database, 'server-a', [9_999])).rejects.toBeInstanceOf(
 			MediaItemScopeMismatchError
 		);
 		await expect(requireScopedMediaItemsById(database, 'server-a', [0])).rejects.toBeInstanceOf(

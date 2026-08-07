@@ -11,15 +11,39 @@ import {
 describe('parseTmdbImages', () => {
 	it('builds poster + backdrop candidates in one set', () => {
 		const sets = parseTmdbImages({
-			posters: [{ file_path: '/p.jpg' }],
-			backdrops: [{ file_path: '/b.jpg' }]
+			posters: [
+				{ file_path: '/p.jpg', width: 2000, height: 3000, iso_639_1: 'pt-BR' },
+				{ file_path: '/untagged.jpg', iso_639_1: null },
+				{ file_path: '/legacy-shape.jpg' }
+			],
+			backdrops: [{ file_path: '/b.jpg', width: 3840, height: 2160, iso_639_1: 'en' }]
 		});
 		expect(sets).toHaveLength(1);
 		const c = sets[0].candidates;
-		expect(c.find((x) => x.kind === 'poster')?.url).toBe('https://image.tmdb.org/t/p/w500/p.jpg');
-		expect(c.find((x) => x.kind === 'background')?.url).toBe(
-			'https://image.tmdb.org/t/p/w1280/b.jpg'
-		);
+		expect(c.find((x) => x.providerAssetId === '/p.jpg')).toMatchObject({
+			url: 'https://image.tmdb.org/t/p/original/p.jpg',
+			previewUrl: 'https://image.tmdb.org/t/p/w500/p.jpg',
+			width: 2000,
+			height: 3000,
+			language: 'pt',
+			languageProvenance: 'tagged'
+		});
+		expect(c.find((x) => x.providerAssetId === '/b.jpg')).toMatchObject({
+			url: 'https://image.tmdb.org/t/p/original/b.jpg',
+			previewUrl: 'https://image.tmdb.org/t/p/w1280/b.jpg',
+			width: 3840,
+			height: 2160,
+			language: 'en',
+			languageProvenance: 'tagged'
+		});
+		expect(c.find((x) => x.providerAssetId === '/untagged.jpg')).toMatchObject({
+			language: null,
+			languageProvenance: 'untagged'
+		});
+		expect(c.find((x) => x.providerAssetId === '/legacy-shape.jpg')).toMatchObject({
+			language: null,
+			languageProvenance: 'unknown'
+		});
 		expect(c.every((x) => x.setId === 'tmdb')).toBe(true);
 	});
 
@@ -32,12 +56,27 @@ describe('parseTmdbImages', () => {
 describe('parseFanart', () => {
 	it('maps movie posters and backgrounds', () => {
 		const sets = parseFanart(
-			{ movieposter: [{ url: 'http://f/p.png' }], moviebackground: [{ url: 'http://f/b.png' }] },
+			{
+				movieposter: [{ id: '41', url: 'http://f/p.png', lang: 'en' }],
+				moviebackground: [{ url: 'http://f/b.png', lang: null }]
+			},
 			'movie'
 		);
 		const c = sets[0].candidates;
-		expect(c.find((x) => x.kind === 'poster')?.url).toBe('http://f/p.png');
-		expect(c.find((x) => x.kind === 'background')?.url).toBe('http://f/b.png');
+		expect(c.find((x) => x.kind === 'poster')).toMatchObject({
+			providerAssetId: '41',
+			url: 'http://f/p.png',
+			previewUrl: null,
+			language: 'en',
+			languageProvenance: 'tagged'
+		});
+		expect(c.find((x) => x.kind === 'background')).toMatchObject({
+			providerAssetId: null,
+			url: 'http://f/b.png',
+			previewUrl: null,
+			language: null,
+			languageProvenance: 'untagged'
+		});
 	});
 
 	it('maps tv posters, backgrounds, and season posters', () => {
@@ -79,6 +118,7 @@ describe('parseThePosterDb', () => {
 			'https://theposterdb.com/api/assets/222'
 		]);
 		expect(sets[0].candidates.every((c) => c.kind === 'poster')).toBe(true);
+		expect(sets[0].candidates.map((c) => c.providerAssetId)).toEqual(['111', '222']);
 	});
 
 	it('returns [] when no assets are present', () => {
@@ -213,6 +253,7 @@ describe('parseThePosterDbAssets', () => {
 			'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/3624/lbzoHxi7bDQ3b6Ly3XK9wolkosbPhx2CPHQEj6Fg.webp'
 		);
 		expect(sets[0].candidates[0].setAuthor).toBe('cinemoire');
+		expect(sets[0].candidates[0].providerAssetId).toBe('883');
 	});
 
 	it('keys the set by the real ThePosterDB set id, not the individual poster id', () => {

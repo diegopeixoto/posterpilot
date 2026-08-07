@@ -5,6 +5,10 @@
 	import type { CandidateSet } from '$lib/server/posters/sets';
 	import { groupSetArtwork } from '$lib/posters/season-groups';
 	import { defaultExpanded, providerKey, setKey, seasonKey } from '$lib/posters/collapse';
+	import {
+		stagedArtworkMatchesCandidate,
+		toggleStagedArtworkCandidate
+	} from '$lib/posters/selection-match';
 	import { m } from '$lib/paraglide/messages';
 	import JobProgress from '$lib/components/JobProgress.svelte';
 	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
@@ -29,7 +33,17 @@
 	// svelte-ignore state_referenced_locally
 	let selectedPoster = $state<string | null>(data.item.selectedPosterUrl);
 	// svelte-ignore state_referenced_locally
+	let selectedPosterCandidateId = $state<number | null>(data.item.selectedPosterCandidateId);
+	// svelte-ignore state_referenced_locally
+	let selectedPosterProvider = $state<string | null>(data.item.selectedPosterProvider);
+	// svelte-ignore state_referenced_locally
 	let selectedBackground = $state<string | null>(data.item.selectedBackgroundUrl);
+	// svelte-ignore state_referenced_locally
+	let selectedBackgroundCandidateId = $state<number | null>(
+		data.item.selectedBackgroundCandidateId
+	);
+	// svelte-ignore state_referenced_locally
+	let selectedBackgroundProvider = $state<string | null>(data.item.selectedBackgroundProvider);
 	// svelte-ignore state_referenced_locally
 	let method = $state<'plex' | 'kometa' | 'both'>(data.defaultApplyMethod);
 	let busy = $state(false);
@@ -119,10 +133,74 @@
 		for (const r of rows) out[childKey(r.kind, r.season, r.episode)] = r.url;
 		return out;
 	}
+	function hydrateChildCandidateIds(
+		rows: typeof data.childSelections
+	): Record<string, number | null> {
+		const out: Record<string, number | null> = {};
+		for (const r of rows) out[childKey(r.kind, r.season, r.episode)] = r.candidateId;
+		return out;
+	}
+	function hydrateChildProviders(rows: typeof data.childSelections): Record<string, string | null> {
+		const out: Record<string, string | null> = {};
+		for (const r of rows) out[childKey(r.kind, r.season, r.episode)] = r.provider;
+		return out;
+	}
 	// svelte-ignore state_referenced_locally
 	let childSel = $state<Record<string, string>>(hydrateChildren(data.childSelections));
-	function isChildStaged(kind: string, season: number, episode: number | null, url: string) {
-		return childSel[childKey(kind, season, episode)] === url;
+	// svelte-ignore state_referenced_locally
+	let childCandidateIds = $state<Record<string, number | null>>(
+		hydrateChildCandidateIds(data.childSelections)
+	);
+	// svelte-ignore state_referenced_locally
+	let childProviders = $state<Record<string, string | null>>(
+		hydrateChildProviders(data.childSelections)
+	);
+	function syncSelectionStateFromData() {
+		selectedPoster = data.item.selectedPosterUrl;
+		selectedPosterCandidateId = data.item.selectedPosterCandidateId;
+		selectedPosterProvider = data.item.selectedPosterProvider;
+		selectedBackground = data.item.selectedBackgroundUrl;
+		selectedBackgroundCandidateId = data.item.selectedBackgroundCandidateId;
+		selectedBackgroundProvider = data.item.selectedBackgroundProvider;
+		childSel = hydrateChildren(data.childSelections);
+		childCandidateIds = hydrateChildCandidateIds(data.childSelections);
+		childProviders = hydrateChildProviders(data.childSelections);
+	}
+	async function recoverSelectionFailure() {
+		try {
+			await invalidateAll();
+		} catch {
+			// Keep the last server-rendered snapshot if revalidation itself is unavailable.
+		} finally {
+			syncSelectionStateFromData();
+			setMessage(m.collection_suggestion_failed(), true);
+		}
+	}
+	function isChildStaged(
+		kind: string,
+		season: number,
+		episode: number | null,
+		candidate: PosterCandidate
+	) {
+		const key = childKey(kind, season, episode);
+		return stagedArtworkMatchesCandidate(
+			{
+				url: childSel[key],
+				candidateId: childCandidateIds[key],
+				provider: childProviders[key]
+			},
+			candidate
+		);
+	}
+	function isRootStaged(kind: 'poster' | 'background', candidate: PosterCandidate): boolean {
+		return stagedArtworkMatchesCandidate(
+			{
+				url: kind === 'poster' ? selectedPoster : selectedBackground,
+				candidateId: kind === 'poster' ? selectedPosterCandidateId : selectedBackgroundCandidateId,
+				provider: kind === 'poster' ? selectedPosterProvider : selectedBackgroundProvider
+			},
+			candidate
+		);
 	}
 	const stagedSeasons = $derived(
 		Object.keys(childSel).filter((k) => k.startsWith('poster:') || k.startsWith('background:'))
@@ -202,29 +280,51 @@
 		advanceTargetHref = null;
 		completionRetry = null;
 		const s = suggestions;
-		let showChanged = false;
+		const rootPatch: RootSelectionPatch = {};
 		if (!selectedPoster && s.poster) {
-			selectedPoster = s.poster.url;
-			showChanged = true;
+			rootPatch.poster = { url: s.poster.url, candidateId: s.poster.id };
 		}
 		if (!selectedBackground && s.background) {
-			selectedBackground = s.background.url;
-			showChanged = true;
+			rootPatch.background = { url: s.background.url, candidateId: s.background.id };
 		}
-		const children: { kind: string; season: number; episode: number | null; url: string }[] = [];
+		const children: {
+			kind: string;
+			season: number;
+			episode: number | null;
+			url: string;
+			candidateId: number;
+			provider: string;
+		}[] = [];
 		for (const [season, c] of s.seasonPosters) {
 			if (!childSel[childKey('poster', season, null)]) {
-				children.push({ kind: 'poster', season, episode: null, url: c.url });
+				children.push({
+					kind: 'poster',
+					season,
+					episode: null,
+					url: c.url,
+					candidateId: c.id,
+					provider: c.provider
+				});
 			}
 		}
 		for (const c of s.titleCards.values()) {
 			if (c.season == null || c.episode == null) continue;
 			if (!childSel[childKey('title_card', c.season, c.episode)]) {
-				children.push({ kind: 'title_card', season: c.season, episode: c.episode, url: c.url });
+				children.push({
+					kind: 'title_card',
+					season: c.season,
+					episode: c.episode,
+					url: c.url,
+					candidateId: c.id,
+					provider: c.provider
+				});
 			}
 		}
 		try {
-			if (showChanged && !(await persistSelection())) throw new Error('selection_failed');
+			const showChanged = Boolean(rootPatch.poster || rootPatch.background);
+			if (showChanged && !(await persistSelection(rootPatch))) {
+				throw new Error('selection_failed');
+			}
 			if (children.length) {
 				const res = await fetch(`/api/items/${data.item.id}/select`, {
 					method: 'POST',
@@ -232,14 +332,33 @@
 					body: JSON.stringify({ children })
 				});
 				if (!res.ok) throw new Error('selection_failed');
-				const add: Record<string, string> = {};
-				for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
-				childSel = { ...childSel, ...add };
 			}
 			if (showChanged || children.length) {
+				if (rootPatch.poster && s.poster) {
+					selectedPoster = s.poster.url;
+					selectedPosterCandidateId = s.poster.id;
+					selectedPosterProvider = s.poster.provider;
+				}
+				if (rootPatch.background && s.background) {
+					selectedBackground = s.background.url;
+					selectedBackgroundCandidateId = s.background.id;
+					selectedBackgroundProvider = s.background.provider;
+				}
+				const add: Record<string, string> = {};
+				const addIds: Record<string, number | null> = {};
+				const addProviders: Record<string, string | null> = {};
+				for (const c of children) {
+					const key = childKey(c.kind, c.season, c.episode);
+					add[key] = c.url;
+					addIds[key] = c.candidateId;
+					addProviders[key] = c.provider;
+				}
+				childSel = { ...childSel, ...add };
+				childCandidateIds = { ...childCandidateIds, ...addIds };
+				childProviders = { ...childProviders, ...addProviders };
 				setMessage(m.review_suggestion_staged());
 				if (data.reviewNavigation) {
-					await fetch(`/api/review/items/${data.item.id}`, {
+					void fetch(`/api/review/items/${data.item.id}`, {
 						method: 'POST',
 						headers: { 'content-type': 'application/json' },
 						body: JSON.stringify({
@@ -247,13 +366,13 @@
 							action: 'staged',
 							context: { source: 'item_detail' }
 						})
-					});
+					}).catch(() => undefined);
 				}
 			} else {
 				setMessage(m.review_no_suggestion_to_stage());
 			}
 		} catch {
-			setMessage(m.review_action_failed(), true);
+			await recoverSelectionFailure();
 		} finally {
 			busy = false;
 		}
@@ -295,9 +414,7 @@
 	$effect(() => {
 		if (data.item.id !== loadedId) {
 			loadedId = data.item.id;
-			selectedPoster = data.item.selectedPosterUrl;
-			selectedBackground = data.item.selectedBackgroundUrl;
-			childSel = hydrateChildren(data.childSelections);
+			syncSelectionStateFromData();
 			message = null;
 			messageError = false;
 			confirmApply = false;
@@ -360,11 +477,49 @@
 	function thumb(url: string): string {
 		return /^https?:\/\//i.test(url) ? `/api/thumb?url=${encodeURIComponent(url)}` : url;
 	}
+	function stagedRootPreview(
+		kind: 'poster' | 'background',
+		canonicalUrl: string | null,
+		candidateId: number | null
+	): string | null {
+		if (!canonicalUrl) return null;
+		const candidate =
+			candidateId === null
+				? null
+				: data.candidates.find(
+						(entry) =>
+							entry.id === candidateId &&
+							entry.kind === kind &&
+							entry.season === null &&
+							entry.episode === null &&
+							entry.url === canonicalUrl
+					);
+		// Candidate previews are trusted provider assets and belong in the thumb cache.
+		// A staged candidate remains previewable if its provider was disabled after staging;
+		// keep direct display only for a custom URL that has no matching candidate row.
+		const persistedPreview =
+			canonicalUrl ===
+			(kind === 'poster' ? data.item.selectedPosterUrl : data.item.selectedBackgroundUrl)
+				? data.selectedRootPreviews[kind]
+				: null;
+		const previewUrl = candidate?.previewUrl ?? candidate?.url ?? persistedPreview;
+		return previewUrl ? thumb(previewUrl) : canonicalUrl;
+	}
+	const selectedPosterPreview = $derived(
+		stagedRootPreview('poster', selectedPoster, selectedPosterCandidateId)
+	);
+	const selectedBackgroundPreview = $derived(
+		stagedRootPreview('background', selectedBackground, selectedBackgroundCandidateId)
+	);
 
 	const jsonHeaders = { 'content-type': 'application/json' };
+	type RootSelectionPatch = {
+		poster?: { url: string | null; candidateId: number | null };
+		background?: { url: string | null; candidateId: number | null };
+	};
 
-	/** Persist the current staged poster + background as the pending selection. */
-	async function persistSelection(): Promise<boolean> {
+	/** Persist only the root slots changed by this interaction. */
+	async function persistSelection(selection: RootSelectionPatch): Promise<boolean> {
 		if (finishingAdvance) return false;
 		confirmApply = false;
 		applyPreview = null;
@@ -374,42 +529,124 @@
 		const response = await fetch(`/api/items/${data.item.id}/select`, {
 			method: 'POST',
 			headers: jsonHeaders,
-			body: JSON.stringify({ posterUrl: selectedPoster, backgroundUrl: selectedBackground })
+			body: JSON.stringify({
+				...(selection.poster
+					? {
+							posterUrl: selection.poster.url,
+							posterCandidateId: selection.poster.candidateId
+						}
+					: {}),
+				...(selection.background
+					? {
+							backgroundUrl: selection.background.url,
+							backgroundCandidateId: selection.background.candidateId
+						}
+					: {})
+			})
 		});
 		return response.ok;
 	}
 
-	async function pickPoster(url: string) {
+	async function pickPoster(candidate: PosterCandidate) {
 		if (finishingAdvance) return;
-		selectedPoster = selectedPoster === url ? null : url;
-		await persistSelection();
+		const next = toggleStagedArtworkCandidate(
+			{
+				url: selectedPoster,
+				candidateId: selectedPosterCandidateId,
+				provider: selectedPosterProvider
+			},
+			candidate
+		);
+		try {
+			if (!(await persistSelection({ poster: { url: next.url, candidateId: next.candidateId } }))) {
+				throw new Error('selection_failed');
+			}
+			selectedPoster = next.url;
+			selectedPosterCandidateId = next.candidateId;
+			selectedPosterProvider = next.provider;
+		} catch {
+			await recoverSelectionFailure();
+		}
 	}
-	async function pickBackground(url: string) {
+	async function pickBackground(candidate: PosterCandidate) {
 		if (finishingAdvance) return;
-		selectedBackground = selectedBackground === url ? null : url;
-		await persistSelection();
+		const next = toggleStagedArtworkCandidate(
+			{
+				url: selectedBackground,
+				candidateId: selectedBackgroundCandidateId,
+				provider: selectedBackgroundProvider
+			},
+			candidate
+		);
+		try {
+			if (
+				!(await persistSelection({
+					background: { url: next.url, candidateId: next.candidateId }
+				}))
+			) {
+				throw new Error('selection_failed');
+			}
+			selectedBackground = next.url;
+			selectedBackgroundCandidateId = next.candidateId;
+			selectedBackgroundProvider = next.provider;
+		} catch {
+			await recoverSelectionFailure();
+		}
 	}
 
 	/** Toggle a single season/episode slot and persist it. */
-	async function pickChild(kind: string, season: number, episode: number | null, url: string) {
+	async function pickChild(
+		kind: 'poster' | 'background' | 'title_card',
+		season: number,
+		episode: number | null,
+		candidate: PosterCandidate
+	) {
 		if (finishingAdvance) return;
 		confirmApply = false;
 		applyPreview = null;
 		completionRetry = null;
 		const key = childKey(kind, season, episode);
-		const next = childSel[key] === url ? null : url;
-		if (next === null) {
-			const copy = { ...childSel };
-			delete copy[key];
-			childSel = copy;
-		} else {
-			childSel = { ...childSel, [key]: url };
+		const next = toggleStagedArtworkCandidate(
+			{
+				url: childSel[key],
+				candidateId: childCandidateIds[key],
+				provider: childProviders[key]
+			},
+			candidate
+		);
+		try {
+			const response = await fetch(`/api/items/${data.item.id}/select`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({
+					child: {
+						kind,
+						season,
+						episode,
+						url: next.url,
+						candidateId: next.candidateId
+					}
+				})
+			});
+			if (!response.ok) throw new Error('selection_failed');
+			if (next.url === null) {
+				const copy = { ...childSel };
+				const idCopy = { ...childCandidateIds };
+				const providerCopy = { ...childProviders };
+				delete copy[key];
+				delete idCopy[key];
+				delete providerCopy[key];
+				childSel = copy;
+				childCandidateIds = idCopy;
+				childProviders = providerCopy;
+			} else {
+				childSel = { ...childSel, [key]: next.url };
+				childCandidateIds = { ...childCandidateIds, [key]: next.candidateId };
+				childProviders = { ...childProviders, [key]: next.provider };
+			}
+		} catch {
+			await recoverSelectionFailure();
 		}
-		await fetch(`/api/items/${data.item.id}/select`, {
-			method: 'POST',
-			headers: jsonHeaders,
-			body: JSON.stringify({ child: { kind, season, episode }, url: next })
-		});
 	}
 
 	/** Stage a whole set: show poster + backdrop and every season/episode slot it covers. */
@@ -418,44 +655,112 @@
 		confirmApply = false;
 		applyPreview = null;
 		const g = groupSetArtwork(set.candidates);
-		if (g.posters[0]) selectedPoster = g.posters[0].url;
-		if (g.backgrounds[0]) selectedBackground = g.backgrounds[0].url;
-		await persistSelection();
+		const rootPatch: RootSelectionPatch = {};
+		if (g.posters[0]) {
+			rootPatch.poster = { url: g.posters[0].url, candidateId: g.posters[0].id };
+		}
+		if (g.backgrounds[0]) {
+			rootPatch.background = { url: g.backgrounds[0].url, candidateId: g.backgrounds[0].id };
+		}
 
-		const children: { kind: string; season: number; episode: number | null; url: string }[] = [];
+		const children: {
+			kind: string;
+			season: number;
+			episode: number | null;
+			url: string;
+			candidateId: number;
+			provider: string;
+		}[] = [];
 		const seenEpisode = new Set<string>();
 		for (const sg of g.seasons) {
 			if (sg.posters[0]) {
-				children.push({ kind: 'poster', season: sg.season, episode: null, url: sg.posters[0].url });
+				children.push({
+					kind: 'poster',
+					season: sg.season,
+					episode: null,
+					url: sg.posters[0].url,
+					candidateId: sg.posters[0].id,
+					provider: sg.posters[0].provider
+				});
 			}
 			for (const tc of sg.titleCards) {
 				if (tc.episode === null) continue;
 				const epKey = `${sg.season}:${tc.episode}`;
 				if (seenEpisode.has(epKey)) continue;
 				seenEpisode.add(epKey);
-				children.push({ kind: 'title_card', season: sg.season, episode: tc.episode, url: tc.url });
+				children.push({
+					kind: 'title_card',
+					season: sg.season,
+					episode: tc.episode,
+					url: tc.url,
+					candidateId: tc.id,
+					provider: tc.provider
+				});
 			}
 		}
-		if (children.length) {
-			await fetch(`/api/items/${data.item.id}/select`, {
-				method: 'POST',
-				headers: jsonHeaders,
-				body: JSON.stringify({ children })
-			});
+		try {
+			if ((rootPatch.poster || rootPatch.background) && !(await persistSelection(rootPatch))) {
+				throw new Error('selection_failed');
+			}
+			if (children.length) {
+				const response = await fetch(`/api/items/${data.item.id}/select`, {
+					method: 'POST',
+					headers: jsonHeaders,
+					body: JSON.stringify({ children })
+				});
+				if (!response.ok) throw new Error('selection_failed');
+			}
+			if (g.posters[0]) {
+				selectedPoster = g.posters[0].url;
+				selectedPosterCandidateId = g.posters[0].id;
+				selectedPosterProvider = g.posters[0].provider;
+			}
+			if (g.backgrounds[0]) {
+				selectedBackground = g.backgrounds[0].url;
+				selectedBackgroundCandidateId = g.backgrounds[0].id;
+				selectedBackgroundProvider = g.backgrounds[0].provider;
+			}
 			const add: Record<string, string> = {};
-			for (const c of children) add[childKey(c.kind, c.season, c.episode)] = c.url;
+			const addIds: Record<string, number | null> = {};
+			const addProviders: Record<string, string | null> = {};
+			for (const c of children) {
+				const key = childKey(c.kind, c.season, c.episode);
+				add[key] = c.url;
+				addIds[key] = c.candidateId;
+				addProviders[key] = c.provider;
+			}
 			childSel = { ...childSel, ...add };
+			childCandidateIds = { ...childCandidateIds, ...addIds };
+			childProviders = { ...childProviders, ...addProviders };
+			setMessage(m.item_msg_set_staged());
+		} catch {
+			await recoverSelectionFailure();
 		}
-		setMessage(m.item_msg_set_staged());
 	}
 
 	async function useCustomUrl(which: 'poster' | 'background') {
 		if (finishingAdvance) return;
 		const url = (which === 'poster' ? posterUrlInput : backgroundUrlInput).trim();
 		if (!url) return;
-		if (which === 'poster') selectedPoster = url;
-		else selectedBackground = url;
-		await persistSelection();
+		try {
+			const persisted = await persistSelection(
+				which === 'poster'
+					? { poster: { url, candidateId: null } }
+					: { background: { url, candidateId: null } }
+			);
+			if (!persisted) throw new Error('selection_failed');
+			if (which === 'poster') {
+				selectedPoster = url;
+				selectedPosterCandidateId = null;
+				selectedPosterProvider = 'custom';
+			} else {
+				selectedBackground = url;
+				selectedBackgroundCandidateId = null;
+				selectedBackgroundProvider = 'custom';
+			}
+		} catch {
+			await recoverSelectionFailure();
+		}
 	}
 
 	async function discover(opts: { providers?: string[]; forceRefresh?: boolean } = {}) {
@@ -815,8 +1120,14 @@
 				return;
 			}
 			selectedPoster = null;
+			selectedPosterCandidateId = null;
+			selectedPosterProvider = null;
 			selectedBackground = null;
+			selectedBackgroundCandidateId = null;
+			selectedBackgroundProvider = null;
 			childSel = {};
+			childCandidateIds = {};
+			childProviders = {};
 			setMessage(m.review_apply_next_completed());
 			await invalidateAll();
 			historyRefresh += 1;
@@ -864,38 +1175,48 @@
 {#snippet posterTile(c: PosterCandidate)}
 	<button
 		type="button"
-		onclick={() => pickPoster(c.url)}
-		aria-pressed={selectedPoster === c.url}
+		onclick={() => pickPoster(c)}
+		aria-pressed={isRootStaged('poster', c)}
 		aria-label={m.item_candidate_label({ kind: m.item_poster(), provider: c.provider })}
-		class="relative overflow-hidden rounded-lg border-2 transition {selectedPoster === c.url
+		class="relative overflow-hidden rounded-lg border-2 transition {isRootStaged('poster', c)
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-[2/3] w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
 {#snippet backdropTile(c: PosterCandidate)}
 	<button
 		type="button"
-		onclick={() => pickBackground(c.url)}
-		aria-pressed={selectedBackground === c.url}
+		onclick={() => pickBackground(c)}
+		aria-pressed={isRootStaged('background', c)}
 		aria-label={m.item_candidate_label({ kind: m.item_backdrop(), provider: c.provider })}
-		class="relative overflow-hidden rounded-lg border-2 transition {selectedBackground === c.url
+		class="relative overflow-hidden rounded-lg border-2 transition {isRootStaged('background', c)
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-video w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-video w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
 {#snippet seasonPosterTile(c: PosterCandidate, season: number)}
 	<button
 		type="button"
-		onclick={() => pickChild('poster', season, null, c.url)}
-		aria-pressed={isChildStaged('poster', season, null, c.url)}
+		onclick={() => pickChild('poster', season, null, c)}
+		aria-pressed={isChildStaged('poster', season, null, c)}
 		aria-label={m.item_candidate_label({
 			kind: `${m.item_season_label({ number: season })} · ${m.item_poster()}`,
 			provider: c.provider
@@ -904,21 +1225,26 @@
 			'poster',
 			season,
 			null,
-			c.url
+			c
 		)
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-[2/3] w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
 {#snippet titleCardTile(c: PosterCandidate, season: number)}
 	<button
 		type="button"
-		onclick={() => pickChild('title_card', season, c.episode, c.url)}
-		aria-pressed={isChildStaged('title_card', season, c.episode, c.url)}
+		onclick={() => pickChild('title_card', season, c.episode, c)}
+		aria-pressed={isChildStaged('title_card', season, c.episode, c)}
 		aria-label={m.item_candidate_label({
 			kind: `${m.item_season_label({ number: season })} · ${m.item_episode_label({ number: c.episode ?? 0 })} · ${m.item_title_card()}`,
 			provider: c.provider
@@ -927,13 +1253,18 @@
 			'title_card',
 			season,
 			c.episode,
-			c.url
+			c
 		)
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-video w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-video w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
@@ -1388,8 +1719,8 @@
 			<div
 				class="h-[51px] w-[34px] flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
 			>
-				{#if selectedPoster}<img
-						src={selectedPoster}
+				{#if selectedPosterPreview}<img
+						src={selectedPosterPreview}
 						alt=""
 						class="h-full w-full object-cover"
 					/>{/if}
@@ -1397,8 +1728,8 @@
 			<div
 				class="h-[45px] w-20 flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
 			>
-				{#if selectedBackground}<img
-						src={selectedBackground}
+				{#if selectedBackgroundPreview}<img
+						src={selectedBackgroundPreview}
 						alt=""
 						class="h-full w-full object-cover"
 					/>{/if}

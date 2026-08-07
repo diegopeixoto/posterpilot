@@ -40,7 +40,8 @@ function collectionPlan(mediaItemId: number) {
 		tvdbId: null,
 		mediaType: 'movie' as const,
 		updatedAt: '2026-07-11T10:00:00.000Z',
-		selectionUpdatedAt: '2026-07-11T10:00:00.000Z'
+		selectionUpdatedAt: '2026-07-11T10:00:00.000Z',
+		selectionRevision: 1
 	};
 	const selection = {
 		selectionSource: 'stored' as const,

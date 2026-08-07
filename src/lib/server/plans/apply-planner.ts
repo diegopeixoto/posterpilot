@@ -24,6 +24,10 @@ import type {
 	AutomaticSelectionInputs
 } from '$lib/server/posters/automatic-selection';
 import type { ScoreWeights } from '$lib/server/posters/score';
+import {
+	canonicalizeProviderArtworkUrl,
+	storedArtworkMatchesCandidate
+} from '$lib/server/tmdb/artwork-url';
 
 export type ApplyMethodInput = ApplyPlanMethod | 'plex';
 
@@ -100,6 +104,12 @@ export interface PlannerStoredSelection {
 	provider: string | null;
 	setId: string | null;
 	setAuthor: string | null;
+	/** Raw staged provenance before the planner DTO resolves a matching candidate. */
+	persisted?: {
+		candidateId: number | null;
+		provider: string | null;
+		setId: string | null;
+	};
 }
 
 export interface PlannerCurrentSlotState {
@@ -355,7 +365,7 @@ function candidateComparable(candidate: PlannerCandidateSnapshot) {
 		setAuthor: candidate.setAuthor,
 		designFamily: candidate.designFamily,
 		language: candidate.language,
-		url: candidate.url,
+		url: canonicalizeProviderArtworkUrl(candidate.url, candidate.provider),
 		slot: candidate.slot,
 		resolvedTmdbId: candidate.resolvedTmdbId,
 		resolvedMediaType: candidate.resolvedMediaType,
@@ -398,6 +408,7 @@ export function freezeApplyCandidateSelection(
 	sourceItem: ApplyItemIdentity,
 	scoreOverride?: number | null
 ): FrozenArtworkSelection {
+	const url = canonicalizeProviderArtworkUrl(candidate.url, candidate.provider);
 	const selection = {
 		selectionSource,
 		sourceItem: {
@@ -406,7 +417,7 @@ export function freezeApplyCandidateSelection(
 		},
 		slot: candidate.slot,
 		candidateId: candidate.candidateId,
-		url: candidate.url,
+		url,
 		provider: candidate.provider,
 		providerAssetId: candidate.providerAssetId,
 		setId: candidate.setId,
@@ -428,17 +439,27 @@ export function freezeApplyStoredSelection(
 	stored: PlannerStoredSelection,
 	data: ApplyPlannerItemData
 ): FrozenArtworkSelection {
-	const matched =
+	// Resolve provenance under the persisted provider's own URL rules. Explicit custom
+	// selections never inherit a candidate; only legacy providerless TMDB URLs may
+	// recover across preview/original variants.
+	const matchesSelection = (candidate: PlannerCandidateSnapshot) =>
+		applySlotKey(candidate.slot) === applySlotKey(stored.slot) &&
+		storedArtworkMatchesCandidate({
+			storedUrl: stored.url,
+			storedProvider: stored.provider,
+			candidateUrl: candidate.url,
+			candidateProvider: candidate.provider
+		});
+	const matchedById =
 		stored.candidateId === null
 			? null
 			: data.candidates.find(
-					(candidate) =>
-						candidate.candidateId === stored.candidateId &&
-						candidate.url === stored.url &&
-						applySlotKey(candidate.slot) === applySlotKey(stored.slot)
+					(candidate) => candidate.candidateId === stored.candidateId && matchesSelection(candidate)
 				);
+	const matched = matchedById ?? data.candidates.find(matchesSelection);
 	if (matched) return freezeApplyCandidateSelection(matched, 'stored', data.item.identity);
 
+	const url = canonicalizeProviderArtworkUrl(stored.url, stored.provider);
 	const selection = {
 		selectionSource: 'stored' as const,
 		sourceItem: {
@@ -447,7 +468,7 @@ export function freezeApplyStoredSelection(
 		},
 		slot: stored.slot,
 		candidateId: null,
-		url: stored.url,
+		url,
 		provider: stored.provider,
 		providerAssetId: null,
 		setId: stored.setId,

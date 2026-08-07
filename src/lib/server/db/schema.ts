@@ -103,7 +103,12 @@ export const mediaItems = sqliteTable(
 		selectedBackgroundUrl: text('selected_background_url'),
 		selectedPosterCandidateId: integer('selected_poster_candidate_id'),
 		selectedBackgroundCandidateId: integer('selected_background_candidate_id'),
+		/** Durable server-owned provenance for the pending root artwork selections. */
+		selectedPosterProvider: text('selected_poster_provider'),
+		selectedBackgroundProvider: text('selected_background_provider'),
 		selectionUpdatedAt: integer('selection_updated_at', { mode: 'timestamp' }),
+		/** Monotonic CAS token; timestamps are persisted at second precision. */
+		selectionRevision: integer('selection_revision').notNull().default(0),
 		/** TMDB display metadata, populated during sync; null until enriched. */
 		overview: text('overview'),
 		tagline: text('tagline'),
@@ -181,7 +186,15 @@ export const posterCandidates = sqliteTable(
 		setAuthor: text('set_author'),
 		designFamily: text('design_family'),
 		language: text('language'),
+		languageProvenance: text('language_provenance', {
+			enum: ['tagged', 'untagged', 'unknown']
+		})
+			.notNull()
+			.default('unknown'),
+		/** Canonical destination asset used for staging, application, and export. */
 		url: text('url').notNull(),
+		/** Optional optimized representation used only for browsing and thumbnail caches. */
+		previewUrl: text('preview_url'),
 		kind: text('kind', { enum: ['poster', 'background', 'season', 'title_card'] }).notNull(),
 		season: integer('season'),
 		episode: integer('episode'),

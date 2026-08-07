@@ -506,7 +506,9 @@
 								<div class="overflow-hidden rounded border border-accent-900/60 bg-neutral-950">
 									{#if entry.suggestion.poster}
 										<img
-											src={proxied(entry.suggestion.poster.url)}
+											src={proxied(
+												entry.suggestion.poster.previewUrl ?? entry.suggestion.poster.url
+											)}
 											alt={m.review_suggested_poster_alt({ title: entry.item.title })}
 											class="aspect-[2/3] w-full object-cover"
 										/>
@@ -525,9 +527,9 @@
 							<div>
 								<p class="mb-1 text-[10px] text-neutral-500">{m.review_staged()}</p>
 								<div class="overflow-hidden rounded border border-neutral-700 bg-neutral-950">
-									{#if entry.item.selectedPosterUrl}
+									{#if entry.item.selectedPosterPreviewUrl}
 										<img
-											src={proxied(entry.item.selectedPosterUrl)}
+											src={proxied(entry.item.selectedPosterPreviewUrl)}
 											alt={m.review_staged_poster_alt({ title: entry.item.title })}
 											class="aspect-[2/3] w-full object-cover"
 										/>
@@ -547,7 +549,7 @@
 								{m.review_compare_background()}
 							</h3>
 							<div class="grid grid-cols-3 gap-2">
-								{#each [{ label: m.review_current(), url: entry.item.hasCurrentBackground ? `/api/artwork/${entry.item.id}/background?v=${entry.item.currentBackgroundFingerprint ?? entry.item.artworkVersion}` : null }, { label: m.review_suggested(), url: proxied(entry.suggestion.background?.url ?? null) }, { label: m.review_staged(), url: proxied(entry.item.selectedBackgroundUrl) }] as image (image.label)}
+								{#each [{ label: m.review_current(), url: entry.item.hasCurrentBackground ? `/api/artwork/${entry.item.id}/background?v=${entry.item.currentBackgroundFingerprint ?? entry.item.artworkVersion}` : null }, { label: m.review_suggested(), url: proxied(entry.suggestion.background ? (entry.suggestion.background.previewUrl ?? entry.suggestion.background.url) : null) }, { label: m.review_staged(), url: proxied(entry.item.selectedBackgroundPreviewUrl) }] as image (image.label)}
 									<div>
 										<p class="mb-1 text-[10px] text-neutral-500">{image.label}</p>
 										<div class="overflow-hidden rounded border border-neutral-800 bg-neutral-950">

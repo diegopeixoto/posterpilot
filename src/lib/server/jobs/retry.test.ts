@@ -138,7 +138,8 @@ describe('failed-only job retry planning', () => {
 			tvdbId: null,
 			mediaType: 'movie' as const,
 			updatedAt: '2026-07-11T00:00:00.000Z',
-			selectionUpdatedAt: '2026-07-11T00:00:00.000Z'
+			selectionUpdatedAt: '2026-07-11T00:00:00.000Z',
+			selectionRevision: 1
 		};
 		const selection = {
 			selectionSource: 'stored' as const,

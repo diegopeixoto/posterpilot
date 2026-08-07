@@ -1,9 +1,9 @@
-import { and, eq, inArray } from 'drizzle-orm';
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { serializeWrite } from '$lib/server/db/write-queue';
-import { mediaItems, posterCandidates } from '$lib/server/db/schema';
+import { posterCandidates } from '$lib/server/db/schema';
+import { requireScopedMediaItemsById } from '$lib/server/media-items/scoped-query';
 import { resolveConfig } from '$lib/server/config';
 import { discoverForItem } from '$lib/server/posters/service';
 import { PROVIDERS } from '$lib/server/posters/providers';
@@ -38,12 +38,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		: undefined;
 
 	const memberIds = collection.localMembers.map((member) => member.id);
-	const items = memberIds.length
-		? await db
-				.select()
-				.from(mediaItems)
-				.where(and(eq(mediaItems.serverInstanceId, active.id), inArray(mediaItems.id, memberIds)))
-		: [];
+	const items = memberIds.length ? await requireScopedMediaItemsById(db, active.id, memberIds) : [];
 
 	const config = await resolveConfig();
 	let succeeded = 0;
@@ -114,7 +109,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
 								provider: 'theposterdb',
 								providerAssetId: match.posterId,
 								setAuthor: null,
+								language: null,
+								languageProvenance: 'unknown' as const,
 								url: match.url,
+								previewUrl: null,
 								kind: 'poster' as const,
 								resolvedTmdbId: item.tmdbId,
 								resolvedMediaType: item.mediaType,
