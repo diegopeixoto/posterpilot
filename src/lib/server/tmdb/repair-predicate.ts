@@ -1,5 +1,6 @@
-import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
+import { and, eq, type SQL } from 'drizzle-orm';
 import { mediaItems, type MediaItem } from '$lib/server/db/schema';
+import { pendingTmdbTypeMismatchIndexCondition } from '$lib/server/db/tmdb-repair-condition';
 
 export type TmdbTypeMismatchItem = Pick<
 	MediaItem,
@@ -31,11 +32,6 @@ export function isPendingTmdbTypeMismatch(
 export function pendingTmdbTypeMismatchCondition(serverInstanceId: string): SQL {
 	return and(
 		eq(mediaItems.serverInstanceId, serverInstanceId),
-		eq(mediaItems.manualMatchPinned, false),
-		isNull(mediaItems.sourceRemovedAt),
-		or(
-			and(eq(mediaItems.type, 'show'), eq(mediaItems.mediaType, 'movie')),
-			and(eq(mediaItems.type, 'movie'), eq(mediaItems.mediaType, 'tv'))
-		)
+		pendingTmdbTypeMismatchIndexCondition(mediaItems)
 	)!;
 }

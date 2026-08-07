@@ -1,6 +1,11 @@
 import { createClient, type Client } from '@libsql/client';
+import { drizzle } from 'drizzle-orm/libsql';
+import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import * as schema from '$lib/server/db/schema';
+import { mediaItems } from '$lib/server/db/schema';
+import { pendingTmdbTypeMismatchCondition } from '$lib/server/tmdb/repair-predicate';
 
 const MIGRATIONS = [
 	'0000_nostalgic_carmella_unuscione.sql',
@@ -44,18 +49,33 @@ afterEach(async () => {
 });
 
 describe('0009 TMDB repair query index migration', () => {
-	it('adds the server-scoped mismatch index without rebuilding media rows', async () => {
+	it('adds a sparse server-scoped index used by the durable mismatch count', async () => {
 		const client = memoryClient();
 		await applyThrough(client, 9);
 
 		const columns = await client.execute("pragma index_info('media_items_tmdb_repair_idx')");
-		expect(columns.rows.map((row) => row.name)).toEqual([
-			'server_instance_id',
-			'manual_match_pinned',
-			'source_removed_at',
-			'type',
-			'media_type'
-		]);
+		expect(columns.rows.map((row) => row.name)).toEqual(['server_instance_id']);
+
+		const indexes = await client.execute("pragma index_list('media_items')");
+		expect(indexes.rows.find((row) => row.name === 'media_items_tmdb_repair_idx')).toMatchObject({
+			partial: 1
+		});
+
+		const database = drizzle(client, { schema });
+		const countQuery = database
+			.select({ count: sql<number>`count(*)` })
+			.from(mediaItems)
+			.where(pendingTmdbTypeMismatchCondition('server-a'))
+			.toSQL();
+		expect(countQuery.params).toEqual(['server-a']);
+
+		const plan = await client.execute({
+			sql: `explain query plan ${countQuery.sql}`,
+			args: countQuery.params as string[]
+		});
+		expect(plan.rows.map((row) => String(row.detail)).join('\n')).toContain(
+			'USING INDEX media_items_tmdb_repair_idx (server_instance_id=?)'
+		);
 	});
 });
 

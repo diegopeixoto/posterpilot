@@ -1,1 +1,1 @@
-CREATE INDEX `media_items_tmdb_repair_idx` ON `media_items` (`server_instance_id`,`manual_match_pinned`,`source_removed_at`,`type`,`media_type`);
+CREATE INDEX `media_items_tmdb_repair_idx` ON `media_items` (`server_instance_id`) WHERE "media_items"."manual_match_pinned" = 0 and "media_items"."source_removed_at" is null and (("media_items"."type" = 'show' and "media_items"."media_type" = 'movie') or ("media_items"."type" = 'movie' and "media_items"."media_type" = 'tv'));
