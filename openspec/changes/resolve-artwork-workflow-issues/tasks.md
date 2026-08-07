@@ -1,23 +1,23 @@
 ## 1. TMDB Type-Safe Resolution and Manual Search
 
-- [ ] 1.1 Add expected media type to the automatic TMDB resolver contract and include it in typed cache identity
-- [ ] 1.2 Restrict direct TMDB ID validation and external-ID find parsing to the expected movie or TV namespace
-- [ ] 1.3 Pass authoritative item type through sync and manual-pin-clear callers while preserving user-confirmed pins
-- [ ] 1.4 Update resolution specs/tests that currently encode movie-first behavior, including equal numeric movie/TV IDs and empty expected buckets
-- [ ] 1.5 Make the manual-search year state consistently numeric-or-empty and move preparation/validation into handled error flow
-- [ ] 1.6 Add component or E2E coverage for changed, restored, cleared, invalid, repeated, empty-result, and failed manual searches
-- [ ] 1.7 Run the focused TMDB unit/integration tests and self-review the Phase 1 resolver diff
+- [x] 1.1 Add expected media type to the automatic TMDB resolver contract and include it in typed cache identity
+- [x] 1.2 Restrict direct TMDB ID validation and external-ID find parsing to the expected movie or TV namespace
+- [x] 1.3 Pass authoritative item type through sync and manual-pin-clear callers while preserving user-confirmed pins
+- [x] 1.4 Update resolution specs/tests that currently encode movie-first behavior, including equal numeric movie/TV IDs and empty expected buckets
+- [x] 1.5 Make the manual-search year state consistently numeric-or-empty and move preparation/validation into handled error flow
+- [x] 1.6 Add component or E2E coverage for changed, restored, cleared, invalid, repeated, empty-result, and failed manual searches
+- [x] 1.7 Run the focused TMDB unit/integration tests and self-review the Phase 1 resolver diff
 
 ## 2. Selective Post-Upgrade TMDB Repair
 
-- [ ] 2.1 Implement and unit-test the server-scoped pending-mismatch predicate excluding manual pins and removed source items
-- [ ] 2.2 Add a durable TMDB-repair execution label/payload that reuses sync resolution while conflicting safely with other server-scoped sync work
-- [ ] 2.3 Force pending mismatches through resolution during repair and ordinary incremental sync without reprocessing unrelated unchanged items
-- [ ] 2.4 Re-check manual-pin state transactionally, invalidate stale candidates/selections on identity change, append resolution audit, and return changed identities to attention
-- [ ] 2.5 Expose per-active-server pending count and matching job state through server loads without using browser-local storage
-- [ ] 2.6 Build the localized non-dismissible shell banner with pending, running/retrying, incomplete, retry, job-detail, server-switch, and completed behavior
-- [ ] 2.7 Add integration/E2E coverage for multi-server isolation, restart durability, partial failure, cancellation, manual pinning during repair, and zero-count dismissal
-- [ ] 2.8 Run check/test/build/lint and relevant Playwright flows for the TMDB hotfix phase
+- [x] 2.1 Implement and unit-test the server-scoped pending-mismatch predicate excluding manual pins and removed source items
+- [x] 2.2 Add a durable TMDB-repair execution label/payload that reuses sync resolution while conflicting safely with other server-scoped sync work
+- [x] 2.3 Force pending mismatches through resolution during repair and ordinary incremental sync without reprocessing unrelated unchanged items
+- [x] 2.4 Re-check manual-pin state transactionally, invalidate stale candidates/selections on identity change, append resolution audit, and return changed identities to attention
+- [x] 2.5 Expose per-active-server pending count and matching job state through server loads without using browser-local storage
+- [x] 2.6 Build the localized non-dismissible shell banner with pending, running/retrying, incomplete, retry, job-detail, server-switch, and completed behavior
+- [x] 2.7 Add integration/E2E coverage for multi-server isolation, restart durability, partial failure, cancellation, manual pinning during repair, and zero-count dismissal
+- [x] 2.8 Run check/test/build/lint and relevant Playwright flows for the TMDB hotfix phase
 
 ## 3. Canonical Artwork Assets and Original-Resolution Application
 

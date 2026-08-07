@@ -7,6 +7,7 @@ import { isSecretLikeKey, redactSensitiveText } from '$lib/server/sensitive-reda
 const ACTIVE_MUTATION_TYPES = new Set<PersistedJobType>([
 	'sync',
 	'full_rescan',
+	'tmdb_repair',
 	'discover',
 	'apply',
 	'undo',
@@ -23,6 +24,7 @@ const ARTWORK_MUTATION_KINDS = new Set<JobPayload['kind']>(['apply', 'undo']);
 const SAFE_REPLAY_TYPES = new Set<PersistedJobType>([
 	'sync',
 	'full_rescan',
+	'tmdb_repair',
 	'discover',
 	'automation',
 	'diagnostics',
@@ -103,6 +105,15 @@ export function normalizeJobPayload(payload: JobPayload): JobPayload {
 			...(itemIds ? { itemIds } : {})
 		};
 	}
+	if (payload.kind === 'tmdb_repair') {
+		const serverInstanceId = requiredString(payload.serverInstanceId, 'job_server_scope_required');
+		const itemIds = positiveIds(payload.itemIds);
+		return {
+			kind: 'tmdb_repair',
+			serverInstanceId,
+			...(itemIds ? { itemIds } : {})
+		};
+	}
 	if (payload.kind === 'discover') {
 		const serverInstanceId = requiredString(payload.serverInstanceId, 'job_server_scope_required');
 		const itemIds = positiveIds(payload.itemIds);
@@ -141,6 +152,15 @@ function scopeFor(payload: JobPayload): JobResourceScope {
 			global: false,
 			serverInstanceIds: [payload.serverInstanceId],
 			librarySectionKeys: payload.librarySectionKey ? [payload.librarySectionKey] : '*',
+			itemIds: payload.itemIds ?? '*',
+			mutationKeys: '*'
+		};
+	}
+	if (payload.kind === 'tmdb_repair') {
+		return {
+			global: false,
+			serverInstanceIds: [payload.serverInstanceId],
+			librarySectionKeys: '*',
 			itemIds: payload.itemIds ?? '*',
 			mutationKeys: '*'
 		};
@@ -277,7 +297,12 @@ export function relateJobs(a: JobDescriptor, b: JobDescriptor): JobRelationship 
 	const aKind = a.executionKind;
 	const bKind = b.executionKind;
 	const eitherSync =
-		aKind === 'sync' || bKind === 'sync' || aKind === 'automation' || bKind === 'automation';
+		aKind === 'sync' ||
+		bKind === 'sync' ||
+		aKind === 'tmdb_repair' ||
+		bKind === 'tmdb_repair' ||
+		aKind === 'automation' ||
+		bKind === 'automation';
 	if (eitherSync) return 'conflict';
 	if (!overlaps(a.scope.itemIds, b.scope.itemIds)) return 'independent';
 	if (ARTWORK_MUTATION_KINDS.has(aKind) && ARTWORK_MUTATION_KINDS.has(bKind)) {

@@ -36,6 +36,9 @@ beforeEach(async () => {
 			title text NOT NULL,
 			year integer,
 			tmdb_id text,
+			media_type text DEFAULT 'movie',
+			manual_match_pinned integer DEFAULT false NOT NULL,
+			resolution_updated_at integer,
 			tmdb_collection_id text,
 			tmdb_collection_name text,
 			source_removed_at integer,
@@ -158,6 +161,34 @@ describe('collection repository source-qualified reconciliation', () => {
 			})
 		).rejects.toMatchObject({ code: 'collection_item_scope_mismatch' });
 		expect(await database.select().from(mediaCollections)).toEqual([]);
+	});
+
+	it('ignores stale TMDB collection metadata when a manual pin wins the repair race', async () => {
+		await database
+			.update(mediaItems)
+			.set({ tmdbId: '999', mediaType: 'tv', manualMatchPinned: true })
+			.where(eq(mediaItems.id, 1));
+
+		const result = await repository.reconcileTmdbItemCollection({
+			serverInstanceId: 'server-a',
+			mediaItemId: 1,
+			collection: { id: '900', name: 'Stale saga' },
+			expectedIdentity: {
+				tmdbId: '101',
+				mediaType: 'movie',
+				manualMatchPinned: false,
+				resolutionUpdatedAt: null
+			}
+		});
+
+		expect(result).toEqual({
+			collectionsUpserted: 0,
+			collectionsRemoved: 0,
+			membershipsUpserted: 0,
+			membershipsRemoved: 0
+		});
+		expect(await database.select().from(mediaCollections)).toEqual([]);
+		expect(await database.select().from(collectionMemberships)).toEqual([]);
 	});
 
 	it('persists TMDB collection identity, local item identity, and provenance', async () => {

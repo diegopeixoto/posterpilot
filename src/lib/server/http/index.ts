@@ -22,6 +22,8 @@ export interface FetchOptions {
 	headers?: Record<string, string>;
 	/** Cache TTL in days; omit or 0 disables caching. */
 	cacheTtlDays?: number;
+	/** Separate cached representations that intentionally share one request URL. */
+	cacheNamespace?: string;
 	/** Bypass the cache read (a fresh response is still written back). */
 	forceRefresh?: boolean;
 	/**
@@ -129,11 +131,12 @@ export async function fetchText(url: string, opts: FetchOptions = {}): Promise<s
 		cacheTtlDays = 0,
 		forceRefresh = false,
 		staleWhileRevalidate = false,
+		cacheNamespace,
 		headers,
 		retries = 3,
 		timeoutMs = 20_000
 	} = opts;
-	const cacheKey = httpCacheKey(url, headers);
+	const cacheKey = httpCacheKey(url, headers, cacheNamespace);
 
 	if (cacheTtlDays > 0 && !forceRefresh) {
 		const row = await readCacheRow(cacheKey);

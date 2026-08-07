@@ -10,7 +10,7 @@ import {
 	verifyTmdbCandidate
 } from './client';
 
-describe('manual TMDB client', () => {
+describe('TMDB client', () => {
 	beforeEach(() => h.fetchJson.mockReset());
 
 	it('searches movie and TV independently with localized year filters', async () => {
@@ -64,22 +64,69 @@ describe('manual TMDB client', () => {
 
 	it('keeps strict automatic-resolution outages distinct from deterministic no-match', async () => {
 		h.fetchJson.mockRejectedValueOnce(new Error('HTTP 503 TMDB unavailable'));
-		await expect(resolveTmdbStrict({ imdb: 'tt0000100' }, 'Bearer test-key')).rejects.toThrow(
-			'503'
-		);
+		await expect(
+			resolveTmdbStrict({ imdb: 'tt0000100' }, 'Bearer test-key', {
+				expectedMediaType: 'movie'
+			})
+		).rejects.toThrow('503');
 
 		h.fetchJson.mockRejectedValueOnce(new Error('HTTP 503 TMDB unavailable'));
-		await expect(resolveTmdb({ imdb: 'tt0000100' }, 'Bearer test-key')).resolves.toBeNull();
+		await expect(
+			resolveTmdb({ imdb: 'tt0000100' }, 'Bearer test-key', { expectedMediaType: 'movie' })
+		).resolves.toBeNull();
 
 		h.fetchJson.mockRejectedValueOnce(new Error('HTTP 404 no match'));
-		await expect(resolveTmdbStrict({ imdb: 'tt404' }, 'Bearer test-key')).resolves.toBeNull();
+		await expect(
+			resolveTmdbStrict({ imdb: 'tt404' }, 'Bearer test-key', { expectedMediaType: 'movie' })
+		).resolves.toBeNull();
 
-		h.fetchJson
-			.mockRejectedValueOnce(new Error('HTTP 404 not a movie'))
-			.mockResolvedValueOnce({ id: 1399, name: 'Game of Thrones' });
-		await expect(resolveTmdbStrict({ tmdb: '1399' }, 'Bearer test-key')).resolves.toEqual({
-			tmdbId: '1399',
-			mediaType: 'tv'
+		h.fetchJson.mockRejectedValueOnce(new Error('HTTP 404 not a TV show'));
+		await expect(
+			resolveTmdbStrict({ tmdb: '1399' }, 'Bearer test-key', { expectedMediaType: 'tv' })
+		).resolves.toBeNull();
+		expect(h.fetchJson).toHaveBeenCalledTimes(4);
+	});
+
+	it('validates a direct id only in the expected namespace, including equal numeric ids', async () => {
+		h.fetchJson.mockResolvedValue({ id: 42 });
+
+		await expect(
+			resolveTmdbStrict({ tmdb: '42' }, 'Bearer test-key', { expectedMediaType: 'movie' })
+		).resolves.toEqual({ tmdbId: '42', mediaType: 'movie' });
+		await expect(
+			resolveTmdbStrict({ tmdb: '42' }, 'Bearer test-key', { expectedMediaType: 'tv' })
+		).resolves.toEqual({ tmdbId: '42', mediaType: 'tv' });
+
+		const [movieCall, tvCall] = h.fetchJson.mock.calls;
+		expect(new URL(movieCall[0]).pathname).toBe('/3/movie/42');
+		expect(movieCall[1]).toMatchObject({ cacheNamespace: 'tmdb-resolution:movie' });
+		expect(new URL(tvCall[0]).pathname).toBe('/3/tv/42');
+		expect(tvCall[1]).toMatchObject({ cacheNamespace: 'tmdb-resolution:tv' });
+		expect(h.fetchJson).toHaveBeenCalledTimes(2);
+	});
+
+	it('parses /find only from the expected bucket and namespaces its cache', async () => {
+		const response = { movie_results: [{ id: 42 }], tv_results: [{ id: 42 }] };
+		h.fetchJson.mockResolvedValue(response);
+
+		await expect(
+			resolveTmdbStrict({ imdb: 'tt42' }, 'Bearer test-key', { expectedMediaType: 'movie' })
+		).resolves.toEqual({ tmdbId: '42', mediaType: 'movie' });
+		await expect(
+			resolveTmdbStrict({ imdb: 'tt42' }, 'Bearer test-key', { expectedMediaType: 'tv' })
+		).resolves.toEqual({ tmdbId: '42', mediaType: 'tv' });
+
+		expect(h.fetchJson.mock.calls[0][1]).toMatchObject({
+			cacheNamespace: 'tmdb-resolution:movie'
 		});
+		expect(h.fetchJson.mock.calls[1][1]).toMatchObject({ cacheNamespace: 'tmdb-resolution:tv' });
+	});
+
+	it('returns unresolved when only the opposite /find bucket has a result', async () => {
+		h.fetchJson.mockResolvedValue({ movie_results: [{ id: 603 }], tv_results: [] });
+
+		await expect(
+			resolveTmdbStrict({ tvdb: '12345' }, 'Bearer test-key', { expectedMediaType: 'tv' })
+		).resolves.toBeNull();
 	});
 });

@@ -21,6 +21,15 @@ import { createCollectionRepository } from '$lib/server/collections/repository';
 import { reconcileOptionalNativeCollections } from '$lib/server/collections/native-sync';
 import { createDatabaseFullRescanArtworkObserver } from './full-rescan-artwork';
 import { sanitizeServerArtworkUrl } from '$lib/server/media-server/artwork-url';
+import { isPendingTmdbTypeMismatch } from '$lib/server/tmdb/repair-predicate';
+import {
+	clearTmdbSyncWatermarkIfCurrent,
+	countPendingTmdbRepairs,
+	listPendingTmdbRepairItemIds,
+	markTmdbSyncedIfCurrent,
+	writeTmdbMetadataIfCurrent,
+	type TmdbIdentityGuard
+} from '$lib/server/tmdb/repair';
 
 const collectionRepository = createCollectionRepository(db);
 const observeFullRescanArtwork = createDatabaseFullRescanArtworkObserver(db);
@@ -29,12 +38,14 @@ function errorMessage(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
 }
 
-export type JobType = 'sync' | 'full_rescan' | 'discover' | 'apply';
+export type JobType = 'sync' | 'full_rescan' | 'tmdb_repair' | 'discover' | 'apply';
 export type { JobPayload } from './types';
 
 interface JobTaskExecutionOptions {
 	libraryScopes?: string[];
 	providers?: string[];
+	/** Exact database ids selected by a TMDB repair execution. */
+	repairItemIds?: number[];
 }
 
 /** Sync: pull the active server's libraries/items, upsert media_items, resolve TMDB ids. */
@@ -157,7 +168,34 @@ export async function runSyncJob(
 	}
 
 	let executionWork = work;
-	if (payload.itemIds) {
+	const repairItemIds = options.repairItemIds
+		? [...new Set(options.repairItemIds)].sort((a, b) => a - b)
+		: null;
+	if (repairItemIds) {
+		const requestedRows = await db
+			.select({
+				id: mediaItems.id,
+				sectionKey: mediaItems.sectionKey,
+				ratingKey: mediaItems.ratingKey
+			})
+			.from(mediaItems)
+			.where(
+				and(
+					eq(mediaItems.serverInstanceId, serverInstanceId),
+					inArray(mediaItems.id, repairItemIds)
+				)
+			);
+		if (requestedRows.length !== repairItemIds.length) throw new Error('job_item_scope_mismatch');
+		const requestedSourceKeys = new Set(
+			requestedRows.map((row) => `${row.sectionKey}\u0000${row.ratingKey}`)
+		);
+		// A title removed between enqueue and execution was already marked unavailable
+		// by reconciliation above, so it legitimately leaves the repair set without a
+		// remote resolution attempt.
+		executionWork = work.filter(({ sectionKey, item }) =>
+			requestedSourceKeys.has(`${sectionKey}\u0000${item.id}`)
+		);
+	} else if (payload.itemIds) {
 		const requestedIds = [...new Set(payload.itemIds)];
 		const requestedRows = await db
 			.select({
@@ -277,22 +315,45 @@ export async function runSyncJob(
 		// Skip the expensive TMDB resolution + enrichment when the item is unchanged
 		// since the last sync. The row above is still upserted (kept/unpruned) with a
 		// refreshed serverUpdatedAt; we only avoid the network work.
-		const reprocess = existing?.sourceRemovedAt
-			? true
-			: shouldReprocessItem(
-					item.serverUpdatedAt,
-					existing?.serverUpdatedAt ?? null,
-					existing?.lastSyncedAt ?? null,
-					{ full, incremental: config.incrementalSync }
-				);
+		const pendingTypeMismatch = existing
+			? isPendingTmdbTypeMismatch(
+					{
+						serverInstanceId,
+						type: item.type,
+						mediaType: existing.mediaType,
+						manualMatchPinned: existing.manualMatchPinned,
+						sourceRemovedAt: null
+					},
+					serverInstanceId
+				)
+			: false;
+		const reprocess =
+			pendingTypeMismatch ||
+			Boolean(existing?.sourceRemovedAt) ||
+			shouldReprocessItem(
+				item.serverUpdatedAt,
+				existing?.serverUpdatedAt ?? null,
+				existing?.lastSyncedAt ?? null,
+				{ full, incremental: config.incrementalSync }
+			);
 		// Only advance lastSyncedAt once the item is fully processed this pass. An
 		// unchanged item is already considered synced; a transient resolve/enrich
 		// failure leaves it unsynced so the next sync retries it.
 		let synced = !reprocess && observationFailure === null;
 		let itemFailure: unknown = observationFailure;
+		let syncIdentityGuard: TmdbIdentityGuard | null = null;
+		let metadataDeferred = false;
 		if (reprocess) {
 			await ctx.setPhase('resolution');
 			try {
+				syncIdentityGuard = existing?.manualMatchPinned
+					? {
+							tmdbId: existing.tmdbId,
+							mediaType: existing.mediaType,
+							manualMatchPinned: true,
+							resolutionUpdatedAt: existing.resolutionUpdatedAt
+						}
+					: null;
 				let resolution =
 					existing?.manualMatchPinned && existing.tmdbId && existing.mediaType
 						? { tmdbId: existing.tmdbId, mediaType: existing.mediaType }
@@ -300,6 +361,7 @@ export async function runSyncJob(
 				if (!existing?.manualMatchPinned) {
 					const selected = pickExternalId(item.guids);
 					const automatic = await resolveTmdbStrict(item.guids, config.tmdbKey!, {
+						expectedMediaType: item.type === 'show' ? 'tv' : 'movie',
 						cacheTtlDays: config.httpCacheTtlDays,
 						forceRefresh: full
 					});
@@ -316,35 +378,47 @@ export async function runSyncJob(
 								resolvedAt: new Date()
 							}
 						);
+						syncIdentityGuard = {
+							tmdbId: persisted.tmdbId,
+							mediaType: persisted.mediaType,
+							manualMatchPinned: persisted.manualMatchPinned,
+							resolutionUpdatedAt: persisted.resolutionUpdatedAt
+						};
 						resolution =
 							persisted.resolved && persisted.tmdbId && persisted.mediaType
 								? { tmdbId: persisted.tmdbId, mediaType: persisted.mediaType }
 								: null;
-						if (existing?.tmdbId && existing.tmdbId !== persisted.tmdbId) {
-							await collectionRepository.reconcileTmdbItemCollection({
-								serverInstanceId,
-								mediaItemId: itemId,
-								collection: null
-							});
-						}
 					} else {
-						await manualMatchRepository.applyAutomaticUnresolved(serverInstanceId, itemId, {
-							reason: selected ? 'no_match' : 'no_external_guid',
-							source: selected?.source ?? null,
-							attemptedSources: selected ? [selected.source] : [],
-							resolvedAt: new Date()
-						});
-						await collectionRepository.reconcileTmdbItemCollection({
+						const persisted = await manualMatchRepository.applyAutomaticUnresolved(
 							serverInstanceId,
-							mediaItemId: itemId,
-							collection: null
-						});
+							itemId,
+							{
+								reason: selected ? 'no_match' : 'no_external_guid',
+								source: selected?.source ?? null,
+								attemptedSources: selected ? [selected.source] : [],
+								resolvedAt: new Date()
+							}
+						);
+						syncIdentityGuard = {
+							tmdbId: persisted.tmdbId,
+							mediaType: persisted.mediaType,
+							manualMatchPinned: persisted.manualMatchPinned,
+							resolutionUpdatedAt: persisted.resolutionUpdatedAt
+						};
+						resolution =
+							persisted.resolved && persisted.tmdbId && persisted.mediaType
+								? { tmdbId: persisted.tmdbId, mediaType: persisted.mediaType }
+								: null;
 					}
 				}
 				if (resolution) {
 					// Enrich with TMDB display metadata. A failure here leaves the item
 					// resolved but un-enriched and unsynced, so it is retried on a later sync.
 					try {
+						const identityChanged =
+							!existing ||
+							existing.tmdbId !== resolution.tmdbId ||
+							existing.mediaType !== resolution.mediaType;
 						const meta = await fetchMetadata(
 							resolution.tmdbId,
 							resolution.mediaType,
@@ -352,35 +426,49 @@ export async function runSyncJob(
 							{
 								cacheTtlDays: config.httpCacheTtlDays,
 								forceRefresh: full,
-								fetchLogo: full || !existing?.logoUrl
+								fetchLogo: full || identityChanged || !existing?.logoUrl
 							}
 						);
-						await db
-							.update(mediaItems)
-							.set({
-								overview: meta.overview,
-								tagline: meta.tagline,
-								genres: meta.genres,
-								runtime: meta.runtime,
-								rating: meta.rating,
-								backdropUrl: meta.backdropUrl,
-								// Keep an existing logo if we skipped the images call this run.
-								logoUrl: meta.logoUrl ?? existing?.logoUrl ?? null,
-								seasonCount: meta.seasonCount,
-								episodeCount: meta.episodeCount,
-								cast: meta.cast,
-								updatedAt: new Date()
-							})
-							.where(eq(mediaItems.id, itemId));
-						await collectionRepository.reconcileTmdbItemCollection({
+						const expectedIdentity = syncIdentityGuard;
+						if (!expectedIdentity) throw new Error('tmdb_resolution_guard_missing');
+						const metadataWritten = await writeTmdbMetadataIfCurrent({
 							serverInstanceId,
-							mediaItemId: itemId,
-							collection: meta.collection
+							itemId,
+							expected: expectedIdentity,
+							metadata: meta,
+							existingLogoUrl: identityChanged ? null : (existing?.logoUrl ?? null),
+							updatedAt: new Date()
 						});
+						if (metadataWritten) {
+							await collectionRepository.reconcileTmdbItemCollection({
+								serverInstanceId,
+								mediaItemId: itemId,
+								collection: meta.collection,
+								expectedIdentity
+							});
+						}
 						synced = observationFailure === null;
 					} catch (error) {
-						// Enrichment failed (network/parse); leave it for the next sync to retry.
-						itemFailure = error;
+						if (repairItemIds && syncIdentityGuard) {
+							// The repair unit is the identity correction. If enrichment fails after
+							// that correction, keep the unit complete but clear its watermark so a
+							// normal sync retries metadata without resurrecting the mismatch banner.
+							await clearTmdbSyncWatermarkIfCurrent({
+								serverInstanceId,
+								itemId,
+								expected: syncIdentityGuard
+							});
+							metadataDeferred = true;
+							synced = observationFailure === null;
+							await logEvent('warn', 'sync', 'TMDB repair metadata enrichment deferred', {
+								serverInstanceId,
+								mediaItemId: itemId,
+								code: 'tmdb_metadata_deferred'
+							});
+						} else {
+							// Enrichment failed (network/parse); leave it for the next sync to retry.
+							itemFailure = error;
+						}
 					}
 				} else if (!existing?.manualMatchPinned) {
 					// Deterministic no-match — retrying won't help until the server item changes.
@@ -397,10 +485,23 @@ export async function runSyncJob(
 
 		// Advance the sync watermark only for fully-processed items.
 		if (synced) {
-			await db
-				.update(mediaItems)
-				.set({ lastSyncedAt: new Date() })
-				.where(eq(mediaItems.id, itemId));
+			if (!metadataDeferred) {
+				if (syncIdentityGuard) {
+					await markTmdbSyncedIfCurrent({
+						serverInstanceId,
+						itemId,
+						expected: syncIdentityGuard,
+						syncedAt: new Date()
+					});
+				} else {
+					await db
+						.update(mediaItems)
+						.set({ lastSyncedAt: new Date() })
+						.where(
+							and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId))
+						);
+				}
+			}
 			succeeded++;
 			await ctx.recordOutcome({
 				serverInstanceId,
@@ -409,8 +510,9 @@ export async function runSyncJob(
 				result: {
 					sourceId: item.id,
 					sectionKey,
-					mode: full ? 'full_rescan' : 'incremental',
-					externalChanges
+					mode: repairItemIds ? 'tmdb_repair' : full ? 'full_rescan' : 'incremental',
+					externalChanges,
+					metadataDeferred
 				}
 			});
 		} else {
@@ -435,6 +537,7 @@ export async function runSyncJob(
 	// native associations on an inconclusive read.
 	if (
 		!payload.itemIds &&
+		!repairItemIds &&
 		!scopedLibraryRun &&
 		!ctx.isCancelled() &&
 		server.listNativeCollections &&
@@ -483,6 +586,38 @@ export async function runSyncJob(
 		automationEvents: {
 			librarySectionKeys: sections.map((section) => section.key),
 			newItems
+		}
+	};
+}
+
+/** Selective, durable wrapper around sync for legacy automatic TMDB type mismatches. */
+export async function runTmdbRepairJob(
+	ctx: JobContext,
+	payload: Extract<JobPayload, { kind: 'tmdb_repair' }>
+): Promise<JobTaskResult> {
+	await ctx.setPhase('tmdb_repair_scan');
+	const pendingBefore = await countPendingTmdbRepairs(payload.serverInstanceId);
+	const itemIds = payload.itemIds?.length
+		? [...new Set(payload.itemIds)].sort((a, b) => a - b)
+		: await listPendingTmdbRepairItemIds(payload.serverInstanceId);
+	if (!itemIds.length) {
+		await ctx.setTotal(0);
+		return {
+			summary: { processed: 0, succeeded: 0, failed: 0, interrupted: 0 },
+			tmdbRepair: { pendingBefore, pendingAfter: pendingBefore }
+		};
+	}
+
+	const result = await runSyncJob(
+		ctx,
+		{ kind: 'sync', serverInstanceId: payload.serverInstanceId },
+		{ repairItemIds: itemIds }
+	);
+	return {
+		...result,
+		tmdbRepair: {
+			pendingBefore,
+			pendingAfter: await countPendingTmdbRepairs(payload.serverInstanceId)
 		}
 	};
 }

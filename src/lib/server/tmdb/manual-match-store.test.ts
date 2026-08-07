@@ -21,6 +21,7 @@ beforeEach(async () => {
 		CREATE TABLE media_items (
 			id integer PRIMARY KEY,
 			server_instance_id text NOT NULL,
+			type text NOT NULL,
 			title text NOT NULL,
 			year integer,
 			tmdb_id text,
@@ -48,8 +49,10 @@ beforeEach(async () => {
 			cast text,
 			tmdb_collection_id text,
 			tmdb_collection_name text,
+			last_synced_at integer,
 			has_candidates integer DEFAULT false NOT NULL,
 			has_mediux integer DEFAULT false NOT NULL,
+			reviewed_at integer,
 			discovery_status text DEFAULT 'not_started' NOT NULL,
 			discovery_started_at integer,
 			discovery_completed_at integer,
@@ -83,16 +86,33 @@ beforeEach(async () => {
 			details text,
 			created_at integer NOT NULL
 		);
+		CREATE TABLE media_collections (
+			id text PRIMARY KEY,
+			server_instance_id text NOT NULL,
+			source text NOT NULL,
+			removed_at integer,
+			updated_at integer NOT NULL
+		);
+		CREATE TABLE collection_memberships (
+			id integer PRIMARY KEY,
+			server_instance_id text NOT NULL,
+			collection_id text NOT NULL,
+			media_item_id integer,
+			source text NOT NULL,
+			removed_at integer
+		);
 	`);
 	await client.execute({
 		sql: `INSERT INTO media_items (
-			id, server_instance_id, title, year, tmdb_id, imdb_id, media_type, resolved,
+			id, server_instance_id, type, title, year, tmdb_id, imdb_id, media_type, resolved,
 			resolution_reason, manual_match_pinned, selected_poster_url,
-			selected_poster_candidate_id, overview, has_candidates, has_mediux,
-			discovery_status, updated_at
-		) VALUES (1, 'server-a', 'Original', 2001, '100', 'tt0000100', 'movie', 1,
-			'imdb_id', 0, 'https://old/poster.jpg', 10, 'old metadata', 1, 1,
-			'succeeded', 1704067200)`,
+			selected_poster_candidate_id, overview, tmdb_collection_id, tmdb_collection_name,
+			last_synced_at, has_candidates, has_mediux,
+			reviewed_at, discovery_status, updated_at
+		) VALUES (1, 'server-a', 'movie', 'Original', 2001, '100', 'tt0000100', 'movie', 1,
+			'imdb_id', 0, 'https://old/poster.jpg', 10, 'old metadata', 'collection-900', 'Old Saga',
+			1704067200, 1, 1,
+			1704067200, 'succeeded', 1704067200)`,
 		args: []
 	});
 	await client.execute({
@@ -103,6 +123,18 @@ beforeEach(async () => {
 	await client.execute({
 		sql: `INSERT INTO child_selections (id, server_instance_id, media_item_id)
 			VALUES (20, 'server-a', 1)`,
+		args: []
+	});
+	await client.execute({
+		sql: `INSERT INTO media_collections (
+			id, server_instance_id, source, removed_at, updated_at
+		) VALUES ('collection-900', 'server-a', 'tmdb', NULL, 1704067200)`,
+		args: []
+	});
+	await client.execute({
+		sql: `INSERT INTO collection_memberships (
+			id, server_instance_id, collection_id, media_item_id, source, removed_at
+		) VALUES (30, 'server-a', 'collection-900', 1, 'tmdb', NULL)`,
 		args: []
 	});
 	await client.execute({
@@ -120,7 +152,14 @@ afterEach(() => {
 });
 
 async function snapshot() {
-	const tables = ['media_items', 'poster_candidates', 'child_selections', 'resolution_audits'];
+	const tables = [
+		'media_items',
+		'poster_candidates',
+		'child_selections',
+		'resolution_audits',
+		'media_collections',
+		'collection_memberships'
+	];
 	const rows: Record<string, unknown> = {};
 	for (const table of tables) {
 		rows[table] = (await client.execute(`SELECT * FROM ${table} ORDER BY id`)).rows;
@@ -178,10 +217,21 @@ describe('manual match transactional repository', () => {
 			manual_match_pinned: 1,
 			selected_poster_url: null,
 			overview: null,
+			tmdb_collection_id: null,
+			tmdb_collection_name: null,
+			last_synced_at: null,
 			has_candidates: 0,
 			has_mediux: 0,
+			reviewed_at: null,
 			discovery_status: 'not_started'
 		});
+		expect(
+			(await client.execute('SELECT removed_at FROM collection_memberships WHERE id = 30')).rows[0]
+		).toMatchObject({ removed_at: NOW.getTime() / 1000 });
+		expect(
+			(await client.execute("SELECT removed_at FROM media_collections WHERE id = 'collection-900'"))
+				.rows[0]
+		).toMatchObject({ removed_at: NOW.getTime() / 1000 });
 
 		const audits = await repository.listAudits('server-a', 1);
 		expect(audits).toHaveLength(2);
@@ -250,6 +300,9 @@ describe('manual match transactional repository', () => {
 			attemptedSources: ['tvdb_id'],
 			resolvedAt: NOW
 		});
+		expect(
+			(await client.execute('SELECT reviewed_at FROM media_items WHERE id = 1')).rows[0]
+		).toMatchObject({ reviewed_at: null });
 		const audits = await repository.listAudits('server-a', 1);
 		expect(audits).toHaveLength(2);
 		expect(audits[1]).toMatchObject({
@@ -261,6 +314,35 @@ describe('manual match transactional repository', () => {
 			source: 'tvdb_id',
 			userConfirmed: false,
 			attemptedSources: ['tvdb_id']
+		});
+	});
+
+	it('invalidates review and artwork when the numeric id stays equal but its namespace changes', async () => {
+		const repository = createManualMatchRepository(database);
+		await repository.applyAutomaticResolution('server-a', 1, {
+			resolution: { tmdbId: '100', mediaType: 'tv' },
+			reason: 'tmdb_type_repair',
+			source: 'imdb_id',
+			attemptedSources: ['imdb_id'],
+			resolvedAt: NOW
+		});
+		const media = (await client.execute('SELECT * FROM media_items WHERE id = 1')).rows[0];
+		expect(media).toMatchObject({
+			tmdb_id: '100',
+			media_type: 'tv',
+			selected_poster_url: null,
+			reviewed_at: null,
+			discovery_status: 'not_started'
+		});
+		expect(
+			(await client.execute('SELECT active, stale FROM poster_candidates')).rows[0]
+		).toMatchObject({ active: 0, stale: 1 });
+		expect((await client.execute('SELECT * FROM child_selections')).rows).toHaveLength(0);
+		expect((await repository.listAudits('server-a', 1)).at(-1)).toMatchObject({
+			previousTmdbId: '100',
+			previousMediaType: 'movie',
+			resultingTmdbId: '100',
+			resultingMediaType: 'tv'
 		});
 	});
 

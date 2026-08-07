@@ -9,6 +9,7 @@
 	import { canonicalPathAfterServerSwitch } from '$lib/server-context-navigation';
 	import WhatsNewModal from '$lib/components/WhatsNewModal.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
+	import TmdbRepairBanner from '$lib/components/TmdbRepairBanner.svelte';
 	import { toasts } from '$lib/stores/toasts.svelte';
 
 	// Local copy of the version comparison (the canonical `isNewerVersion` lives in
@@ -341,6 +342,13 @@
 			{m.maintenance_banner()}
 		</div>
 	{/if}
+
+	{#key data.serverSelection.activeServerId}
+		<TmdbRepairBanner
+			repair={data.tmdbRepair}
+			mutationDisabled={data.maintenanceActive || switchingServer}
+		/>
+	{/key}
 
 	{#if !data.configReady}
 		<div

@@ -1,6 +1,5 @@
 import { resolveConfig } from '$lib/server/config';
 import { db } from '$lib/server/db';
-import { createCollectionRepository } from '$lib/server/collections/repository';
 import type { TmdbMediaType } from '$lib/server/types';
 import {
 	resolveTmdbStrict,
@@ -16,7 +15,6 @@ import {
 import { createManualMatchRepository } from './manual-match-store';
 
 export const manualMatchRepository = createManualMatchRepository(db);
-const collectionRepository = createCollectionRepository(db);
 
 async function liveService(requireTmdb: boolean) {
 	const config = await resolveConfig();
@@ -30,8 +28,9 @@ async function liveService(requireTmdb: boolean) {
 		search: (input) => searchTmdbCandidates(input, requireKey()),
 		verify: (tmdbId: string, mediaType: TmdbMediaType, language?: string) =>
 			verifyTmdbCandidate(tmdbId, mediaType, requireKey(), language),
-		resolve: (guids) =>
+		resolve: (guids, expectedMediaType) =>
 			resolveTmdbStrict(guids, requireKey(), {
+				expectedMediaType,
 				forceRefresh: true,
 				cacheTtlDays: config.httpCacheTtlDays
 			})
@@ -51,26 +50,11 @@ export async function confirmManualTmdbMatch(
 	itemId: number,
 	input: ConfirmManualMatchInput
 ) {
-	const before = await manualMatchRepository.getScopedItem(serverInstanceId, itemId);
-	const confirmed = await (await liveService(true)).confirm(serverInstanceId, itemId, input);
-	if (before && (before.tmdbId !== confirmed.tmdbId || before.mediaType !== confirmed.mediaType)) {
-		await collectionRepository.reconcileTmdbItemCollection({
-			serverInstanceId,
-			mediaItemId: itemId,
-			collection: null
-		});
-	}
-	return confirmed;
+	return (await liveService(true)).confirm(serverInstanceId, itemId, input);
 }
 
 export async function clearManualTmdbMatch(serverInstanceId: string, itemId: number) {
-	const cleared = await (await liveService(false)).clear(serverInstanceId, itemId);
-	await collectionRepository.reconcileTmdbItemCollection({
-		serverInstanceId,
-		mediaItemId: itemId,
-		collection: null
-	});
-	return cleared;
+	return (await liveService(false)).clear(serverInstanceId, itemId);
 }
 
 export async function listTmdbResolutionAudit(serverInstanceId: string, itemId: number) {

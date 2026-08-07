@@ -227,6 +227,19 @@ function createJellyfinServer() {
 		}
 
 		if (request.method === 'GET' && path === '/Items') {
+			const requestedIds = url.searchParams.get('ids');
+			if (requestedIds) {
+				const ids = new Set(
+					requestedIds
+						.split(',')
+						.map((id) => id.trim())
+						.filter(Boolean)
+				);
+				const requestedItems = fixture.items.filter((item) => ids.has(item.Id));
+				if (ids.has('jf-collection')) requestedItems.push({ Id: 'jf-collection' });
+				sendJson(response, { Items: requestedItems.map(fixture.enriched) });
+				return;
+			}
 			const parent = url.searchParams.get('ParentId');
 			const types = url.searchParams.get('IncludeItemTypes') ?? '';
 			if (types.includes('BoxSet')) {

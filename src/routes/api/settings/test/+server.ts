@@ -34,7 +34,10 @@ export const POST: RequestHandler = async () => {
 	} else {
 		try {
 			// A well-known TMDB id (Fight Club) round-trips auth + classification.
-			const res = await resolveTmdb({ tmdb: '550' }, config.tmdbKey, { cacheTtlDays: 0 });
+			const res = await resolveTmdb({ tmdb: '550' }, config.tmdbKey, {
+				expectedMediaType: 'movie',
+				cacheTtlDays: 0
+			});
 			tmdb = res ? { ok: true } : { ok: false, error: 'connection_unreachable' };
 		} catch {
 			tmdb = { ok: false, error: 'connection_unreachable' };

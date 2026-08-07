@@ -9,7 +9,7 @@ import {
 	serverInstances
 } from '$lib/server/db/schema';
 import type { ServerNativeCollection, ServerType } from '$lib/server/media-server/types';
-import type { TmdbCollectionRef } from '$lib/server/types';
+import type { TmdbCollectionRef, TmdbMediaType } from '$lib/server/types';
 import { sanitizeNativeCollectionArtworkUrl } from './native-artwork-url';
 
 type Database = LibSQLDatabase<typeof schema>;
@@ -28,6 +28,13 @@ export interface ReconcileTmdbItemCollectionInput {
 	serverInstanceId: string;
 	mediaItemId: number;
 	collection: TmdbCollectionRef | null;
+	/** Optional compare-and-set guard used by asynchronous TMDB enrichment. */
+	expectedIdentity?: {
+		tmdbId: string | null;
+		mediaType: TmdbMediaType | null;
+		manualMatchPinned: boolean;
+		resolutionUpdatedAt: Date | null;
+	};
 	observedAt?: Date;
 }
 
@@ -212,6 +219,9 @@ export function createCollectionRepository(
 				.select({
 					id: mediaItems.id,
 					tmdbId: mediaItems.tmdbId,
+					mediaType: mediaItems.mediaType,
+					manualMatchPinned: mediaItems.manualMatchPinned,
+					resolutionUpdatedAt: mediaItems.resolutionUpdatedAt,
 					title: mediaItems.title,
 					year: mediaItems.year
 				})
@@ -224,6 +234,16 @@ export function createCollectionRepository(
 				)
 				.limit(1);
 			if (!item) throw new CollectionRepositoryError('collection_item_scope_mismatch');
+			if (
+				input.expectedIdentity &&
+				(item.tmdbId !== input.expectedIdentity.tmdbId ||
+					item.mediaType !== input.expectedIdentity.mediaType ||
+					item.manualMatchPinned !== input.expectedIdentity.manualMatchPinned ||
+					(item.resolutionUpdatedAt?.getTime() ?? null) !==
+						(input.expectedIdentity.resolutionUpdatedAt?.getTime() ?? null))
+			) {
+				return zeroResult();
+			}
 			if (collection && !item.tmdbId) {
 				throw new CollectionRepositoryError('invalid_collection_observation');
 			}

@@ -154,6 +154,33 @@ describe('durable job policy', () => {
 		expect(relateJobs(sync, discover)).toBe('conflict');
 	});
 
+	it('normalizes selective TMDB repair and serializes it with same-server sync work', () => {
+		const repair = describeJob({
+			kind: 'tmdb_repair',
+			serverInstanceId: ' server-a ',
+			itemIds: [9, 3, 9]
+		});
+		expect(repair).toMatchObject({
+			persistedType: 'tmdb_repair',
+			safeToReplay: true,
+			normalizedPayload: {
+				kind: 'tmdb_repair',
+				serverInstanceId: 'server-a',
+				itemIds: [3, 9]
+			},
+			scope: {
+				serverInstanceIds: ['server-a'],
+				itemIds: [3, 9]
+			}
+		});
+		expect(relateJobs(repair, describeJob({ kind: 'sync', serverInstanceId: 'server-a' }))).toBe(
+			'conflict'
+		);
+		expect(relateJobs(repair, describeJob({ kind: 'sync', serverInstanceId: 'server-b' }))).toBe(
+			'independent'
+		);
+	});
+
 	it('includes the frozen cross-server source in authorization and conflict scope', () => {
 		const crossServer = describeJob(crossServerApplyPayload(), {
 			persistedType: 'cross_server_apply'

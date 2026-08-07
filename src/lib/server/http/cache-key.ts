@@ -4,12 +4,16 @@ import { createHash } from 'node:crypto';
  * One-way SQLite cache key. URL queries and authorization headers influence the
  * cache identity but are never persisted themselves.
  */
-export function httpCacheKey(url: string, headers: Record<string, string> | undefined): string {
+export function httpCacheKey(
+	url: string,
+	headers: Record<string, string> | undefined,
+	namespace?: string
+): string {
 	const normalizedHeaders = Object.entries(headers ?? {})
 		.map(([key, value]) => [key.toLowerCase(), value] as const)
 		.sort(([left], [right]) => left.localeCompare(right));
 	return createHash('sha256')
-		.update(JSON.stringify({ url, headers: normalizedHeaders }))
+		.update(JSON.stringify({ url, headers: normalizedHeaders, namespace }))
 		.digest('hex');
 }
 

@@ -58,6 +58,7 @@ const ACTIVE_JOB_STATUSES = ['pending', 'running', 'retry_scheduled'] as const;
 const MUTATING_JOB_TYPES = [
 	'sync',
 	'full_rescan',
+	'tmdb_repair',
 	'discover',
 	'apply',
 	'retry',

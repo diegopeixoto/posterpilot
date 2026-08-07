@@ -3,6 +3,11 @@
 	import { tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { readLocaleNeutralApiError } from '$lib/i18n/api-errors';
+	import {
+		ManualTmdbSearchValidationError,
+		prepareManualTmdbSearchParams,
+		readManualTmdbSearchYear
+	} from '$lib/tmdb-manual-search-form';
 
 	type MediaType = 'movie' | 'tv';
 	type SearchType = MediaType | 'both';
@@ -70,7 +75,7 @@
 	// svelte-ignore state_referenced_locally
 	let query = $state(item.title);
 	// svelte-ignore state_referenced_locally
-	let year = $state(item.year ? String(item.year) : '');
+	let year = $state<number | null>(item.year);
 	// svelte-ignore state_referenced_locally
 	let searchType = $state<SearchType>(item.type === 'movie' ? 'movie' : 'tv');
 	let open = $state(false);
@@ -100,7 +105,7 @@
 			resolutionUpdatedAt: item.resolutionUpdatedAt
 		};
 		query = item.title;
-		year = item.year ? String(item.year) : '';
+		year = item.year;
 		searchType = item.type === 'movie' ? 'movie' : 'tv';
 		open = false;
 		results = [];
@@ -195,16 +200,8 @@
 	}
 
 	async function search() {
-		if (searching || !query.trim()) return;
+		if (searching) return;
 		errorReference = null;
-		const parsedYear = year.trim() ? Number(year) : undefined;
-		if (
-			parsedYear !== undefined &&
-			(!Number.isInteger(parsedYear) || parsedYear < 1800 || parsedYear > 9999)
-		) {
-			errorCode = 'invalid_request';
-			return;
-		}
 		searching = true;
 		searched = false;
 		results = [];
@@ -212,9 +209,12 @@
 		errorCode = null;
 		errorReference = null;
 		successMessage = null;
-		const params = new URLSearchParams({ q: query.trim(), type: searchType });
-		if (parsedYear !== undefined) params.set('year', String(parsedYear));
 		try {
+			const params = prepareManualTmdbSearchParams({
+				query,
+				year,
+				mediaType: searchType
+			});
 			const response = await fetch(`${endpoint}/search?${params}`);
 			if (!response.ok) {
 				errorCode = await readError(response);
@@ -223,8 +223,9 @@
 			const body = (await response.json()) as { results: Candidate[] };
 			results = body.results;
 			searched = true;
-		} catch {
-			errorCode = 'tmdb_unavailable';
+		} catch (error) {
+			errorCode =
+				error instanceof ManualTmdbSearchValidationError ? 'invalid_request' : 'tmdb_unavailable';
 		} finally {
 			searching = false;
 		}
@@ -371,7 +372,13 @@
 						type="number"
 						min="1800"
 						max="9999"
-						bind:value={year}
+						value={year ?? ''}
+						oninput={(event) => {
+							year = readManualTmdbSearchYear(
+								event.currentTarget.value,
+								event.currentTarget.valueAsNumber
+							);
+						}}
 						class="input w-full"
 					/>
 				</div>
