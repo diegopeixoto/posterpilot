@@ -79,6 +79,7 @@ export function classifyKometaLegacyConfig(raw: string): {
 			continue;
 		}
 		const libraryName = libraryPair.key.value;
+		if (isYamlNull(libraryPair.value)) continue;
 		if (!isMap(libraryPair.value) || hasShapeIndirection(libraryPair.value)) {
 			known = false;
 			continue;

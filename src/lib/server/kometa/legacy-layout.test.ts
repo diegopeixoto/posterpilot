@@ -91,4 +91,12 @@ libraries:
 `)
 		).toEqual({ known: true, references: [] });
 	});
+
+	it('treats an empty library stanza as known absence', () => {
+		expect(
+			classifyKometaLegacyConfig(`libraries:
+  Movies:
+`)
+		).toEqual({ known: true, references: [] });
+	});
 });
