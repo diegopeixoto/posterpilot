@@ -547,6 +547,7 @@ export async function listPosterMatchCandidates(itemId: number, serverInstanceId
 		.select({
 			id: posterCandidates.id,
 			url: posterCandidates.url,
+			previewUrl: posterCandidates.previewUrl,
 			provider: posterCandidates.provider,
 			setId: posterCandidates.setId,
 			setAuthor: posterCandidates.setAuthor,

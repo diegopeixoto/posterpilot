@@ -184,7 +184,15 @@ export const posterCandidates = sqliteTable(
 		setAuthor: text('set_author'),
 		designFamily: text('design_family'),
 		language: text('language'),
+		languageProvenance: text('language_provenance', {
+			enum: ['tagged', 'untagged', 'unknown']
+		})
+			.notNull()
+			.default('unknown'),
+		/** Canonical destination asset used for staging, application, and export. */
 		url: text('url').notNull(),
+		/** Optional optimized representation used only for browsing and thumbnail caches. */
+		previewUrl: text('preview_url'),
 		kind: text('kind', { enum: ['poster', 'background', 'season', 'title_card'] }).notNull(),
 		season: integer('season'),
 		episode: integer('episode'),

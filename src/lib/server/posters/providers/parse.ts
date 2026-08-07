@@ -1,5 +1,5 @@
 import { tmdbImageUrl } from '$lib/server/tmdb/metadata';
-import type { TmdbMediaType } from '$lib/server/types';
+import type { ArtworkLanguageProvenance, TmdbMediaType } from '$lib/server/types';
 import type { ArtworkSet } from './types';
 
 /**
@@ -14,10 +14,63 @@ interface TmdbImage {
 	file_path?: string;
 	width?: number;
 	height?: number;
+	iso_639_1?: string | null;
 }
 interface TmdbImagesResponse {
 	posters?: TmdbImage[];
 	backdrops?: TmdbImage[];
+}
+
+interface CandidateLanguage {
+	language: string | null;
+	languageProvenance: ArtworkLanguageProvenance;
+}
+
+function candidateLanguage(value: unknown): CandidateLanguage {
+	if (value === null || value === '') {
+		return { language: null, languageProvenance: 'untagged' };
+	}
+	if (typeof value === 'string') {
+		const base = value.trim().toLowerCase().split('-')[0];
+		if (/^[a-z]{2}$/.test(base)) {
+			return { language: base, languageProvenance: 'tagged' };
+		}
+	}
+	return { language: null, languageProvenance: 'unknown' };
+}
+
+function unknownMetadata(providerAssetId: string | null = null) {
+	return {
+		providerAssetId,
+		previewUrl: null,
+		width: null,
+		height: null,
+		language: null,
+		languageProvenance: 'unknown' as const
+	};
+}
+
+function tmdbCandidate(
+	image: TmdbImage,
+	kind: 'poster' | 'background',
+	previewSize: 'w500' | 'w1280'
+) {
+	const url = tmdbImageUrl(image.file_path, 'original');
+	const previewUrl = tmdbImageUrl(image.file_path, previewSize);
+	if (!url || !previewUrl || !image.file_path) return null;
+	return {
+		setId: 'tmdb',
+		setAuthor: null,
+		providerAssetId: image.file_path,
+		url,
+		previewUrl,
+		kind,
+		season: null,
+		episode: null,
+		width: image.width ?? null,
+		height: image.height ?? null,
+		...candidateLanguage(image.iso_639_1)
+	};
 }
 
 /** Build a single TMDB set (posters + backdrops) from an images response. */
@@ -25,51 +78,21 @@ export function parseTmdbImages(json: unknown): ArtworkSet[] {
 	const data = (json ?? {}) as TmdbImagesResponse;
 	const posters = (data.posters ?? [])
 		.slice(0, MAX_PER_KIND)
-		.map((p) => ({
-			url: tmdbImageUrl(p.file_path, 'w500'),
-			width: p.width ?? null,
-			height: p.height ?? null
-		}))
-		.filter(
-			(p): p is { url: string; width: number | null; height: number | null } => p.url !== null
-		)
-		.map((p) => ({
-			setId: 'tmdb',
-			setAuthor: null,
-			url: p.url,
-			kind: 'poster' as const,
-			season: null,
-			episode: null,
-			width: p.width,
-			height: p.height
-		}));
+		.map((image) => tmdbCandidate(image, 'poster', 'w500'))
+		.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
 	const backdrops = (data.backdrops ?? [])
 		.slice(0, MAX_PER_KIND)
-		.map((b) => ({
-			url: tmdbImageUrl(b.file_path, 'w1280'),
-			width: b.width ?? null,
-			height: b.height ?? null
-		}))
-		.filter(
-			(b): b is { url: string; width: number | null; height: number | null } => b.url !== null
-		)
-		.map((b) => ({
-			setId: 'tmdb',
-			setAuthor: null,
-			url: b.url,
-			kind: 'background' as const,
-			season: null,
-			episode: null,
-			width: b.width,
-			height: b.height
-		}));
+		.map((image) => tmdbCandidate(image, 'background', 'w1280'))
+		.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
 	const candidates = [...posters, ...backdrops];
 	return candidates.length ? [{ setId: 'tmdb', author: null, candidates }] : [];
 }
 
 interface FanartImage {
+	id?: string | number;
 	url?: string;
 	season?: string;
+	lang?: string | null;
 }
 interface FanartResponse {
 	movieposter?: FanartImage[];
@@ -88,14 +111,23 @@ export function parseFanart(json: unknown, mediaType: TmdbMediaType): ArtworkSet
 	const mk = (imgs: FanartImage[] | undefined, kind: 'poster' | 'background' | 'season') =>
 		(imgs ?? [])
 			.filter((i) => Boolean(i.url))
-			.map((i) => ({
-				setId: 'fanarttv',
-				setAuthor: null,
-				url: i.url!,
-				kind,
-				season: kind === 'season' && i.season && /^\d+$/.test(i.season) ? Number(i.season) : null,
-				episode: null
-			}));
+			.map((i) => {
+				const providerAssetId =
+					typeof i.id === 'string' || typeof i.id === 'number' ? String(i.id).trim() || null : null;
+				return {
+					setId: 'fanarttv',
+					setAuthor: null,
+					providerAssetId,
+					url: i.url!,
+					previewUrl: null,
+					kind,
+					season: kind === 'season' && i.season && /^\d+$/.test(i.season) ? Number(i.season) : null,
+					episode: null,
+					width: null,
+					height: null,
+					...candidateLanguage(i.lang)
+				};
+			});
 
 	const candidates = [
 		...mk(posterSrc, 'poster'),
@@ -175,6 +207,7 @@ export function parseThePosterDb(html: string): ArtworkSet[] {
 	const candidates = urls.map((url) => ({
 		setId: 'theposterdb',
 		setAuthor: null,
+		...unknownMetadata(url.match(/\/api\/assets\/(\d+)$/)?.[1] ?? null),
 		url,
 		kind: 'poster' as const,
 		season: null,
@@ -292,7 +325,17 @@ export function parseThePosterDbAssets(html: string): ArtworkSet[] {
 		sets.push({
 			setId,
 			author,
-			candidates: [{ setId, setAuthor: author, url, kind: 'poster', season: null, episode: null }]
+			candidates: [
+				{
+					setId,
+					setAuthor: author,
+					...unknownMetadata(posterId),
+					url,
+					kind: 'poster',
+					season: null,
+					episode: null
+				}
+			]
 		});
 	}
 	if (sets.length) return sets;

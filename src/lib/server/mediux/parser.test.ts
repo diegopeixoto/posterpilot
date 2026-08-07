@@ -62,10 +62,16 @@ describe('parseListingSets', () => {
 		expect(poster).toEqual({
 			setId: '8472',
 			setAuthor: 'poster_maker',
+			providerAssetId: P,
 			url: `https://api.mediux.pro/assets/${P}`,
+			previewUrl: null,
 			kind: 'poster',
 			season: null,
-			episode: null
+			episode: null,
+			width: null,
+			height: null,
+			language: null,
+			languageProvenance: 'unknown'
 		});
 		expect(all.find((c) => c.url.endsWith(B))?.kind).toBe('background');
 	});

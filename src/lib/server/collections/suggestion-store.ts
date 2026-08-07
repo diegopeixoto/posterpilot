@@ -282,6 +282,7 @@ export function createCollectionSuggestionStore(
 				id: posterCandidates.id,
 				mediaItemId: posterCandidates.mediaItemId,
 				url: posterCandidates.url,
+				previewUrl: posterCandidates.previewUrl,
 				kind: posterCandidates.kind
 			})
 			.from(posterCandidates)
@@ -554,7 +555,7 @@ export function createCollectionSuggestionStore(
 			identifier(collectionId),
 			positiveInteger(candidateId)
 		);
-		return candidate?.url ?? null;
+		return candidate?.previewUrl ?? candidate?.url ?? null;
 	}
 
 	return {

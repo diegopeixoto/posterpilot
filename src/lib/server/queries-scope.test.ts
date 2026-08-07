@@ -56,6 +56,7 @@ import {
 	listActiveJobs,
 	listJobs,
 	listLibrary,
+	listPosterMatchCandidates,
 	listPosterMatchEligibleItems
 } from './queries';
 
@@ -100,7 +101,8 @@ describe('server-scoped queries', () => {
 				mediaItemId: itemA,
 				setId: 'set-a',
 				provider: 'tmdb',
-				url: 'https://images.example.test/a.jpg',
+				url: 'https://images.example.test/original/a.jpg',
+				previewUrl: 'https://images.example.test/w500/a.jpg',
 				kind: 'poster'
 			},
 			{
@@ -296,6 +298,11 @@ describe('server-scoped queries', () => {
 		expect(JSON.stringify(matchItem)).not.toMatch(
 			/server\.invalid|provider\.invalid|token|secret/i
 		);
+		const matchCandidates = await listPosterMatchCandidates(itemA, 'server-a');
+		expect(matchCandidates.find((candidate) => candidate.provider === 'tmdb')).toMatchObject({
+			url: 'https://images.example.test/original/a.jpg',
+			previewUrl: 'https://images.example.test/w500/a.jpg'
+		});
 		expect((await listFunItemsByIds([999_999, itemA], 'server-a')).map((item) => item.id)).toEqual([
 			itemA
 		]);

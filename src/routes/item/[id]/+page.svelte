@@ -872,7 +872,12 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-[2/3] w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
@@ -887,7 +892,12 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-video w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-video w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
@@ -910,7 +920,12 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-[2/3] w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-[2/3] w-full object-cover"
+		/>
 	</button>
 {/snippet}
 
@@ -933,7 +948,12 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		<img src={thumb(c.url)} alt="" loading="lazy" class="aspect-video w-full object-cover" />
+		<img
+			src={thumb(c.previewUrl ?? c.url)}
+			alt=""
+			loading="lazy"
+			class="aspect-video w-full object-cover"
+		/>
 	</button>
 {/snippet}
 

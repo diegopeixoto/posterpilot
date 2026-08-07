@@ -57,10 +57,16 @@ function thePosterDbCandidate() {
 						{
 							setId: 'theposterdb-1',
 							setAuthor: 'creator',
+							providerAssetId: '1',
 							url: 'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/1/a.webp',
+							previewUrl: null,
 							kind: 'poster',
 							season: null,
-							episode: null
+							episode: null,
+							width: null,
+							height: null,
+							language: null,
+							languageProvenance: 'unknown'
 						}
 					]
 				}

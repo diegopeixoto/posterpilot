@@ -55,7 +55,20 @@ describe('native collection ThePosterDB artwork candidates', () => {
 			setId,
 			author,
 			candidates: [
-				{ setId, setAuthor: author, url, kind: 'poster' as const, season: null, episode: null }
+				{
+					setId,
+					setAuthor: author,
+					providerAssetId: null,
+					url,
+					previewUrl: null,
+					kind: 'poster' as const,
+					season: null,
+					episode: null,
+					width: null,
+					height: null,
+					language: null,
+					languageProvenance: 'unknown' as const
+				}
 			]
 		};
 	}
@@ -84,10 +97,16 @@ describe('native collection ThePosterDB artwork candidates', () => {
 					{
 						setId: 'theposterdb-3',
 						setAuthor: 'creator-c',
+						providerAssetId: null,
 						url: 'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/3/c.webp',
+						previewUrl: null,
 						kind: 'poster' as const,
 						season: 1,
-						episode: null
+						episode: null,
+						width: null,
+						height: null,
+						language: null,
+						languageProvenance: 'unknown' as const
 					}
 				]
 			}
