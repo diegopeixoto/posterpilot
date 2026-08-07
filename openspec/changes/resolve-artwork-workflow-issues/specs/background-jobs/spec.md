@@ -48,3 +48,22 @@ After an upgrade containing the type-safe TMDB resolver, the system SHALL durabl
 
 - **WHEN** a repair job is cancelled, interrupted, or awaiting an automatic retry
 - **THEN** completed units remain normalized, unprocessed units remain pending, and the durable job exposes its current state
+
+### Requirement: Bound durable item-scope lookups
+
+Durable sync, discovery, apply, and automation jobs SHALL validate explicit media-item ID scopes in bounded database batches below the supported SQLite/libSQL parameter limit. Every batch SHALL preserve the requested media-server scope, and the combined result SHALL reject missing or cross-server items before execution. Retry payload size SHALL NOT cause the same logical scope to be issued as one unbounded `IN (...)` query.
+
+#### Scenario: A large retry payload is resumed
+
+- **WHEN** a partial-failed job produces a retry payload containing more item IDs than one safe database batch
+- **THEN** the runner validates the complete scope through multiple bounded queries and processes the same logical item set without exceeding the driver parameter limit
+
+#### Scenario: A large scope contains an invalid item
+
+- **WHEN** any batch contains a missing item or an item belonging to another media-server instance
+- **THEN** scope validation rejects the job before processing and does not treat the valid batches as authorization for the invalid item
+
+#### Scenario: A retry payload repeats item IDs
+
+- **WHEN** a retry payload contains duplicate media-item IDs
+- **THEN** scope validation deduplicates them deterministically before batching without processing the same item twice
