@@ -181,12 +181,53 @@ test.describe
 
 	test('applies a warning-free exact plan in one click, verifies it, and undoes it', async ({
 		page,
+		runtime,
 		scenario
 	}) => {
 		const itemId = scenario.primaryItems.alpha;
 		const endpoint = `/api/items/${itemId}/apply`;
+		const artwork = {
+			poster: {
+				server: `${runtime.fakeJellyfinUrl}/Items/jf-alpha/Images/Primary`,
+				canonical: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-primary-original.png`,
+				preview: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-primary-preview.png`
+			},
+			background: {
+				server: `${runtime.fakeJellyfinUrl}/Items/jf-alpha/Images/Backdrop`,
+				canonical: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-background-primary-original.png`,
+				preview: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-background-primary-preview.png`
+			}
+		};
+		const imageBytes = async (url) => {
+			const response = await fetch(url);
+			expect(response.ok, `image request ${url}`).toBeTruthy();
+			return Buffer.from(await response.arrayBuffer()).toString('base64');
+		};
+		const canonicalUrls = Object.values(artwork)
+			.map((slot) => slot.canonical)
+			.sort();
+		const beforeApply = {
+			poster: await imageBytes(artwork.poster.server),
+			background: await imageBytes(artwork.background.server)
+		};
+		const canonicalBytes = {
+			poster: await imageBytes(artwork.poster.canonical),
+			background: await imageBytes(artwork.background.canonical)
+		};
+		expect(canonicalBytes.poster).not.toBe(await imageBytes(artwork.poster.preview));
+		expect(canonicalBytes.background).not.toBe(await imageBytes(artwork.background.preview));
 		await gotoHydrated(page, `/item/${itemId}?returnTo=%2Freview`);
 		await page.getByLabel(t('library_apply_method_label')).selectOption('plex');
+		await expect(
+			page.locator('img[src*="jf-alpha-poster-primary-preview.png"]').first()
+		).toBeVisible();
+		await expect(
+			page.locator('img[src*="jf-alpha-background-primary-preview.png"]').first()
+		).toBeVisible();
+		expect(await page.locator('img[src*="jf-alpha-poster-primary-original.png"]').count()).toBe(0);
+		expect(await page.locator('img[src*="jf-alpha-background-primary-original.png"]').count()).toBe(
+			0
+		);
 
 		const previewResponsePromise = page.waitForResponse((response) => {
 			const url = new URL(response.url());
@@ -209,15 +250,37 @@ test.describe
 		await page.getByRole('button', { name: t('item_apply'), exact: true }).click();
 		const previewResponse = await previewResponsePromise;
 		expect(previewResponse.ok()).toBeTruthy();
-		expect(await previewResponse.json()).toMatchObject({
+		const preview = await previewResponse.json();
+		expect(preview).toMatchObject({
 			summary: { destinations: { server: 2, kometa: 0 }, skipCount: 0 }
 		});
+		const plannedUrls = preview.items
+			.flatMap((item) => item.operations)
+			.map((operation) => operation.selection.url)
+			.sort();
+		expect(plannedUrls).toEqual(canonicalUrls);
+		expect(plannedUrls.some((url) => url.includes('-preview.png'))).toBe(false);
 		const jobResponse = await jobResponsePromise;
 		expect(jobResponse.ok()).toBeTruthy();
 		const { jobId } = await jobResponse.json();
 		expect(jobId).toEqual(expect.any(Number));
 		await expectJobCompleted(page, jobId);
 		await expect(page.getByRole('status').filter({ hasText: t('item_msg_applied') })).toBeVisible();
+		expect(await imageBytes(artwork.poster.server)).toBe(canonicalBytes.poster);
+		expect(await imageBytes(artwork.background.server)).toBe(canonicalBytes.background);
+
+		const client = createClient({ url: `file:${runtime.databaseFile}` });
+		try {
+			const applied = await client.execute({
+				sql: `select url from applied_posters
+				 where server_instance_id = ? and media_item_id = ? and status = 'success'
+				 order by id desc limit 2`,
+				args: [scenario.primaryServerId, itemId]
+			});
+			expect(applied.rows.map((row) => String(row.url)).sort()).toEqual(canonicalUrls);
+		} finally {
+			client.close();
+		}
 
 		const undoButton = page.getByRole('button', { name: t('item_undo_item') }).first();
 		await expect(undoButton).toBeVisible();
@@ -229,6 +292,8 @@ test.describe
 		await expect(page.getByRole('status').filter({ hasText: t('item_undo_success') })).toBeVisible({
 			timeout: 30_000
 		});
+		expect(await imageBytes(artwork.poster.server)).toBe(beforeApply.poster);
+		expect(await imageBytes(artwork.background.server)).toBe(beforeApply.background);
 	});
 
 	test('exercises every FUN experiment without applying artwork automatically', async ({

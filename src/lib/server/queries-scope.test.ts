@@ -177,6 +177,14 @@ describe('server-scoped queries', () => {
 				'fanarttv',
 				'tmdb'
 			]);
+			const tmdbCandidate = detail?.candidates.find((candidate) => candidate.provider === 'tmdb');
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterUrl: tmdbCandidate!.url,
+					selectedPosterCandidateId: tmdbCandidate!.id
+				})
+				.where(eq(mediaItems.id, itemA));
 
 			providerConfig.current.providerFanart = false;
 			detail = await getItemDetail(itemA, 'server-a');
@@ -188,11 +196,19 @@ describe('server-scoped queries', () => {
 			detail = await getItemDetail(itemA, 'server-a');
 			expect(detail?.candidates).toEqual([]);
 			expect(detail?.providerGroups).toEqual([]);
+			expect(detail?.selectedRootPreviews.poster).toBe(tmdbCandidate!.previewUrl);
 		} finally {
 			providerConfig.current.providerMediux = true;
 			providerConfig.current.providerTmdb = true;
 			providerConfig.current.providerFanart = true;
 			providerConfig.current.providerThePosterDb = true;
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterUrl: 'https://provider.invalid/staged?secret=value',
+					selectedPosterCandidateId: null
+				})
+				.where(eq(mediaItems.id, itemA));
 		}
 	});
 

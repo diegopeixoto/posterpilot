@@ -10,6 +10,7 @@ import {
 import { REVIEW_STATES, type ReviewState } from './state';
 import { reviewStateExpression } from './state-sql';
 import { buildReviewDashboardSummary } from './dashboard-summary';
+import { resolveStagedArtworkPreview } from '$lib/server/posters/selection-preview';
 
 export type ReviewAvailability = 'candidates' | 'mediux' | 'none';
 export type ReviewSort = 'priority' | 'updated' | 'title' | 'year';
@@ -42,39 +43,6 @@ export interface ReviewCandidateSummary {
 	setAuthor: string | null;
 	score: number | null;
 	stale: boolean;
-}
-
-interface ReviewPreviewCandidate {
-	id: number;
-	mediaItemId: number;
-	url: string;
-	previewUrl: string | null;
-	kind: 'poster' | 'background' | 'season' | 'title_card';
-}
-
-/** Resolve a display-only preview without ever changing the canonical staged URL. */
-function selectedCandidatePreview(
-	candidates: ReviewPreviewCandidate[],
-	selection: {
-		mediaItemId: number;
-		kind: 'poster' | 'background';
-		url: string | null;
-		candidateId: number | null;
-	}
-): string | null {
-	if (!selection.url) return null;
-	const matchesSelection = (candidate: ReviewPreviewCandidate) =>
-		candidate.mediaItemId === selection.mediaItemId &&
-		candidate.kind === selection.kind &&
-		candidate.url === selection.url;
-	const matchedById =
-		selection.candidateId === null
-			? null
-			: candidates.find(
-					(candidate) => candidate.id === selection.candidateId && matchesSelection(candidate)
-				);
-	const matched = matchedById ?? candidates.find(matchesSelection);
-	return matched?.previewUrl ?? selection.url;
 }
 
 function reviewConditions(filter: ReviewFilter): SQL[] {
@@ -278,13 +246,13 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 		return {
 			item: {
 				...item,
-				selectedPosterPreviewUrl: selectedCandidatePreview(own, {
+				selectedPosterPreviewUrl: resolveStagedArtworkPreview(own, {
 					mediaItemId: item.id,
 					kind: 'poster',
 					url: item.selectedPosterUrl,
 					candidateId: item.selectedPosterCandidateId
 				}),
-				selectedBackgroundPreviewUrl: selectedCandidatePreview(own, {
+				selectedBackgroundPreviewUrl: resolveStagedArtworkPreview(own, {
 					mediaItemId: item.id,
 					kind: 'background',
 					url: item.selectedBackgroundUrl,

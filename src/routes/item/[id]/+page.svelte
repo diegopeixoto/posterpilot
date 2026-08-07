@@ -373,8 +373,15 @@
 				entry.url === canonicalUrl
 		);
 		// Candidate previews are trusted provider assets and belong in the thumb cache.
-		// Preserve the existing direct display for a custom URL that has no candidate row.
-		return candidate ? thumb(candidate.previewUrl ?? candidate.url) : canonicalUrl;
+		// A staged candidate remains previewable if its provider was disabled after staging;
+		// keep direct display only for a custom URL that has no matching candidate row.
+		const persistedPreview =
+			canonicalUrl ===
+			(kind === 'poster' ? data.item.selectedPosterUrl : data.item.selectedBackgroundUrl)
+				? data.selectedRootPreviews[kind]
+				: null;
+		const previewUrl = candidate?.previewUrl ?? candidate?.url ?? persistedPreview;
+		return previewUrl ? thumb(previewUrl) : canonicalUrl;
 	}
 	const selectedPosterPreview = $derived(stagedRootPreview('poster', selectedPoster));
 	const selectedBackgroundPreview = $derived(stagedRootPreview('background', selectedBackground));

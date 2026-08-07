@@ -141,12 +141,14 @@ export async function seedPrimaryScenario() {
 		for (const definition of definitions.slice(0, 3)) {
 			const item = byRatingKey.get(definition.ratingKey);
 			for (const kind of ['poster', 'background']) {
+				const assetStem = `${definition.ratingKey}-${kind}-primary`;
 				candidateRows.push({
 					itemId: Number(item.id),
 					tmdbId: definition.tmdbId,
 					kind,
-					assetId: `${definition.ratingKey}-${kind}-primary`,
-					url: `${runtime.fakeJellyfinUrl}/assets/${definition.ratingKey}-${kind}-primary.png`,
+					assetId: assetStem,
+					url: `${runtime.fakeJellyfinUrl}/assets/${assetStem}-original.png`,
+					previewUrl: `${runtime.fakeJellyfinUrl}/assets/${assetStem}-preview.png`,
 					score: kind === 'poster' ? 9.5 : 8.9
 				});
 			}
@@ -156,7 +158,8 @@ export async function seedPrimaryScenario() {
 			tmdbId: '71001',
 			kind: 'poster',
 			assetId: 'jf-alpha-poster-alternate',
-			url: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-alternate.png`,
+			url: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-alternate-original.png`,
+			previewUrl: `${runtime.fakeJellyfinUrl}/assets/jf-alpha-poster-alternate-preview.png`,
 			score: 8.7
 		});
 
@@ -165,16 +168,18 @@ export async function seedPrimaryScenario() {
 				client,
 				`insert into poster_candidates (
 				 server_instance_id, media_item_id, discovery_run_id, set_id, provider,
-				 provider_asset_id, set_author, design_family, language, url, kind,
+				 provider_asset_id, set_author, design_family, language, language_provenance,
+				 url, preview_url, kind,
 				 resolved_tmdb_id, resolved_media_type, width, height, score,
 				 active, stale, last_seen_at, created_at
 				) values (?, ?, null, 'e2e-violet-family', 'mediux', ?, 'E2E Curator',
-				 'violet-noir', 'en', ?, ?, ?, 'movie', ?, ?, ?, 1, 0, ?, ?)`,
+				 'violet-noir', 'en', 'tagged', ?, ?, ?, ?, 'movie', ?, ?, ?, 1, 0, ?, ?)`,
 				[
 					serverId,
 					candidate.itemId,
 					candidate.assetId,
 					candidate.url,
+					candidate.previewUrl,
 					candidate.kind,
 					candidate.tmdbId,
 					candidate.kind === 'poster' ? 1000 : 1600,
