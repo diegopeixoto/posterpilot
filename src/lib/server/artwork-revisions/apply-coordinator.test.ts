@@ -819,6 +819,47 @@ describe('ArtworkApplyCoordinator', () => {
 		expect(await snapshots.readBytes(after!)).toEqual(Buffer.from('external before apply'));
 	});
 
+	it('rechecks cancellation after the live artwork read and before applying bytes', async () => {
+		const planned = operation({ id: 'cancelled-during-live-read' });
+		const beforeArtwork = artwork('prepared prior', 'prepared-prior');
+		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		let releaseLiveRead!: () => void;
+		let signalLiveReadStarted!: () => void;
+		const liveReadStarted = new Promise<void>((resolve) => {
+			signalLiveReadStarted = resolve;
+		});
+		const liveReadReleased = new Promise<void>((resolve) => {
+			releaseLiveRead = resolve;
+		});
+		let readCount = 0;
+		let cancelled = false;
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => {
+				readCount += 1;
+				if (readCount === 2) {
+					signalLiveReadStarted();
+					await liveReadReleased;
+				}
+				return beforeArtwork;
+			}),
+			applyPosterBytes
+		} as unknown as MediaServer;
+		const subject = coordinator();
+
+		await subject.prepareOperation(planned, { server });
+		const pending = subject.executeServerOperation(planned, {
+			server,
+			isCancelled: () => cancelled
+		});
+		await liveReadStarted;
+		cancelled = true;
+		releaseLiveRead();
+
+		await expect(pending).rejects.toThrow('cancelled');
+		expect(applyPosterBytes).not.toHaveBeenCalled();
+	});
+
 	it('uses the exact typed movie file/id and records destination provenance on every snapshot and revision', async () => {
 		const subject = coordinator();
 		const planned = operation({
@@ -844,6 +885,7 @@ describe('ArtworkApplyCoordinator', () => {
 		expect(result).toMatchObject({ status: 'success', verification: 'exact' });
 		const rows = await database.select().from(artworkSnapshots);
 		const [revision] = await database.select().from(artworkRevisions);
+		const original = rows.find((row) => row.isOriginal);
 		const prior = rows.find((row) => row.id === revision?.beforeSnapshotId);
 		const after = rows.find((row) => row.id === revision?.afterSnapshotId);
 		expect(typedDestination).toMatchObject({
@@ -854,7 +896,14 @@ describe('ArtworkApplyCoordinator', () => {
 			filename: MOVIE_FILENAME
 		});
 		expect(planned.targetId).toBe(typedDestination.key);
-		expect(rows).toHaveLength(2);
+		expect(rows).toHaveLength(3);
+		expect(original?.id).not.toBe(prior?.id);
+		expect(original).toMatchObject({
+			state: 'absent',
+			value: null,
+			metadata: { kometaDestination: typedDestination },
+			isOriginal: true
+		});
 		expect(prior).toMatchObject({
 			state: 'absent',
 			value: null,

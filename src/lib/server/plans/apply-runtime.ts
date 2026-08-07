@@ -48,12 +48,9 @@ import { operationPlanStore } from './operation-plan-store';
 import { resolveScopedApplyTargets } from './apply-targets';
 
 const databaseServerRegistry = createDatabaseApplyServerRegistry();
-const databaseDestinationResolver = createApplyDestinationResolver({
-	serverRegistry: databaseServerRegistry
-});
-const databaseApplyPlanner = createDatabaseApplyPlanner({
-	resolveDestinationSlots: databaseDestinationResolver
-});
+function requestDestinationResolver(serverRegistry: ApplyServerRegistry = databaseServerRegistry) {
+	return createApplyDestinationResolver({ serverRegistry, cacheKometaReads: true });
+}
 
 /** Hold every in-process collision-guard source stable while a typed file is written. */
 async function withKometaGuardLocks<T>(config: AppConfig, operation: () => Promise<T>): Promise<T> {
@@ -84,7 +81,10 @@ export async function resolveDatabaseApplyTargets(
 }
 
 export async function previewDatabaseArtworkApply(request: PlanArtworkApplyRequest) {
-	return exactApplyPreviewResponse(await databaseApplyPlanner(request));
+	const planner = createDatabaseApplyPlanner({
+		resolveDestinationSlots: requestDestinationResolver()
+	});
+	return exactApplyPreviewResponse(await planner(request));
 }
 
 export async function confirmDatabaseArtworkApply(
@@ -97,7 +97,7 @@ export async function confirmDatabaseArtworkApply(
 	return confirmApplyPlan(request, {
 		store: operationPlanStore,
 		loadItemData: loadDatabaseApplyPlannerItemData,
-		resolveDestinationSlots: databaseDestinationResolver,
+		resolveDestinationSlots: requestDestinationResolver(),
 		validateContext: options.validateContext,
 		enqueue
 	});
@@ -169,7 +169,8 @@ export async function executeDatabaseFrozenApplyJob(
 	}
 	const resolveDestinationSlots = createApplyDestinationResolver({
 		serverRegistry: registry,
-		loadConfig: resolveConfig
+		loadConfig: () => Promise.resolve(config),
+		cacheKometaReads: true
 	});
 	await assertApplyPlanFresh(payload.plan, {
 		loadItemData: loadDatabaseApplyPlannerItemData,
@@ -202,7 +203,7 @@ export async function executeDatabaseFrozenApplyJob(
 		payload.plan,
 		{
 			serverRegistry: registry,
-			writeKometa: (items, operations = []) => {
+			writeKometa: (items, operations = [], isCancelled) => {
 				const filenames = new Set(items.map((item) => item.destination.filename));
 				const operationFilenames = new Set(
 					operations.map((operation) => operation.kometaDestination?.filename)
@@ -216,6 +217,7 @@ export async function executeDatabaseFrozenApplyJob(
 				}
 				return withKometaGuardLocks(config, () => {
 					return writeKometaYaml(kometaOutputDirectory(config), items, {
+						isCancelled,
 						validateCurrent: async (raw) => {
 							// Re-resolve mutable settings as the final awaited step while the
 							// exact typed file and every guard source are locked. After this
@@ -233,6 +235,7 @@ export async function executeDatabaseFrozenApplyJob(
 								inspectKometaCollisionGuard(liveConfig)
 							);
 							coordinator.assertKometaFresh(operations, raw);
+							if (isCancelled?.()) throw new Error('cancelled');
 						}
 					});
 				});

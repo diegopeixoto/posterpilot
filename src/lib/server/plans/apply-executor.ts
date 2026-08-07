@@ -22,6 +22,11 @@ export interface ApplyOperationExecutionResult {
 export interface ApplyOperationExecutionContext {
 	/** Bound provider for server operations; absent when resolution itself failed. */
 	server?: MediaServer;
+	/**
+	 * Cooperative cancellation guard for dependencies that await a final precondition
+	 * before mutating. Implementations must recheck it at their commit boundary.
+	 */
+	isCancelled?(): boolean;
 }
 
 export interface ApplyItemExecutionResult {
@@ -52,7 +57,11 @@ export interface ApplyPlanExecutionResult {
 
 export interface ApplyPlanExecutorDependencies {
 	serverRegistry: ApplyServerRegistry;
-	writeKometa(items: KometaItemInput[], operations?: ApplyPlanOperation[]): Promise<void>;
+	writeKometa(
+		items: KometaItemInput[],
+		operations?: ApplyPlanOperation[],
+		isCancelled?: () => boolean
+	): Promise<void>;
 	prepareOperation?(
 		operation: ApplyPlanOperation,
 		context: ApplyOperationExecutionContext
@@ -71,6 +80,26 @@ export interface ApplyPlanExecutorDependencies {
 export interface ApplyPlanExecutionHooks {
 	isCancelled?(): boolean;
 	progress?(processed: number, item: ApplyPlanItem): Promise<void>;
+}
+
+/**
+ * Count durable progress units using the same phases the executor reports:
+ * one server phase per item, one phase per exact Kometa file, or one phase for
+ * an item whose frozen plan contains skips only.
+ */
+export function countApplyPlanProgressUnits(payload: ApplyPlanPayloadV1): number {
+	return payload.items.reduce((total, item) => {
+		const hasServerPhase = item.operations.some((operation) => operation.destination === 'server');
+		const kometaFilenames = new Set(
+			item.operations.flatMap((operation) => {
+				if (operation.destination !== 'kometa') return [];
+				const filename = operation.kometaDestination?.filename;
+				if (!filename) throw new TypeError('Kometa operation is missing its typed destination');
+				return [filename];
+			})
+		);
+		return total + Math.max(1, Number(hasServerPhase) + kometaFilenames.size);
+	}, 0);
 }
 
 function errorMessage(error: unknown): string {
@@ -168,6 +197,11 @@ export async function executeFrozenApplyPlan(
 			results: ApplyOperationExecutionResult[];
 		}>
 	>();
+	let processed = 0;
+	const reportProgress = async (item: ApplyPlanItem): Promise<void> => {
+		processed++;
+		await hooks.progress?.(processed, item);
+	};
 
 	for (const item of payload.items) {
 		if (hooks.isCancelled?.()) break;
@@ -187,9 +221,12 @@ export async function executeFrozenApplyPlan(
 					throw new Error('Server registry returned the wrong instance');
 				}
 				for (const operation of serverOperations) {
+					const context: ApplyOperationExecutionContext = {
+						server: binding.server,
+						isCancelled: hooks.isCancelled
+					};
 					let result: ApplyOperationExecutionResult;
 					try {
-						const context = { server: binding.server };
 						if (hooks.isCancelled?.()) throw new Error('cancelled');
 						await dependencies.prepareOperation?.(operation, context);
 						if (hooks.isCancelled?.()) throw new Error('cancelled');
@@ -220,7 +257,7 @@ export async function executeFrozenApplyPlan(
 							error: errorMessage(error)
 						};
 					}
-					result = await record(dependencies, operation, result, { server: binding.server });
+					result = await record(dependencies, operation, result, context);
 					results.push(result);
 				}
 			} catch (error) {
@@ -236,6 +273,7 @@ export async function executeFrozenApplyPlan(
 					results.push(await record(dependencies, operation, result));
 				}
 			}
+			await reportProgress(item);
 		}
 
 		if (kometaOperations.length) {
@@ -253,11 +291,15 @@ export async function executeFrozenApplyPlan(
 				kometaBatches.set(filename, batch);
 			}
 		}
+		if (serverOperations.length === 0 && kometaOperations.length === 0) {
+			await reportProgress(item);
+		}
 	}
 
-	// One atomic writer call per exact metadata file. All operations sharing a file
-	// observe the same pre-write state, while a failure in one file does not prevent
-	// an independent movie/show file from succeeding.
+	// One atomic, all-or-nothing writer call per exact metadata file. All operations
+	// sharing a file observe the same pre-write state; if preparation, CAS, or the
+	// write fails, every operation in that file fails without a partial file commit.
+	// The other typed file remains an independent failure domain.
 	for (const [, entries] of [...kometaBatches.entries()].sort(([left], [right]) =>
 		left.localeCompare(right)
 	)) {
@@ -271,7 +313,8 @@ export async function executeFrozenApplyPlan(
 			if (hooks.isCancelled?.()) throw new Error('cancelled');
 			await dependencies.writeKometa(
 				entries.map((entry) => kometaInput(entry.item, entry.operations)),
-				operations
+				operations,
+				hooks.isCancelled
 			);
 		} catch (caught) {
 			error = caught;
@@ -288,11 +331,11 @@ export async function executeFrozenApplyPlan(
 				};
 				entry.results.push(await record(dependencies, operation, result));
 			}
+			await reportProgress(entry.item);
 		}
 	}
 
 	const items: ApplyItemExecutionResult[] = [];
-	let processed = 0;
 	for (const { item, results } of pendingItems) {
 		const resultByOperation = new Map(results.map((result) => [result.operationId, result]));
 		items.push({
@@ -301,8 +344,6 @@ export async function executeFrozenApplyPlan(
 			operations: item.operations.map((operation) => resultByOperation.get(operation.id)!),
 			skips: item.skips
 		});
-		processed++;
-		await hooks.progress?.(processed, item);
 	}
 
 	const operationResults = items.flatMap((item) => item.operations);

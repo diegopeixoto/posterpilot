@@ -10,7 +10,11 @@ import {
 } from '$lib/server/remote-artwork';
 import { canonicalJsonDigest, hashCanonicalJson } from './canonical-json';
 import { confirmApplyPlan, exactApplyPreviewResponse } from './apply-api';
-import { executeFrozenApplyPlan, type ApplyPlanExecutorDependencies } from './apply-executor';
+import {
+	countApplyPlanProgressUnits,
+	executeFrozenApplyPlan,
+	type ApplyPlanExecutorDependencies
+} from './apply-executor';
 import {
 	applySlotKey,
 	type ApplyPlanDestination,
@@ -664,6 +668,199 @@ describe('frozen apply flow', () => {
 		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
 	});
 
+	it('propagates the cooperative cancellation guard to mutation dependencies', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'both'
+		});
+		const isCancelled = vi.fn(() => false);
+		const prepareOperation = vi.fn<NonNullable<ApplyPlanExecutorDependencies['prepareOperation']>>(
+			async (operation, context) => {
+				if (operation.destination === 'server') expect(context.isCancelled).toBe(isCancelled);
+			}
+		);
+		const executeServerOperation = vi.fn<
+			NonNullable<ApplyPlanExecutorDependencies['executeServerOperation']>
+		>(async (_operation, context) => {
+			expect(context.isCancelled).toBe(isCancelled);
+		});
+		const recordOutcome = vi.fn<NonNullable<ApplyPlanExecutorDependencies['recordOutcome']>>(
+			async (operation, result, context) => {
+				if (operation.destination === 'server') expect(context.isCancelled).toBe(isCancelled);
+				return result;
+			}
+		);
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(
+			async (_items, _operations, cancellationGuard) => {
+				expect(cancellationGuard).toBe(isCancelled);
+			}
+		);
+
+		await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: { type: 'plex' } as never
+					})
+				},
+				writeKometa,
+				prepareOperation,
+				executeServerOperation,
+				recordOutcome
+			},
+			{ isCancelled }
+		);
+
+		expect(executeServerOperation).toHaveBeenCalledTimes(2);
+		expect(writeKometa).toHaveBeenCalledOnce();
+	});
+
+	it('reports server-only progress as each item completes', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'bulk', resultSetFingerprint: 'incremental-progress' },
+			targets: [
+				{ serverInstanceId: 'server-a', mediaItemId: 1 },
+				{ serverInstanceId: 'server-a', mediaItemId: 2 }
+			],
+			selectionMode: 'auto',
+			method: 'server'
+		});
+		let executedOperations = 0;
+		const progress: Array<{
+			processed: number;
+			mediaItemId: number;
+			executedOperations: number;
+		}> = [];
+
+		await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: { type: 'plex' } as never
+					})
+				},
+				writeKometa: vi.fn(),
+				prepareOperation: vi.fn(async () => undefined),
+				executeServerOperation: vi.fn(async () => {
+					executedOperations++;
+				})
+			},
+			{
+				progress: async (processed, item) => {
+					progress.push({
+						processed,
+						mediaItemId: item.target.mediaItemId,
+						executedOperations
+					});
+				}
+			}
+		);
+
+		expect(progress).toEqual([
+			{ processed: 1, mediaItemId: 1, executedOperations: 2 },
+			{ processed: 2, mediaItemId: 2, executedOperations: 4 }
+		]);
+		expect(countApplyPlanProgressUnits(preview.payload)).toBe(2);
+	});
+
+	it('reports one progress unit for an item whose frozen plan contains skips only', async () => {
+		const fixture = setup();
+		fixture.items[0].item.ignored = true;
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'both'
+		});
+		const progress = vi.fn(async () => undefined);
+
+		await executeFrozenApplyPlan(
+			'skip-only-plan',
+			canonicalJsonDigest(preview.payload).digest,
+			preview.payload,
+			{
+				serverRegistry: { resolve: vi.fn() },
+				writeKometa: vi.fn()
+			},
+			{ progress }
+		);
+
+		expect(preview.payload.items[0]).toMatchObject({ operations: [] });
+		expect(preview.payload.items[0].skips).toEqual(
+			expect.arrayContaining([expect.objectContaining({ code: 'item_ignored' })])
+		);
+		expect(progress).toHaveBeenCalledOnce();
+		expect(progress).toHaveBeenCalledWith(1, preview.payload.items[0]);
+		expect(countApplyPlanProgressUnits(preview.payload)).toBe(1);
+	});
+
+	it('reports mixed server phases before the shared Kometa batch and Kometa phases after it', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'bulk', resultSetFingerprint: 'mixed-phase-progress' },
+			targets: [
+				{ serverInstanceId: 'server-a', mediaItemId: 1 },
+				{ serverInstanceId: 'server-a', mediaItemId: 2 }
+			],
+			selectionMode: 'auto',
+			method: 'both'
+		});
+		const progress: Array<{ processed: number; mediaItemId: number }> = [];
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(async (items) => {
+			expect(items).toHaveLength(2);
+			expect(progress).toEqual([
+				{ processed: 1, mediaItemId: 1 },
+				{ processed: 2, mediaItemId: 2 }
+			]);
+		});
+
+		await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: { type: 'plex' } as never
+					})
+				},
+				writeKometa,
+				prepareOperation: vi.fn(async () => undefined),
+				executeServerOperation: vi.fn(async () => undefined)
+			},
+			{
+				progress: async (processed, item) => {
+					progress.push({ processed, mediaItemId: item.target.mediaItemId });
+				}
+			}
+		);
+
+		expect(writeKometa).toHaveBeenCalledOnce();
+		expect(progress).toEqual([
+			{ processed: 1, mediaItemId: 1 },
+			{ processed: 2, mediaItemId: 2 },
+			{ processed: 3, mediaItemId: 1 },
+			{ processed: 4, mediaItemId: 2 }
+		]);
+		expect(countApplyPlanProgressUnits(preview.payload)).toBe(4);
+	});
+
 	it('does not mutate the server when cancelled during operation preparation', async () => {
 		const fixture = setup();
 		const preview = await fixture.planner({
@@ -750,6 +947,48 @@ describe('frozen apply flow', () => {
 		expect(prepareOperation).toHaveBeenCalledTimes(cancelAfter);
 		expect(writeKometa).not.toHaveBeenCalled();
 		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 0, failed: 2 });
+		expect(result.items[0].operations).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ status: 'failed', error: 'cancelled' }),
+				expect.objectContaining({ status: 'failed', error: 'cancelled' })
+			])
+		);
+	});
+
+	it('keeps a Kometa writer from committing when cancellation arrives during its final await', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+		let cancelled = false;
+		let committed = false;
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(
+			async (_items, _operations, isCancelled) => {
+				await Promise.resolve();
+				cancelled = true;
+				if (isCancelled?.()) throw new Error('cancelled');
+				committed = true;
+			}
+		);
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: { resolve: vi.fn() },
+				writeKometa,
+				prepareOperation: vi.fn(async () => undefined)
+			},
+			{ isCancelled: () => cancelled }
+		);
+
+		expect(writeKometa).toHaveBeenCalledOnce();
+		expect(committed).toBe(false);
+		expect(result.summary).toMatchObject({ succeeded: 0, failed: 2 });
 		expect(result.items[0].operations).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ status: 'failed', error: 'cancelled' }),

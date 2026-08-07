@@ -200,22 +200,29 @@ const POSTERPILOT_METADATA_FILES = new Set<string>([
 ]);
 
 class KometaLibraryPlanError extends Error {
-	constructor(
-		readonly code:
-			| 'kometa_library_missing'
-			| 'kometa_library_type_unsupported'
-			| 'kometa_migration_required'
-	) {
+	constructor(readonly code: 'kometa_library_missing' | 'kometa_migration_required') {
 		super(code);
 		this.name = 'KometaLibraryPlanError';
 	}
 }
 
+function requiresKometaLayoutMigration(raw: string): boolean {
+	const classification = classifyKometaLegacyConfig(raw);
+	return !classification.known || classification.references.length > 0;
+}
+
 /** Select a co-located basename from the authoritative media-server library type. */
-function metadataFileForLibraryType(type: string): KometaMetadataFilename {
+function metadataFileForLibraryType(type: string): KometaMetadataFilename | null {
 	if (type === 'movie') return MOVIE_FILENAME;
 	if (type === 'show') return SHOW_FILENAME;
-	throw new KometaLibraryPlanError('kometa_library_type_unsupported');
+	return null;
+}
+
+function recordsForLibraries<T>(
+	values: Record<string, T>,
+	allowed: Set<string>
+): Record<string, T> {
+	return Object.fromEntries(Object.entries(values).filter(([key]) => allowed.has(key)));
 }
 
 /** Build the desired-state plan from the user's selections + resolved config. */
@@ -225,21 +232,38 @@ async function planFromSelections(
 	binding: KometaServerBinding,
 	currentManagedSettings: Record<string, string>,
 	storedManagedSettings: Record<string, string>
-): Promise<ConfigPlan> {
+): Promise<{ plan: ConfigPlan; selection: SyncSelectionInput; warnings: string[] }> {
 	const cached = await getCachedLibraries(binding.id);
 	const libraryByKey = new Map(cached.map((library) => [library.key, library]));
-	const libraries = sel.libraries.map((key) => {
+	const supportedLibraryKeys = new Set<string>();
+	const warnings = new Set<string>();
+	const libraries: Parameters<typeof buildPlan>[0]['libraries'] = [];
+	for (const key of sel.libraries) {
 		const library = libraryByKey.get(key);
 		if (!library?.title) throw new KometaLibraryPlanError('kometa_library_missing');
-		return {
+		const metadataFile = metadataFileForLibraryType(library.type);
+		if (!metadataFile) {
+			warnings.add('kometa_library_type_unsupported');
+			continue;
+		}
+		supportedLibraryKeys.add(key);
+		libraries.push({
 			name: library.title,
 			defaults: knownDefaults(sel.defaults[key] ?? []),
 			overlays: knownOverlays(sel.overlays[key] ?? []),
 			operations: sel.operations[key] ?? {},
 			settingsOverrides: sel.librarySettings[key] ?? {},
-			metadataFile: metadataFileForLibraryType(library.type)
-		};
-	});
+			metadataFile
+		});
+	}
+	const selection: SyncSelectionInput = {
+		...sel,
+		libraries: sel.libraries.filter((key) => supportedLibraryKeys.has(key)),
+		defaults: recordsForLibraries(sel.defaults, supportedLibraryKeys),
+		overlays: recordsForLibraries(sel.overlays, supportedLibraryKeys),
+		operations: recordsForLibraries(sel.operations, supportedLibraryKeys),
+		librarySettings: recordsForLibraries(sel.librarySettings, supportedLibraryKeys)
+	};
 
 	// A blank secret means "leave the stored value alone" → carry it forward via
 	// connectionKeep so it is not deleted on resync. A blank non-secret means
@@ -283,14 +307,18 @@ async function planFromSelections(
 		}
 	}
 
-	return buildPlan({
-		creds: { plexUrl: binding.plexUrl, plexToken: binding.plexToken, tmdbKey: config.tmdbKey },
-		libraries,
-		settings,
-		settingKeep,
-		connections,
-		connectionKeep
-	});
+	return {
+		plan: buildPlan({
+			creds: { plexUrl: binding.plexUrl, plexToken: binding.plexToken, tmdbKey: config.tmdbKey },
+			libraries,
+			settings,
+			settingKeep,
+			connections,
+			connectionKeep
+		}),
+		selection,
+		warnings: [...warnings]
+	};
 }
 
 function readManagedSettingValues(doc: ReturnType<typeof loadDoc>): Record<string, string> {
@@ -556,21 +584,28 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 	}
 	const binding = resolvedBinding.binding;
 	const raw = readConfig(config.kometaConfigPath);
-	if (raw !== null && classifyKometaLegacyConfig(raw).references.length > 0) {
+	const sourceDoc = loadDoc(raw ?? '');
+	if (sourceDoc.errors.length > 0) {
+		return parseErrorResult(config.kometaConfigMode, sourceDoc.errors[0].message);
+	}
+	// Deliberately block the whole structured config plan: changing settings while
+	// preserving a legacy metadata reference would produce a seemingly successful
+	// sync that still cannot authorize typed artwork writes. The dedicated migration
+	// previews and activates the config plus split files as one recoverable operation.
+	if (raw !== null && requiresKometaLayoutMigration(raw)) {
 		return libraryPlanErrorResult(
 			config,
 			raw,
 			new KometaLibraryPlanError('kometa_migration_required')
 		);
 	}
-	const sourceDoc = loadDoc(raw ?? '');
 	const [snapshot, storedManagedSettings] = await Promise.all([
 		getKometaLastApplied(),
 		getKometaManagedSettings()
 	]);
-	let plan: ConfigPlan;
+	let planned: Awaited<ReturnType<typeof planFromSelections>>;
 	try {
-		plan = await planFromSelections(
+		planned = await planFromSelections(
 			config,
 			sel,
 			binding,
@@ -583,11 +618,13 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		}
 		throw error;
 	}
+	const { plan, selection, warnings: planningWarnings } = planned;
 
 	const out = computeSync(config, plan, raw, snapshot);
 	if ('parseError' in out) return parseErrorResult(config.kometaConfigMode, out.parseError);
 	const consistency = checkConsistency(plan, raw !== null ? loadDoc(raw) : loadDoc(''));
 	const proposedContent = serialize(out.res.doc);
+	const warnings = [...new Set([...out.res.warnings, ...planningWarnings])];
 	const payload = jsonSafe<KometaConfigPlanPayload>({
 		type: KOMETA_CONFIG_PLAN_KIND,
 		version: 1,
@@ -601,12 +638,12 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		proposedContent,
 		display: {
 			changes: out.res.changes,
-			warnings: out.res.warnings,
+			warnings,
 			dropped: out.dropped,
 			consistency,
 			willScaffold: out.willScaffold
 		},
-		structured: { selection: sel, nextSnapshot: out.res.nextSnapshot },
+		structured: { selection, nextSnapshot: out.res.nextSnapshot },
 		restore: null
 	});
 	assertKometaConfigPlanPayload(payload);
@@ -622,7 +659,7 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 		willScaffold: out.willScaffold,
 		parseError: null,
 		changes: redactSecrets(out.res.changes),
-		warnings: out.res.warnings,
+		warnings,
 		dropped: out.dropped,
 		consistency,
 		...planIdentity(frozen)
@@ -837,7 +874,7 @@ async function confirmKometaConfigPlan(
 		if (
 			expectedAction === 'structured' &&
 			current !== null &&
-			classifyKometaLegacyConfig(current).references.length > 0
+			requiresKometaLayoutMigration(current)
 		) {
 			throw new OperationPlanError('plan_stale', request.planId);
 		}

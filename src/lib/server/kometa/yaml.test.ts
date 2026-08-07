@@ -96,6 +96,25 @@ describe('buildMetadataObject', () => {
 });
 
 describe('mergeMetadata', () => {
+	it('rejects logically duplicate keys in an existing metadata Map', () => {
+		const metadata = new Map<string | number, { url_poster: string }>([
+			[550, { url_poster: 'https://example.test/first.jpg' }],
+			['550', { url_poster: 'https://example.test/second.jpg' }]
+		]);
+		const existing = { metadata };
+
+		expect(() =>
+			mergeMetadata(existing, [
+				{
+					destination: movieDestination('550'),
+					title: 'Fight Club',
+					posterUrl: 'https://example.test/new.jpg'
+				}
+			])
+		).toThrow('Ambiguous existing Kometa YAML keys');
+		expect([...metadata.keys()]).toEqual([550, '550']);
+	});
+
 	it('updates an existing tmdb key in place rather than duplicating', () => {
 		const existing = {
 			metadata: {
@@ -455,6 +474,114 @@ describe('writeKometaYaml', () => {
 		expect(String(error)).toContain('Invalid existing Kometa YAML');
 		expect(String(error)).not.toContain(credential);
 		expect(readFileSync(movieFile, 'utf8')).toBe(malformed);
+	});
+
+	it.each([
+		{
+			name: 'metadata ids',
+			raw: [
+				'metadata:',
+				'  550:',
+				'    url_poster: first.jpg',
+				'  "550":',
+				'    url_poster: second.jpg',
+				''
+			].join('\n'),
+			item: {
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/new.jpg'
+			} satisfies KometaItemInput
+		},
+		{
+			name: 'season ids',
+			raw: [
+				'metadata:',
+				'  550:',
+				'    seasons:',
+				'      1:',
+				'        url_poster: first.jpg',
+				'      "1":',
+				'        url_poster: second.jpg',
+				''
+			].join('\n'),
+			item: {
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				seasons: [{ season: 1, posterUrl: 'https://example.test/new.jpg' }]
+			} satisfies KometaItemInput
+		}
+	])('rejects logically duplicate $name without changing the file', async ({ raw, item }) => {
+		writeFileSync(movieFile, raw, 'utf8');
+
+		await expect(writeKometaYaml(dir, [item])).rejects.toThrow(
+			'Ambiguous existing Kometa YAML keys'
+		);
+		expect(readFileSync(movieFile, 'utf8')).toBe(raw);
+	});
+
+	it.each([
+		['root', 'keep-this-root\n'],
+		['metadata', 'metadata: keep-this-metadata\n'],
+		['item', 'metadata:\n  550: [keep-this-item]\n'],
+		['seasons', 'metadata:\n  550:\n    seasons: [keep-these-seasons]\n']
+	])('rejects an incompatible managed %s node without changing the file', async (_label, raw) => {
+		writeFileSync(movieFile, raw, 'utf8');
+
+		await expect(
+			writeKometaYaml(dir, [
+				{
+					destination: movieDestination('550'),
+					title: 'Fight Club',
+					posterUrl: 'https://example.test/new.jpg'
+				}
+			])
+		).rejects.toThrow(/not a mapping/);
+		expect(readFileSync(movieFile, 'utf8')).toBe(raw);
+	});
+
+	it('promotes an explicit YAML null root to managed mappings', async () => {
+		writeFileSync(movieFile, 'null\n', 'utf8');
+
+		await writeKometaYaml(dir, [
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/new.jpg'
+			}
+		]);
+
+		expect(parse(readFileSync(movieFile, 'utf8'))).toEqual({
+			metadata: { 550: { url_poster: 'https://example.test/new.jpg' } }
+		});
+	});
+
+	it('rechecks cancellation after async validation and before merge or write', async () => {
+		const original = 'metadata: {}\n';
+		writeFileSync(movieFile, original, 'utf8');
+		let cancelled = false;
+
+		await expect(
+			writeKometaYaml(
+				dir,
+				[
+					{
+						destination: movieDestination('550'),
+						title: 'Fight Club',
+						posterUrl: 'https://example.test/new.jpg'
+					}
+				],
+				{
+					validateCurrent: async () => {
+						queueMicrotask(() => {
+							cancelled = true;
+						});
+					},
+					isCancelled: () => cancelled
+				}
+			)
+		).rejects.toThrow('cancelled');
+		expect(readFileSync(movieFile, 'utf8')).toBe(original);
 	});
 
 	it('isolates equal numeric movie and show identifiers in separate files', async () => {

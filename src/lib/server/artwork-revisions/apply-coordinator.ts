@@ -306,6 +306,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			liveArtwork = undefined;
 		}
 		assertArtworkMatches(liveArtwork, artworkFingerprint(captured.beforeArtwork));
+		if (context.isCancelled?.()) throw new Error('cancelled');
 
 		if (operation.slot.kind === 'background') {
 			if (!server.applyBackgroundBytes) {
@@ -348,6 +349,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			value: beforeValue.state === 'present' ? beforeValue : undefined,
 			metadata: { kometaDestination }
 		};
+		await options.snapshots.captureValue({ ...scope, isOriginal: true });
 		const before = await options.snapshots.captureValue(scope);
 		prepared.set(operation.id, {
 			destination: 'kometa',

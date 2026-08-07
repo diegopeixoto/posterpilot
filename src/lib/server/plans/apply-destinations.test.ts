@@ -183,6 +183,37 @@ describe('Kometa apply destination binding', () => {
 		expect(show.targetId).not.toBe(movie.targetId);
 	});
 
+	it('reuses one immutable Kometa file snapshot within a request-scoped resolver', async () => {
+		const directory = mkdtempSync(join(tmpdir(), 'posterpilot-kometa-request-cache-'));
+		temporaryDirectories.push(directory);
+		const configPath = join(directory, 'config.yml');
+		writeFileSync(configPath, 'settings:\n  cache: true\n');
+		writeFileSync(
+			join(directory, MOVIE_FILENAME),
+			'metadata:\n  101:\n    url_poster: first.jpg\n  202:\n    url_poster: second.jpg\n'
+		);
+		const loadConfig = vi.fn(async () => config('server-a', { kometaConfigPath: configPath }));
+		const resolve = createApplyDestinationResolver({
+			serverRegistry: registry(),
+			loadConfig,
+			cacheKometaReads: true
+		});
+
+		const [first] = await resolve(input('server-a', { tmdbId: '101' }));
+		writeFileSync(
+			join(directory, MOVIE_FILENAME),
+			'metadata:\n  101:\n    url_poster: changed.jpg\n  202:\n    url_poster: changed-too.jpg\n'
+		);
+		const [second] = await resolve(
+			input('server-a', { mediaItemId: 2, sourceId: 'movie-2', tmdbId: '202' })
+		);
+
+		expect(loadConfig).toHaveBeenCalledOnce();
+		expect(first.current.url).toBe('first.jpg');
+		expect(second.current.url).toBe('second.jpg');
+		expect(second.kometaFileFingerprint).toBe(first.kometaFileFingerprint);
+	});
+
 	it('uses authoritative type despite provider type disagreement and falls back to IMDb', async () => {
 		const readKometaState = vi.fn(async () => ({
 			kometaFileFingerprint: KOMETA_FILE_FINGERPRINT,

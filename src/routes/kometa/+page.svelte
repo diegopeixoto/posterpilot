@@ -67,6 +67,7 @@
 		key: string;
 		title: string;
 		type: string;
+		supported: boolean;
 		managed: boolean;
 		collections: SvelteSet<string>;
 		overlays: SvelteSet<string>;
@@ -77,11 +78,13 @@
 	const libs = $state<LibUI[]>(
 		km.availableLibraries.map((l) => {
 			const st = km.libraryState[l.title];
+			const supported = l.type === 'movie' || l.type === 'show';
 			return {
 				key: l.key,
 				title: l.title,
 				type: l.type,
-				managed: km.managedLibraries.includes(l.key) || Boolean(st?.hasMetadata),
+				supported,
+				managed: supported && (km.managedLibraries.includes(l.key) || Boolean(st?.hasMetadata)),
 				collections: new SvelteSet(st?.collections ?? km.defaultCollections[l.key] ?? []),
 				overlays: new SvelteSet(st?.overlays ?? []),
 				operations: { ...(st?.operations ?? {}) },
@@ -123,7 +126,7 @@
 		const operations: Record<string, Record<string, string>> = {};
 		const librarySettings: Record<string, Record<string, string>> = {};
 		for (const lib of libs) {
-			if (!lib.managed) continue;
+			if (!lib.supported || !lib.managed) continue;
 			libraries.push(lib.key);
 			if (lib.collections.size) defaults[lib.key] = [...lib.collections];
 			if (lib.overlays.size) overlays[lib.key] = [...lib.overlays];
@@ -510,11 +513,18 @@
 			{#each libs as lib (lib.key)}
 				<div class="surface p-4">
 					<div class="flex items-center justify-between gap-3">
-						<label class="flex items-center gap-2 text-sm font-medium">
-							<input type="checkbox" bind:checked={lib.managed} />
+						<label
+							class="flex items-center gap-2 text-sm font-medium"
+							class:text-neutral-500={!lib.supported}
+						>
+							<input type="checkbox" bind:checked={lib.managed} disabled={!lib.supported} />
 							{lib.title}
 							<span class="text-xs text-neutral-400">
-								({lib.type === 'movie' ? m.manual_match_type_movie() : m.manual_match_type_show()})
+								({lib.type === 'movie'
+									? m.manual_match_type_movie()
+									: lib.type === 'show'
+										? m.manual_match_type_show()
+										: lib.type || '—'})
 							</span>
 						</label>
 						<button
@@ -526,6 +536,11 @@
 							{expanded === lib.key ? m.kometa_collapse() : m.kometa_expand()}
 						</button>
 					</div>
+					{#if !lib.supported}
+						<p class="mt-2 text-xs text-amber-300">
+							{m.kometa_library_type_unsupported_warning()}
+						</p>
+					{/if}
 					{#if lib.managed && expanded === lib.key}
 						<div class="mt-4 space-y-4 border-t border-neutral-800 pt-4">
 							<div>
