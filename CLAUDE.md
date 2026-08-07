@@ -19,9 +19,14 @@ Tailwind v4 (`@theme` tokens + `@layer components` in `src/app.css`), Paraglide 
   instead of every intermediate commit. Keep no `type: description` lines in a PR body;
   release-please reads them as extra changelog entries.
 - **Release notes are curated, not generated** — release-please owns the version, tag, and
-  raw ledger; the `release-notes` skill rewrites that into user-facing notes in both
-  `CHANGELOG.md` and the release PR body _before_ the release PR merges. Run it after the
-  last merge — release-please force-pushes the release branch on every push to `main`.
+  raw ledger; the `release-notes` skill rewrites that into user-facing notes: the release PR
+  _body_ before merge (it becomes the GitHub Release), `CHANGELOG.md` in a follow-up PR after
+  the tag. Run it after the last merge — release-please force-pushes the release branch on
+  every push to `main`.
+- **Never commit to the release-please branch** — merging a release PR that carries extra
+  commits bumps the manifest but emits `release_created: false`, so no tag, no release, and
+  no Docker image; re-running does not fix it. The PR _body_ is safe to edit. Recovery steps
+  are in the `release-notes` skill.
 - **No Claude trailers** in commits (no `Co-Authored-By: Claude`, no `Claude-Session:`).
   Commits are authored under the maintainer's git identity.
 - **Quality gates before a PR is ready:** `bun run check` (0 errors), `bun run test`,
