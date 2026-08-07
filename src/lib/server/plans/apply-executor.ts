@@ -190,7 +190,9 @@ export async function executeFrozenApplyPlan(
 					let result: ApplyOperationExecutionResult;
 					try {
 						const context = { server: binding.server };
+						if (hooks.isCancelled?.()) throw new Error('cancelled');
 						await dependencies.prepareOperation?.(operation, context);
+						if (hooks.isCancelled?.()) throw new Error('cancelled');
 						if (dependencies.executeServerOperation) {
 							await dependencies.executeServerOperation(operation, context);
 						} else if (operation.slot.kind === 'background') {
@@ -263,8 +265,10 @@ export async function executeFrozenApplyPlan(
 		let error: unknown = null;
 		try {
 			for (const operation of operations) {
+				if (hooks.isCancelled?.()) throw new Error('cancelled');
 				await dependencies.prepareOperation?.(operation, {});
 			}
+			if (hooks.isCancelled?.()) throw new Error('cancelled');
 			await dependencies.writeKometa(
 				entries.map((entry) => kometaInput(entry.item, entry.operations)),
 				operations

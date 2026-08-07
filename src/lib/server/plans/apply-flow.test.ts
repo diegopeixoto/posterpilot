@@ -664,6 +664,100 @@ describe('frozen apply flow', () => {
 		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
 	});
 
+	it('does not mutate the server when cancelled during operation preparation', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'server'
+		});
+		let cancelled = false;
+		const applyPosterUrl = vi.fn(async () => undefined);
+		const applyBackgroundUrl = vi.fn(async () => undefined);
+		const prepareOperation = vi.fn(async () => {
+			await Promise.resolve();
+			cancelled = true;
+		});
+		const executeServerOperation = vi.fn(async () => undefined);
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: {
+							type: 'plex',
+							applyPosterUrl,
+							applyBackgroundUrl
+						} as never
+					})
+				},
+				writeKometa: vi.fn(),
+				prepareOperation,
+				executeServerOperation
+			},
+			{ isCancelled: () => cancelled }
+		);
+
+		expect(prepareOperation).toHaveBeenCalledTimes(1);
+		expect(executeServerOperation).not.toHaveBeenCalled();
+		expect(applyPosterUrl).not.toHaveBeenCalled();
+		expect(applyBackgroundUrl).not.toHaveBeenCalled();
+		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 0, failed: 2 });
+		expect(result.items[0].operations).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ status: 'failed', error: 'cancelled' }),
+				expect.objectContaining({ status: 'failed', error: 'cancelled' })
+			])
+		);
+	});
+
+	it.each([
+		['between Kometa operation preparations', 1],
+		['immediately before the Kometa write', 2]
+	] as const)('does not write a Kometa batch when cancelled %s', async (_boundary, cancelAfter) => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+		let cancelled = false;
+		const prepareOperation = vi.fn(async () => {
+			await Promise.resolve();
+			if (prepareOperation.mock.calls.length === cancelAfter) cancelled = true;
+		});
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(async () => undefined);
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: { resolve: vi.fn() },
+				writeKometa,
+				prepareOperation
+			},
+			{ isCancelled: () => cancelled }
+		);
+
+		expect(prepareOperation).toHaveBeenCalledTimes(cancelAfter);
+		expect(writeKometa).not.toHaveBeenCalled();
+		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 0, failed: 2 });
+		expect(result.items[0].operations).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ status: 'failed', error: 'cancelled' }),
+				expect.objectContaining({ status: 'failed', error: 'cancelled' })
+			])
+		);
+	});
+
 	it('isolates an atomic failure in one typed file from the other file batch', async () => {
 		const fixture = setup();
 		fixture.items[1].item.identity.type = 'show';
