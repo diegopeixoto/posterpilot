@@ -1,6 +1,6 @@
 ---
 name: release-notes
-description: Use when a release-please PR is open and its changelog needs to be rewritten as human release notes — grouping commit-level entries into user-facing themes, adding Upgrading and Contributors, and writing the result into both CHANGELOG.md and the release PR body before merge. Triggers on "release notes", "write the changelog", "curate the release", "prep the release PR".
+description: Use when a release-please PR is open and its generated changelog needs to become human release notes — grouping commit-level entries into user-facing themes, adding Upgrading and Contributors, writing them into the release PR body before merge and into CHANGELOG.md after the tag. Also carries the rule that the release branch must never be committed to, and the recovery steps when a tag is missed. Triggers on "release notes", "write the changelog", "curate the release", "prep the release PR".
 ---
 
 # Release notes
@@ -9,25 +9,34 @@ release-please decides the version, the tag, and the raw ledger. It cannot decid
 release *means* to someone running PosterPilot. This skill closes that gap: it turns the
 generated commit list into the house-style notes, in place, before the release PR merges.
 
-## The two artifacts
+## Never push a commit to the release branch
 
-Both come from the release PR, so both must be edited **on the release PR**:
+**Do not commit to `release-please--branches--main--…`, for any reason, including fixing
+`CHANGELOG.md`.** This was learned the expensive way on v0.8.0: on merge, release-please
+bumps `.release-please-manifest.json` to the new version but emits
+`release_created: false`, so **no tag and no GitHub Release are cut** — and the `publish`
+job in `release-please.yml`, gated on that output, **never builds the Docker image**. The
+label stays `autorelease: pending`. Re-running release-please does not fix it, because the
+manifest already reads as done. Recovery is manual (see the bottom of this file).
 
-| Artifact | Source | Edit by |
+The release PR **body** is safe to edit — it is metadata, not a commit, and it is what
+release-please turns into the GitHub Release.
+
+## The two artifacts, and when each is written
+
+| Artifact | Written | How |
 |---|---|---|
-| `CHANGELOG.md` section | the file on the release branch | commit to the release branch |
-| GitHub Release body | the release PR **body** | `gh pr edit --body-file` |
+| GitHub Release body | **before** merging the release PR | `gh pr edit <n> --body-file` — release-please builds the release from this body |
+| `CHANGELOG.md` section | **after** the tag exists | a normal follow-up PR against `main` |
 
-Editing the published release afterwards with `gh release edit` is the fallback, not the
-plan. The point is that both nascem certos.
+That ordering is what makes the published release correct at birth instead of patched with
+`gh release edit` afterwards — while keeping the release branch untouched.
 
-## Timing (read this first)
+## Timing
 
-release-please rebuilds and **force-pushes** the release branch on every push to `main`.
-Any curation done before the last feature merge is destroyed silently.
-
-Run this skill only when the release is closed for new work. If a PR lands afterwards,
-re-run it — it is cheap and idempotent.
+release-please rebuilds and **force-pushes** the release branch on every push to `main`,
+overwriting the PR body along with it. Curate only when the release is closed for new work,
+and re-run if a PR lands late — it is cheap and idempotent.
 
 ## Step 1 — Establish the range
 
@@ -83,26 +92,14 @@ subsystem are **one** bullet. Match [`CHANGELOG.md`'s v0.10.0 entry](../../../CH
 - No invented impact. If a fix's user-facing symptom cannot be established from the PR,
   the issue, or the diff, it belongs in **Under the hood** — or it is dropped.
 
-## Step 5 — Apply
+## Step 5a — Write the release PR body (before merge)
 
 Never silently drop an entry release-please generated: every one is either folded into a
 bullet or deliberately cut as internal. State the cuts when reporting back.
 
-```bash
-git fetch origin
-git checkout release-please--branches--main--components--posterpilot
-```
-
-Rewrite only the new version's section in `CHANGELOG.md`, keeping release-please's heading
-line (`## [0.11.0](…compare/v0.10.0...v0.11.0) (2026-08-07)`) byte-identical — the tag,
-compare link, and date are its output, not yours. Then:
-
-```bash
-git commit -S -m "docs: write 0.11.0 release notes" CHANGELOG.md && git push
-```
-
-For the PR body, keep release-please's sentinels exactly — it parses this text to build the
-GitHub Release, and a mangled body breaks the release:
+Keep release-please's sentinels exactly — it parses this text to build the GitHub Release,
+and a mangled body breaks the release. Keep its heading line byte-identical too; the tag,
+compare link, and date are its output, not yours:
 
 ```
 :robot: I have created a release *beep* *boop*
@@ -119,13 +116,44 @@ This PR was generated with [Release Please](https://github.com/googleapis/releas
 
 ```bash
 gh pr edit <n> --body-file <file>
+gh pr view <n> --json body -q .body | head -5   # sentinels intact
 ```
 
-## Step 6 — Verify
+Then hand the PR to the maintainer to merge. Do not merge it, and do not push to it.
 
-- `gh pr view <n> --json body -q .body | head -5` — sentinels intact.
-- CHANGELOG heading unchanged: `git diff origin/main -- CHANGELOG.md | grep '^[-+]## '` prints
-  only the added heading, never a removed one.
-- Every PR link resolves and points at this repo.
-- After merge: `gh release view v<version>` — body matches. If it does not, that is the one
-  legitimate use of `gh release edit`.
+## Step 5b — Backfill CHANGELOG.md (after the tag)
+
+Once the tag exists, open a normal PR against `main` replacing that version's generated
+section with the same curated notes, keeping the heading line byte-identical:
+
+```bash
+git checkout -b docs/changelog-<version> origin/main
+# rewrite only the new section
+git diff -- CHANGELOG.md | grep '^[-+]## '   # must show no removed heading
+git commit -S -m "docs: write <version> release notes" CHANGELOG.md
+```
+
+## Step 6 — Verify the release actually happened
+
+The failure mode this guards against is silent. Immediately after the release PR merges:
+
+```bash
+gh release view v<version> --json tagName,publishedAt   # the tag exists
+gh pr view <n> --json labels -q '.labels[].name'        # autorelease: tagged, not pending
+gh run list --workflow=release-please.yml --limit 1     # publish job ran
+```
+
+Also check every PR link in the body resolves to this repo.
+
+If the tag was **not** cut (label stuck on `autorelease: pending`, manifest already bumped —
+re-running release-please will not fix it):
+
+```bash
+gh release create v<version> --target <main-merge-sha> --notes-file <file> --latest
+gh pr edit <n> --add-label "autorelease: tagged" --remove-label "autorelease: pending"
+gh workflow run docker-publish.yml --ref main -f version=<version> -f ref=v<version>
+```
+
+`docker-publish.yml` carries a `workflow_dispatch` trigger for exactly this, so the
+multi-arch image and its `X.Y.Z` / `X.Y` / `X` / `latest` tags can be published without
+touching CI.
