@@ -75,13 +75,13 @@ export interface DownloadedRemoteArtwork {
 }
 
 /** Normalize an explicitly supported raster MIME type, rejecting SVG and generic data. */
-export function safeRasterArtworkContentType(value: string | null): string | null {
+function safeRasterArtworkContentType(value: string | null): string | null {
 	const normalized = value?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
 	return RASTER_CONTENT_TYPES.has(normalized) ? normalized : null;
 }
 
 /** HTTP(S), without embedded credentials; suitable for a user-supplied initial URL. */
-export function safeCustomArtworkTarget(target: URL): boolean {
+function safeCustomArtworkTarget(target: URL): boolean {
 	return (
 		(target.protocol === 'http:' || target.protocol === 'https:') &&
 		!target.username &&
@@ -171,7 +171,7 @@ function declaredLength(response: Response): number | null {
 }
 
 /** Read response bytes incrementally and cancel as soon as the configured cap is exceeded. */
-export async function readBoundedArtworkBody(
+async function readBoundedArtworkBody(
 	response: Response,
 	maxBytes: number,
 	signal?: AbortSignal
