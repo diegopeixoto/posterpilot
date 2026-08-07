@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { m } from '$lib/paraglide/messages';
-	import { isActiveTmdbRepairJob, tmdbRepairPollInterval } from './tmdb-repair-polling';
+	import {
+		createSingleFlightTmdbRepairRefresh,
+		isActiveTmdbRepairJob,
+		tmdbRepairPollInterval
+	} from './tmdb-repair-polling';
 
 	type RepairJob = {
 		id: number;
@@ -20,6 +24,7 @@
 
 	let starting = $state(false);
 	let actionError = $state<string | null>(null);
+	const refresh = createSingleFlightTmdbRepairRefresh(invalidateAll);
 	const active = $derived(isActiveTmdbRepairJob(repair.job?.status));
 	const incomplete = $derived(
 		repair.job !== null &&
@@ -31,10 +36,10 @@
 	// load in every open tab. A one-shot focus refresh still picks up work done elsewhere.
 	$effect(() => {
 		if (repair.pendingCount === 0) return;
-		const refreshOnFocus = () => void invalidateAll();
+		const refreshOnFocus = () => void refresh();
 		window.addEventListener('focus', refreshOnFocus);
 		const interval = tmdbRepairPollInterval(repair.pendingCount, repair.job?.status);
-		const timer = interval === null ? null : setInterval(() => void invalidateAll(), interval);
+		const timer = interval === null ? null : setInterval(() => void refresh(), interval);
 		return () => {
 			window.removeEventListener('focus', refreshOnFocus);
 			if (timer !== null) clearInterval(timer);

@@ -30,7 +30,7 @@ import {
 	writeTmdbMetadataIfCurrent,
 	type TmdbIdentityGuard
 } from '$lib/server/tmdb/repair';
-import { batchItemIds } from './item-id-batches';
+import { requireScopedMediaItemsById } from './scoped-item-query';
 
 const collectionRepository = createCollectionRepository(db);
 const observeFullRescanArtwork = createDatabaseFullRescanArtworkObserver(db);
@@ -47,25 +47,6 @@ interface JobTaskExecutionOptions {
 	providers?: string[];
 	/** Exact database ids selected by a TMDB repair execution. */
 	repairItemIds?: number[];
-}
-
-async function listScopedMediaItemsById(serverInstanceId: string, itemIds: readonly number[]) {
-	const rows: Array<{ id: number; sectionKey: string; ratingKey: string }> = [];
-	for (const batch of batchItemIds(itemIds)) {
-		rows.push(
-			...(await db
-				.select({
-					id: mediaItems.id,
-					sectionKey: mediaItems.sectionKey,
-					ratingKey: mediaItems.ratingKey
-				})
-				.from(mediaItems)
-				.where(
-					and(eq(mediaItems.serverInstanceId, serverInstanceId), inArray(mediaItems.id, batch))
-				))
-		);
-	}
-	return rows;
 }
 
 /** Sync: pull the active server's libraries/items, upsert media_items, resolve TMDB ids. */
@@ -192,8 +173,7 @@ export async function runSyncJob(
 		? [...new Set(options.repairItemIds)].sort((a, b) => a - b)
 		: null;
 	if (repairItemIds) {
-		const requestedRows = await listScopedMediaItemsById(serverInstanceId, repairItemIds);
-		if (requestedRows.length !== repairItemIds.length) throw new Error('job_item_scope_mismatch');
+		const requestedRows = await requireScopedMediaItemsById(db, serverInstanceId, repairItemIds);
 		const requestedSourceKeys = new Set(
 			requestedRows.map((row) => `${row.sectionKey}\u0000${row.ratingKey}`)
 		);
@@ -205,8 +185,7 @@ export async function runSyncJob(
 		);
 	} else if (payload.itemIds) {
 		const requestedIds = [...new Set(payload.itemIds)];
-		const requestedRows = await listScopedMediaItemsById(serverInstanceId, requestedIds);
-		if (requestedRows.length !== requestedIds.length) throw new Error('job_item_scope_mismatch');
+		const requestedRows = await requireScopedMediaItemsById(db, serverInstanceId, requestedIds);
 		const requestedSourceKeys = new Set(
 			requestedRows.map((row) => `${row.sectionKey}\u0000${row.ratingKey}`)
 		);
