@@ -99,7 +99,12 @@ function storedSelection(
 		url: input.url,
 		provider: candidate?.provider ?? input.provider,
 		setId: candidate?.setId ?? input.setId,
-		setAuthor: candidate?.setAuthor ?? null
+		setAuthor: candidate?.setAuthor ?? null,
+		persisted: {
+			candidateId: input.candidateId,
+			provider: input.provider,
+			setId: input.setId
+		}
 	};
 }
 

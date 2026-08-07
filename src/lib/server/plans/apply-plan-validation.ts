@@ -19,7 +19,10 @@ import {
 	type PlannerStoredSelection,
 	type ResolveApplyDestinationsInput
 } from './apply-planner';
-import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
+import {
+	canonicalizeProviderArtworkUrl,
+	equivalentProviderArtworkUrls
+} from '$lib/server/tmdb/artwork-url';
 
 export type ApplyPlanValidationErrorCode = 'invalid_plan' | 'plan_stale' | 'plan_scope_mismatch';
 
@@ -170,18 +173,53 @@ function freezeLegacyV1StoredSelection(
 		return freezeLegacyV1CandidateSelection(matched, 'stored', data.item.identity);
 	}
 
-	// Migration 0010 labels unproved providerless selections as custom without
-	// changing their URL, slot, timestamp, or revision. Reconstruct only that exact
-	// additive backfill when comparing a genuinely revisionless frozen plan.
-	const provider =
-		planned?.candidateId === null &&
+	const persisted = stored.persisted;
+	const legacyStandalone =
+		planned?.selectionSource === 'stored' &&
+		planned.candidateId === null &&
 		planned.provider === null &&
+		planned.providerAssetId === null &&
+		planned.setAuthor === null &&
+		planned.designFamily === null &&
+		planned.language === null &&
+		planned.discoveryRunId === null &&
+		planned.stale === false &&
+		planned.score === null &&
+		planned.width === null &&
+		planned.height === null &&
+		stored.url === planned.url &&
+		applySlotKey(stored.slot) === applySlotKey(planned.slot) &&
+		persisted?.candidateId === null &&
+		persisted.setId === planned.setId;
+	const customBackfill =
+		legacyStandalone &&
+		persisted?.provider === 'custom' &&
 		stored.candidateId === null &&
 		stored.provider === 'custom' &&
-		stored.url === planned.url &&
-		applySlotKey(stored.slot) === applySlotKey(planned.slot)
-			? null
-			: stored.provider;
+		stored.setId === persisted.setId &&
+		stored.setAuthor === null;
+	const tmdbCandidate =
+		legacyStandalone &&
+		persisted?.provider === 'tmdb' &&
+		stored.candidateId !== null &&
+		stored.provider === 'tmdb'
+			? data.candidates.find(
+					(candidate) =>
+						candidate.candidateId === stored.candidateId &&
+						candidate.serverInstanceId === data.item.identity.serverInstanceId &&
+						candidate.mediaItemId === data.item.identity.mediaItemId &&
+						candidate.provider === 'tmdb' &&
+						candidate.url !== stored.url &&
+						canonicalizeProviderArtworkUrl(candidate.url, 'tmdb') === stored.url &&
+						applySlotKey(candidate.slot) === applySlotKey(stored.slot) &&
+						stored.setId === candidate.setId &&
+						stored.setAuthor === candidate.setAuthor
+				)
+			: null;
+	const tmdbBackfill = tmdbCandidate !== null && tmdbCandidate !== undefined;
+	const provider = customBackfill || tmdbBackfill ? null : stored.provider;
+	const setId = customBackfill || tmdbBackfill ? (persisted?.setId ?? null) : stored.setId;
+	const setAuthor = customBackfill || tmdbBackfill ? null : stored.setAuthor;
 	const selection = {
 		selectionSource: 'stored' as const,
 		sourceItem: {
@@ -193,8 +231,8 @@ function freezeLegacyV1StoredSelection(
 		url: stored.url,
 		provider,
 		providerAssetId: null,
-		setId: stored.setId,
-		setAuthor: stored.setAuthor,
+		setId,
+		setAuthor,
 		designFamily: null,
 		language: null,
 		discoveryRunId: null,
@@ -206,6 +244,12 @@ function freezeLegacyV1StoredSelection(
 		height: null
 	};
 	return { ...selection, fingerprint: hashCanonicalJson(selection) };
+}
+
+function validFrozenSelectionFingerprint(selection: FrozenArtworkSelection): boolean {
+	if (!/^[0-9a-f]{64}$/.test(selection.fingerprint)) return false;
+	const { fingerprint, ...identity } = selection;
+	return hashCanonicalJson(identity) === fingerprint;
 }
 
 function sortedUnique(values: string[]): string[] {
@@ -389,16 +433,21 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 		if (!/^[0-9a-f]{64}$/.test(item.sourceFingerprint)) {
 			failInvalid('Invalid frozen item fingerprint');
 		}
+		const selectionsBySlot = new Map<string, FrozenArtworkSelection>();
 		for (const selection of item.selections) {
 			if (
 				!selection ||
 				!validSlot(selection.slot) ||
 				!selection.url ||
+				!validFrozenSelectionFingerprint(selection) ||
 				selection.sourceItem.serverInstanceId !== item.selectionFrom.serverInstanceId ||
 				selection.sourceItem.mediaItemId !== item.selectionFrom.mediaItemId
 			) {
 				failInvalid('Invalid frozen artwork selection');
 			}
+			const key = applySlotKey(selection.slot);
+			if (selectionsBySlot.has(key)) failInvalid('Duplicate frozen artwork selection slot');
+			selectionsBySlot.set(key, selection);
 		}
 		if (item.operations.length > 0) actionableItemCount++;
 		operationCount += item.operations.length;
@@ -421,7 +470,10 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			if (!same(operation.target, item.target) || !validSlot(operation.slot)) {
 				failInvalid('Frozen operation target or slot does not match its item');
 			}
+			const itemSelection = selectionsBySlot.get(applySlotKey(operation.slot));
 			if (
+				!itemSelection ||
+				!same(operation.selection, itemSelection) ||
 				operation.selection.sourceItem.serverInstanceId !== item.selectionFrom.serverInstanceId ||
 				operation.selection.sourceItem.mediaItemId !== item.selectionFrom.mediaItemId ||
 				applySlotKey(operation.selection.slot) !== applySlotKey(operation.slot)
@@ -552,6 +604,7 @@ function currentSelection(
 				(row) =>
 					row.candidateId === planned.candidateId &&
 					row.active &&
+					row.provider === planned.provider &&
 					row.url === planned.url &&
 					applySlotKey(row.slot) === applySlotKey(planned.slot)
 			);

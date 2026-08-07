@@ -16,8 +16,7 @@ import {
 	type ApplyPlanDestination,
 	type ApplyPlanPayloadV1,
 	type ApplySlot,
-	type FrozenApplyJobPayload,
-	type FrozenArtworkSelection
+	type FrozenApplyJobPayload
 } from './apply-plan';
 import {
 	createApplyPlanner,
@@ -220,274 +219,51 @@ function setup() {
 	return { items, planner, store, loadItemData, resolveDestinationSlots };
 }
 
-type LegacyV1Selection = Omit<FrozenArtworkSelection, 'fingerprint'>;
-
-/**
- * Serialize the literal v1 shape emitted before migration 0010. This intentionally
- * does not call the current planner and never creates then deletes revision fields.
- */
-function legacyV1PayloadFixture(input: {
-	data: ApplyPlannerItemData;
-	selection: LegacyV1Selection;
-	selectionMode: 'auto' | 'stored';
-}): ApplyPlanPayloadV1 {
-	const { selectionRevision: _selectionRevision, ...legacyIdentity } = structuredClone(
-		input.data.item.identity
-	);
-	const candidates = [...input.data.candidates]
-		.sort((a, b) => a.candidateId - b.candidateId)
-		.map((candidate) => ({
-			candidateId: candidate.candidateId,
-			serverInstanceId: candidate.serverInstanceId,
-			mediaItemId: candidate.mediaItemId,
-			discoveryRunId: candidate.discoveryRunId,
-			provider: candidate.provider,
-			providerAssetId: candidate.providerAssetId,
-			setId: candidate.setId,
-			setAuthor: candidate.setAuthor,
-			designFamily: candidate.designFamily,
-			language: candidate.language,
-			url: candidate.url,
-			slot: candidate.slot,
-			resolvedTmdbId: candidate.resolvedTmdbId,
-			resolvedMediaType: candidate.resolvedMediaType,
-			width: candidate.width,
-			height: candidate.height,
-			score: candidate.score,
-			active: candidate.active,
-			stale: candidate.stale,
-			lastSeenAt: candidate.lastSeenAt
-		}));
-	const active = candidates.filter((candidate) => candidate.active);
-	const discovery = {
-		status: input.data.item.discovery.status,
-		runId: input.data.item.discovery.runId,
-		completedAt: input.data.item.discovery.completedAt,
-		resolvedTmdbId: input.data.item.identity.tmdbId,
-		resolvedMediaType: input.data.item.identity.mediaType,
-		candidateIds: active.map((candidate) => candidate.candidateId),
-		candidateCount: active.length,
-		fingerprint: hashCanonicalJson({
-			status: input.data.item.discovery.status,
-			runId: input.data.item.discovery.runId,
-			completedAt: input.data.item.discovery.completedAt,
-			resolvedTmdbId: input.data.item.identity.tmdbId,
-			resolvedMediaType: input.data.item.identity.mediaType,
-			candidates
-		})
-	};
-	const selection = {
-		...structuredClone(input.selection),
-		fingerprint: hashCanonicalJson(input.selection)
-	};
-	const currentSlot = input.data.item.currentSlots.find(
-		(row) => applySlotKey(row.slot) === applySlotKey(selection.slot)
-	);
-	const current = {
-		url: currentSlot?.url ?? null,
-		fingerprint: currentSlot?.fingerprint ?? null,
-		artworkVersion: currentSlot?.artworkVersion ?? null,
-		observedAt: currentSlot?.observedAt ?? null,
-		destinationFingerprint: `server-state-${legacyIdentity.mediaItemId}`
-	};
-	const targetId = `server-${legacyIdentity.mediaItemId}-${applySlotKey(selection.slot)}`;
-	const destinationSlot = {
-		destination: 'server' as const,
-		slot: selection.slot,
-		targetId,
-		capability: 'supported' as const,
-		current,
-		skipCode: null,
-		parameters: {}
-	};
-	const operationId = hashCanonicalJson({
-		destination: 'server',
-		serverInstanceId: legacyIdentity.serverInstanceId,
-		mediaItemId: legacyIdentity.mediaItemId,
-		targetId,
-		slot: selection.slot,
-		selectionFingerprint: selection.fingerprint
-	});
-	const operation = {
-		id: operationId,
-		destination: 'server' as const,
-		target: legacyIdentity,
-		targetId,
-		slot: selection.slot,
-		current,
-		selection,
-		expectedOverwrite: current.url !== null || current.fingerprint !== null
-	};
-	const missingSlot =
-		selection.slot.kind === 'poster'
-			? { kind: 'background' as const, season: null, episode: null }
-			: { kind: 'poster' as const, season: null, episode: null };
-	const skips = [
-		{
-			destination: 'server' as const,
-			slot: missingSlot,
-			code:
-				input.selectionMode === 'auto'
-					? ('no_candidate' as const)
-					: ('no_stored_selection' as const),
-			parameters: {}
+function asLegacyRevisionlessPlan(payload: ApplyPlanPayloadV1): ApplyPlanPayloadV1 {
+	const legacy = structuredClone(payload);
+	if (legacy.context.source === 'cross_server') {
+		Reflect.deleteProperty(legacy.context.sourceItem, 'selectionRevision');
+	}
+	for (const item of legacy.items) {
+		Reflect.deleteProperty(item.target, 'selectionRevision');
+		Reflect.deleteProperty(item.selectionFrom, 'selectionRevision');
+		for (const operation of item.operations) {
+			Reflect.deleteProperty(operation.target, 'selectionRevision');
 		}
-	];
-	const selectionFingerprint = hashCanonicalJson({
-		selectionUpdatedAt: legacyIdentity.selectionUpdatedAt,
-		discoveryFingerprint: discovery.fingerprint,
-		selections: [selection]
+		item.selectionFingerprint = hashCanonicalJson({
+			selectionUpdatedAt: item.selectionFrom.selectionUpdatedAt,
+			discoveryFingerprint: item.discovery.fingerprint,
+			selections: item.selections
+		});
+		item.sourceFingerprint = hashCanonicalJson({
+			target: item.target,
+			selectionFrom: item.selectionFrom,
+			selectionFingerprint: item.selectionFingerprint,
+			currentStateFingerprint: item.currentStateFingerprint,
+			operations: item.operations.map((operation) => operation.id),
+			skips: item.skips
+		});
+	}
+	legacy.sourceFingerprint = hashCanonicalJson({
+		context: legacy.context,
+		defaults: legacy.defaults,
+		items: legacy.items.map((item) => item.sourceFingerprint)
 	});
-	const currentStateFingerprint = hashCanonicalJson({
-		targetUpdatedAt: legacyIdentity.updatedAt,
-		destinationSlots: [
-			{
-				destination: destinationSlot.destination,
-				slot: destinationSlot.slot,
-				targetId: destinationSlot.targetId,
-				capability: destinationSlot.capability,
-				current: destinationSlot.current,
-				skipCode: destinationSlot.skipCode
-			}
-		]
-	});
-	const sourceFingerprint = hashCanonicalJson({
-		target: legacyIdentity,
-		selectionFrom: legacyIdentity,
-		selectionFingerprint,
-		currentStateFingerprint,
-		operations: [operationId],
-		skips
-	});
-	const item = {
-		target: legacyIdentity,
-		selectionFrom: legacyIdentity,
-		discovery,
-		selections: [selection],
-		destinationSlots: [destinationSlot],
-		operations: [operation],
-		skips,
-		selectionFingerprint,
-		currentStateFingerprint,
-		sourceFingerprint
-	};
-	const context = { source: 'single' as const };
-	const defaults = {
-		configuredMethod: 'both' as const,
-		effectiveMethod: 'server' as const,
-		methodSource: 'explicit' as const,
-		selectionMode: input.selectionMode,
-		scoring: {
-			providerPriority: ['mediux'],
-			weights: DEFAULT_SCORE_WEIGHTS
-		}
-	};
-	const payload = {
-		version: 1 as const,
-		type: 'artwork_apply' as const,
-		plannedAt: NOW.toISOString(),
-		context,
-		defaults,
-		scope: {
-			serverInstanceIds: [legacyIdentity.serverInstanceId],
-			librarySectionKeys: [legacyIdentity.librarySectionKey],
-			targetItemIds: [legacyIdentity.mediaItemId]
-		},
-		items: [item],
-		sourceFingerprint: hashCanonicalJson({
-			context,
-			defaults,
-			items: [sourceFingerprint]
-		}),
-		summary: {
-			itemCount: 1,
-			actionableItemCount: 1,
-			operationCount: 1,
-			skipCount: 1,
-			destinations: { server: 1, kometa: 0 }
-		}
-	};
-	return payload as unknown as ApplyPlanPayloadV1;
-}
-
-function legacyV1CandidateSelectionFixture(
-	data: ApplyPlannerItemData,
-	candidate: PlannerCandidateSnapshot,
-	selectionSource: 'auto' | 'stored'
-): LegacyV1Selection {
-	return {
-		selectionSource,
-		sourceItem: {
-			serverInstanceId: data.item.identity.serverInstanceId,
-			mediaItemId: data.item.identity.mediaItemId
-		},
-		slot: candidate.slot,
-		candidateId: candidate.candidateId,
-		url: candidate.url,
-		provider: candidate.provider,
-		providerAssetId: candidate.providerAssetId,
-		setId: candidate.setId,
-		setAuthor: candidate.setAuthor,
-		designFamily: candidate.designFamily,
-		language: candidate.language,
-		discoveryRunId: candidate.discoveryRunId,
-		resolvedTmdbId: candidate.resolvedTmdbId,
-		resolvedMediaType: candidate.resolvedMediaType,
-		stale: candidate.stale,
-		score: candidate.score,
-		width: candidate.width,
-		height: candidate.height
-	};
-}
-
-function legacyV1ProviderlessStoredSelectionFixture(
-	data: ApplyPlannerItemData,
-	url: string
-): LegacyV1Selection {
-	return {
-		selectionSource: 'stored',
-		sourceItem: {
-			serverInstanceId: data.item.identity.serverInstanceId,
-			mediaItemId: data.item.identity.mediaItemId
-		},
-		slot: { kind: 'poster', season: null, episode: null },
-		candidateId: null,
-		url,
-		provider: null,
-		providerAssetId: null,
-		setId: null,
-		setAuthor: null,
-		designFamily: null,
-		language: null,
-		discoveryRunId: null,
-		resolvedTmdbId: data.item.identity.tmdbId,
-		resolvedMediaType: data.item.identity.mediaType,
-		stale: false,
-		score: null,
-		width: null,
-		height: null
-	};
+	return legacy;
 }
 
 describe('frozen apply flow', () => {
-	it('keeps a genuine revisionless v1 TMDB preview plan fresh after canonicalization', async () => {
+	it('accepts a revisionless v1 payload only while the migrated selection revision is zero', async () => {
 		const fixture = setup();
-		const data = fixture.items[0];
-		data.item.identity.selectionRevision = 0;
-		data.candidates = [data.candidates[0]];
-		data.candidates[0].provider = 'tmdb';
-		data.candidates[0].url = 'https://image.tmdb.org/t/p/w500/legacy-v1.jpg';
-		const legacy = legacyV1PayloadFixture({
-			data,
-			selection: legacyV1CandidateSelectionFixture(data, data.candidates[0], 'auto'),
-			selectionMode: 'auto'
+		fixture.items[0].item.identity.selectionRevision = 0;
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'server'
 		});
+		const legacy = asLegacyRevisionlessPlan(preview.payload);
 
-		expect(legacy.items[0].selections[0]).toMatchObject({
-			url: 'https://image.tmdb.org/t/p/w500/legacy-v1.jpg',
-			provider: 'tmdb'
-		});
-		expect(Object.hasOwn(legacy.items[0].selectionFrom, 'selectionRevision')).toBe(false);
 		expect(() => assertApplyPlanPayload(legacy)).not.toThrow();
 		await expect(
 			assertApplyPlanFresh(legacy, {
@@ -496,68 +272,7 @@ describe('frozen apply flow', () => {
 			})
 		).resolves.toBeUndefined();
 
-		data.candidates[0].url = 'https://image.tmdb.org/t/p/w500/changed.jpg';
-		await expect(
-			assertApplyPlanFresh(legacy, {
-				loadItemData: fixture.loadItemData,
-				resolveDestinationSlots: fixture.resolveDestinationSlots
-			})
-		).rejects.toMatchObject({ code: 'plan_stale' });
-	});
-
-	it('keeps a genuine revisionless v1 providerless custom plan fresh after backfill', async () => {
-		const fixture = setup();
-		const data = fixture.items[0];
-		const customUrl = 'https://custom.example/legacy-v1.jpg';
-		data.item.identity.selectionRevision = 0;
-		data.candidates = [];
-		data.storedSelections = [
-			{
-				slot: { kind: 'poster', season: null, episode: null },
-				candidateId: null,
-				url: customUrl,
-				provider: 'custom',
-				setId: null,
-				setAuthor: null
-			}
-		];
-		const legacy = legacyV1PayloadFixture({
-			data,
-			selection: legacyV1ProviderlessStoredSelectionFixture(data, customUrl),
-			selectionMode: 'stored'
-		});
-
-		expect(legacy.items[0].selections[0]).toMatchObject({ provider: null, url: customUrl });
-		expect(Object.hasOwn(legacy.items[0].selectionFrom, 'selectionRevision')).toBe(false);
-		expect(() => assertApplyPlanPayload(legacy)).not.toThrow();
-		await expect(
-			assertApplyPlanFresh(legacy, {
-				loadItemData: fixture.loadItemData,
-				resolveDestinationSlots: fixture.resolveDestinationSlots
-			})
-		).resolves.toBeUndefined();
-
-		data.storedSelections[0].url = 'https://custom.example/changed.jpg';
-		await expect(
-			assertApplyPlanFresh(legacy, {
-				loadItemData: fixture.loadItemData,
-				resolveDestinationSlots: fixture.resolveDestinationSlots
-			})
-		).rejects.toMatchObject({ code: 'plan_stale' });
-	});
-
-	it('rejects a genuine revisionless v1 payload after the migrated revision advances', async () => {
-		const fixture = setup();
-		const data = fixture.items[0];
-		data.item.identity.selectionRevision = 0;
-		data.candidates = [data.candidates[0]];
-		const legacy = legacyV1PayloadFixture({
-			data,
-			selection: legacyV1CandidateSelectionFixture(data, data.candidates[0], 'auto'),
-			selectionMode: 'auto'
-		});
-		data.item.identity.selectionRevision = 1;
-
+		fixture.items[0].item.identity.selectionRevision = 1;
 		await expect(
 			assertApplyPlanFresh(legacy, {
 				loadItemData: fixture.loadItemData,

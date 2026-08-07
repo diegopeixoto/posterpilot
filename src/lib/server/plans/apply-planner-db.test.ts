@@ -226,7 +226,7 @@ describe('database apply-planner snapshot', () => {
 		);
 	});
 
-	it('recovers a legacy providerless TMDB selection after candidate rediscovery', async () => {
+	it('retains raw migrated provenance while enriching legacy TMDB root and child selections', async () => {
 		await db.insert(serverInstances).values({
 			id: 'server-a',
 			name: 'Cinema',
@@ -238,43 +238,82 @@ describe('database apply-planner snapshot', () => {
 			.values({
 				serverInstanceId: 'server-a',
 				ratingKey: 'plex-legacy',
-				sectionKey: 'movies',
-				type: 'movie',
+				sectionKey: 'shows',
+				type: 'show',
 				title: 'Legacy',
 				tmdbId: '99',
-				mediaType: 'movie',
-				selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/rediscovered.jpg',
-				selectedPosterCandidateId: 999,
-				selectedPosterProvider: null,
-				selectionRevision: 1
+				mediaType: 'tv',
+				selectedPosterUrl: 'https://image.tmdb.org/t/p/original/legacy-root.jpg',
+				selectedPosterCandidateId: null,
+				selectedPosterProvider: 'tmdb',
+				selectionRevision: 0
 			})
 			.returning();
-		const [candidate] = await db
+		const candidates = await db
 			.insert(posterCandidates)
-			.values({
-				serverInstanceId: 'server-a',
-				mediaItemId: item.id,
-				provider: 'tmdb',
-				providerAssetId: '/rediscovered.jpg',
-				setId: 'tmdb-rediscovered',
-				url: 'https://image.tmdb.org/t/p/original/rediscovered.jpg',
-				kind: 'poster',
-				active: true,
-				stale: false
-			})
+			.values([
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/legacy-root.jpg',
+					setId: 'tmdb-root',
+					url: 'https://image.tmdb.org/t/p/w500/legacy-root.jpg',
+					kind: 'poster' as const,
+					active: true,
+					stale: false
+				},
+				{
+					serverInstanceId: 'server-a',
+					mediaItemId: item.id,
+					provider: 'tmdb',
+					providerAssetId: '/legacy-child.jpg',
+					setId: 'tmdb-child',
+					url: 'https://image.tmdb.org/t/p/w500/legacy-child.jpg',
+					kind: 'title_card' as const,
+					season: 1,
+					episode: 2,
+					active: true,
+					stale: false
+				}
+			])
 			.returning();
+		await db.insert(childSelections).values({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id,
+			kind: 'title_card',
+			season: 1,
+			episode: 2,
+			url: 'https://image.tmdb.org/t/p/original/legacy-child.jpg',
+			candidateId: null,
+			provider: 'tmdb',
+			setId: null
+		});
 
 		const snapshot = await loadDatabaseApplyPlannerItemData({
 			serverInstanceId: 'server-a',
 			mediaItemId: item.id
 		});
 
-		expect(snapshot?.storedSelections).toEqual([
-			expect.objectContaining({
-				candidateId: candidate.id,
-				provider: 'tmdb',
-				url: 'https://image.tmdb.org/t/p/w500/rediscovered.jpg'
-			})
-		]);
+		expect(snapshot?.storedSelections).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					candidateId: candidates[0].id,
+					provider: 'tmdb',
+					setId: 'tmdb-root',
+					url: 'https://image.tmdb.org/t/p/original/legacy-root.jpg',
+					slot: { kind: 'poster', season: null, episode: null },
+					persisted: { candidateId: null, provider: 'tmdb', setId: null }
+				}),
+				expect.objectContaining({
+					candidateId: candidates[1].id,
+					provider: 'tmdb',
+					setId: 'tmdb-child',
+					url: 'https://image.tmdb.org/t/p/original/legacy-child.jpg',
+					slot: { kind: 'title_card', season: 1, episode: 2 },
+					persisted: { candidateId: null, provider: 'tmdb', setId: null }
+				})
+			])
+		);
 	});
 });

@@ -1,0 +1,210 @@
+{
+	"version": 1,
+	"type": "artwork_apply",
+	"plannedAt": "2026-07-10T12:00:00.000Z",
+	"context": {
+		"source": "single"
+	},
+	"defaults": {
+		"configuredMethod": "server",
+		"effectiveMethod": "server",
+		"methodSource": "explicit",
+		"selectionMode": "stored",
+		"scoring": {
+			"providerPriority": ["mediux", "tmdb"],
+			"weights": {
+				"providerWeights": {
+					"mediux": 1,
+					"theposterdb": 0.8,
+					"fanarttv": 0.7,
+					"tmdb": 0.6
+				},
+				"resolutionWeight": 0.5,
+				"aspectWeight": 0.3
+			}
+		}
+	},
+	"scope": {
+		"serverInstanceIds": ["server-a"],
+		"librarySectionKeys": ["shows"],
+		"targetItemIds": [77]
+	},
+	"items": [
+		{
+			"target": {
+				"serverInstanceId": "server-a",
+				"mediaItemId": 77,
+				"librarySectionKey": "shows",
+				"sourceId": "show-77",
+				"type": "show",
+				"tmdbId": "77",
+				"imdbId": null,
+				"tvdbId": "7077",
+				"mediaType": "tv",
+				"updatedAt": "2026-07-10T11:00:00.000Z",
+				"selectionUpdatedAt": "2026-07-10T11:05:00.000Z"
+			},
+			"selectionFrom": {
+				"serverInstanceId": "server-a",
+				"mediaItemId": 77,
+				"librarySectionKey": "shows",
+				"sourceId": "show-77",
+				"type": "show",
+				"tmdbId": "77",
+				"imdbId": null,
+				"tvdbId": "7077",
+				"mediaType": "tv",
+				"updatedAt": "2026-07-10T11:00:00.000Z",
+				"selectionUpdatedAt": "2026-07-10T11:05:00.000Z"
+			},
+			"discovery": {
+				"status": "succeeded",
+				"runId": "run-pre0010-custom",
+				"completedAt": "2026-07-10T10:59:30.000Z",
+				"resolvedTmdbId": "77",
+				"resolvedMediaType": "tv",
+				"candidateIds": [],
+				"candidateCount": 0,
+				"fingerprint": "d27c379011ffb72e5899f64b0bd8cbd8aa2c231867505c289c979e038c60f912"
+			},
+			"selections": [
+				{
+					"selectionSource": "stored",
+					"sourceItem": {
+						"serverInstanceId": "server-a",
+						"mediaItemId": 77
+					},
+					"slot": {
+						"kind": "poster",
+						"season": null,
+						"episode": null
+					},
+					"candidateId": null,
+					"url": "https://custom.example/pre0010.jpg",
+					"provider": null,
+					"providerAssetId": null,
+					"setId": null,
+					"setAuthor": null,
+					"designFamily": null,
+					"language": null,
+					"discoveryRunId": null,
+					"resolvedTmdbId": "77",
+					"resolvedMediaType": "tv",
+					"stale": false,
+					"score": null,
+					"width": null,
+					"height": null,
+					"fingerprint": "4d054c38682a90d6e2872f42a28ab7684a008077ec0b9f174303494cd9faa2d1"
+				}
+			],
+			"destinationSlots": [
+				{
+					"destination": "server",
+					"slot": {
+						"kind": "poster",
+						"season": null,
+						"episode": null
+					},
+					"targetId": "show-77:poster:root:root",
+					"capability": "supported",
+					"current": {
+						"url": "https://server.example/current-root.jpg",
+						"fingerprint": "current-root",
+						"artworkVersion": 4,
+						"observedAt": "2026-07-10T10:00:00.000Z",
+						"destinationFingerprint": null
+					},
+					"skipCode": null,
+					"parameters": {}
+				}
+			],
+			"operations": [
+				{
+					"id": "2f602e8ab5652b26bb11c286877959fd6d2d06ca4895888bc517c39b772a74ed",
+					"destination": "server",
+					"target": {
+						"serverInstanceId": "server-a",
+						"mediaItemId": 77,
+						"librarySectionKey": "shows",
+						"sourceId": "show-77",
+						"type": "show",
+						"tmdbId": "77",
+						"imdbId": null,
+						"tvdbId": "7077",
+						"mediaType": "tv",
+						"updatedAt": "2026-07-10T11:00:00.000Z",
+						"selectionUpdatedAt": "2026-07-10T11:05:00.000Z"
+					},
+					"targetId": "show-77:poster:root:root",
+					"slot": {
+						"kind": "poster",
+						"season": null,
+						"episode": null
+					},
+					"current": {
+						"url": "https://server.example/current-root.jpg",
+						"fingerprint": "current-root",
+						"artworkVersion": 4,
+						"observedAt": "2026-07-10T10:00:00.000Z",
+						"destinationFingerprint": null
+					},
+					"selection": {
+						"selectionSource": "stored",
+						"sourceItem": {
+							"serverInstanceId": "server-a",
+							"mediaItemId": 77
+						},
+						"slot": {
+							"kind": "poster",
+							"season": null,
+							"episode": null
+						},
+						"candidateId": null,
+						"url": "https://custom.example/pre0010.jpg",
+						"provider": null,
+						"providerAssetId": null,
+						"setId": null,
+						"setAuthor": null,
+						"designFamily": null,
+						"language": null,
+						"discoveryRunId": null,
+						"resolvedTmdbId": "77",
+						"resolvedMediaType": "tv",
+						"stale": false,
+						"score": null,
+						"width": null,
+						"height": null,
+						"fingerprint": "4d054c38682a90d6e2872f42a28ab7684a008077ec0b9f174303494cd9faa2d1"
+					},
+					"expectedOverwrite": true
+				}
+			],
+			"skips": [
+				{
+					"destination": "server",
+					"slot": {
+						"kind": "background",
+						"season": null,
+						"episode": null
+					},
+					"code": "no_stored_selection",
+					"parameters": {}
+				}
+			],
+			"selectionFingerprint": "082c061b2232b9447478d9cd3a1e866f0ef2bfdb2eb29da2b18e11bd65d6ef3c",
+			"currentStateFingerprint": "0004475312270e3bd780402d15c1dd91c0a869850afa59a35d9bcf0f9579bcc7",
+			"sourceFingerprint": "9595e924989c9d74549191cfafb7d43791b69ccd223de4741fcf84970a24e5e4"
+		}
+	],
+	"sourceFingerprint": "0b784c718298fcde154855aba135728432e73120a46d8bbc7045639414e264ae",
+	"summary": {
+		"itemCount": 1,
+		"actionableItemCount": 1,
+		"operationCount": 1,
+		"skipCount": 1,
+		"destinations": {
+			"server": 1,
+			"kometa": 0
+		}
+	}
+}

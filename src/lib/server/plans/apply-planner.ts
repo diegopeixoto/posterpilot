@@ -104,6 +104,12 @@ export interface PlannerStoredSelection {
 	provider: string | null;
 	setId: string | null;
 	setAuthor: string | null;
+	/** Raw staged provenance before the planner DTO resolves a matching candidate. */
+	persisted?: {
+		candidateId: number | null;
+		provider: string | null;
+		setId: string | null;
+	};
 }
 
 export interface PlannerCurrentSlotState {

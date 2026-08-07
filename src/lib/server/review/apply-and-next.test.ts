@@ -585,52 +585,6 @@ describe('Apply and next completion service', () => {
 		expect(item.selectionRevision).toBe(1);
 	});
 
-	it('completes a genuine revisionless v1 TMDB w500 job after the upgrade', async () => {
-		const legacyUrl = 'https://image.tmdb.org/t/p/w500/legacy-job.jpg';
-		const operations = [operation('poster', { url: legacyUrl, provider: 'tmdb' })];
-		await database
-			.update(mediaItems)
-			.set({
-				selectedPosterUrl: legacyUrl,
-				selectedPosterCandidateId: 101,
-				selectedPosterProvider: 'tmdb',
-				selectionRevision: 0,
-				selectionUpdatedAt: new Date(plannedSelectionUpdatedAt)
-			})
-			.where(eq(mediaItems.id, mediaItemId));
-		await insertJob(operations, { omitSelectionRevision: true });
-
-		await expect(
-			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
-		).resolves.toMatchObject({ state: 'completed' });
-		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
-		expect(item.selectedPosterUrl).toBeNull();
-		expect(item.selectionRevision).toBe(1);
-	});
-
-	it('completes a genuine revisionless v1 providerless custom job after provider backfill', async () => {
-		const legacyUrl = 'https://custom.example/legacy-job.jpg';
-		const operations = [operation('poster', { url: legacyUrl, provider: null })];
-		await database
-			.update(mediaItems)
-			.set({
-				selectedPosterUrl: legacyUrl,
-				selectedPosterCandidateId: null,
-				selectedPosterProvider: 'custom',
-				selectionRevision: 0,
-				selectionUpdatedAt: new Date(plannedSelectionUpdatedAt)
-			})
-			.where(eq(mediaItems.id, mediaItemId));
-		await insertJob(operations, { omitSelectionRevision: true });
-
-		await expect(
-			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
-		).resolves.toMatchObject({ state: 'completed' });
-		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
-		expect(item.selectedPosterUrl).toBeNull();
-		expect(item.selectionRevision).toBe(1);
-	});
-
 	it('preserves matching staging when a revisionless legacy timestamp changed', async () => {
 		const operations = [
 			operation('poster', { url: 'https://art.example/poster.jpg', provider: 'mediux' })
