@@ -208,6 +208,7 @@ export async function executeDatabaseFrozenApplyJob(
 					validateCurrent: (raw) => coordinator.assertKometaFresh(operations, raw)
 				}),
 			prepareOperation: coordinator.prepareOperation,
+			executeServerOperation: coordinator.executeServerOperation,
 			recordOutcome: async (operation, operationResult, operationContext) => {
 				const recorded = await coordinator.recordOutcome(
 					operation,

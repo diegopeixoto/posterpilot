@@ -392,6 +392,50 @@ describe('frozen apply flow', () => {
 		expect(result.summary).toMatchObject({ operationCount: 8, succeeded: 8, failed: 0 });
 	});
 
+	it('delegates coordinated server mutations without invoking the URL fallback', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'server'
+		});
+		const applyPosterUrl = vi.fn(async () => undefined);
+		const applyBackgroundUrl = vi.fn(async () => undefined);
+		const prepareOperation = vi.fn(async () => undefined);
+		const executeServerOperation = vi.fn(async () => undefined);
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: {
+							type: 'plex',
+							applyPosterUrl,
+							applyPosterBytes: vi.fn(),
+							applyBackgroundUrl,
+							applyBackgroundBytes: vi.fn()
+						} as never
+					})
+				},
+				writeKometa: vi.fn(),
+				prepareOperation,
+				executeServerOperation
+			}
+		);
+
+		expect(prepareOperation).toHaveBeenCalledTimes(2);
+		expect(executeServerOperation).toHaveBeenCalledTimes(2);
+		expect(applyPosterUrl).not.toHaveBeenCalled();
+		expect(applyBackgroundUrl).not.toHaveBeenCalled();
+		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
+	});
+
 	it.each([
 		['timeout', 'remote_artwork_timeout'],
 		['size limit', 'remote_artwork_too_large'],

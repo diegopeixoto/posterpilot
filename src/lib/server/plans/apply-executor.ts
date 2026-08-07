@@ -57,6 +57,10 @@ export interface ApplyPlanExecutorDependencies {
 		operation: ApplyPlanOperation,
 		context: ApplyOperationExecutionContext
 	): Promise<void>;
+	executeServerOperation?(
+		operation: ApplyPlanOperation,
+		context: ApplyOperationExecutionContext
+	): Promise<void>;
 	recordOutcome?(
 		operation: ApplyPlanOperation,
 		result: ApplyOperationExecutionResult,
@@ -164,8 +168,11 @@ export async function executeFrozenApplyPlan(
 				for (const operation of serverOperations) {
 					let result: ApplyOperationExecutionResult;
 					try {
-						await dependencies.prepareOperation?.(operation, { server: binding.server });
-						if (operation.slot.kind === 'background') {
+						const context = { server: binding.server };
+						await dependencies.prepareOperation?.(operation, context);
+						if (dependencies.executeServerOperation) {
+							await dependencies.executeServerOperation(operation, context);
+						} else if (operation.slot.kind === 'background') {
 							if (!binding.server.applyBackgroundUrl) {
 								throw new Error('Target server does not support background artwork');
 							}
