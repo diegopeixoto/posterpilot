@@ -87,3 +87,54 @@ describe('applyBackground replaces instead of appending', () => {
 		expect(posts).toHaveLength(1);
 	});
 });
+
+describe('remote artwork apply', () => {
+	it('preserves a custom HTTP origin while securely following a same-origin redirect', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = new URL(input instanceof Request ? input.url : input.toString());
+			if (url.href === 'http://artwork.local/start.jpg') {
+				expect(init?.redirect).toBe('manual');
+				return new Response(null, { status: 302, headers: { location: '/final.png' } });
+			}
+			if (url.href === 'http://artwork.local/final.png') {
+				return new Response(new Uint8Array([1, 2, 3]), {
+					headers: { 'content-type': 'image/png' }
+				});
+			}
+			if (url.href === 'http://jellyfin.local/Items/item-4/Images/Primary') {
+				expect(init?.method).toBe('POST');
+				expect(init?.body).toBe('AQID');
+				expect(new Headers(init?.headers).get('content-type')).toBe('image/png');
+				return new Response(null, { status: 204 });
+			}
+			throw new Error(`Unexpected ${init?.method ?? 'GET'} ${url.href}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await provider.applyPosterUrl!('item-4', 'http://artwork.local/start.jpg');
+
+		expect(fetchMock.mock.calls.map(([input]) => input.toString())).toEqual([
+			'http://artwork.local/start.jpg',
+			'http://artwork.local/final.png',
+			'http://jellyfin.local/Items/item-4/Images/Primary'
+		]);
+	});
+
+	it('rejects a cross-origin redirect before requesting the target or uploading', async () => {
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(null, {
+					status: 302,
+					headers: { location: 'http://127.0.0.1/private.jpg' }
+				})
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await expect(
+			provider.applyPosterUrl!('item-5', 'https://artwork.example/start.jpg')
+		).rejects.toThrow('remote_artwork_target_not_allowed');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+});

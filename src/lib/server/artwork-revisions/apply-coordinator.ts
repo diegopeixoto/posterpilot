@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { readConfig } from '$lib/server/kometa/config-io';
 import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
+import { downloadRemoteArtwork } from '$lib/server/remote-artwork';
 import type {
 	ApplyOperationExecutionContext,
 	ApplyOperationExecutionResult,
@@ -58,22 +59,29 @@ function safeNow(clock: () => Date): Date {
 	return now;
 }
 
-async function defaultFetchArtworkBytes(url: string): Promise<ArrayBuffer | null> {
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), 15_000);
+const MAX_VERIFICATION_ARTWORK_BYTES = 50 * 1024 * 1024;
+
+async function defaultFetchArtworkBytes(
+	url: string,
+	provider: string | null
+): Promise<ArrayBuffer | null> {
 	try {
-		const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
-		if (!response.ok) return null;
-		return response.arrayBuffer();
+		const downloaded = await downloadRemoteArtwork(url, {
+			maxBytes: MAX_VERIFICATION_ARTWORK_BYTES,
+			timeoutMs: 30_000,
+			maxRedirects: 3,
+			validateUrl: (target) => trustedProviderArtworkUrl(target, provider)
+		});
+		return downloaded.bytes;
 	} catch {
+		// Verification is best-effort. The server write still proceeds, but it is
+		// recorded as unavailable instead of downloading an untrusted response.
 		return null;
-	} finally {
-		clearTimeout(timeout);
 	}
 }
 
 /** Exported for direct unit testing of the per-provider artwork host allowlist. */
-export function trustedProviderArtworkUrl(url: string, provider: string | null): boolean {
+export function trustedProviderArtworkUrl(url: string | URL, provider: string | null): boolean {
 	if (!provider) return false;
 	let parsed: URL;
 	try {
@@ -81,7 +89,8 @@ export function trustedProviderArtworkUrl(url: string, provider: string | null):
 	} catch {
 		return false;
 	}
-	if (parsed.protocol !== 'https:') return false;
+	if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port)
+		return false;
 	const host = parsed.hostname.toLowerCase();
 	switch (provider) {
 		case 'mediux':
@@ -201,9 +210,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		}
 		const expectedBytes = options.fetchArtworkBytes
 			? await options.fetchArtworkBytes(operation.selection.url)
-			: trustedProviderArtworkUrl(operation.selection.url, operation.selection.provider)
-				? await defaultFetchArtworkBytes(operation.selection.url)
-				: null;
+			: await defaultFetchArtworkBytes(operation.selection.url, operation.selection.provider);
 		prepared.set(operation.id, {
 			destination: 'server',
 			beforeSnapshotId: before.id,

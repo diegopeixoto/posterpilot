@@ -640,4 +640,12 @@ describe('trustedProviderArtworkUrl', () => {
 		expect(trustedProviderArtworkUrl('https://api.mediux.pro/assets/1', null)).toBe(false);
 		expect(trustedProviderArtworkUrl('not-a-url', 'mediux')).toBe(false);
 	});
+
+	it('rejects embedded credentials and non-default ports on trusted hosts', () => {
+		expect(trustedProviderArtworkUrl('https://user:secret@image.tmdb.org/a.jpg', 'tmdb')).toBe(
+			false
+		);
+		expect(trustedProviderArtworkUrl('https://image.tmdb.org:8443/a.jpg', 'tmdb')).toBe(false);
+		expect(trustedProviderArtworkUrl('https://image.tmdb.org.evil.test/a.jpg', 'tmdb')).toBe(false);
+	});
 });

@@ -11,8 +11,8 @@ import {
 	invalidateThePosterDbSession
 } from '$lib/server/posters/providers/theposterdb-session';
 import { sha256Bytes } from '$lib/server/revisions/verification';
+import { downloadRemoteArtwork } from '$lib/server/remote-artwork';
 import { tmdbAuth } from '$lib/server/tmdb/auth';
-import { safeStagedArtworkContentType } from './staged-artwork-url';
 import {
 	buildThePosterDbCollectionArtworkCandidates,
 	parseTmdbCollectionArtworkCandidates,
@@ -137,27 +137,21 @@ export async function fetchThePosterDbNativeCollectionArtworkCandidates(
 export async function fetchNativeCollectionCandidateBytes(
 	candidate: NativeCollectionArtworkCandidate
 ): Promise<NativeCollectionCandidateBytes> {
-	const parsed = new URL(candidate.url);
-	if (
-		parsed.protocol !== 'https:' ||
-		parsed.hostname !== TRUSTED_CANDIDATE_HOSTS[candidate.provider]
-	) {
-		throw new TypeError('native_collection_candidate_source_invalid');
-	}
-	const response = await fetch(parsed, {
-		redirect: 'error',
-		signal: AbortSignal.timeout(15_000)
+	const trustedHost = TRUSTED_CANDIDATE_HOSTS[candidate.provider];
+	const downloaded = await downloadRemoteArtwork(candidate.url, {
+		maxBytes: MAX_CANDIDATE_BYTES,
+		timeoutMs: 15_000,
+		maxRedirects: 3,
+		validateUrl: (target) =>
+			target.protocol === 'https:' &&
+			!target.username &&
+			!target.password &&
+			!target.port &&
+			target.hostname.toLowerCase() === trustedHost
 	});
-	if (!response.ok) throw new Error('native_collection_candidate_unavailable');
-	const declaredLength = Number(response.headers.get('content-length'));
-	if (Number.isFinite(declaredLength) && declaredLength > MAX_CANDIDATE_BYTES) {
-		throw new Error('native_collection_candidate_too_large');
-	}
-	const contentType = safeStagedArtworkContentType(response.headers.get('content-type') ?? '');
-	if (!contentType) throw new Error('native_collection_candidate_type_invalid');
-	const bytes = await response.arrayBuffer();
-	if (bytes.byteLength === 0 || bytes.byteLength > MAX_CANDIDATE_BYTES) {
-		throw new Error('native_collection_candidate_size_invalid');
-	}
-	return { bytes, contentType, sha256: sha256Bytes(bytes) };
+	return {
+		bytes: downloaded.bytes,
+		contentType: downloaded.contentType,
+		sha256: sha256Bytes(downloaded.bytes)
+	};
 }

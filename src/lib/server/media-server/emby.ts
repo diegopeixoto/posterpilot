@@ -33,6 +33,7 @@ import type {
 	ServerLibrary,
 	ServerNativeCollection
 } from './types';
+import { downloadRemoteArtwork, sameOriginCustomArtworkPolicy } from '$lib/server/remote-artwork';
 import { version } from '$lib/version';
 
 export type EmbyFlavor = 'jellyfin' | 'emby';
@@ -176,6 +177,7 @@ export function embyLikeProvider(
 	// transfers get a larger one for big files on slow links.
 	const JSON_TIMEOUT_MS = 15_000;
 	const IMAGE_TIMEOUT_MS = 30_000;
+	const MAX_REMOTE_ARTWORK_BYTES = 50 * 1024 * 1024;
 
 	async function getJson<T>(path: string): Promise<T> {
 		const res = await fetch(`${base}${path}`, {
@@ -255,12 +257,13 @@ export function embyLikeProvider(
 
 	/** Fetch an image URL into bytes + its content type for byte-based apply. */
 	async function fetchImage(url: string): Promise<{ data: ArrayBuffer; contentType: string }> {
-		const res = await fetch(url, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
-		if (!res.ok) {
-			throw new Error(`Could not fetch image (${res.status} ${res.statusText}): ${url}`);
-		}
-		const contentType = res.headers.get('content-type') ?? 'image/jpeg';
-		return { data: await res.arrayBuffer(), contentType };
+		const downloaded = await downloadRemoteArtwork(url, {
+			maxBytes: MAX_REMOTE_ARTWORK_BYTES,
+			timeoutMs: IMAGE_TIMEOUT_MS,
+			maxRedirects: 3,
+			validateUrl: sameOriginCustomArtworkPolicy
+		});
+		return { data: downloaded.bytes, contentType: downloaded.contentType };
 	}
 
 	async function readCurrentArtwork(itemId: string, kind: 'poster' | 'background') {
