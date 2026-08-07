@@ -78,6 +78,16 @@ function errorMessage(error: unknown): string {
 }
 
 function kometaInput(item: ApplyPlanItem, operations: ApplyPlanOperation[]): KometaItemInput {
+	const destination = operations[0]?.kometaDestination;
+	if (
+		!destination ||
+		operations.some(
+			(operation) =>
+				operation.destination !== 'kometa' || operation.kometaDestination?.key !== destination.key
+		)
+	) {
+		throw new TypeError('Kometa batch item is missing one exact typed destination');
+	}
 	const seasons = new Map<number, KometaSeasonInput>();
 	const ensureSeason = (season: number): KometaSeasonInput => {
 		let value = seasons.get(season);
@@ -107,7 +117,7 @@ function kometaInput(item: ApplyPlanItem, operations: ApplyPlanOperation[]): Kom
 		season.episodes?.sort((a, b) => a.episode - b.episode);
 	}
 	return {
-		tmdbId: item.target.tmdbId!,
+		destination,
 		// The title is readability-only in the YAML writer; sourceId is frozen and
 		// avoids a database lookup during execution.
 		title: item.target.sourceId,
@@ -146,12 +156,23 @@ export async function executeFrozenApplyPlan(
 	if (canonicalJsonDigest(payload).digest !== digest) {
 		throw new TypeError('Frozen apply payload does not match its digest');
 	}
-	const items: ApplyItemExecutionResult[] = [];
-	let processed = 0;
+	const pendingItems: Array<{
+		item: ApplyPlanItem;
+		results: ApplyOperationExecutionResult[];
+	}> = [];
+	const kometaBatches = new Map<
+		string,
+		Array<{
+			item: ApplyPlanItem;
+			operations: ApplyPlanOperation[];
+			results: ApplyOperationExecutionResult[];
+		}>
+	>();
 
 	for (const item of payload.items) {
 		if (hooks.isCancelled?.()) break;
 		const results: ApplyOperationExecutionResult[] = [];
+		pendingItems.push({ item, results });
 		const serverOperations = item.operations.filter(
 			(operation) => operation.destination === 'server'
 		);
@@ -169,7 +190,9 @@ export async function executeFrozenApplyPlan(
 					let result: ApplyOperationExecutionResult;
 					try {
 						const context = { server: binding.server };
+						if (hooks.isCancelled?.()) throw new Error('cancelled');
 						await dependencies.prepareOperation?.(operation, context);
+						if (hooks.isCancelled?.()) throw new Error('cancelled');
 						if (dependencies.executeServerOperation) {
 							await dependencies.executeServerOperation(operation, context);
 						} else if (operation.slot.kind === 'background') {
@@ -216,17 +239,45 @@ export async function executeFrozenApplyPlan(
 		}
 
 		if (kometaOperations.length) {
-			let error: unknown = null;
-			try {
-				if (!item.target.tmdbId) throw new Error('Kometa operation is missing a TMDB id');
-				for (const operation of kometaOperations) {
-					await dependencies.prepareOperation?.(operation, {});
-				}
-				await dependencies.writeKometa([kometaInput(item, kometaOperations)], kometaOperations);
-			} catch (caught) {
-				error = caught;
-			}
+			const byFilename = new Map<string, ApplyPlanOperation[]>();
 			for (const operation of kometaOperations) {
+				const filename = operation.kometaDestination?.filename;
+				if (!filename) throw new TypeError('Kometa operation is missing its typed destination');
+				const operations = byFilename.get(filename) ?? [];
+				operations.push(operation);
+				byFilename.set(filename, operations);
+			}
+			for (const [filename, operations] of byFilename) {
+				const batch = kometaBatches.get(filename) ?? [];
+				batch.push({ item, operations, results });
+				kometaBatches.set(filename, batch);
+			}
+		}
+	}
+
+	// One atomic writer call per exact metadata file. All operations sharing a file
+	// observe the same pre-write state, while a failure in one file does not prevent
+	// an independent movie/show file from succeeding.
+	for (const [, entries] of [...kometaBatches.entries()].sort(([left], [right]) =>
+		left.localeCompare(right)
+	)) {
+		const operations = entries.flatMap((entry) => entry.operations);
+		let error: unknown = null;
+		try {
+			for (const operation of operations) {
+				if (hooks.isCancelled?.()) throw new Error('cancelled');
+				await dependencies.prepareOperation?.(operation, {});
+			}
+			if (hooks.isCancelled?.()) throw new Error('cancelled');
+			await dependencies.writeKometa(
+				entries.map((entry) => kometaInput(entry.item, entry.operations)),
+				operations
+			);
+		} catch (caught) {
+			error = caught;
+		}
+		for (const entry of entries) {
+			for (const operation of entry.operations) {
 				const result: ApplyOperationExecutionResult = {
 					operationId: operation.id,
 					destination: operation.destination,
@@ -235,10 +286,14 @@ export async function executeFrozenApplyPlan(
 					status: error === null ? 'success' : 'failed',
 					...(error === null ? {} : { error: errorMessage(error) })
 				};
-				results.push(await record(dependencies, operation, result));
+				entry.results.push(await record(dependencies, operation, result));
 			}
 		}
+	}
 
+	const items: ApplyItemExecutionResult[] = [];
+	let processed = 0;
+	for (const { item, results } of pendingItems) {
 		const resultByOperation = new Map(results.map((result) => [result.operationId, result]));
 		items.push({
 			serverInstanceId: item.target.serverInstanceId,

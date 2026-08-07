@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parse } from 'yaml';
+import { isMap, isScalar, parse, parseDocument } from 'yaml';
+import {
+	LEGACY_FILENAME,
+	MOVIE_FILENAME,
+	SHOW_FILENAME,
+	resolveKometaDestination,
+	type KometaDestinationV2
+} from './destination';
 import {
 	buildMetadataObject,
 	mergeMetadata,
@@ -11,32 +18,62 @@ import {
 	type KometaItemInput
 } from './yaml';
 
+function destination(
+	type: 'movie' | 'show',
+	mappingId: string,
+	namespace: 'preferred' | 'imdb' = 'preferred'
+): KometaDestinationV2 {
+	const result = resolveKometaDestination(
+		type === 'movie'
+			? {
+					type,
+					tmdbId: namespace === 'preferred' ? mappingId : null,
+					imdbId: namespace === 'imdb' ? mappingId : null
+				}
+			: {
+					type,
+					tvdbId: namespace === 'preferred' ? mappingId : null,
+					imdbId: namespace === 'imdb' ? mappingId : null
+				}
+	);
+	if (!result.ok) throw new TypeError('Invalid test destination');
+	return result.destination;
+}
+
+const movieDestination = (id: string) => destination('movie', id);
+const showDestination = (id: string) => destination('show', id);
+const imdbMovieDestination = (id: string) => destination('movie', id, 'imdb');
+
 describe('buildMetadataObject', () => {
 	it('encodes poster-only items under metadata keyed by tmdb id', () => {
 		const items: KometaItemInput[] = [
-			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://example.test/p/550.jpg' }
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/p/550.jpg'
+			}
 		];
 
-		const obj = buildMetadataObject(items) as { metadata: Record<string, unknown> };
+		const obj = buildMetadataObject(items);
 
-		expect(obj.metadata['550']).toEqual({ url_poster: 'https://example.test/p/550.jpg' });
+		expect(obj.metadata.get(550)).toEqual({ url_poster: 'https://example.test/p/550.jpg' });
 		// No background key when none is provided.
-		expect(obj.metadata['550']).not.toHaveProperty('url_background');
+		expect(obj.metadata.get(550)).not.toHaveProperty('url_background');
 	});
 
 	it('encodes poster + background', () => {
 		const items: KometaItemInput[] = [
 			{
-				tmdbId: '603',
+				destination: movieDestination('603'),
 				title: 'The Matrix',
 				posterUrl: 'https://example.test/p/603.jpg',
 				backgroundUrl: 'https://example.test/b/603.jpg'
 			}
 		];
 
-		const obj = buildMetadataObject(items) as { metadata: Record<string, unknown> };
+		const obj = buildMetadataObject(items);
 
-		expect(obj.metadata['603']).toEqual({
+		expect(obj.metadata.get(603)).toEqual({
 			url_poster: 'https://example.test/p/603.jpg',
 			url_background: 'https://example.test/b/603.jpg'
 		});
@@ -44,12 +81,17 @@ describe('buildMetadataObject', () => {
 
 	it('omits urls that are null/undefined', () => {
 		const items: KometaItemInput[] = [
-			{ tmdbId: '1', title: 'No URLs', posterUrl: null, backgroundUrl: undefined }
+			{
+				destination: movieDestination('1'),
+				title: 'No URLs',
+				posterUrl: null,
+				backgroundUrl: undefined
+			}
 		];
 
-		const obj = buildMetadataObject(items) as { metadata: Record<string, unknown> };
+		const obj = buildMetadataObject(items);
 
-		expect(obj.metadata['1']).toEqual({});
+		expect(obj.metadata.get(1)).toEqual({});
 	});
 });
 
@@ -62,12 +104,16 @@ describe('mergeMetadata', () => {
 		};
 
 		const merged = mergeMetadata(existing, [
-			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://new.test/550.jpg' }
-		]) as { metadata: Record<string, unknown> };
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://new.test/550.jpg'
+			}
+		]);
 
 		// Exactly one entry for that id, with the new URL.
-		expect(Object.keys(merged.metadata)).toEqual(['550']);
-		expect(merged.metadata['550']).toEqual({ url_poster: 'https://new.test/550.jpg' });
+		expect([...merged.metadata.keys()]).toEqual([550]);
+		expect(merged.metadata.get(550)).toEqual({ url_poster: 'https://new.test/550.jpg' });
 	});
 
 	it('adds new entries while keeping existing ones', () => {
@@ -79,16 +125,16 @@ describe('mergeMetadata', () => {
 
 		const merged = mergeMetadata(existing, [
 			{
-				tmdbId: '603',
+				destination: movieDestination('603'),
 				title: 'The Matrix',
 				posterUrl: 'https://example.test/603.jpg',
 				backgroundUrl: 'https://example.test/603-bg.jpg'
 			}
-		]) as { metadata: Record<string, unknown> };
+		]);
 
-		expect(Object.keys(merged.metadata).sort()).toEqual(['550', '603']);
-		expect(merged.metadata['550']).toEqual({ url_poster: 'https://example.test/550.jpg' });
-		expect(merged.metadata['603']).toEqual({
+		expect([...merged.metadata.keys()].sort()).toEqual([550, 603]);
+		expect(merged.metadata.get(550)).toEqual({ url_poster: 'https://example.test/550.jpg' });
+		expect(merged.metadata.get(603)).toEqual({
 			url_poster: 'https://example.test/603.jpg',
 			url_background: 'https://example.test/603-bg.jpg'
 		});
@@ -102,7 +148,11 @@ describe('mergeMetadata', () => {
 		};
 
 		mergeMetadata(existing, [
-			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://new.test/550.jpg' }
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://new.test/550.jpg'
+			}
 		]);
 
 		expect(existing.metadata['550']).toEqual({ url_poster: 'https://old.test/550.jpg' });
@@ -117,15 +167,15 @@ describe('mergeMetadata', () => {
 
 		const merged = mergeMetadata(existing, [
 			{
-				tmdbId: '1399',
+				destination: showDestination('1399'),
 				title: 'GoT',
 				seasons: [{ season: 1, posterUrl: 'https://example.test/s1.jpg' }]
 			}
-		]) as { metadata: Record<string, { url_poster?: string; seasons?: unknown }> };
+		]);
 
 		// Show poster kept; season added alongside it.
-		expect(merged.metadata['1399'].url_poster).toBe('https://example.test/show.jpg');
-		expect(merged.metadata['1399'].seasons).toEqual({
+		expect(merged.metadata.get(1399)?.url_poster).toBe('https://example.test/show.jpg');
+		expect(merged.metadata.get(1399)?.seasons).toEqual({
 			1: { url_poster: 'https://example.test/s1.jpg' }
 		});
 	});
@@ -141,13 +191,13 @@ describe('mergeMetadata', () => {
 
 		const merged = mergeMetadata(existing, [
 			{
-				tmdbId: '1399',
+				destination: showDestination('1399'),
 				title: 'GoT',
 				seasons: [{ season: 1, episodes: [{ episode: 2, url: 'https://example.test/s1e2.jpg' }] }]
 			}
-		]) as { metadata: Record<string, { seasons: Record<number, { episodes: unknown }> }> };
+		]);
 
-		expect(merged.metadata['1399'].seasons[1].episodes).toEqual({
+		expect(merged.metadata.get(1399)?.seasons?.[1].episodes).toEqual({
 			1: { url_poster: 'https://example.test/s1e1.jpg' },
 			2: { url_poster: 'https://example.test/s1e2.jpg' }
 		});
@@ -155,21 +205,29 @@ describe('mergeMetadata', () => {
 
 	it('initializes metadata when existing has none', () => {
 		const merged = mergeMetadata({}, [
-			{ tmdbId: '1', title: 'Solo', posterUrl: 'https://example.test/1.jpg' }
-		]) as { metadata: Record<string, unknown> };
+			{
+				destination: movieDestination('1'),
+				title: 'Solo',
+				posterUrl: 'https://example.test/1.jpg'
+			}
+		]);
 
-		expect(merged.metadata['1']).toEqual({ url_poster: 'https://example.test/1.jpg' });
+		expect(merged.metadata.get(1)).toEqual({ url_poster: 'https://example.test/1.jpg' });
 	});
 
 	it('preserves unrelated top-level keys', () => {
 		const existing = { libraries: { Movies: {} }, metadata: {} };
 
 		const merged = mergeMetadata(existing, [
-			{ tmdbId: '1', title: 'Solo', posterUrl: 'https://example.test/1.jpg' }
-		]) as { libraries: unknown; metadata: Record<string, unknown> };
+			{
+				destination: movieDestination('1'),
+				title: 'Solo',
+				posterUrl: 'https://example.test/1.jpg'
+			}
+		]);
 
 		expect(merged.libraries).toEqual({ Movies: {} });
-		expect(merged.metadata['1']).toEqual({ url_poster: 'https://example.test/1.jpg' });
+		expect(merged.metadata.get(1)).toEqual({ url_poster: 'https://example.test/1.jpg' });
 	});
 });
 
@@ -177,7 +235,7 @@ describe('seasons and episodes', () => {
 	it('encodes season posters and episode title cards (no season background)', () => {
 		const items: KometaItemInput[] = [
 			{
-				tmdbId: '1399',
+				destination: showDestination('1399'),
 				title: 'Game of Thrones',
 				posterUrl: 'https://example.test/p/show.jpg',
 				seasons: [
@@ -194,9 +252,9 @@ describe('seasons and episodes', () => {
 			}
 		];
 
-		const obj = buildMetadataObject(items) as { metadata: Record<string, { seasons: unknown }> };
+		const obj = buildMetadataObject(items);
 
-		expect(obj.metadata['1399']).toEqual({
+		expect(obj.metadata.get(1399)).toEqual({
 			url_poster: 'https://example.test/p/show.jpg',
 			seasons: {
 				1: {
@@ -214,67 +272,97 @@ describe('seasons and episodes', () => {
 	it('emits an episodes-only season (no season poster)', () => {
 		const obj = buildMetadataObject([
 			{
-				tmdbId: '1',
+				destination: showDestination('1'),
 				title: 'Show',
 				seasons: [{ season: 3, episodes: [{ episode: 5, url: 'https://example.test/s3e5.jpg' }] }]
 			}
-		]) as { metadata: Record<string, unknown> };
+		]);
 
-		expect(obj.metadata['1']).toEqual({
+		expect(obj.metadata.get(1)).toEqual({
 			seasons: { 3: { episodes: { 5: { url_poster: 'https://example.test/s3e5.jpg' } } } }
 		});
 	});
 
 	it('omits the seasons key when no season carries artwork', () => {
 		const obj = buildMetadataObject([
-			{ tmdbId: '1', title: 'Show', posterUrl: 'https://example.test/p.jpg', seasons: [] }
-		]) as { metadata: Record<string, unknown> };
+			{
+				destination: showDestination('1'),
+				title: 'Show',
+				posterUrl: 'https://example.test/p.jpg',
+				seasons: []
+			}
+		]);
 
-		expect(obj.metadata['1']).toEqual({ url_poster: 'https://example.test/p.jpg' });
+		expect(obj.metadata.get(1)).toEqual({ url_poster: 'https://example.test/p.jpg' });
 	});
 
 	it('round-trips nested seasons through the yaml parser', () => {
 		const obj = buildMetadataObject([
 			{
-				tmdbId: '1399',
+				destination: showDestination('1399'),
 				title: 'GoT',
 				seasons: [{ season: 1, posterUrl: 'https://example.test/s1.jpg' }]
 			}
 		]);
-		expect(parse(toYaml(obj))).toEqual(obj);
+		expect(parse(toYaml(obj))).toEqual({
+			metadata: {
+				1399: { seasons: { 1: { url_poster: 'https://example.test/s1.jpg' } } }
+			}
+		});
 	});
 });
 
 describe('toYaml', () => {
-	it('round-trips buildMetadataObject output through the yaml parser', () => {
+	it('round-trips output with numeric provider keys encoded as YAML integers', () => {
 		const items: KometaItemInput[] = [
 			{
-				tmdbId: '603',
+				destination: movieDestination('603'),
 				title: 'The Matrix',
 				posterUrl: 'https://example.test/p/603.jpg',
 				backgroundUrl: 'https://example.test/b/603.jpg'
 			},
-			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://example.test/p/550.jpg' }
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/p/550.jpg'
+			}
 		];
 
 		const obj = buildMetadataObject(items);
 		const yaml = toYaml(obj);
 		const parsed = parse(yaml);
 
-		expect(parsed).toEqual(obj);
+		expect(parsed).toEqual({
+			metadata: {
+				603: {
+					url_poster: 'https://example.test/p/603.jpg',
+					url_background: 'https://example.test/b/603.jpg'
+				},
+				550: { url_poster: 'https://example.test/p/550.jpg' }
+			}
+		});
+		expect(yaml).toMatch(/^ {2}603:/m);
+		expect(yaml).not.toContain('"603":');
 	});
 });
 
 describe('writeKometaYaml', () => {
 	const dir = join(tmpdir(), `posterpilot-kometa-yaml-${process.pid}`);
-	const file = join(dir, 'posterpilot.yml');
+	const movieFile = join(dir, MOVIE_FILENAME);
+	const showFile = join(dir, SHOW_FILENAME);
+	const legacyFile = join(dir, LEGACY_FILENAME);
+	const escapedFile = join(tmpdir(), `posterpilot-kometa-escape-${process.pid}.yml`);
 
 	beforeEach(() => {
 		rmSync(dir, { recursive: true, force: true });
+		rmSync(escapedFile, { force: true });
 		mkdirSync(dir, { recursive: true });
 	});
 
-	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+		rmSync(escapedFile, { force: true });
+	});
 
 	it('atomically merges an existing file and preserves its comments', async () => {
 		const original = [
@@ -283,27 +371,29 @@ describe('writeKometaYaml', () => {
 			'  Movies: {} # keep library settings',
 			'metadata:',
 			'  # Existing title',
-			'  603:',
+			'  "603":',
 			'    url_poster: https://old.test/603.jpg # keep poster note',
 			'    custom_field: keep-me',
 			''
 		].join('\n');
-		writeFileSync(file, original, 'utf8');
+		writeFileSync(movieFile, original, 'utf8');
 
 		await writeKometaYaml(dir, [
 			{
-				tmdbId: '603',
+				destination: movieDestination('603'),
 				title: 'The Matrix',
 				posterUrl: 'https://new.test/603.jpg',
 				backgroundUrl: 'https://new.test/603-bg.jpg'
 			}
 		]);
 
-		const written = readFileSync(file, 'utf8');
+		const written = readFileSync(movieFile, 'utf8');
 		expect(written).toContain('# Hand-maintained Kometa metadata');
 		expect(written).toContain('# keep library settings');
 		expect(written).toContain('# Existing title');
 		expect(written).toContain('# keep poster note');
+		expect(written).toMatch(/^ {2}603:/m);
+		expect(written).not.toContain('"603":');
 		expect(parse(written)).toEqual({
 			libraries: { Movies: {} },
 			metadata: {
@@ -323,14 +413,22 @@ describe('writeKometaYaml', () => {
 	it('serializes concurrent read-modify-write calls without losing either item', async () => {
 		await Promise.all([
 			writeKometaYaml(dir, [
-				{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://example.test/550.jpg' }
+				{
+					destination: movieDestination('550'),
+					title: 'Fight Club',
+					posterUrl: 'https://example.test/550.jpg'
+				}
 			]),
 			writeKometaYaml(dir, [
-				{ tmdbId: '603', title: 'The Matrix', posterUrl: 'https://example.test/603.jpg' }
+				{
+					destination: movieDestination('603'),
+					title: 'The Matrix',
+					posterUrl: 'https://example.test/603.jpg'
+				}
 			])
 		]);
 
-		const result = parse(readFileSync(file, 'utf8')) as {
+		const result = parse(readFileSync(movieFile, 'utf8')) as {
 			metadata: Record<string, { url_poster: string }>;
 		};
 		expect(result.metadata['550'].url_poster).toBe('https://example.test/550.jpg');
@@ -340,10 +438,14 @@ describe('writeKometaYaml', () => {
 	it('does not include credential-bearing source text in parse errors', async () => {
 		const credential = 'do-not-leak-this-token';
 		const malformed = `plex_token: ${credential}\nmetadata: [\n`;
-		writeFileSync(file, malformed, 'utf8');
+		writeFileSync(movieFile, malformed, 'utf8');
 
 		const error = await writeKometaYaml(dir, [
-			{ tmdbId: '550', title: 'Fight Club', posterUrl: 'https://example.test/550.jpg' }
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/550.jpg'
+			}
 		]).then(
 			() => null,
 			(reason: unknown) => reason
@@ -352,6 +454,152 @@ describe('writeKometaYaml', () => {
 		expect(error).toBeInstanceOf(Error);
 		expect(String(error)).toContain('Invalid existing Kometa YAML');
 		expect(String(error)).not.toContain(credential);
-		expect(readFileSync(file, 'utf8')).toBe(malformed);
+		expect(readFileSync(movieFile, 'utf8')).toBe(malformed);
+	});
+
+	it('isolates equal numeric movie and show identifiers in separate files', async () => {
+		await Promise.all([
+			writeKometaYaml(dir, [
+				{
+					destination: movieDestination('42'),
+					title: 'Movie 42',
+					posterUrl: 'https://example.test/movie-42.jpg'
+				}
+			]),
+			writeKometaYaml(dir, [
+				{
+					destination: showDestination('42'),
+					title: 'Show 42',
+					posterUrl: 'https://example.test/show-42.jpg'
+				}
+			])
+		]);
+
+		expect(parse(readFileSync(movieFile, 'utf8'))).toEqual({
+			metadata: { 42: { url_poster: 'https://example.test/movie-42.jpg' } }
+		});
+		expect(parse(readFileSync(showFile, 'utf8'))).toEqual({
+			metadata: { 42: { url_poster: 'https://example.test/show-42.jpg' } }
+		});
+	});
+
+	it('writes numeric provider keys as integer scalars and IMDb keys as strings', async () => {
+		await writeKometaYaml(dir, [
+			{
+				destination: movieDestination('603'),
+				title: 'The Matrix',
+				posterUrl: 'https://example.test/603.jpg'
+			},
+			{
+				destination: imdbMovieDestination('tt0137523'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/fight-club.jpg'
+			}
+		]);
+
+		const document = parseDocument(readFileSync(movieFile, 'utf8'));
+		expect(isMap(document.contents)).toBe(true);
+		if (!isMap(document.contents)) throw new TypeError('Expected YAML root map');
+		const metadataPair = document.contents.items.find(
+			(pair) => isScalar(pair.key) && pair.key.value === 'metadata'
+		);
+		expect(isMap(metadataPair?.value)).toBe(true);
+		if (!isMap(metadataPair?.value)) throw new TypeError('Expected YAML metadata map');
+		const keys = metadataPair.value.items.map((pair) => {
+			expect(isScalar(pair.key)).toBe(true);
+			return isScalar(pair.key) ? pair.key.value : null;
+		});
+		expect(keys).toContain(603);
+		expect(keys).toContain('tt0137523');
+	});
+
+	it('never touches the legacy mixed-kind file during a typed write', async () => {
+		const legacy = '# user-owned legacy metadata\nmetadata: {}\n';
+		writeFileSync(legacyFile, legacy, 'utf8');
+
+		await writeKometaYaml(dir, [
+			{
+				destination: movieDestination('550'),
+				title: 'Fight Club',
+				posterUrl: 'https://example.test/550.jpg'
+			}
+		]);
+
+		expect(readFileSync(legacyFile, 'utf8')).toBe(legacy);
+		expect(existsSync(movieFile)).toBe(true);
+		expect(existsSync(showFile)).toBe(false);
+	});
+
+	it('awaits final async validation before performing the atomic write', async () => {
+		let validationStarted!: () => void;
+		const started = new Promise<void>((resolve) => (validationStarted = resolve));
+		let resumeValidation!: () => void;
+		const paused = new Promise<void>((resolve) => (resumeValidation = resolve));
+		const pending = writeKometaYaml(
+			dir,
+			[
+				{
+					destination: movieDestination('550'),
+					title: 'Fight Club',
+					posterUrl: 'https://example.test/550.jpg'
+				}
+			],
+			{
+				validateCurrent: async () => {
+					validationStarted();
+					await paused;
+				}
+			}
+		);
+
+		await started;
+		expect(existsSync(movieFile)).toBe(false);
+		resumeValidation();
+		await pending;
+		expect(existsSync(movieFile)).toBe(true);
+	});
+
+	it('rejects mixed split destinations before creating either file', async () => {
+		await expect(
+			writeKometaYaml(dir, [
+				{ destination: movieDestination('42'), title: 'Movie 42' },
+				{ destination: showDestination('42'), title: 'Show 42' }
+			])
+		).rejects.toThrow('cannot mix metadata files');
+		expect(existsSync(movieFile)).toBe(false);
+		expect(existsSync(showFile)).toBe(false);
+	});
+
+	it('rejects explicit legacy destinations rather than default-writing them', async () => {
+		const legacyDestination = {
+			version: 1,
+			filename: LEGACY_FILENAME,
+			namespace: 'tmdb',
+			mappingId: '550',
+			key: `kometa:v1:legacy:tmdb:550:${LEGACY_FILENAME}`
+		} as unknown as KometaDestinationV2;
+
+		await expect(
+			writeKometaYaml(dir, [{ destination: legacyDestination, title: 'Legacy item' }])
+		).rejects.toThrow('Invalid Kometa destination');
+		expect(existsSync(legacyFile)).toBe(false);
+	});
+
+	it('rejects forged filenames before path resolution or filesystem access', async () => {
+		const forged = {
+			...movieDestination('550'),
+			filename: `../${escapedFile.split('/').at(-1)}`,
+			key: `kometa:v2:movie:tmdb:550:../${escapedFile.split('/').at(-1)}`
+		} as unknown as KometaDestinationV2;
+
+		await expect(writeKometaYaml(dir, [{ destination: forged, title: 'Forged' }])).rejects.toThrow(
+			'Invalid Kometa destination'
+		);
+		expect(existsSync(escapedFile)).toBe(false);
+	});
+
+	it('rejects an empty write without creating a default file', async () => {
+		await expect(writeKometaYaml(dir, [])).rejects.toThrow('requires at least one typed item');
+		expect(readdirSync(dir)).toEqual([]);
 	});
 });

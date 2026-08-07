@@ -1,4 +1,11 @@
 import type { ArtworkSnapshot } from '$lib/server/db/schema';
+import {
+	kometaYamlMappingKey,
+	parseKometaDestinationKey,
+	parseKometaLegacyDestinationKey,
+	type KometaDestinationV2,
+	type KometaLegacyDestinationV1
+} from '$lib/server/kometa/destination';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
 import type { ApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
 import { canonicalJsonDigest } from '$lib/server/plans/canonical-json';
@@ -68,7 +75,7 @@ export class ArtworkUndoExecutionError extends Error {
 
 export interface UndoKometaMutationInput {
 	serverInstanceId: string;
-	tmdbId: string;
+	destination: KometaDestinationV2 | KometaLegacyDestinationV1;
 	slot: UndoPlanSlot;
 	restore: KometaSlotSnapshotValue;
 	/** Safe compare-and-set identity. The mutator should reject a different live value atomically. */
@@ -83,7 +90,10 @@ export interface ArtworkUndoExecutorDependencies {
 	snapshots: UndoSnapshots;
 	ledger: UndoLedger;
 	/** null means an absent file/empty document; undefined means it could not be observed. */
-	readKometa(serverInstanceId: string): Promise<string | null | undefined>;
+	readKometa(
+		serverInstanceId: string,
+		destination: KometaDestinationV2 | KometaLegacyDestinationV1
+	): Promise<string | null | undefined>;
 	/** Atomically restore/remove exactly one managed scalar and preserve unrelated YAML. */
 	mutateKometa(input: UndoKometaMutationInput): Promise<void>;
 	clock?: () => Date;
@@ -239,7 +249,24 @@ function snapshotMatchesOperation(
 	operation: UndoPlanOperation
 ): boolean {
 	const target = targetFields(operation.target);
+	const destination = kometaDestination(operation);
+	const metadata = snapshot.metadata;
+	const recordedDestination = metadata && typeof metadata === 'object' ? metadata : null;
+	const recordedDestinationKey =
+		destination?.version === 2
+			? recordedDestination?.kometaDestination
+			: recordedDestination?.legacyKometaDestination;
+	const explicitDestinationMatches =
+		recordedDestinationKey !== null &&
+		typeof recordedDestinationKey === 'object' &&
+		(recordedDestinationKey as Record<string, unknown>).key === destination?.key;
+	const historicalLegacyMatches =
+		destination?.version === 1 && recordedDestination?.tmdbId === destination.mappingId;
+	const destinationMatches =
+		operation.destination !== 'kometa' ||
+		(destination !== null && (explicitDestinationMatches || historicalLegacyMatches));
 	return (
+		destinationMatches &&
 		snapshot.id === operation.beforeSnapshotId &&
 		snapshot.serverInstanceId === operation.serverInstanceId &&
 		snapshot.mediaItemId === target.mediaItemId &&
@@ -282,11 +309,14 @@ function kometaSnapshotValue(snapshot: ArtworkSnapshot): KometaSlotSnapshotValue
 	return null;
 }
 
-function kometaTmdbId(operation: UndoPlanOperation): string | null {
-	const prefix = 'kometa:';
-	if (!operation.targetId.startsWith(prefix)) return null;
-	const value = operation.targetId.slice(prefix.length);
-	return value && !value.includes('/') && !value.includes('..') ? value : null;
+function kometaDestination(
+	operation: UndoPlanOperation
+): KometaDestinationV2 | KometaLegacyDestinationV1 | null {
+	if (operation.destination !== 'kometa') return null;
+	return (
+		parseKometaDestinationKey(operation.targetId) ??
+		parseKometaLegacyDestinationKey(operation.targetId)
+	);
 }
 
 function statusFromResults(results: ArtworkUndoOperationResult[]): ArtworkUndoExecutionStatus {
@@ -400,10 +430,14 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 		): Promise<CurrentKometaObservation> {
 			let raw: string | null | undefined;
 			let value: KometaSlotSnapshotValue | null = null;
+			const destination = kometaDestination(operation);
 			try {
-				raw = await dependencies.readKometa(operation.serverInstanceId);
-				const tmdbId = kometaTmdbId(operation);
-				if (raw !== undefined && tmdbId) value = readKometaSlot(raw ?? '', tmdbId, operation.slot);
+				raw = destination
+					? await dependencies.readKometa(operation.serverInstanceId, destination)
+					: undefined;
+				if (raw !== undefined && destination) {
+					value = readKometaSlot(raw ?? '', kometaYamlMappingKey(destination), operation.slot);
+				}
 			} catch {
 				raw = undefined;
 			}
@@ -420,7 +454,11 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 					slot: operation.slot,
 					state,
 					value: value?.state === 'present' ? value : undefined,
-					metadata: { tmdbId: kometaTmdbId(operation) }
+					metadata: destination
+						? destination.version === 2
+							? { kometaDestination: destination }
+							: { legacyKometaDestination: destination }
+						: null
 				});
 				return { raw, value, state, fingerprint, snapshotId: snapshot.id };
 			} catch {
@@ -454,6 +492,13 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			record: OperationRecord
 		): Promise<ArtworkUndoOperationResult> {
 			const target = targetFields(operation.target);
+			const undoDestination = kometaDestination(operation);
+			const destinationProvenance =
+				undoDestination?.version === 2
+					? { kometaDestination: undoDestination }
+					: undoDestination
+						? { legacyKometaDestination: undoDestination }
+						: {};
 			const recorded = await dependencies.ledger.recordOutcome({
 				groupId,
 				serverInstanceId: operation.serverInstanceId,
@@ -472,7 +517,8 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 				provenance: {
 					operationId: operation.id,
 					revisionGroupId: operation.revisionGroupId,
-					snapshotState: operation.snapshot.state
+					snapshotState: operation.snapshot.state,
+					...destinationProvenance
 				},
 				priorFingerprint: record.priorFingerprint,
 				proposedFingerprint: record.proposedFingerprint,
@@ -730,6 +776,19 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			operation: UndoPlanOperation,
 			groupId: string
 		): Promise<ArtworkUndoOperationResult> {
+			const destination = kometaDestination(operation);
+			if (!destination) {
+				return record(operation, groupId, {
+					beforeSnapshotId: null,
+					afterSnapshotId: null,
+					priorFingerprint: null,
+					proposedFingerprint: operation.snapshot.fingerprint,
+					applyMethod: 'kometa_yaml',
+					status: 'skipped',
+					verification: 'unavailable',
+					errorCode: 'undo_kometa_target_invalid'
+				});
+			}
 			const before = await captureKometaObservation(operation);
 			const base = {
 				beforeSnapshotId: before.snapshotId,
@@ -752,15 +811,6 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 					status: 'failed',
 					verification: 'failed',
 					errorCode: 'undo_snapshot_capture_failed'
-				});
-			}
-			const tmdbId = kometaTmdbId(operation);
-			if (!tmdbId) {
-				return record(operation, groupId, {
-					...base,
-					status: 'failed',
-					verification: 'failed',
-					errorCode: 'undo_kometa_target_invalid'
 				});
 			}
 			if (before.state === 'unavailable' || !before.value) {
@@ -807,7 +857,7 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			try {
 				await dependencies.mutateKometa({
 					serverInstanceId: operation.serverInstanceId,
-					tmdbId,
+					destination,
 					slot: operation.slot,
 					restore,
 					expectedCurrent: {
@@ -838,7 +888,12 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			try {
 				verified =
 					after.raw !== undefined &&
-					verifyKometaSlot(after.raw ?? '', tmdbId, operation.slot, restore);
+					verifyKometaSlot(
+						after.raw ?? '',
+						kometaYamlMappingKey(destination),
+						operation.slot,
+						restore
+					);
 			} catch {
 				verified = false;
 			}

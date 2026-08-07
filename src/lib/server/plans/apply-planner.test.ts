@@ -35,6 +35,8 @@ import {
 	type PlannerStoredSelection
 } from './apply-planner';
 import { applySlotKey, type ApplyPlanDestination, type ApplySlot } from './apply-plan';
+import { resolveKometaDestination } from '$lib/server/kometa/destination';
+import { hashCanonicalJson } from './canonical-json';
 
 const PLANNED_AT = new Date('2026-07-10T12:00:00.000Z');
 let planId = 0;
@@ -194,13 +196,33 @@ function createTestPlanner(items: ApplyPlannerItemData[]) {
 					const current = target.item.currentSlots.find(
 						(state) => applySlotKey(state.slot) === applySlotKey(selection.slot)
 					);
+					const kometa =
+						destination === 'kometa'
+							? resolveKometaDestination({
+									type: target.item.identity.type,
+									tmdbId: target.item.identity.tmdbId,
+									tvdbId: target.item.identity.tvdbId,
+									imdbId: target.item.identity.imdbId
+								})
+							: null;
 					return {
 						destination,
+						...(kometa?.ok
+							? {
+									kometaDestination: kometa.destination,
+									kometaFileFingerprint: hashCanonicalJson({
+										exists: false,
+										content: null
+									})
+								}
+							: {}),
 						slot: selection.slot,
 						targetId:
 							destination === 'server'
 								? `${target.item.identity.sourceId}:${applySlotKey(selection.slot)}`
-								: `${target.item.identity.tmdbId}:${applySlotKey(selection.slot)}`,
+								: kometa?.ok
+									? kometa.destination.key
+									: null,
 						capability: 'supported' as const,
 						current: {
 							url: current?.url ?? null,
@@ -212,7 +234,10 @@ function createTestPlanner(items: ApplyPlannerItemData[]) {
 									? `kometa-file-${target.item.identity.serverInstanceId}`
 									: null
 						},
-						skipCode: null,
+						skipCode:
+							destination === 'kometa' && !kometa?.ok
+								? ('missing_kometa_identifier' as const)
+								: null,
 						parameters: {}
 					};
 				})
@@ -281,8 +306,8 @@ describe('unified apply planner', () => {
 			candidateCount: 2
 		});
 		expect(item.operations.map((operation) => operation.targetId)).toEqual([
-			'1:background:root:root',
-			'1:poster:root:root',
+			'kometa:v2:movie:tmdb:1:posterpilot-movies.yml',
+			'kometa:v2:movie:tmdb:1:posterpilot-movies.yml',
 			'source-server-a-1:background:root:root',
 			'source-server-a-1:poster:root:root'
 		]);

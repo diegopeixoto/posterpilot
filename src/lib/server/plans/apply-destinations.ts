@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse } from 'yaml';
 import { resolveConfig, type AppConfig } from '$lib/server/config';
-import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
+import {
+	LEGACY_FILENAME,
+	resolveKometaDestination,
+	type KometaDestinationV2
+} from '$lib/server/kometa/destination';
+import { classifyKometaLegacyConfig } from '$lib/server/kometa/legacy-layout';
 import { hashCanonicalJson } from './canonical-json';
 import {
 	applySlotKey,
@@ -16,14 +21,30 @@ import { sha256Bytes } from '$lib/server/revisions/verification';
 type JsonObject = Record<string, unknown>;
 
 export interface KometaDestinationState {
-	targetId: string;
+	kometaFileFingerprint: string;
 	current: CurrentArtworkIdentity;
 }
 
 interface KometaDocumentState {
 	filePath: string;
+	destination: KometaDestinationV2;
 	metadata: JsonObject;
 	parseError: boolean;
+	fileFingerprint: string;
+}
+
+interface InspectedKometaFile {
+	path: string;
+	exists: boolean;
+	readable: boolean;
+	content: string | null;
+	fingerprint: string;
+}
+
+export interface KometaCollisionGuardState {
+	migrationRequired: boolean;
+	reason: 'active_legacy_reference' | 'unknown_config_with_legacy_file' | null;
+	fingerprint: string;
 }
 
 export interface ApplyDestinationResolverOptions {
@@ -31,7 +52,7 @@ export interface ApplyDestinationResolverOptions {
 	loadConfig?: () => Promise<AppConfig>;
 	readKometaState?: (
 		config: AppConfig,
-		tmdbId: string,
+		destination: KometaDestinationV2,
 		slot: ResolveApplyDestinationsInput['selections'][number]['slot']
 	) => Promise<KometaDestinationState>;
 }
@@ -55,6 +76,100 @@ export function kometaOutputDirectory(config: AppConfig): string {
 	return config.kometaConfigPath ? dirname(config.kometaConfigPath) : config.kometaAssetsDir;
 }
 
+function inspectKometaFile(path: string): InspectedKometaFile {
+	const exists = existsSync(path);
+	let content: string | null = null;
+	let readable = !exists;
+	if (exists) {
+		try {
+			content = readFileSync(path, 'utf8');
+			readable = true;
+		} catch {
+			readable = false;
+		}
+	}
+	return {
+		path,
+		exists,
+		readable,
+		content,
+		fingerprint: hashCanonicalJson({ path, exists, readable, content })
+	};
+}
+
+/**
+ * Freeze the active config and preserved legacy file into every Kometa snapshot.
+ * This is intentionally read-only: migration owns all config/file mutation.
+ */
+export function inspectKometaCollisionGuard(config: AppConfig): KometaCollisionGuardState {
+	const activeConfig = Boolean(config.kometaConfigPath);
+	const configFile = activeConfig
+		? inspectKometaFile(config.kometaConfigPath)
+		: {
+				path: '',
+				exists: false,
+				readable: true,
+				content: null,
+				fingerprint: hashCanonicalJson({ path: '', exists: false, readable: true, content: null })
+			};
+	const legacyFile = inspectKometaFile(join(kometaOutputDirectory(config), LEGACY_FILENAME));
+	const classification =
+		activeConfig && configFile.exists && configFile.readable && configFile.content !== null
+			? classifyKometaLegacyConfig(configFile.content)
+			: { known: false, references: [] as string[] };
+	const hasActiveLegacyReference = classification.references.length > 0;
+	const unknownConfigWithLegacyFile = legacyFile.exists && (!activeConfig || !classification.known);
+	const reason = hasActiveLegacyReference
+		? ('active_legacy_reference' as const)
+		: unknownConfigWithLegacyFile
+			? ('unknown_config_with_legacy_file' as const)
+			: null;
+	const migrationRequired = reason !== null;
+	return {
+		migrationRequired,
+		reason,
+		fingerprint: hashCanonicalJson({
+			version: 1,
+			activeConfig,
+			configFile: configFile.fingerprint,
+			configKnown: classification.known,
+			activeLegacyReferences: classification.references,
+			legacyFile: legacyFile.fingerprint,
+			migrationRequired,
+			reason
+		})
+	};
+}
+
+function bindCollisionGuard(
+	state: KometaDestinationState,
+	guard: KometaCollisionGuardState
+): KometaDestinationState {
+	return {
+		kometaFileFingerprint: state.kometaFileFingerprint,
+		current: {
+			...state.current,
+			destinationFingerprint: hashCanonicalJson({
+				typedDestinationFingerprint: state.current.destinationFingerprint,
+				collisionGuardFingerprint: guard.fingerprint
+			})
+		}
+	};
+}
+
+function emptyKometaCurrent(guard: KometaCollisionGuardState): CurrentArtworkIdentity {
+	return {
+		url: null,
+		fingerprint: null,
+		artworkVersion: null,
+		observedAt: null,
+		destinationFingerprint: hashCanonicalJson({
+			typedDestinationFingerprint: null,
+			collisionGuardFingerprint: guard.fingerprint
+		})
+	};
+}
+
 function kometaSlotUrl(
 	entry: JsonObject,
 	slot: ResolveApplyDestinationsInput['selections'][number]['slot']
@@ -70,40 +185,51 @@ function kometaSlotUrl(
 }
 
 /** Read only the target Kometa entry; no preview path may create or rewrite a file. */
-function readDatabaseKometaDocument(config: AppConfig): KometaDocumentState {
+function readDatabaseKometaDocument(
+	config: AppConfig,
+	destination: KometaDestinationV2
+): KometaDocumentState {
 	const outputDirectory = kometaOutputDirectory(config);
-	const filePath = join(outputDirectory, DEFAULT_FILENAME);
+	const filePath = join(outputDirectory, destination.filename);
 	let metadata: JsonObject = {};
 	let parseError = false;
-	if (existsSync(filePath)) {
+	let raw: string | null = null;
+	const exists = existsSync(filePath);
+	if (exists) {
 		try {
-			const parsed = object(parse(readFileSync(filePath, 'utf8')));
+			raw = readFileSync(filePath, 'utf8');
+			const parsed = object(parse(raw));
 			metadata = object(parsed.metadata);
 		} catch {
 			parseError = true;
 		}
 	}
-	return { filePath, metadata, parseError };
+	return {
+		filePath,
+		destination,
+		metadata,
+		parseError,
+		fileFingerprint: hashCanonicalJson({ exists, content: raw })
+	};
 }
 
 function kometaStateFromDocument(
 	document: KometaDocumentState,
-	tmdbId: string,
 	slot: ResolveApplyDestinationsInput['selections'][number]['slot']
 ): KometaDestinationState {
 	// A malformed file is still represented by a distinct identity and will fail
 	// safely during the existing writer. Preview itself remains read-only.
 	const entry = document.parseError
 		? { __posterpilotParseError: true }
-		: child(document.metadata, tmdbId);
+		: child(document.metadata, document.destination.mappingId);
 	const url = kometaSlotUrl(entry, slot);
 	const destinationFingerprint = hashCanonicalJson({
 		filePath: document.filePath,
-		tmdbId,
-		entry
+		destination: document.destination,
+		fileFingerprint: document.fileFingerprint
 	});
 	return {
-		targetId: `kometa:${hashCanonicalJson({ filePath: document.filePath, tmdbId })}`,
+		kometaFileFingerprint: document.fileFingerprint,
 		current: {
 			url,
 			fingerprint: url === null ? null : hashCanonicalJson({ url }),
@@ -116,10 +242,10 @@ function kometaStateFromDocument(
 
 async function readDatabaseKometaState(
 	config: AppConfig,
-	tmdbId: string,
+	destination: KometaDestinationV2,
 	slot: ResolveApplyDestinationsInput['selections'][number]['slot']
 ): Promise<KometaDestinationState> {
-	return kometaStateFromDocument(readDatabaseKometaDocument(config), tmdbId, slot);
+	return kometaStateFromDocument(readDatabaseKometaDocument(config, destination), slot);
 }
 
 function currentSlot(
@@ -168,8 +294,16 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 				'Kometa target is not bound to this named Plex server'
 			);
 		}
-		const kometaDocument =
-			config && !options.readKometaState ? readDatabaseKometaDocument(config) : null;
+		const kometaResolution = wantsKometa
+			? resolveKometaDestination({
+					type: input.target.item.identity.type,
+					tmdbId: input.target.item.identity.tmdbId,
+					tvdbId: input.target.item.identity.tvdbId,
+					imdbId: input.target.item.identity.imdbId
+				})
+			: null;
+		const kometaGuard = config ? inspectKometaCollisionGuard(config) : null;
+		const kometaDocuments = new Map<string, KometaDocumentState>();
 
 		let seasons: Awaited<
 			ReturnType<NonNullable<typeof serverBinding>['server']['listSeasons']>
@@ -237,23 +371,50 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 				});
 			}
 
-			if (config) {
-				const tmdbId = input.target.item.identity.tmdbId;
-				if (tmdbId) {
-					const state = kometaDocument
-						? kometaStateFromDocument(kometaDocument, tmdbId, selection.slot)
-						: await readKometaState(config, tmdbId, selection.slot);
+			if (config && kometaGuard) {
+				if (kometaResolution?.ok) {
+					const destination = kometaResolution.destination;
+					let state: KometaDestinationState;
+					if (options.readKometaState) {
+						state = await readKometaState(config, destination, selection.slot);
+					} else {
+						let document = kometaDocuments.get(destination.key);
+						if (!document) {
+							document = readDatabaseKometaDocument(config, destination);
+							kometaDocuments.set(destination.key, document);
+						}
+						state = kometaStateFromDocument(document, selection.slot);
+					}
+					state = bindCollisionGuard(state, kometaGuard);
 					snapshots.push({
 						destination: 'kometa',
+						kometaDestination: destination,
+						kometaFileFingerprint: state.kometaFileFingerprint,
 						slot: selection.slot,
-						targetId: state.targetId,
+						targetId: destination.key,
 						capability:
 							selection.slot.kind === 'background' && selection.slot.season !== null
 								? 'unsupported'
 								: 'supported',
 						current: state.current,
-						skipCode: null,
-						parameters: {}
+						skipCode: kometaGuard.migrationRequired ? 'kometa_migration_required' : null,
+						parameters: kometaGuard.migrationRequired
+							? { reason: kometaGuard.reason, legacyFile: LEGACY_FILENAME }
+							: {}
+					});
+				} else {
+					snapshots.push({
+						destination: 'kometa',
+						slot: selection.slot,
+						targetId: null,
+						capability: 'supported',
+						current: emptyKometaCurrent(kometaGuard),
+						skipCode: kometaGuard.migrationRequired
+							? 'kometa_migration_required'
+							: 'missing_kometa_identifier',
+						parameters: kometaGuard.migrationRequired
+							? { reason: kometaGuard.reason, legacyFile: LEGACY_FILENAME }
+							: { mediaKind: input.target.item.identity.type }
 					});
 				}
 			}

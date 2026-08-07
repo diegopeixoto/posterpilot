@@ -17,6 +17,7 @@
 import { Document, isAlias, isMap, isScalar, isSeq, parseDocument, YAMLMap, YAMLSeq } from 'yaml';
 import { knownDefaults } from './defaults-catalog';
 import { CONNECTOR_DEPENDENCIES, SECRET_PATHS } from './connectors';
+import { MOVIE_FILENAME, SHOW_FILENAME, type KometaMetadataFilename } from './destination';
 
 /** Plex/TMDB credentials PosterPilot writes into the connection sections. */
 export interface KometaCreds {
@@ -31,8 +32,8 @@ export interface PlanLibrary {
 	name: string;
 	/** Default collection names to ensure as `- default: <name>` entries. */
 	defaults: string[];
-	/** Whether to wire the `posterpilot.yml` `metadata_files` entry. */
-	metadata: boolean;
+	/** Exact co-located PosterPilot metadata file selected from the authoritative library type. */
+	metadataFile: KometaMetadataFilename | null;
 	/** Default overlay names to ensure as `- default: <name>` under `overlay_files`. */
 	overlays?: string[];
 	/** Per-library `operations` keys to set (key → scalar string value). */
@@ -50,7 +51,10 @@ export interface ManagedSetting {
 
 /** What PosterPilot owns within one managed library, for safe removal next sync. */
 export interface ManagedLib {
-	metadata: boolean;
+	/** Exact metadata reference PosterPilot owns. Null means an identical user entry was reused. */
+	metadataFile?: string | null;
+	/** Legacy snapshot ownership flag; read only with the snapshot-level `metadataPath`. */
+	metadata?: boolean;
 	defaults: string[];
 	overlays?: string[];
 	operations?: string[];
@@ -60,8 +64,6 @@ export interface ManagedLib {
 /** The fully-resolved desired managed state. */
 export interface ConfigPlan {
 	creds: KometaCreds;
-	/** Kometa-visible path to `posterpilot.yml` (the `metadata_files` `file:` value). */
-	metadataFile: string;
 	libraries: PlanLibrary[];
 	settings: ManagedSetting[];
 	/** Secret setting paths to preserve from the source without exposing their value. */
@@ -82,7 +84,8 @@ export interface ConfigPlan {
 
 /** What PosterPilot last wrote, used to compute safe removals on the next sync. */
 export interface KometaSnapshot {
-	metadataPath: string;
+	/** Legacy global metadata path; new snapshots store ownership per library. */
+	metadataPath?: string;
 	libraries: Record<string, ManagedLib>;
 	managedSettingKeys: string[];
 	/** Managed key names per connector section (for removal on unmanage). */
@@ -118,11 +121,10 @@ export function serialize(doc: Document): string {
 /** Assemble a ConfigPlan from resolved inputs (filters defaults to known names). */
 export function buildPlan(input: {
 	creds: KometaCreds;
-	metadataFile: string;
 	libraries: {
 		name: string;
 		defaults: string[];
-		metadata?: boolean;
+		metadataFile: KometaMetadataFilename | null;
 		overlays?: string[];
 		operations?: Record<string, string>;
 		settingsOverrides?: Record<string, string>;
@@ -132,13 +134,21 @@ export function buildPlan(input: {
 	connections?: Record<string, Record<string, string>>;
 	connectionKeep?: Record<string, string[]>;
 }): ConfigPlan {
+	for (const library of input.libraries) {
+		if (
+			library.metadataFile !== null &&
+			library.metadataFile !== MOVIE_FILENAME &&
+			library.metadataFile !== SHOW_FILENAME
+		) {
+			throw new TypeError('Unsupported PosterPilot Kometa metadata filename');
+		}
+	}
 	return {
 		creds: input.creds,
-		metadataFile: input.metadataFile,
 		libraries: input.libraries.map((l) => ({
 			name: l.name,
 			defaults: dedupe(knownDefaults(l.defaults)),
-			metadata: l.metadata ?? true,
+			metadataFile: l.metadataFile,
 			overlays: l.overlays ? dedupe(l.overlays) : undefined,
 			operations: l.operations,
 			settingsOverrides: l.settingsOverrides
@@ -211,6 +221,28 @@ function ensureSeq(doc: Document, path: (string | number)[]): YAMLSeq {
 	return seq;
 }
 
+/** Resolve metadata ownership from either the new per-library or legacy global snapshot. */
+function ownedMetadataFile(snapshot: KometaSnapshot | null, libraryName: string): string | null {
+	const previous = snapshot?.libraries?.[libraryName];
+	if (!previous) return null;
+	if (typeof previous.metadataFile === 'string' && previous.metadataFile.length > 0) {
+		return previous.metadataFile;
+	}
+	if (previous.metadata === true && snapshot?.metadataPath) return snapshot.metadataPath;
+	return null;
+}
+
+/** Carry skipped ownership forward while upgrading any legacy global metadata path. */
+function carryManagedLibrary(
+	snapshot: KometaSnapshot | null,
+	libraryName: string,
+	fallback: ManagedLib
+): ManagedLib {
+	const previous = snapshot?.libraries?.[libraryName] ?? fallback;
+	const { metadata: _legacyMetadata, ...managed } = previous;
+	return { ...managed, metadataFile: ownedMetadataFile(snapshot, libraryName) };
+}
+
 /**
  * Apply the plan to the Document, preserving unmanaged content. Returns the
  * mutated doc, the list of changes (the preview diff), the next snapshot, and any
@@ -265,6 +297,7 @@ export function applyPlan(
 	// ── Libraries ──────────────────────────────────────────────────────────────
 	const planByName = new Map(plan.libraries.map((l) => [l.name, l]));
 	const prevLibs = snapshot?.libraries ?? {};
+	const managedByLib: Record<string, ManagedLib> = {};
 
 	// Remove our entries from libraries that were managed before but no longer are.
 	for (const [name, prev] of Object.entries(prevLibs)) {
@@ -273,11 +306,11 @@ export function applyPlan(
 		if (!isMap(libNode)) continue;
 		if (hasAliasOrAnchor(libNode)) {
 			warnings.push(`libraries.${name}`);
+			managedByLib[name] = carryManagedLibrary(snapshot, name, prev);
 			continue;
 		}
-		if (prev.metadata && snapshot) {
-			removeMetadataEntry(doc, name, snapshot.metadataPath, changes);
-		}
+		const previousMetadataFile = ownedMetadataFile(snapshot, name);
+		if (previousMetadataFile) removeMetadataEntry(doc, name, previousMetadataFile, changes);
 		removeDefaults(doc, name, 'collection_files', prev.defaults, changes);
 		removeDefaults(doc, name, 'overlay_files', prev.overlays ?? [], changes);
 		applyManagedMap(
@@ -302,14 +335,16 @@ export function applyPlan(
 
 	// Add/reconcile managed libraries. Track what we actually own (added or were
 	// already managing) so the snapshot never claims a user's pre-existing entry.
-	const managedByLib: Record<string, ManagedLib> = {};
 	for (const lib of plan.libraries) {
 		const libPath = ['libraries', lib.name];
 		const existing = nodeAt(doc, libPath);
 		if (existing !== undefined && existing !== null && hasAliasOrAnchor(existing)) {
 			warnings.push(`libraries.${lib.name}`);
 			// Carry forward the prior snapshot so we don't lose track of what we own.
-			managedByLib[lib.name] = prevLibs[lib.name] ?? { metadata: false, defaults: [] };
+			managedByLib[lib.name] = carryManagedLibrary(snapshot, lib.name, {
+				metadataFile: null,
+				defaults: []
+			});
 			continue;
 		}
 		// Materialize an empty `Name:` (null) or missing library as a map we can edit.
@@ -318,9 +353,14 @@ export function applyPlan(
 			changes.push({ op: 'add', path: `libraries.${lib.name}`, after: '(library)' });
 		}
 
-		if (lib.metadata) ensureMetadataEntry(doc, lib.name, plan.metadataFile, snapshot, changes);
-
 		const prev = prevLibs[lib.name];
+		const ownedMetadata = reconcileMetadataEntry(
+			doc,
+			lib.name,
+			lib.metadataFile,
+			ownedMetadataFile(snapshot, lib.name),
+			changes
+		);
 		const ownedDefaults = reconcileDefaults(
 			doc,
 			lib.name,
@@ -356,7 +396,7 @@ export function applyPlan(
 			`libraries.${lib.name}.settings`
 		);
 		managedByLib[lib.name] = {
-			metadata: lib.metadata,
+			metadataFile: ownedMetadata,
 			defaults: ownedDefaults,
 			overlays: ownedOverlays,
 			operations: ownedOps,
@@ -393,7 +433,6 @@ export function applyPlan(
 		return scalarAt(doc, [section, key]) !== undefined;
 	});
 	const nextSnapshot: KometaSnapshot = {
-		metadataPath: plan.metadataFile,
 		libraries: managedByLib,
 		managedSettingKeys: dedupe([
 			...plan.settings.map((s) => `${s.section}.${s.key}`),
@@ -467,28 +506,85 @@ function applyManagedMap(
 	return managed;
 }
 
-/** Ensure exactly one managed `metadata_files` `file:` entry for the library. */
-function ensureMetadataEntry(
+/** Add one metadata reference and mark it as PosterPilot-owned. */
+function addMetadataEntry(
 	doc: Document,
 	name: string,
-	metadataFile: string,
-	snapshot: KometaSnapshot | null,
+	metadataFile: KometaMetadataFilename,
 	changes: ChangeEntry[]
 ): void {
 	const path = ['libraries', name, 'metadata_files'];
 	const seq = ensureSeq(doc, path);
-	// Drop a stale managed entry if the Kometa-visible path changed since last sync.
-	const oldPath = snapshot?.metadataPath;
-	if (oldPath && oldPath !== metadataFile) {
-		const stale = findMapItem(seq, 'file', oldPath);
-		if (stale >= 0) {
-			seq.items.splice(stale, 1);
-			changes.push({ op: 'remove', path: `${path.join('.')}[file]`, before: oldPath, after: null });
-		}
-	}
-	if (findMapItem(seq, 'file', metadataFile) >= 0) return; // already present → idempotent
 	seq.add(doc.createNode({ file: metadataFile }));
 	changes.push({ op: 'add', path: `${path.join('.')}[file]`, after: metadataFile });
+}
+
+/** Replace an owned file scalar in place so its sequence position and comments survive. */
+function replaceMetadataEntry(
+	seq: YAMLSeq,
+	index: number,
+	metadataFile: KometaMetadataFilename
+): void {
+	const item = seq.items[index];
+	if (!isMap(item)) throw new TypeError('Managed Kometa metadata entry is not a map');
+	const fileNode = item.get('file', true);
+	if (isScalar(fileNode)) fileNode.value = metadataFile;
+	else item.set('file', metadataFile);
+}
+
+/**
+ * Reconcile only the metadata reference proved to be PosterPilot-owned.
+ *
+ * An identical entry that predates ownership is reused without being claimed, so
+ * a later deselect cannot remove user-authored configuration.
+ */
+function reconcileMetadataEntry(
+	doc: Document,
+	name: string,
+	desiredFile: KometaMetadataFilename | null,
+	previousOwnedFile: string | null,
+	changes: ChangeEntry[]
+): string | null {
+	const path = ['libraries', name, 'metadata_files'];
+	const current = nodeAt(doc, path);
+	const seq = isSeq(current) ? current : null;
+
+	if (desiredFile === null) {
+		if (previousOwnedFile) removeMetadataEntry(doc, name, previousOwnedFile, changes);
+		return null;
+	}
+
+	const desiredIndex = seq ? findMapItem(seq, 'file', desiredFile) : -1;
+	const previousIndex = seq && previousOwnedFile ? findMapItem(seq, 'file', previousOwnedFile) : -1;
+
+	if (previousOwnedFile === desiredFile) {
+		if (desiredIndex >= 0) return desiredFile;
+		addMetadataEntry(doc, name, desiredFile, changes);
+		return desiredFile;
+	}
+
+	if (desiredIndex >= 0) {
+		// The desired entry already exists without ownership. Remove only the stale
+		// owned entry and leave the user's matching entry untouched and unclaimed.
+		if (previousIndex >= 0 && previousOwnedFile) {
+			removeMetadataEntry(doc, name, previousOwnedFile, changes);
+		}
+		return null;
+	}
+
+	if (seq && previousIndex >= 0 && previousOwnedFile) {
+		replaceMetadataEntry(seq, previousIndex, desiredFile);
+		changes.push({
+			op: 'modify',
+			path: `${path.join('.')}[file]`,
+			before: previousOwnedFile,
+			after: desiredFile
+		});
+		return desiredFile;
+	}
+
+	addMetadataEntry(doc, name, desiredFile, changes);
+	return desiredFile;
 }
 
 /** Remove the managed metadata entry (used when a library is deselected). */

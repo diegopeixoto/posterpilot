@@ -1,14 +1,10 @@
 /**
- * Kometa / PMM metadata YAML export.
+ * Kometa metadata YAML export for media-kind-specific files.
  *
- * Mirrors the shape the legacy MediaUX scraper emitted: a top-level `metadata:`
- * mapping keyed by TMDB id, each entry carrying `url_poster` and (optionally)
- * `url_background`. Kometa reads this file and applies the URLs to the matching
- * library item.
- *
- * The structure-building helpers (`buildMetadataObject`, `mergeMetadata`,
- * `toYaml`) are PURE so they can be unit-tested in isolation. Only
- * `writeKometaYaml` touches the filesystem.
+ * Kometa interprets numeric metadata keys in library context: TMDb for movie
+ * libraries and TVDb for show libraries. IMDb keys use their canonical `tt...`
+ * form. The typed destination supplies both that key and the only split file a
+ * write may touch.
  */
 
 import { join, resolve } from 'node:path';
@@ -24,9 +20,13 @@ import {
 	type YAMLMap
 } from 'yaml';
 import { readConfig, withConfigLock, writeConfigAtomic } from './config-io';
-
-/** Default file name written into the Kometa assets/config directory. */
-export const DEFAULT_FILENAME = 'posterpilot.yml';
+import {
+	isCanonicalKometaNumericId,
+	isKometaDestinationV2,
+	kometaYamlMappingKey,
+	type KometaDestinationV2,
+	type KometaMetadataFilename
+} from './destination';
 
 /** An episode title card to export under its season. */
 export interface KometaEpisodeInput {
@@ -42,10 +42,9 @@ export interface KometaSeasonInput {
 	episodes?: KometaEpisodeInput[];
 }
 
-/** A single item to export, keyed by its TMDB id. */
+/** A single item to export to one exact typed Kometa destination. */
 export interface KometaItemInput {
-	/** TMDB id used as the metadata mapping key Kometa matches against. */
-	tmdbId: string;
+	destination: KometaDestinationV2;
 	/** Human-readable title, used only for the trailing comment / readability. */
 	title: string;
 	/** Selected poster asset URL, or null/undefined when none is selected. */
@@ -72,6 +71,13 @@ interface KometaEntry {
 	url_poster?: string;
 	url_background?: string;
 	seasons?: Record<number, KometaSeasonEntry>;
+}
+
+type KometaYamlKey = string | number;
+type KometaMetadataMap = Map<KometaYamlKey, KometaEntry>;
+
+export interface KometaMetadataObject extends Record<string, unknown> {
+	metadata: KometaMetadataMap;
 }
 
 /** Build the nested `seasons:` mapping (season posters + episode title cards). */
@@ -110,20 +116,70 @@ function buildEntry(item: KometaItemInput): KometaEntry {
 	return entry;
 }
 
-/**
- * Build the Kometa `metadata:` mapping keyed by TMDB id from scratch.
- *
- * Each item becomes `metadata[tmdbId] = { url_poster?, url_background? }`,
- * omitting any URL that is not set. When multiple items share a TMDB id, the
- * later item wins.
- *
- * @param items Items to encode.
- * @returns An object of the form `{ metadata: { <tmdbId>: { ... } } }`.
- */
-export function buildMetadataObject(items: KometaItemInput[]): Record<string, unknown> {
-	const metadata: Record<string, KometaEntry> = {};
+function assertTypedItems(items: KometaItemInput[], allowEmpty: false): KometaMetadataFilename;
+function assertTypedItems(
+	items: KometaItemInput[],
+	allowEmpty: true
+): KometaMetadataFilename | null;
+function assertTypedItems(
+	items: KometaItemInput[],
+	allowEmpty: boolean
+): KometaMetadataFilename | null {
+	if (items.length === 0) {
+		if (allowEmpty) return null;
+		throw new TypeError('Kometa YAML write requires at least one typed item');
+	}
+
+	let filename: KometaMetadataFilename | null = null;
 	for (const item of items) {
-		metadata[item.tmdbId] = buildEntry(item);
+		if (!isKometaDestinationV2(item.destination)) {
+			throw new TypeError('Invalid Kometa destination');
+		}
+		if (filename !== null && filename !== item.destination.filename) {
+			throw new TypeError('Kometa YAML write cannot mix metadata files');
+		}
+		filename = item.destination.filename;
+	}
+	return filename;
+}
+
+function setMetadataEntry(
+	metadata: KometaMetadataMap,
+	key: KometaYamlKey,
+	entry: KometaEntry
+): void {
+	const prior = [...metadata.keys()].find((candidate) => String(candidate) === String(key));
+	if (prior !== undefined && (prior !== key || typeof prior !== typeof key)) metadata.delete(prior);
+	metadata.set(key, entry);
+}
+
+function normalizeMetadataKey(key: unknown): KometaYamlKey | null {
+	if (typeof key === 'number' && Number.isSafeInteger(key) && key > 0) return key;
+	if (isCanonicalKometaNumericId(key)) return Number(key);
+	return typeof key === 'string' ? key : null;
+}
+
+function metadataMapFrom(value: unknown): KometaMetadataMap {
+	const metadata: KometaMetadataMap = new Map();
+	const entries =
+		value instanceof Map
+			? value.entries()
+			: value && typeof value === 'object' && !Array.isArray(value)
+				? Object.entries(value as Record<string, KometaEntry>)
+				: [];
+	for (const [rawKey, entry] of entries) {
+		const key = normalizeMetadataKey(rawKey);
+		if (key !== null) setMetadataEntry(metadata, key, entry as KometaEntry);
+	}
+	return metadata;
+}
+
+/** Build a typed Kometa metadata mapping from scratch. */
+export function buildMetadataObject(items: KometaItemInput[]): KometaMetadataObject {
+	assertTypedItems(items, true);
+	const metadata: KometaMetadataMap = new Map();
+	for (const item of items) {
+		setMetadataEntry(metadata, kometaYamlMappingKey(item.destination), buildEntry(item));
 	}
 	return { metadata };
 }
@@ -132,8 +188,8 @@ export function buildMetadataObject(items: KometaItemInput[]): Record<string, un
  * Merge items into an existing parsed Kometa document, updating entries in
  * place rather than duplicating them.
  *
- * Existing keys for the same TMDB id are overwritten with the new URLs; new
- * TMDB ids are appended. The returned object is a fresh copy — the input
+ * Existing keys for the same typed mapping identifier are overwritten with the
+ * new URLs; new identifiers are appended. The returned object is a fresh copy — the input
  * `existing` is not mutated. Any non-`metadata` top-level keys present in
  * `existing` are preserved.
  *
@@ -144,26 +200,25 @@ export function buildMetadataObject(items: KometaItemInput[]): Record<string, un
 export function mergeMetadata(
 	existing: Record<string, unknown>,
 	items: KometaItemInput[]
-): Record<string, unknown> {
+): KometaMetadataObject {
+	assertTypedItems(items, true);
 	const merged: Record<string, unknown> = { ...existing };
 
-	const rawMetadata = merged.metadata;
-	const metadata: Record<string, KometaEntry> =
-		rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)
-			? { ...(rawMetadata as Record<string, KometaEntry>) }
-			: {};
+	const metadata = metadataMapFrom(merged.metadata);
 
 	for (const item of items) {
-		metadata[item.tmdbId] = mergeEntry(metadata[item.tmdbId] ?? {}, buildEntry(item));
+		const key = kometaYamlMappingKey(item.destination);
+		const priorKey = [...metadata.keys()].find((candidate) => String(candidate) === String(key));
+		const previous = priorKey === undefined ? undefined : metadata.get(priorKey);
+		setMetadataEntry(metadata, key, mergeEntry(previous ?? {}, buildEntry(item)));
 	}
 
-	merged.metadata = metadata;
-	return merged;
+	return { ...merged, metadata };
 }
 
 /**
- * Merge a freshly-built entry into the existing one for the same TMDB id, field by
- * field, so a granular-only apply (only `seasons`) does not drop a previously
+ * Merge a freshly-built entry into the existing one for the same mapping ID,
+ * field by field, so a granular-only apply (only `seasons`) does not drop a previously
  * exported show-level `url_poster`/`url_background`, and a season re-apply does not
  * drop previously exported episodes. A field present in `next` overwrites; a field
  * absent from `next` is preserved from `existing`.
@@ -208,7 +263,7 @@ function keyValue(key: unknown): unknown {
 /**
  * Find a map pair while treating quoted and unquoted numeric keys as the same
  * logical Kometa identifier. This matters because YAML parses `550:` as a
- * number, while PosterPilot receives TMDB ids as strings.
+ * number, while PosterPilot receives provider IDs as strings.
  */
 function findPair(map: YAMLMap, key: string | number): Pair | undefined {
 	return map.items.find((pair) => String(keyValue(pair.key)) === String(key));
@@ -226,9 +281,19 @@ function createMap(document: Document<Node>): YAMLMap {
 	return document.createNode({}) as YAMLMap;
 }
 
+/** Ensure numeric provider IDs remain YAML integers rather than quoted titles. */
+function normalizePairKey(document: Document<Node>, pair: Pair, key: string | number): void {
+	const current = keyValue(pair.key);
+	if (current === key && typeof current === typeof key) return;
+	const replacement = document.createNode(key);
+	copyPresentation(pair.key, replacement);
+	pair.key = replacement;
+}
+
 /** Get or create a mapping child without replacing a compatible existing node. */
 function ensureMap(document: Document<Node>, parent: YAMLMap, key: string | number): YAMLMap {
 	const pair = findPair(parent, key);
+	if (pair) normalizePairKey(document, pair, key);
 	if (pair && isMap(pair.value)) return pair.value;
 
 	const map = createMap(document);
@@ -269,7 +334,7 @@ function mergeItemIntoDocument(
 	metadata: YAMLMap,
 	item: KometaItemInput
 ): void {
-	const entry = ensureMap(document, metadata, item.tmdbId);
+	const entry = ensureMap(document, metadata, kometaYamlMappingKey(item.destination));
 	const next = buildEntry(item);
 	if (next.url_poster !== undefined) setScalar(document, entry, 'url_poster', next.url_poster);
 	if (next.url_background !== undefined) {
@@ -297,6 +362,7 @@ function mergeItemIntoDocument(
 
 /** Parse and merge without including source text (which may contain secrets) in errors. */
 function mergeYamlDocument(raw: string | null, items: KometaItemInput[]): string {
+	assertTypedItems(items, false);
 	const document = parseDocument(raw ?? '') as Document<Node>;
 	if (document.errors.length > 0) {
 		throw new Error('Invalid existing Kometa YAML');
@@ -319,24 +385,25 @@ function mergeYamlDocument(raw: string | null, items: KometaItemInput[]): string
 /**
  * Write (or update) the Kometa YAML file in the given directory.
  *
- * Ensures `dir` exists, reads any pre-existing YAML file, merges the supplied
- * items in place (no duplicate TMDB keys), and writes the result back.
+ * Derives the one allowed split filename from the supplied typed destinations,
+ * reads that file, merges items in place, and writes it atomically. Mixed,
+ * forged, empty, and legacy destinations are rejected before filesystem I/O.
  *
  * @param dir Directory to write the file into (created recursively if needed).
  * @param items Items to export.
- * @param opts Optional settings; `filename` defaults to `posterpilot.yml`.
+ * @param opts Optional current-file fingerprint validator.
  */
 export async function writeKometaYaml(
 	dir: string,
 	items: KometaItemInput[],
-	opts: { filename?: string; validateCurrent?: (raw: string | null) => void } = {}
+	opts: { validateCurrent?: (raw: string | null) => void | Promise<void> } = {}
 ): Promise<void> {
-	const filename = opts.filename ?? DEFAULT_FILENAME;
+	const filename = assertTypedItems(items, false);
 	const filePath = resolve(join(dir, filename));
 
 	await withConfigLock(filePath, async () => {
 		const current = readConfig(filePath);
-		opts.validateCurrent?.(current);
+		await opts.validateCurrent?.(current);
 		const merged = mergeYamlDocument(current, items);
 		writeConfigAtomic(filePath, merged, new Date().toISOString());
 	});

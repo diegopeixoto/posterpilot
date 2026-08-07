@@ -17,8 +17,10 @@ function slotTail(slot: ApplySlot): (string | number)[] {
 	return ['seasons', slot.season, slot.kind === 'background' ? 'url_background' : 'url_poster'];
 }
 
-function kometaSlotPath(tmdbId: string, slot: ApplySlot): (string | number)[] {
-	return ['metadata', tmdbId, ...slotTail(slot)];
+export type KometaYamlMappingKey = string | number;
+
+function kometaSlotPath(mappingKey: KometaYamlMappingKey, slot: ApplySlot): (string | number)[] {
+	return ['metadata', mappingKey, ...slotTail(slot)];
 }
 
 function parsed(raw: string): Document {
@@ -27,13 +29,13 @@ function parsed(raw: string): Document {
 	return document;
 }
 
-function resolvedSlotPath(document: Document, tmdbId: string, slot: ApplySlot) {
+function resolvedSlotPath(document: Document, mappingKey: KometaYamlMappingKey, slot: ApplySlot) {
 	const metadata = document.getIn(['metadata'], true);
 	if (isMap(metadata)) {
 		const pair = metadata.items.find((entry) => {
 			const key = entry.key as unknown as { value?: unknown } | string | number | null;
 			const value = key && typeof key === 'object' && 'value' in key ? key.value : key;
-			return String(value) === tmdbId;
+			return String(value) === String(mappingKey);
 		});
 		if (pair) {
 			const key = pair.key as unknown as { value?: unknown } | string | number;
@@ -41,17 +43,17 @@ function resolvedSlotPath(document: Document, tmdbId: string, slot: ApplySlot) {
 			return ['metadata', value as string | number, ...slotTail(slot)];
 		}
 	}
-	return kometaSlotPath(tmdbId, slot);
+	return kometaSlotPath(mappingKey, slot);
 }
 
 /** Read one exact PosterPilot-managed scalar or its absence. */
 export function readKometaSlot(
 	raw: string,
-	tmdbId: string,
+	mappingKey: KometaYamlMappingKey,
 	slot: ApplySlot
 ): KometaSlotSnapshotValue {
 	const document = parsed(raw);
-	const value = document.getIn(resolvedSlotPath(document, tmdbId, slot));
+	const value = document.getIn(resolvedSlotPath(document, mappingKey, slot));
 	return typeof value === 'string' && value.length > 0
 		? { state: 'present', url: value }
 		: { state: 'absent', url: null };
@@ -69,12 +71,12 @@ function mapEmpty(document: Document, path: (string | number)[]): boolean {
 /** Restore only one managed scalar while retaining unrelated entries and comments. */
 export function restoreKometaSlot(
 	raw: string,
-	tmdbId: string,
+	mappingKey: KometaYamlMappingKey,
 	slot: ApplySlot,
 	snapshot: KometaSlotSnapshotValue
 ): string {
 	const document = parsed(raw);
-	const path = resolvedSlotPath(document, tmdbId, slot);
+	const path = resolvedSlotPath(document, mappingKey, slot);
 	if (snapshot.state === 'present' && snapshot.url) {
 		document.setIn(path, snapshot.url);
 	} else {
@@ -91,11 +93,11 @@ export function restoreKometaSlot(
 
 export function verifyKometaSlot(
 	raw: string,
-	tmdbId: string,
+	mappingKey: KometaYamlMappingKey,
 	slot: ApplySlot,
 	expected: KometaSlotSnapshotValue
 ): boolean {
 	return (
-		kometaSlotFingerprint(readKometaSlot(raw, tmdbId, slot)) === kometaSlotFingerprint(expected)
+		kometaSlotFingerprint(readKometaSlot(raw, mappingKey, slot)) === kometaSlotFingerprint(expected)
 	);
 }

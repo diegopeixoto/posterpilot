@@ -3,6 +3,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page, navigating } from '$app/state';
 	import JobProgress from '$lib/components/JobProgress.svelte';
+	import ApplySkipReasons from '$lib/components/ApplySkipReasons.svelte';
 	import LibraryGrid from '$lib/components/library/LibraryGrid.svelte';
 	import LibrarySpotlight from '$lib/components/library/LibrarySpotlight.svelte';
 	import LibraryToolbar from '$lib/components/library/LibraryToolbar.svelte';
@@ -41,6 +42,7 @@
 			skipCount: number;
 			destinations: { server: number; kometa: number };
 		};
+		items: Array<{ skips: Array<{ code: string }> }>;
 	} | null>(null);
 	let previewing = $state(false);
 
@@ -524,6 +526,11 @@
 		<button onclick={clearSelection} class="ml-auto text-neutral-400 hover:text-neutral-200"
 			>{m.library_clear()}</button
 		>
+		{#if applyPreview}
+			<ApplySkipReasons
+				codes={applyPreview.items.flatMap((item) => item.skips.map((skip) => skip.code))}
+			/>
+		{/if}
 	</div>
 	{#if errorMsg}
 		<div

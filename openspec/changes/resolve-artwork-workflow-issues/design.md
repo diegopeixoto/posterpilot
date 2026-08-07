@@ -151,6 +151,8 @@ Media kind comes from the authoritative media-server item/library type, never fr
 
 Each managed Kometa library references exactly one compatible generated file. New exports never write the legacy shared file. Legacy revisions target their recorded legacy path when provable and never infer a split path from a numeric key.
 
+The typed destination keeps the physical split basename independent from the Kometa-visible config reference. The migration/config workflow may add a validated relative mount prefix to that reference without changing the destination key or filesystem target.
+
 **Alternative considered:** keep one file and prefix YAML keys with media type. Rejected because Kometa interprets mapping identifiers in library context and the same shared file would still be wired into incompatible libraries.
 
 ### 10. Migrate Kometa with config-last ordering and no destructive cleanup
@@ -225,7 +227,10 @@ Rollback strategy:
 - TMDB repair writes are append-audited identity corrections. Rollback does not silently restore known cross-type matches; users can use manual matching where a repaired identity needs adjustment.
 - Coverage is rebuildable and can be dropped/recomputed without altering artwork, YAML, revisions, or review state.
 
+## Resolved Questions
+
+- The typed writer supports Kometa 2.0.0 and newer. Numeric mapping names are emitted as YAML integer scalars (TMDB in movie libraries, TVDB in show libraries); IMDb fallback uses canonical lowercase `tt...` mapping names in either library type. Fixtures cover the contract verified through Kometa 2.4.6.
+
 ## Open Questions
 
-- Confirm the minimum supported Kometa version and exact IMDb fallback representation for both typed metadata files against its current metadata-file contract before implementing the destination resolver.
 - Validate the proposed 200-per-kind provider guard and 20-item disclosure batch with real high-volume TMDB responses; constants may be lowered if measured payload or database costs exceed the detail-page budget without changing the specification.

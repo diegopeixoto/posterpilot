@@ -4,6 +4,7 @@ import {
 	APPLY_PLAN_VERSION,
 	applySlotKey,
 	type ApplyItemIdentity,
+	type ApplyPlanSkipCode,
 	type ApplySelectionMode,
 	type ApplyPlanPayloadV1,
 	type FrozenDiscoverySnapshot,
@@ -20,6 +21,7 @@ import {
 	type ResolveApplyDestinationsInput
 } from './apply-planner';
 import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
+import { isKometaDestinationV2 } from '$lib/server/kometa/destination';
 
 export type ApplyPlanValidationErrorCode = 'invalid_plan' | 'plan_stale' | 'plan_scope_mismatch';
 
@@ -51,6 +53,25 @@ function failStale(message: string): never {
 
 function same(a: unknown, b: unknown): boolean {
 	return canonicalJson(a) === canonicalJson(b);
+}
+
+const APPLY_PLAN_SKIP_CODES = new Set<ApplyPlanSkipCode>([
+	'item_ignored',
+	'item_removed',
+	'no_candidate',
+	'no_stored_selection',
+	'invalid_selection',
+	'destination_unavailable',
+	'unsupported_slot',
+	'missing_tmdb_id',
+	'missing_kometa_identifier',
+	'kometa_migration_required',
+	'target_unresolved',
+	'capability_unknown'
+]);
+
+function validSkipCode(value: unknown): value is ApplyPlanSkipCode {
+	return typeof value === 'string' && APPLY_PLAN_SKIP_CODES.has(value as ApplyPlanSkipCode);
 }
 
 function validSelectionRevision(identity: import('./apply-plan').ApplyItemIdentity): boolean {
@@ -475,6 +496,57 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			if (selectionsBySlot.has(key)) failInvalid('Duplicate frozen artwork selection slot');
 			selectionsBySlot.set(key, selection);
 		}
+		const destinationSlotsByKey = new Map<string, (typeof item.destinationSlots)[number]>();
+		for (const snapshot of item.destinationSlots) {
+			if (
+				!snapshot ||
+				!['server', 'kometa'].includes(snapshot.destination) ||
+				!validSlot(snapshot.slot) ||
+				(snapshot.skipCode !== null && !validSkipCode(snapshot.skipCode)) ||
+				(snapshot.targetId !== null &&
+					(typeof snapshot.targetId !== 'string' || snapshot.targetId.length === 0))
+			) {
+				failInvalid('Invalid frozen apply destination snapshot');
+			}
+			if (snapshot.destination === 'server') {
+				if (
+					snapshot.kometaDestination !== undefined ||
+					snapshot.kometaFileFingerprint !== undefined
+				) {
+					failInvalid('Server destination carries a Kometa identity');
+				}
+			} else if (snapshot.targetId !== null) {
+				const carriesTypedIdentity =
+					snapshot.kometaDestination !== undefined || snapshot.kometaFileFingerprint !== undefined;
+				if (
+					carriesTypedIdentity &&
+					(!isKometaDestinationV2(snapshot.kometaDestination) ||
+						snapshot.targetId !== snapshot.kometaDestination.key ||
+						typeof snapshot.kometaFileFingerprint !== 'string' ||
+						!/^[0-9a-f]{64}$/.test(snapshot.kometaFileFingerprint))
+				) {
+					failInvalid('Kometa destination snapshot is not typed');
+				}
+				// Durable V1 plans may contain a non-actionable, untyped Kometa
+				// snapshot. Keep it readable, but the operation validation below
+				// still rejects every untyped Kometa mutation.
+			} else if (
+				snapshot.kometaDestination !== undefined ||
+				snapshot.kometaFileFingerprint !== undefined
+			) {
+				failInvalid('Unavailable Kometa destination carries a typed target');
+			}
+			const key = `${snapshot.destination}:${applySlotKey(snapshot.slot)}`;
+			if (destinationSlotsByKey.has(key)) {
+				failInvalid('Duplicate frozen apply destination snapshot');
+			}
+			destinationSlotsByKey.set(key, snapshot);
+		}
+		for (const skip of item.skips) {
+			if (!skip || !validSkipCode(skip.code)) {
+				failInvalid('Invalid frozen apply skip');
+			}
+		}
 		if (item.operations.length > 0) actionableItemCount++;
 		operationCount += item.operations.length;
 		skipCount += item.skips.length;
@@ -493,6 +565,21 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			if (!expectedDestinations.has(operation.destination)) {
 				failInvalid('Frozen operation targets an unrequested destination');
 			}
+			if (operation.destination === 'kometa') {
+				if (
+					!isKometaDestinationV2(operation.kometaDestination) ||
+					operation.targetId !== operation.kometaDestination.key ||
+					typeof operation.kometaFileFingerprint !== 'string' ||
+					!/^[0-9a-f]{64}$/.test(operation.kometaFileFingerprint)
+				) {
+					failInvalid('Frozen Kometa operation is missing its typed destination');
+				}
+			} else if (
+				operation.kometaDestination !== undefined ||
+				operation.kometaFileFingerprint !== undefined
+			) {
+				failInvalid('Frozen server operation carries a Kometa destination');
+			}
 			if (!same(operation.target, item.target) || !validSlot(operation.slot)) {
 				failInvalid('Frozen operation target or slot does not match its item');
 			}
@@ -506,8 +593,26 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			) {
 				failInvalid('Frozen operation selection does not match its source or slot');
 			}
+			const destinationSnapshot = destinationSlotsByKey.get(
+				`${operation.destination}:${applySlotKey(operation.slot)}`
+			);
+			if (
+				!destinationSnapshot ||
+				destinationSnapshot.targetId !== operation.targetId ||
+				(destinationSnapshot.kometaDestination === undefined &&
+				operation.kometaDestination === undefined
+					? false
+					: !same(destinationSnapshot.kometaDestination, operation.kometaDestination)) ||
+				destinationSnapshot.kometaFileFingerprint !== operation.kometaFileFingerprint
+			) {
+				failInvalid('Frozen operation does not match its destination snapshot');
+			}
 			const expectedId = hashCanonicalJson({
 				destination: operation.destination,
+				...(operation.kometaDestination ? { kometaDestination: operation.kometaDestination } : {}),
+				...(operation.kometaFileFingerprint
+					? { kometaFileFingerprint: operation.kometaFileFingerprint }
+					: {}),
 				serverInstanceId: operation.target.serverInstanceId,
 				mediaItemId: operation.target.mediaItemId,
 				targetId: operation.targetId,
@@ -534,6 +639,10 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			targetUpdatedAt: item.target.updatedAt,
 			destinationSlots: item.destinationSlots.map((snapshot) => ({
 				destination: snapshot.destination,
+				...(snapshot.kometaDestination ? { kometaDestination: snapshot.kometaDestination } : {}),
+				...(snapshot.kometaFileFingerprint
+					? { kometaFileFingerprint: snapshot.kometaFileFingerprint }
+					: {}),
 				slot: snapshot.slot,
 				targetId: snapshot.targetId,
 				capability: snapshot.capability,

@@ -6,6 +6,7 @@ import {
 } from './retry-plan';
 import { buildApplyPlanPayload } from '$lib/server/plans/apply-plan';
 import { canonicalJsonDigest } from '$lib/server/plans/canonical-json';
+import { resolveKometaDestination } from '$lib/server/kometa/destination';
 import {
 	freezeAutomationOccurrence,
 	normalizeAutomationDefinition
@@ -127,6 +128,9 @@ describe('failed-only job retry planning', () => {
 	});
 
 	it('retries only the failed apply destination and never repeats its successful sibling', () => {
+		const resolvedKometa = resolveKometaDestination({ type: 'movie', tmdbId: '42' });
+		if (!resolvedKometa.ok) throw new Error('expected a Kometa destination');
+		const kometaDestination = resolvedKometa.destination;
 		const target = {
 			serverInstanceId: 's',
 			mediaItemId: 42,
@@ -210,7 +214,9 @@ describe('failed-only job retry planning', () => {
 						{
 							destination: 'kometa',
 							slot: selection.slot,
-							targetId: '42',
+							targetId: kometaDestination.key,
+							kometaDestination,
+							kometaFileFingerprint: '0'.repeat(64),
 							capability: 'supported',
 							current: emptyCurrent,
 							skipCode: null,

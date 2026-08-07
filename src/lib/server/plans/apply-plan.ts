@@ -1,4 +1,5 @@
 import { hashCanonicalJson } from './canonical-json';
+import type { KometaDestinationV2 } from '$lib/server/kometa/destination';
 
 export const APPLY_PLAN_KIND = 'artwork_apply';
 export const APPLY_PLAN_VERSION = 1 as const;
@@ -136,12 +137,19 @@ export type ApplyPlanSkipCode =
 	| 'invalid_selection'
 	| 'destination_unavailable'
 	| 'unsupported_slot'
+	/** Read-only durable-v1 compatibility. New planners emit missing_kometa_identifier. */
 	| 'missing_tmdb_id'
+	| 'missing_kometa_identifier'
+	| 'kometa_migration_required'
 	| 'target_unresolved'
 	| 'capability_unknown';
 
 export interface DestinationSlotSnapshot {
 	destination: ApplyPlanDestination;
+	/** Exact typed Kometa destination. Absent only on server or durable legacy-v1 snapshots. */
+	kometaDestination?: KometaDestinationV2;
+	/** Whole exact target-file hash; absent on server, unresolved, and durable legacy-v1 snapshots. */
+	kometaFileFingerprint?: string;
 	slot: ApplySlot;
 	targetId: string | null;
 	capability: 'supported' | 'unsupported' | 'unknown';
@@ -153,6 +161,10 @@ export interface DestinationSlotSnapshot {
 export interface ApplyPlanOperation {
 	id: string;
 	destination: ApplyPlanDestination;
+	/** Exact typed Kometa destination. Absent only on server or durable legacy-v1 operations. */
+	kometaDestination?: KometaDestinationV2;
+	/** Whole exact target-file hash captured by the resolver before confirmation. */
+	kometaFileFingerprint?: string;
 	target: ApplyItemIdentity;
 	targetId: string;
 	slot: ApplySlot;
@@ -310,6 +322,29 @@ function buildItem(
 	for (const snapshot of snapshots) {
 		const key = destinationSlotKey(snapshot.destination, snapshot.slot);
 		if (snapshotByKey.has(key)) throw new TypeError(`Duplicate destination slot snapshot: ${key}`);
+		if (
+			snapshot.destination === 'server' &&
+			(snapshot.kometaDestination !== undefined || snapshot.kometaFileFingerprint !== undefined)
+		) {
+			throw new TypeError('Server destination cannot carry Kometa file identity');
+		}
+		if (snapshot.destination === 'kometa') {
+			if (
+				snapshot.targetId === null &&
+				(snapshot.kometaDestination !== undefined || snapshot.kometaFileFingerprint !== undefined)
+			) {
+				throw new TypeError('Unresolved Kometa destination cannot carry file identity');
+			}
+			if (
+				snapshot.targetId !== null &&
+				(!snapshot.kometaDestination ||
+					snapshot.targetId !== snapshot.kometaDestination.key ||
+					typeof snapshot.kometaFileFingerprint !== 'string' ||
+					!/^[0-9a-f]{64}$/.test(snapshot.kometaFileFingerprint))
+			) {
+				throw new TypeError('New Kometa snapshots require an exact typed file identity');
+			}
+		}
 		snapshotByKey.set(key, snapshot);
 	}
 
@@ -349,16 +384,6 @@ function buildItem(
 					});
 					continue;
 				}
-				if (destination === 'kometa' && input.target.tmdbId === null) {
-					skips.push({
-						destination,
-						slot: selection.slot,
-						code: 'missing_tmdb_id',
-						parameters: {}
-					});
-					continue;
-				}
-
 				const snapshot = snapshotByKey.get(destinationSlotKey(destination, selection.slot));
 				if (!snapshot) {
 					skips.push({
@@ -379,9 +404,28 @@ function buildItem(
 					});
 					continue;
 				}
+				if (
+					destination === 'kometa' &&
+					(!snapshot.kometaDestination ||
+						!snapshot.kometaFileFingerprint ||
+						!/^[0-9a-f]{64}$/.test(snapshot.kometaFileFingerprint))
+				) {
+					throw new TypeError('New Kometa operations require a typed file destination');
+				}
+				if (
+					(destination === 'kometa' && snapshot.targetId !== snapshot.kometaDestination?.key) ||
+					(destination === 'server' &&
+						(snapshot.kometaDestination || snapshot.kometaFileFingerprint))
+				) {
+					throw new TypeError('Apply destination identity does not match its target');
+				}
 
 				const operationIdentity = {
 					destination,
+					...(snapshot.kometaDestination ? { kometaDestination: snapshot.kometaDestination } : {}),
+					...(snapshot.kometaFileFingerprint
+						? { kometaFileFingerprint: snapshot.kometaFileFingerprint }
+						: {}),
 					serverInstanceId: input.target.serverInstanceId,
 					mediaItemId: input.target.mediaItemId,
 					targetId: snapshot.targetId,
@@ -391,6 +435,10 @@ function buildItem(
 				operations.push({
 					id: hashCanonicalJson(operationIdentity),
 					destination,
+					...(snapshot.kometaDestination ? { kometaDestination: snapshot.kometaDestination } : {}),
+					...(snapshot.kometaFileFingerprint
+						? { kometaFileFingerprint: snapshot.kometaFileFingerprint }
+						: {}),
 					target: input.target,
 					targetId: snapshot.targetId,
 					slot: selection.slot,
@@ -414,6 +462,10 @@ function buildItem(
 		targetUpdatedAt: input.target.updatedAt,
 		destinationSlots: snapshots.map((snapshot) => ({
 			destination: snapshot.destination,
+			...(snapshot.kometaDestination ? { kometaDestination: snapshot.kometaDestination } : {}),
+			...(snapshot.kometaFileFingerprint
+				? { kometaFileFingerprint: snapshot.kometaFileFingerprint }
+				: {}),
 			slot: snapshot.slot,
 			targetId: snapshot.targetId,
 			capability: snapshot.capability,

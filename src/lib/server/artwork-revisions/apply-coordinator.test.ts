@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,13 +12,20 @@ import {
 	artworkSnapshots,
 	mediaItems
 } from '$lib/server/db/schema';
-import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
+import {
+	LEGACY_FILENAME,
+	MOVIE_FILENAME,
+	SHOW_FILENAME,
+	resolveKometaDestination,
+	type KometaDestinationV2
+} from '$lib/server/kometa/destination';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
 import type {
 	ApplyOperationExecutionResult,
 	ApplyPlanExecutionResult
 } from '$lib/server/plans/apply-executor';
 import type { ApplyPlanOperation } from '$lib/server/plans/apply-plan';
+import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { RemoteArtworkDownloadError, type RemoteArtworkFetch } from '$lib/server/remote-artwork';
 import { sha256Bytes } from '$lib/server/revisions/verification';
 import {
@@ -68,6 +75,34 @@ function serverReader(...reads: Array<ServerArtwork | null | undefined | Error>)
 	return { readArtwork } as unknown as MediaServer;
 }
 
+function destinationFor(input: {
+	type?: 'movie' | 'show';
+	tmdbId?: string | null;
+	tvdbId?: string | null;
+	imdbId?: string | null;
+}): KometaDestinationV2 {
+	const type = input.type ?? 'movie';
+	const result = resolveKometaDestination({
+		type,
+		tmdbId: input.tmdbId === undefined && type === 'movie' ? '101' : input.tmdbId,
+		tvdbId: input.tvdbId === undefined && type === 'show' ? '101' : input.tvdbId,
+		imdbId: input.imdbId
+	});
+	if (!result.ok) throw new Error('test Kometa destination must resolve');
+	return result.destination;
+}
+
+function kometaDestinationFingerprint(
+	destination: KometaDestinationV2,
+	raw: string | null
+): string {
+	return hashCanonicalJson({
+		filePath: join(kometaDirectory, destination.filename),
+		destination,
+		fileFingerprint: hashCanonicalJson({ exists: raw !== null, content: raw })
+	});
+}
+
 function operation(input: {
 	id: string;
 	destination?: 'server' | 'kometa';
@@ -75,39 +110,66 @@ function operation(input: {
 	serverInstanceId?: string;
 	mediaItemId?: number;
 	targetId?: string;
+	type?: 'movie' | 'show';
 	tmdbId?: string | null;
+	tvdbId?: string | null;
+	imdbId?: string | null;
+	kometaDestination?: KometaDestinationV2;
+	kometaRaw?: string | null;
 	url?: string;
 }): ApplyPlanOperation {
 	const destination = input.destination ?? 'server';
 	const serverInstanceId = input.serverInstanceId ?? 'server-a';
 	const mediaItemId = input.mediaItemId ?? 1;
+	const type = input.type ?? 'movie';
 	const kind = input.kind ?? 'poster';
 	const slot = { kind, season: null, episode: null } as const;
+	const kometaDestination =
+		destination === 'kometa'
+			? (input.kometaDestination ??
+				destinationFor({
+					type,
+					tmdbId: input.tmdbId,
+					tvdbId: input.tvdbId,
+					imdbId: input.imdbId
+				}))
+			: null;
 	return {
 		id: input.id,
 		destination,
+		...(kometaDestination ? { kometaDestination } : {}),
+		...(kometaDestination
+			? {
+					kometaFileFingerprint: hashCanonicalJson({
+						exists: (input.kometaRaw ?? null) !== null,
+						content: input.kometaRaw ?? null
+					})
+				}
+			: {}),
 		target: {
 			serverInstanceId,
 			mediaItemId,
 			librarySectionKey: 'movies',
 			sourceId: input.targetId ?? `source-${mediaItemId}`,
-			type: 'movie',
+			type,
 			tmdbId: input.tmdbId === undefined ? '101' : input.tmdbId,
-			imdbId: null,
-			tvdbId: null,
-			mediaType: 'movie',
+			imdbId: input.imdbId ?? null,
+			tvdbId: input.tvdbId ?? null,
+			mediaType: type === 'movie' ? 'movie' : 'tv',
 			updatedAt: NOW.toISOString(),
 			selectionUpdatedAt: NOW.toISOString(),
 			selectionRevision: 1
 		},
-		targetId: input.targetId ?? `source-${mediaItemId}`,
+		targetId: kometaDestination?.key ?? input.targetId ?? `source-${mediaItemId}`,
 		slot,
 		current: {
 			url: 'https://server.invalid/before',
 			fingerprint: `prior-${input.id}`,
 			artworkVersion: 0,
 			observedAt: NOW.toISOString(),
-			destinationFingerprint: `destination-${input.id}`
+			destinationFingerprint: kometaDestination
+				? kometaDestinationFingerprint(kometaDestination, input.kometaRaw ?? null)
+				: `destination-${input.id}`
 		},
 		selection: {
 			selectionSource: 'auto',
@@ -757,17 +819,22 @@ describe('ArtworkApplyCoordinator', () => {
 		expect(await snapshots.readBytes(after!)).toEqual(Buffer.from('external before apply'));
 	});
 
-	it('preserves absent Kometa original/prior snapshots and records an exact present value', async () => {
+	it('uses the exact typed movie file/id and records destination provenance on every snapshot and revision', async () => {
 		const subject = coordinator();
 		const planned = operation({
 			id: 'kometa-absent-present',
 			destination: 'kometa',
 			tmdbId: '101'
 		});
+		const typedDestination = planned.kometaDestination!;
+		const showSentinel = 'metadata:\n  101:\n    url_poster: https://show.invalid/keep.jpg\n';
+		const legacySentinel = 'metadata:\n  101:\n    url_poster: https://legacy.invalid/keep.jpg\n';
+		await writeFile(join(kometaDirectory, SHOW_FILENAME), showSentinel, 'utf8');
+		await writeFile(join(kometaDirectory, LEGACY_FILENAME), legacySentinel, 'utf8');
 
 		await subject.prepareOperation(planned, {});
 		await writeFile(
-			join(kometaDirectory, DEFAULT_FILENAME),
+			join(kometaDirectory, MOVIE_FILENAME),
 			`metadata:\n  101:\n    url_poster: ${planned.selection.url}\n`,
 			'utf8'
 		);
@@ -777,25 +844,34 @@ describe('ArtworkApplyCoordinator', () => {
 		expect(result).toMatchObject({ status: 'success', verification: 'exact' });
 		const rows = await database.select().from(artworkSnapshots);
 		const [revision] = await database.select().from(artworkRevisions);
-		const original = rows.find((row) => row.isOriginal);
 		const prior = rows.find((row) => row.id === revision?.beforeSnapshotId);
 		const after = rows.find((row) => row.id === revision?.afterSnapshotId);
-		expect(rows).toHaveLength(3);
-		expect(original).toMatchObject({ state: 'absent', value: null });
-		expect(prior).toMatchObject({ state: 'absent', value: null });
+		expect(typedDestination).toMatchObject({
+			version: 2,
+			mediaKind: 'movie',
+			namespace: 'tmdb',
+			mappingId: '101',
+			filename: MOVIE_FILENAME
+		});
+		expect(planned.targetId).toBe(typedDestination.key);
+		expect(rows).toHaveLength(2);
+		expect(prior).toMatchObject({
+			state: 'absent',
+			value: null,
+			metadata: { kometaDestination: typedDestination }
+		});
 		expect(after).toMatchObject({
 			state: 'present',
-			value: { state: 'present', url: planned.selection.url }
+			value: { state: 'present', url: planned.selection.url },
+			metadata: { kometaDestination: typedDestination }
 		});
-		expect(
-			await snapshots.findOriginal({
-				serverInstanceId: 'server-a',
-				mediaItemId: 1,
-				destination: 'kometa',
-				slot: planned.slot
-			})
-		).toMatchObject({ id: original?.id, state: 'absent' });
-		expect(revision).toMatchObject({ outcome: 'success', verification: 'exact' });
+		expect(revision).toMatchObject({
+			outcome: 'success',
+			verification: 'exact',
+			provenance: { kometaDestination: typedDestination }
+		});
+		expect(await readFile(join(kometaDirectory, SHOW_FILENAME), 'utf8')).toBe(showSentinel);
+		expect(await readFile(join(kometaDirectory, LEGACY_FILENAME), 'utf8')).toBe(legacySentinel);
 	});
 
 	it('blocks a Kometa write when the managed slot changes after preparation', async () => {
@@ -803,7 +879,7 @@ describe('ArtworkApplyCoordinator', () => {
 		const planned = operation({ id: 'stale-kometa', destination: 'kometa', tmdbId: '101' });
 		await subject.prepareOperation(planned, {});
 		await writeFile(
-			join(kometaDirectory, DEFAULT_FILENAME),
+			join(kometaDirectory, MOVIE_FILENAME),
 			'metadata:\n  101:\n    url_poster: https://external.invalid/new.jpg\n',
 			'utf8'
 		);
@@ -815,6 +891,64 @@ describe('ArtworkApplyCoordinator', () => {
 				'metadata:\n  101:\n    url_poster: https://external.invalid/new.jpg\n'
 			)
 		).toThrow(/changed before/);
+	});
+
+	it('invalidates the whole typed file when only a sibling entry changes after preparation', async () => {
+		const initial = `metadata:
+  101:
+    url_poster: https://images.invalid/current.jpg
+  202:
+    url_poster: https://images.invalid/sibling-before.jpg
+`;
+		const changedSibling = initial.replace('sibling-before.jpg', 'sibling-after.jpg');
+		await writeFile(join(kometaDirectory, MOVIE_FILENAME), initial, 'utf8');
+		const planned = operation({
+			id: 'kometa-whole-file-cas',
+			destination: 'kometa',
+			tmdbId: '101',
+			kometaRaw: initial
+		});
+		const subject = coordinator();
+
+		await subject.prepareOperation(planned, {});
+		expect(() => subject.assertKometaFresh([planned], initial)).not.toThrow();
+		expect(() => subject.assertKometaFresh([planned], changedSibling)).toThrow(
+			/Frozen Kometa metadata file changed/
+		);
+	});
+
+	it('revalidates the frozen collision guard immediately before a typed write', async () => {
+		const planned = operation({
+			id: 'kometa-guard-cas',
+			destination: 'kometa',
+			tmdbId: '101'
+		});
+		const typedDestinationFingerprint = planned.current.destinationFingerprint;
+		planned.current.destinationFingerprint = hashCanonicalJson({
+			typedDestinationFingerprint,
+			collisionGuardFingerprint: 'guard-v1'
+		});
+		const subject = coordinator();
+		await subject.prepareOperation(planned, {});
+
+		expect(() =>
+			subject.assertKometaGuardFresh([planned], {
+				migrationRequired: false,
+				fingerprint: 'guard-v1'
+			})
+		).not.toThrow();
+		expect(() =>
+			subject.assertKometaGuardFresh([planned], {
+				migrationRequired: false,
+				fingerprint: 'guard-v2'
+			})
+		).toThrow(/collision guard changed/);
+		expect(() =>
+			subject.assertKometaGuardFresh([planned], {
+				migrationRequired: true,
+				fingerprint: 'guard-v1'
+			})
+		).toThrow(/requires migration/);
 	});
 
 	it('releases Kometa entries after each outcome without breaking the remaining sequence', async () => {
@@ -834,14 +968,14 @@ describe('ArtworkApplyCoordinator', () => {
 		await subject.prepareOperation(poster, {});
 		await subject.prepareOperation(background, {});
 		const raw = `metadata:\n  101:\n    url_poster: ${poster.selection.url}\n    url_background: ${background.selection.url}\n`;
-		await writeFile(join(kometaDirectory, DEFAULT_FILENAME), raw, 'utf8');
+		await writeFile(join(kometaDirectory, MOVIE_FILENAME), raw, 'utf8');
 
-		expect(() => subject.assertKometaFresh([poster, background], '')).not.toThrow();
+		expect(() => subject.assertKometaFresh([poster, background], null)).not.toThrow();
 		await subject.recordOutcome(poster, successfulWrite(poster), {});
-		expect(() => subject.assertKometaFresh([poster], '')).toThrow('not prepared');
-		expect(() => subject.assertKometaFresh([background], '')).not.toThrow();
+		expect(() => subject.assertKometaFresh([poster], null)).toThrow('not prepared');
+		expect(() => subject.assertKometaFresh([background], null)).not.toThrow();
 		await subject.recordOutcome(background, successfulWrite(background), {});
-		expect(() => subject.assertKometaFresh([background], '')).toThrow('not prepared');
+		expect(() => subject.assertKometaFresh([background], null)).toThrow('not prepared');
 	});
 
 	it('uses one group per server and finalizes mixed outcomes as partial', async () => {

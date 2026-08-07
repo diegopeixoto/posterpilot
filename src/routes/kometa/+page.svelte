@@ -820,9 +820,28 @@
 					</p>
 				{/each}
 				{#if preview.warnings.length}
-					<p class="text-amber-400">
-						{m.kometa_warnings({ sections: preview.warnings.join(', ') })}
-					</p>
+					{#if preview.warnings.includes('kometa_migration_required')}
+						<p class="text-amber-300">{m.apply_skip_kometa_migration_required()}</p>
+					{/if}
+					{#if preview.warnings.includes('kometa_library_missing')}
+						<p class="text-amber-300">{m.kometa_library_missing_warning()}</p>
+					{/if}
+					{#if preview.warnings.includes('kometa_library_type_unsupported')}
+						<p class="text-amber-300">{m.kometa_library_type_unsupported_warning()}</p>
+					{/if}
+					{@const structuralWarnings = preview.warnings.filter(
+						(warning) =>
+							![
+								'kometa_migration_required',
+								'kometa_library_missing',
+								'kometa_library_type_unsupported'
+							].includes(warning)
+					)}
+					{#if structuralWarnings.length}
+						<p class="text-amber-400">
+							{m.kometa_warnings({ sections: structuralWarnings.join(', ') })}
+						</p>
+					{/if}
 				{/if}
 				{#if preview.dropped.length}
 					<p class="text-red-300">{m.kometa_dropped({ keys: preview.dropped.join(', ') })}</p>

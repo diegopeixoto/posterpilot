@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import JobProgress from '$lib/components/JobProgress.svelte';
+	import ApplySkipReasons from '$lib/components/ApplySkipReasons.svelte';
 	import { m } from '$lib/paraglide/messages';
 
 	type ApplyMethod = 'server' | 'kometa' | 'both';
@@ -202,6 +203,9 @@
 					skips: preview.summary.skipCount
 				})}
 			</p>
+			<ApplySkipReasons
+				codes={preview.items.flatMap((item) => item.skips.map((skip) => skip.code))}
+			/>
 			<ul class="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
 				{#each preview.items as item (item.target.mediaItemId)}
 					<li class="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 text-xs">
