@@ -3,7 +3,10 @@ import {
 	APPLY_PLAN_KIND,
 	APPLY_PLAN_VERSION,
 	applySlotKey,
+	type ApplyItemIdentity,
+	type ApplySelectionMode,
 	type ApplyPlanPayloadV1,
+	type FrozenDiscoverySnapshot,
 	type FrozenArtworkSelection
 } from './apply-plan';
 import {
@@ -12,6 +15,8 @@ import {
 	freezeApplyStoredSelection,
 	type ApplyItemRef,
 	type ApplyPlannerItemData,
+	type PlannerCandidateSnapshot,
+	type PlannerStoredSelection,
 	type ResolveApplyDestinationsInput
 } from './apply-planner';
 import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
@@ -63,6 +68,144 @@ function sameFrozenIdentity(
 	if (current.selectionRevision !== 0) return false;
 	const { selectionRevision: _selectionRevision, ...legacyCurrent } = current;
 	return same(legacyCurrent, planned);
+}
+
+function legacyV1CandidateComparable(candidate: PlannerCandidateSnapshot) {
+	return {
+		candidateId: candidate.candidateId,
+		serverInstanceId: candidate.serverInstanceId,
+		mediaItemId: candidate.mediaItemId,
+		discoveryRunId: candidate.discoveryRunId,
+		provider: candidate.provider,
+		providerAssetId: candidate.providerAssetId,
+		setId: candidate.setId,
+		setAuthor: candidate.setAuthor,
+		designFamily: candidate.designFamily,
+		language: candidate.language,
+		url: candidate.url,
+		slot: candidate.slot,
+		resolvedTmdbId: candidate.resolvedTmdbId,
+		resolvedMediaType: candidate.resolvedMediaType,
+		width: candidate.width,
+		height: candidate.height,
+		score: candidate.score,
+		active: candidate.active,
+		stale: candidate.stale,
+		lastSeenAt: candidate.lastSeenAt
+	};
+}
+
+/** Reproduce the discovery identity emitted before canonical artwork URLs shipped. */
+function freezeLegacyV1DiscoverySnapshot(data: ApplyPlannerItemData): FrozenDiscoverySnapshot {
+	const candidates = [...data.candidates]
+		.sort((a, b) => a.candidateId - b.candidateId)
+		.map(legacyV1CandidateComparable);
+	const active = candidates.filter((candidate) => candidate.active);
+	return {
+		status: data.item.discovery.status,
+		runId: data.item.discovery.runId,
+		completedAt: data.item.discovery.completedAt,
+		resolvedTmdbId: data.item.identity.tmdbId,
+		resolvedMediaType: data.item.identity.mediaType,
+		candidateIds: active.map((candidate) => candidate.candidateId),
+		candidateCount: active.length,
+		fingerprint: hashCanonicalJson({
+			status: data.item.discovery.status,
+			runId: data.item.discovery.runId,
+			completedAt: data.item.discovery.completedAt,
+			resolvedTmdbId: data.item.identity.tmdbId,
+			resolvedMediaType: data.item.identity.mediaType,
+			candidates
+		})
+	};
+}
+
+function freezeLegacyV1CandidateSelection(
+	candidate: PlannerCandidateSnapshot,
+	selectionSource: ApplySelectionMode,
+	sourceItem: ApplyItemIdentity,
+	scoreOverride?: number | null
+): FrozenArtworkSelection {
+	const selection = {
+		selectionSource,
+		sourceItem: {
+			serverInstanceId: sourceItem.serverInstanceId,
+			mediaItemId: sourceItem.mediaItemId
+		},
+		slot: candidate.slot,
+		candidateId: candidate.candidateId,
+		url: candidate.url,
+		provider: candidate.provider,
+		providerAssetId: candidate.providerAssetId,
+		setId: candidate.setId,
+		setAuthor: candidate.setAuthor,
+		designFamily: candidate.designFamily,
+		language: candidate.language,
+		discoveryRunId: candidate.discoveryRunId,
+		resolvedTmdbId: candidate.resolvedTmdbId,
+		resolvedMediaType: candidate.resolvedMediaType,
+		stale: candidate.stale,
+		score: scoreOverride ?? candidate.score,
+		width: candidate.width,
+		height: candidate.height
+	};
+	return { ...selection, fingerprint: hashCanonicalJson(selection) };
+}
+
+function freezeLegacyV1StoredSelection(
+	stored: PlannerStoredSelection,
+	data: ApplyPlannerItemData,
+	planned: FrozenArtworkSelection | undefined
+): FrozenArtworkSelection {
+	const matched =
+		stored.candidateId === null
+			? null
+			: data.candidates.find(
+					(candidate) =>
+						candidate.candidateId === stored.candidateId &&
+						candidate.url === stored.url &&
+						applySlotKey(candidate.slot) === applySlotKey(stored.slot)
+				);
+	if (matched) {
+		return freezeLegacyV1CandidateSelection(matched, 'stored', data.item.identity);
+	}
+
+	// Migration 0010 labels unproved providerless selections as custom without
+	// changing their URL, slot, timestamp, or revision. Reconstruct only that exact
+	// additive backfill when comparing a genuinely revisionless frozen plan.
+	const provider =
+		planned?.candidateId === null &&
+		planned.provider === null &&
+		stored.candidateId === null &&
+		stored.provider === 'custom' &&
+		stored.url === planned.url &&
+		applySlotKey(stored.slot) === applySlotKey(planned.slot)
+			? null
+			: stored.provider;
+	const selection = {
+		selectionSource: 'stored' as const,
+		sourceItem: {
+			serverInstanceId: data.item.identity.serverInstanceId,
+			mediaItemId: data.item.identity.mediaItemId
+		},
+		slot: stored.slot,
+		candidateId: null,
+		url: stored.url,
+		provider,
+		providerAssetId: null,
+		setId: stored.setId,
+		setAuthor: stored.setAuthor,
+		designFamily: null,
+		language: null,
+		discoveryRunId: null,
+		resolvedTmdbId: data.item.identity.tmdbId,
+		resolvedMediaType: data.item.identity.mediaType,
+		stale: false,
+		score: null,
+		width: null,
+		height: null
+	};
+	return { ...selection, fingerprint: hashCanonicalJson(selection) };
 }
 
 function sortedUnique(values: string[]): string[] {
@@ -211,6 +354,12 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 	let actionableItemCount = 0;
 	let serverCount = 0;
 	let kometaCount = 0;
+	const revisionFormats = new Set(
+		payload.items.map((item) => Object.hasOwn(item?.selectionFrom ?? {}, 'selectionRevision'))
+	);
+	if (revisionFormats.size > 1) {
+		failInvalid('Mixed frozen apply identity formats');
+	}
 
 	for (const item of payload.items) {
 		if (
@@ -231,7 +380,9 @@ export function assertApplyPlanPayload(payload: ApplyPlanPayloadV1): void {
 			!item.target.serverInstanceId ||
 			!Number.isInteger(item.target.mediaItemId) ||
 			!validSelectionRevision(item.target) ||
-			!validSelectionRevision(item.selectionFrom)
+			!validSelectionRevision(item.selectionFrom) ||
+			Object.hasOwn(item.target, 'selectionRevision') !==
+				Object.hasOwn(item.selectionFrom, 'selectionRevision')
 		) {
 			failInvalid('Invalid frozen apply target');
 		}
@@ -392,8 +543,29 @@ function sortedDestinations(
 
 function currentSelection(
 	planned: FrozenArtworkSelection,
-	data: ApplyPlannerItemData
+	data: ApplyPlannerItemData,
+	legacyV1: boolean
 ): FrozenArtworkSelection | null {
+	if (legacyV1) {
+		if (planned.selectionSource === 'auto') {
+			const candidate = data.candidates.find(
+				(row) =>
+					row.candidateId === planned.candidateId &&
+					row.active &&
+					row.url === planned.url &&
+					applySlotKey(row.slot) === applySlotKey(planned.slot)
+			);
+			return candidate
+				? freezeLegacyV1CandidateSelection(candidate, 'auto', data.item.identity, planned.score)
+				: null;
+		}
+
+		const stored = data.storedSelections.find(
+			(row) => row.url === planned.url && applySlotKey(row.slot) === applySlotKey(planned.slot)
+		);
+		return stored ? freezeLegacyV1StoredSelection(stored, data, planned) : null;
+	}
+
 	if (planned.selectionSource === 'auto') {
 		const candidate = data.candidates.find(
 			(row) =>
@@ -443,6 +615,7 @@ export async function assertApplyPlanFresh(
 	};
 
 	for (const plannedItem of payload.items) {
+		const legacyV1 = !Object.hasOwn(plannedItem.selectionFrom, 'selectionRevision');
 		const [target, selectionFrom] = await Promise.all([
 			load(plannedItem.target),
 			load(plannedItem.selectionFrom)
@@ -467,20 +640,33 @@ export async function assertApplyPlanFresh(
 		) {
 			failStale('Frozen apply eligibility changed');
 		}
-		if (!same(freezeApplyDiscoverySnapshot(selectionFrom), plannedItem.discovery)) {
+		const currentDiscovery = legacyV1
+			? freezeLegacyV1DiscoverySnapshot(selectionFrom)
+			: freezeApplyDiscoverySnapshot(selectionFrom);
+		if (!same(currentDiscovery, plannedItem.discovery)) {
 			failStale('Frozen artwork candidates changed');
 		}
 
 		const selections = plannedItem.selections;
 		for (const plannedSelection of selections) {
-			const current = currentSelection(plannedSelection, selectionFrom);
+			const current = currentSelection(plannedSelection, selectionFrom, legacyV1);
 			if (!current || current.fingerprint !== plannedSelection.fingerprint) {
 				failStale('A frozen artwork selection changed');
 			}
 		}
 		if (payload.defaults.selectionMode === 'stored') {
 			const currentStored = selectionFrom.storedSelections
-				.map((selection) => freezeApplyStoredSelection(selection, selectionFrom))
+				.map((selection) =>
+					legacyV1
+						? freezeLegacyV1StoredSelection(
+								selection,
+								selectionFrom,
+								selections.find(
+									(planned) => applySlotKey(planned.slot) === applySlotKey(selection.slot)
+								)
+							)
+						: freezeApplyStoredSelection(selection, selectionFrom)
+				)
 				.sort((a, b) => selectionKey(a).localeCompare(selectionKey(b)));
 			const plannedStored = [...selections].sort((a, b) =>
 				selectionKey(a).localeCompare(selectionKey(b))
