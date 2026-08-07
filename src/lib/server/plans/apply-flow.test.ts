@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('$lib/server/db', () => ({ db: {} }));
 import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
 import { selectAutomaticArtwork } from '$lib/server/posters/automatic-selection';
+import {
+	RemoteArtworkDownloadError,
+	type RemoteArtworkDownloadErrorCode
+} from '$lib/server/remote-artwork';
 import { canonicalJsonDigest, hashCanonicalJson } from './canonical-json';
 import { confirmApplyPlan, exactApplyPreviewResponse } from './apply-api';
 import { executeFrozenApplyPlan, type ApplyPlanExecutorDependencies } from './apply-executor';
@@ -387,6 +391,82 @@ describe('frozen apply flow', () => {
 		});
 		expect(result.summary).toMatchObject({ operationCount: 8, succeeded: 8, failed: 0 });
 	});
+
+	it.each([
+		['timeout', 'remote_artwork_timeout'],
+		['size limit', 'remote_artwork_too_large'],
+		['invalid MIME', 'remote_artwork_content_type_invalid'],
+		['redirect policy', 'remote_artwork_redirect_limit'],
+		['host policy', 'remote_artwork_target_not_allowed']
+	] satisfies [string, RemoteArtworkDownloadErrorCode][])(
+		'never mutates Plex when the %s preflight rejects',
+		async (_label, code) => {
+			const fixture = setup();
+			for (const candidate of fixture.items[0].candidates) {
+				candidate.url = `${candidate.url}?api_key=must-stay-redacted`;
+			}
+			const preview = await fixture.planner({
+				context: { source: 'single' },
+				targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+				selectionMode: 'auto',
+				method: 'server'
+			});
+			const applyPosterUrl = vi.fn(async () => undefined);
+			const applyBackgroundUrl = vi.fn(async () => undefined);
+			const prepareOperation = vi.fn(async () => {
+				throw new RemoteArtworkDownloadError(code);
+			});
+
+			const result = await executeFrozenApplyPlan(
+				preview.plan!.id,
+				preview.plan!.digest,
+				preview.payload,
+				{
+					serverRegistry: {
+						resolve: async () => ({
+							serverInstanceId: 'server-a',
+							fingerprint: 'server-fingerprint',
+							server: {
+								type: 'plex',
+								identity: { instanceId: 'server-a', name: 'Server A', type: 'plex' },
+								capabilities: {
+									posterWrite: 'supported',
+									backgroundWrite: 'supported',
+									seasonWrite: 'supported',
+									episodeWrite: 'supported',
+									fieldLock: 'supported',
+									currentImageRetrieval: 'supported',
+									artworkDelete: 'unsupported',
+									evidence: 'provider_contract',
+									limitations: ['artwork_delete_unavailable']
+								},
+								testConnection: vi.fn(),
+								listLibraries: vi.fn(),
+								listItems: vi.fn(),
+								listSeasons: vi.fn(),
+								listEpisodes: vi.fn(),
+								applyPosterUrl,
+								applyPosterBytes: vi.fn(),
+								applyBackgroundUrl,
+								lockField: vi.fn()
+							}
+						})
+					},
+					writeKometa: vi.fn(),
+					prepareOperation
+				}
+			);
+
+			expect(prepareOperation).toHaveBeenCalledTimes(2);
+			expect(applyPosterUrl).not.toHaveBeenCalled();
+			expect(applyBackgroundUrl).not.toHaveBeenCalled();
+			expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 0, failed: 2 });
+			for (const operation of result.items[0].operations) {
+				expect(operation).toMatchObject({ status: 'failed', error: code });
+				expect(operation.error).not.toContain('must-stay-redacted');
+			}
+		}
+	);
 
 	it('continues independent collection member writes after one operation fails', async () => {
 		const fixture = setup();

@@ -19,11 +19,14 @@ import type {
 	ApplyPlanExecutionResult
 } from '$lib/server/plans/apply-executor';
 import type { ApplyPlanOperation } from '$lib/server/plans/apply-plan';
+import { RemoteArtworkDownloadError, type RemoteArtworkFetch } from '$lib/server/remote-artwork';
 import { sha256Bytes } from '$lib/server/revisions/verification';
 import {
 	createArtworkApplyCoordinator,
+	preflightServerArtwork,
 	trustedProviderArtworkUrl,
-	type ArtworkApplyCoordinator
+	type ArtworkApplyCoordinator,
+	type ArtworkApplyCoordinatorOptions
 } from './apply-coordinator';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore } from './snapshot-store';
@@ -175,14 +178,17 @@ function executionResult(
 	};
 }
 
-function coordinator(): ArtworkApplyCoordinator {
+function coordinator(
+	preflight: NonNullable<ArtworkApplyCoordinatorOptions['fetchArtworkBytes']> = async (url) =>
+		bytes(url)
+): ArtworkApplyCoordinator {
 	return createArtworkApplyCoordinator({
 		snapshots,
 		ledger,
 		planId: 'plan-global',
 		kometaAssetsDirectory: kometaDirectory,
 		clock: () => NOW,
-		fetchArtworkBytes: async (url) => bytes(url)
+		fetchArtworkBytes: preflight
 	});
 }
 
@@ -400,7 +406,8 @@ describe('ArtworkApplyCoordinator', () => {
 	});
 
 	it('accepts changed provider evidence as best-effort and advances the verified version', async () => {
-		const subject = coordinator();
+		const preflight = vi.fn(async (url: string) => bytes(url));
+		const subject = coordinator(preflight);
 		const planned = operation({ id: 'best-effort' });
 		const beforeArtwork = artwork('before bytes', 'before-id');
 		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
@@ -415,6 +422,7 @@ describe('ArtworkApplyCoordinator', () => {
 			verification: 'best_effort',
 			artworkVersion: 1
 		});
+		expect(preflight).toHaveBeenCalledOnce();
 		const [revision] = await database.select().from(artworkRevisions);
 		const [slotState] = await database.select().from(artworkSlotStates);
 		const [group] = await database.select().from(artworkRevisionGroups);
@@ -600,6 +608,100 @@ describe('ArtworkApplyCoordinator', () => {
 			}
 		});
 		expect(await database.select().from(artworkRevisions)).toHaveLength(2);
+	});
+});
+
+describe('preflightServerArtwork', () => {
+	it('uses the strict provider allowlist for the initial URL and every redirect hop', async () => {
+		const initialFetch = vi.fn<RemoteArtworkFetch>();
+		await expect(
+			preflightServerArtwork('https://artwork.example/not-really-tmdb.jpg', 'tmdb', initialFetch)
+		).rejects.toMatchObject({ code: 'remote_artwork_target_not_allowed' });
+		expect(initialFetch).not.toHaveBeenCalled();
+
+		const redirectFetch = vi.fn<RemoteArtworkFetch>(
+			async () =>
+				new Response(null, {
+					status: 302,
+					headers: { location: 'https://artwork.example/pivot.jpg' }
+				})
+		);
+		await expect(
+			preflightServerArtwork(
+				'https://image.tmdb.org/t/p/original/poster.jpg',
+				'tmdb',
+				redirectFetch
+			)
+		).rejects.toMatchObject({ code: 'remote_artwork_target_not_allowed' });
+		expect(redirectFetch).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		{ label: 'custom', provider: 'custom' },
+		{ label: 'providerless legacy', provider: null }
+	])('preserves $label URLs under the safe custom redirect policy', async ({ provider }) => {
+		const fetchImpl = vi.fn<RemoteArtworkFetch>(
+			async () =>
+				new Response(new Uint8Array([1, 2, 3]), {
+					headers: { 'content-type': 'image/jpeg' }
+				})
+		);
+
+		await expect(
+			preflightServerArtwork('http://legacy-artwork.example/poster.jpg', provider, fetchImpl)
+		).resolves.toEqual(new Uint8Array([1, 2, 3]).buffer);
+		expect(fetchImpl).toHaveBeenCalledOnce();
+	});
+
+	it('fails closed for unknown provider provenance', async () => {
+		const fetchImpl = vi.fn<RemoteArtworkFetch>();
+		await expect(
+			preflightServerArtwork(
+				'https://legacy-artwork.example/poster.jpg',
+				'unknown-provider',
+				fetchImpl
+			)
+		).rejects.toMatchObject({ code: 'remote_artwork_target_not_allowed' });
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{
+			label: 'an invalid MIME type',
+			response: () =>
+				new Response(new Uint8Array([1]), { headers: { 'content-type': 'text/html' } }),
+			code: 'remote_artwork_content_type_invalid'
+		},
+		{
+			label: 'an oversized body',
+			response: () =>
+				new Response(new Uint8Array([1]), {
+					headers: {
+						'content-type': 'image/jpeg',
+						'content-length': String(50 * 1024 * 1024 + 1)
+					}
+				}),
+			code: 'remote_artwork_too_large'
+		}
+	])('propagates $label as a failed preflight', async ({ response, code }) => {
+		await expect(
+			preflightServerArtwork('https://image.tmdb.org/t/p/original/poster.jpg', 'tmdb', async () =>
+				response()
+			)
+		).rejects.toMatchObject({ code });
+	});
+
+	it('does not swallow bounded downloader errors or expose a signed source URL', async () => {
+		const failure = new RemoteArtworkDownloadError('remote_artwork_timeout');
+		const signedUrl =
+			'https://image.tmdb.org/t/p/original/poster.jpg?api_key=should-never-be-reported';
+		const error = await preflightServerArtwork(signedUrl, 'tmdb', async () => {
+			throw failure;
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBe(failure);
+		expect(String(error)).not.toContain('should-never-be-reported');
+		expect(String(error)).not.toContain(signedUrl);
 	});
 });
 

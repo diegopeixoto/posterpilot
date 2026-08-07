@@ -2,7 +2,13 @@ import { join } from 'node:path';
 import { readConfig } from '$lib/server/kometa/config-io';
 import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
-import { downloadRemoteArtwork } from '$lib/server/remote-artwork';
+import {
+	downloadRemoteArtwork,
+	RemoteArtworkDownloadError,
+	safeArtworkRedirectPolicy,
+	type RemoteArtworkFetch,
+	type RemoteArtworkUrlValidator
+} from '$lib/server/remote-artwork';
 import type {
 	ApplyOperationExecutionContext,
 	ApplyOperationExecutionResult,
@@ -50,6 +56,7 @@ export interface ArtworkApplyCoordinatorOptions {
 	};
 	kometaAssetsDirectory: string;
 	clock?: () => Date;
+	/** Test/integration seam; null or empty results fail the mandatory preflight. */
 	fetchArtworkBytes?: (url: string) => Promise<ArrayBuffer | null>;
 }
 
@@ -59,25 +66,31 @@ function safeNow(clock: () => Date): Date {
 	return now;
 }
 
-const MAX_VERIFICATION_ARTWORK_BYTES = 50 * 1024 * 1024;
+const MAX_PREFLIGHT_ARTWORK_BYTES = 50 * 1024 * 1024;
 
-async function defaultFetchArtworkBytes(
+/**
+ * Validate and download the exact frozen selection before any media-server mutation.
+ * Known provider provenance stays on its strict asset-host allowlist. Custom and
+ * providerless legacy selections keep their original URL semantics and use the
+ * redirect policy shared by the media-server adapters.
+ */
+export async function preflightServerArtwork(
 	url: string,
-	provider: string | null
-): Promise<ArrayBuffer | null> {
-	try {
-		const downloaded = await downloadRemoteArtwork(url, {
-			maxBytes: MAX_VERIFICATION_ARTWORK_BYTES,
-			timeoutMs: 30_000,
-			maxRedirects: 3,
-			validateUrl: (target) => trustedProviderArtworkUrl(target, provider)
-		});
-		return downloaded.bytes;
-	} catch {
-		// Verification is best-effort. The server write still proceeds, but it is
-		// recorded as unavailable instead of downloading an untrusted response.
-		return null;
-	}
+	provider: string | null,
+	fetchImpl?: RemoteArtworkFetch
+): Promise<ArrayBuffer> {
+	const validateUrl: RemoteArtworkUrlValidator =
+		provider === null || provider === 'custom'
+			? safeArtworkRedirectPolicy
+			: (target) => trustedProviderArtworkUrl(target, provider);
+	const downloaded = await downloadRemoteArtwork(url, {
+		maxBytes: MAX_PREFLIGHT_ARTWORK_BYTES,
+		timeoutMs: 30_000,
+		maxRedirects: 3,
+		validateUrl,
+		...(fetchImpl ? { fetchImpl } : {})
+	});
+	return downloaded.bytes;
 }
 
 /** Exported for direct unit testing of the per-provider artwork host allowlist. */
@@ -210,12 +223,15 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		}
 		const expectedBytes = options.fetchArtworkBytes
 			? await options.fetchArtworkBytes(operation.selection.url)
-			: await defaultFetchArtworkBytes(operation.selection.url, operation.selection.provider);
+			: await preflightServerArtwork(operation.selection.url, operation.selection.provider);
+		if (!expectedBytes || expectedBytes.byteLength === 0) {
+			throw new RemoteArtworkDownloadError('remote_artwork_empty');
+		}
 		prepared.set(operation.id, {
 			destination: 'server',
 			beforeSnapshotId: before.id,
 			beforeArtwork,
-			expectedSha256: expectedBytes ? sha256Bytes(expectedBytes) : null
+			expectedSha256: sha256Bytes(expectedBytes)
 		});
 	}
 
