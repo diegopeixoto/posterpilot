@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	downloadRemoteArtwork,
 	RemoteArtworkDownloadError,
-	sameOriginCustomArtworkPolicy,
+	safeArtworkRedirectPolicy,
 	type RemoteArtworkFetch,
 	type RemoteArtworkUrlValidator
 } from './remote-artwork';
@@ -161,6 +161,34 @@ describe('downloadRemoteArtwork', () => {
 		}
 	});
 
+	it('does not wait for stream cancellation when a body timeout expires', async () => {
+		vi.useFakeTimers();
+		let cancelled = false;
+		try {
+			const body = new ReadableStream<Uint8Array>({
+				pull: () => new Promise<void>(() => undefined),
+				cancel: () => {
+					cancelled = true;
+					return new Promise<void>(() => undefined);
+				}
+			});
+			const pending = downloadRemoteArtwork('https://images.example/never-cancels.jpg', {
+				maxBytes: 10,
+				timeoutMs: 50,
+				validateUrl: allowHttps,
+				fetchImpl: async () => new Response(body, { headers: { 'content-type': 'image/jpeg' } })
+			});
+			const assertion = expect(pending).rejects.toSatisfy(
+				(error: unknown) => code(error) === 'remote_artwork_timeout'
+			);
+			await vi.advanceTimersByTimeAsync(50);
+			await assertion;
+			expect(cancelled).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('enforces the timeout even when the fetch implementation ignores its signal', async () => {
 		vi.useFakeTimers();
 		try {
@@ -201,6 +229,152 @@ describe('downloadRemoteArtwork', () => {
 		]);
 	});
 
+	it('continues without waiting for redirect body cancellation', async () => {
+		let cancelled = false;
+		const redirectBody = new ReadableStream<Uint8Array>({
+			cancel: () => {
+				cancelled = true;
+				return new Promise<void>(() => undefined);
+			}
+		});
+		const fetchImpl = vi
+			.fn<RemoteArtworkFetch>()
+			.mockResolvedValueOnce(
+				new Response(redirectBody, { status: 302, headers: { location: '/final.jpg' } })
+			)
+			.mockResolvedValueOnce(response([9]));
+
+		const result = await downloadRemoteArtwork('https://images.example/start.jpg', {
+			maxBytes: 10,
+			timeoutMs: 1_000,
+			validateUrl: safeArtworkRedirectPolicy,
+			fetchImpl
+		});
+
+		expect(new Uint8Array(result.bytes)).toEqual(new Uint8Array([9]));
+		expect(cancelled).toBe(true);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it('allows a same-host HTTP-to-HTTPS upgrade', async () => {
+		const fetchImpl = vi
+			.fn<RemoteArtworkFetch>()
+			.mockResolvedValueOnce(
+				new Response(null, {
+					status: 301,
+					headers: { location: 'https://artwork.example/final.jpg' }
+				})
+			)
+			.mockResolvedValueOnce(response([1]));
+
+		const result = await downloadRemoteArtwork('http://artwork.example/start.jpg', {
+			maxBytes: 10,
+			timeoutMs: 1_000,
+			validateUrl: safeArtworkRedirectPolicy,
+			fetchImpl
+		});
+
+		expect(result.finalUrl).toBe('https://artwork.example/final.jpg');
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it('rejects a downgrade on a later hop after an HTTPS upgrade', async () => {
+		const fetchImpl = vi
+			.fn<RemoteArtworkFetch>()
+			.mockResolvedValueOnce(
+				new Response(null, {
+					status: 301,
+					headers: { location: 'https://artwork.example/secure.jpg' }
+				})
+			)
+			.mockResolvedValueOnce(
+				new Response(null, {
+					status: 302,
+					headers: { location: 'http://artwork.example/downgraded.jpg' }
+				})
+			);
+
+		await expect(
+			downloadRemoteArtwork('http://artwork.example/start.jpg', {
+				maxBytes: 10,
+				timeoutMs: 1_000,
+				validateUrl: safeArtworkRedirectPolicy,
+				fetchImpl
+			})
+		).rejects.toSatisfy((error: unknown) => code(error) === 'remote_artwork_target_not_allowed');
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it('allows redirects across the known ThePosterDB public hosts', async () => {
+		const fetchImpl = vi
+			.fn<RemoteArtworkFetch>()
+			.mockResolvedValueOnce(
+				new Response(null, {
+					status: 302,
+					headers: { location: 'https://www.theposterdb.com/poster/42' }
+				})
+			)
+			.mockResolvedValueOnce(
+				new Response(null, {
+					status: 302,
+					headers: { location: 'https://images.theposterdb.com/posters/42.jpg' }
+				})
+			)
+			.mockResolvedValueOnce(response([4, 2]));
+
+		const result = await downloadRemoteArtwork('https://theposterdb.com/poster/42', {
+			maxBytes: 10,
+			timeoutMs: 1_000,
+			validateUrl: safeArtworkRedirectPolicy,
+			fetchImpl
+		});
+
+		expect(result.finalUrl).toBe('https://images.theposterdb.com/posters/42.jpg');
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+	});
+
+	it('allows redirects between Fanart.tv subdomains', async () => {
+		const fetchImpl = vi
+			.fn<RemoteArtworkFetch>()
+			.mockResolvedValueOnce(
+				new Response(null, {
+					status: 302,
+					headers: { location: 'https://assets.fanart.tv/fanart/poster.jpg' }
+				})
+			)
+			.mockResolvedValueOnce(response([7]));
+
+		const result = await downloadRemoteArtwork('https://webservice.fanart.tv/v3/movies/550', {
+			maxBytes: 10,
+			timeoutMs: 1_000,
+			validateUrl: safeArtworkRedirectPolicy,
+			fetchImpl
+		});
+
+		expect(result.finalUrl).toBe('https://assets.fanart.tv/fanart/poster.jpg');
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not let an unknown custom origin pivot into a known provider family', async () => {
+		const fetchImpl = vi.fn(
+			async () =>
+				new Response(null, {
+					status: 302,
+					headers: { location: 'https://images.theposterdb.com/posters/42.jpg' }
+				})
+		);
+
+		await expect(
+			downloadRemoteArtwork('https://artwork.example/start.jpg', {
+				maxBytes: 10,
+				timeoutMs: 1_000,
+				validateUrl: safeArtworkRedirectPolicy,
+				fetchImpl
+			})
+		).rejects.toSatisfy((error: unknown) => code(error) === 'remote_artwork_target_not_allowed');
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
+
 	it('rejects a cross-origin redirect before requesting its target', async () => {
 		const fetchImpl = vi.fn(
 			async () =>
@@ -214,7 +388,7 @@ describe('downloadRemoteArtwork', () => {
 			downloadRemoteArtwork('https://images.example/start.jpg', {
 				maxBytes: 10,
 				timeoutMs: 1_000,
-				validateUrl: sameOriginCustomArtworkPolicy,
+				validateUrl: safeArtworkRedirectPolicy,
 				fetchImpl
 			})
 		).rejects.toSatisfy((error: unknown) => code(error) === 'remote_artwork_target_not_allowed');

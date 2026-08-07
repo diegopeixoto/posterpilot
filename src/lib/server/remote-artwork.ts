@@ -13,6 +13,13 @@ const RASTER_CONTENT_TYPES = new Set([
 	'image/png',
 	'image/webp'
 ]);
+const THEPOSTERDB_ARTWORK_HOSTS = new Set([
+	'theposterdb.com',
+	'www.theposterdb.com',
+	'images.theposterdb.com'
+]);
+
+type PublicArtworkProviderFamily = 'fanart-tv' | 'theposterdb';
 
 export type RemoteArtworkDownloadErrorCode =
 	| 'remote_artwork_options_invalid'
@@ -82,13 +89,42 @@ export function safeCustomArtworkTarget(target: URL): boolean {
 	);
 }
 
+function publicArtworkProviderFamily(target: URL): PublicArtworkProviderFamily | null {
+	if ((target.protocol !== 'http:' && target.protocol !== 'https:') || target.port) return null;
+	if (THEPOSTERDB_ARTWORK_HOSTS.has(target.hostname)) return 'theposterdb';
+	if (target.hostname === 'fanart.tv' || target.hostname.endsWith('.fanart.tv')) {
+		return 'fanart-tv';
+	}
+	return null;
+}
+
+function isSameHostnameHttpsUpgrade(target: URL, initialUrl: URL): boolean {
+	return (
+		initialUrl.protocol === 'http:' &&
+		target.protocol === 'https:' &&
+		target.hostname === initialUrl.hostname
+	);
+}
+
 /**
- * Preserve a custom initial target while preventing redirects to another origin.
- * This still permits an intentional local initial URL in a self-hosted deployment.
+ * Preserve arbitrary custom targets while allowing only narrowly compatible redirects:
+ * same-origin, an HTTP-to-HTTPS upgrade on the same hostname, or HTTPS redirects inside
+ * the same known public provider family. Each transition is checked against the previous
+ * hop, while the provider-family exception stays anchored to the initial target so a custom
+ * host cannot pivot into an allowlist.
  */
-export const sameOriginCustomArtworkPolicy: RemoteArtworkUrlValidator = (target, context) =>
-	safeCustomArtworkTarget(target) &&
-	(!context.redirected || target.origin === context.initialUrl.origin);
+export const safeArtworkRedirectPolicy: RemoteArtworkUrlValidator = (target, context) => {
+	if (!safeCustomArtworkTarget(target)) return false;
+	if (!context.redirected) return true;
+
+	const previousUrl = context.previousUrl ?? context.initialUrl;
+	if (target.origin === previousUrl.origin) return true;
+	if (isSameHostnameHttpsUpgrade(target, previousUrl)) return true;
+	if (target.protocol !== 'https:') return false;
+
+	const initialFamily = publicArtworkProviderFamily(context.initialUrl);
+	return initialFamily !== null && publicArtworkProviderFamily(target) === initialFamily;
+};
 
 function positiveInteger(value: number): boolean {
 	return Number.isSafeInteger(value) && value > 0;
@@ -100,8 +136,31 @@ function requestIdentity(target: URL): string {
 	return value.href;
 }
 
-async function cancelBody(response: Response): Promise<void> {
-	await response.body?.cancel().catch(() => undefined);
+function cancelBody(response: Response): void {
+	try {
+		void response.body?.cancel().catch(() => undefined);
+	} catch {
+		// Cleanup must never replace the download error being reported.
+	}
+}
+
+function releaseReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+	try {
+		reader.releaseLock();
+	} catch {
+		// A pending read may still own the lock while cancellation settles.
+	}
+}
+
+function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+	try {
+		void reader
+			.cancel()
+			.catch(() => undefined)
+			.finally(() => releaseReader(reader));
+	} catch {
+		// Cancellation can also fail synchronously for an already-closed reader.
+	}
 }
 
 function declaredLength(response: Response): number | null {
@@ -122,7 +181,7 @@ export async function readBoundedArtworkBody(
 	}
 	const length = declaredLength(response);
 	if (length !== null && length > maxBytes) {
-		await cancelBody(response);
+		cancelBody(response);
 		throw new RemoteArtworkDownloadError('remote_artwork_too_large');
 	}
 	if (!response.body) throw new RemoteArtworkDownloadError('remote_artwork_empty');
@@ -146,20 +205,20 @@ export async function readBoundedArtworkBody(
 			if (!value?.byteLength) continue;
 			total += value.byteLength;
 			if (total > maxBytes) {
-				await reader.cancel().catch(() => undefined);
+				cancelReader(reader);
 				throw new RemoteArtworkDownloadError('remote_artwork_too_large');
 			}
 			chunks.push(value);
 		}
 	} catch (error) {
 		if (signal?.aborted) {
-			await reader.cancel().catch(() => undefined);
+			cancelReader(reader);
 			throw new RemoteArtworkDownloadError('remote_artwork_timeout');
 		}
 		throw error;
 	} finally {
 		if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
-		reader.releaseLock();
+		releaseReader(reader);
 	}
 	if (total === 0) throw new RemoteArtworkDownloadError('remote_artwork_empty');
 
@@ -255,22 +314,22 @@ export async function downloadRemoteArtwork(
 
 			if (REDIRECT_STATUSES.has(response.status)) {
 				if (redirects >= maxRedirects) {
-					await cancelBody(response);
+					cancelBody(response);
 					throw new RemoteArtworkDownloadError('remote_artwork_redirect_limit');
 				}
 				const location = response.headers.get('location');
 				if (!location) {
-					await cancelBody(response);
+					cancelBody(response);
 					throw new RemoteArtworkDownloadError('remote_artwork_redirect_invalid');
 				}
 				let next: URL;
 				try {
 					next = new URL(location, currentUrl);
 				} catch {
-					await cancelBody(response);
+					cancelBody(response);
 					throw new RemoteArtworkDownloadError('remote_artwork_redirect_invalid');
 				}
-				await cancelBody(response);
+				cancelBody(response);
 				previousUrl = currentUrl;
 				currentUrl = next;
 				redirects += 1;
@@ -278,12 +337,12 @@ export async function downloadRemoteArtwork(
 			}
 
 			if (!response.ok) {
-				await cancelBody(response);
+				cancelBody(response);
 				throw new RemoteArtworkDownloadError('remote_artwork_response_failed');
 			}
 			const contentType = safeRasterArtworkContentType(response.headers.get('content-type'));
 			if (!contentType) {
-				await cancelBody(response);
+				cancelBody(response);
 				throw new RemoteArtworkDownloadError('remote_artwork_content_type_invalid');
 			}
 			try {

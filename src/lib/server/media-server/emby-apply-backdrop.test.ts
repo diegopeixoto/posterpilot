@@ -121,6 +121,46 @@ describe('remote artwork apply', () => {
 		]);
 	});
 
+	it('follows redirects within a known public provider family before uploading', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = new URL(input instanceof Request ? input.url : input.toString());
+			if (url.href === 'https://theposterdb.com/poster/42') {
+				return new Response(null, {
+					status: 302,
+					headers: { location: 'https://www.theposterdb.com/poster/42' }
+				});
+			}
+			if (url.href === 'https://www.theposterdb.com/poster/42') {
+				return new Response(null, {
+					status: 302,
+					headers: { location: 'https://images.theposterdb.com/posters/42.jpg' }
+				});
+			}
+			if (url.href === 'https://images.theposterdb.com/posters/42.jpg') {
+				return new Response(new Uint8Array([4, 2]), {
+					headers: { 'content-type': 'image/jpeg' }
+				});
+			}
+			if (url.href === 'http://jellyfin.local/Items/item-6/Images/Primary') {
+				expect(init?.method).toBe('POST');
+				expect(init?.body).toBe('BAI=');
+				return new Response(null, { status: 204 });
+			}
+			throw new Error(`Unexpected ${init?.method ?? 'GET'} ${url.href}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await provider.applyPosterUrl!('item-6', 'https://theposterdb.com/poster/42');
+
+		expect(fetchMock.mock.calls.map(([input]) => input.toString())).toEqual([
+			'https://theposterdb.com/poster/42',
+			'https://www.theposterdb.com/poster/42',
+			'https://images.theposterdb.com/posters/42.jpg',
+			'http://jellyfin.local/Items/item-6/Images/Primary'
+		]);
+	});
+
 	it('rejects a cross-origin redirect before requesting the target or uploading', async () => {
 		const fetchMock = vi.fn(
 			async () =>

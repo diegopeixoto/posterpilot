@@ -33,7 +33,7 @@ import type {
 	ServerLibrary,
 	ServerNativeCollection
 } from './types';
-import { downloadRemoteArtwork, sameOriginCustomArtworkPolicy } from '$lib/server/remote-artwork';
+import { downloadRemoteArtwork, safeArtworkRedirectPolicy } from '$lib/server/remote-artwork';
 import { version } from '$lib/version';
 
 export type EmbyFlavor = 'jellyfin' | 'emby';
@@ -261,7 +261,7 @@ export function embyLikeProvider(
 			maxBytes: MAX_REMOTE_ARTWORK_BYTES,
 			timeoutMs: IMAGE_TIMEOUT_MS,
 			maxRedirects: 3,
-			validateUrl: sameOriginCustomArtworkPolicy
+			validateUrl: safeArtworkRedirectPolicy
 		});
 		return { data: downloaded.bytes, contentType: downloaded.contentType };
 	}
