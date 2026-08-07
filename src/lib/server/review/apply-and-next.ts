@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from '$lib/server/db/schema';
 import {
@@ -56,6 +56,7 @@ interface ApplyOutcomeProjection {
 interface FrozenApplyItemProjection {
 	operations: ApplyOperationProjection[];
 	selectionUpdatedAt: string | null;
+	selectionRevision: number;
 }
 
 function count(value: unknown): number {
@@ -68,6 +69,16 @@ function readSelectionUpdatedAt(value: unknown): string | null {
 
 	const parsed = new Date(value);
 	if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+		throw new ApplyAndNextError('job_not_verified');
+	}
+	return value;
+}
+
+function readSelectionRevision(selectionFrom: Record<string, unknown>): number {
+	// Plans frozen before the monotonic token rollout are valid only against the migration default.
+	if (!Object.hasOwn(selectionFrom, 'selectionRevision')) return 0;
+	const value = selectionFrom.selectionRevision;
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new ApplyAndNextError('job_not_verified');
 	}
 	return value;
@@ -97,7 +108,8 @@ function readFrozenItem(payload: Record<string, unknown>): FrozenApplyItemProjec
 		operations: operations as ApplyOperationProjection[],
 		selectionUpdatedAt: readSelectionUpdatedAt(
 			(selectionFrom as Record<string, unknown>).selectionUpdatedAt
-		)
+		),
+		selectionRevision: readSelectionRevision(selectionFrom as Record<string, unknown>)
 	};
 }
 
@@ -228,10 +240,6 @@ function stagedSelectionMatches(
 	);
 }
 
-function selectionVersionMatches(current: Date | null, frozen: string | null): boolean {
-	return (current?.toISOString() ?? null) === frozen;
-}
-
 /** Atomically complete review intent only while the exact applied staging is unchanged. */
 export function createApplyAndNextCompletionService(
 	database: Database,
@@ -261,7 +269,7 @@ export function createApplyAndNextCompletionService(
 				.select({
 					selectedPosterUrl: mediaItems.selectedPosterUrl,
 					selectedBackgroundUrl: mediaItems.selectedBackgroundUrl,
-					selectionUpdatedAt: mediaItems.selectionUpdatedAt,
+					selectionRevision: mediaItems.selectionRevision,
 					state: reviewStateExpression
 				})
 				.from(mediaItems)
@@ -313,13 +321,13 @@ export function createApplyAndNextCompletionService(
 				})
 				.from(jobItemOutcomes)
 				.where(eq(jobItemOutcomes.jobId, input.jobId));
-			const { operations, selectionUpdatedAt } = verifyApplyAndNextCompletion({
+			const { operations, selectionRevision } = verifyApplyAndNextCompletion({
 				serverInstanceId: input.serverInstanceId,
 				mediaItemId: input.mediaItemId,
 				job: job as ApplyJobProjection,
 				outcomes
 			});
-			if (!selectionVersionMatches(item.selectionUpdatedAt, selectionUpdatedAt)) {
+			if (item.selectionRevision !== selectionRevision) {
 				throw new ApplyAndNextError('selection_changed');
 			}
 			const expected = frozenSelections(operations);
@@ -356,19 +364,21 @@ export function createApplyAndNextCompletionService(
 			}
 
 			const completedAt = clock();
-			const selectionVersionCondition =
-				selectionUpdatedAt === null
-					? isNull(mediaItems.selectionUpdatedAt)
-					: eq(mediaItems.selectionUpdatedAt, new Date(selectionUpdatedAt));
 			const [cleared] = await tx
 				.update(mediaItems)
 				.set({
 					selectedPosterUrl: null,
 					selectedBackgroundUrl: null,
+					selectedPosterCandidateId: null,
+					selectedBackgroundCandidateId: null,
+					selectedPosterProvider: null,
+					selectedBackgroundProvider: null,
 					selectionUpdatedAt: completedAt,
+					selectionRevision: sql`${mediaItems.selectionRevision} + 1`,
+					updatedAt: completedAt,
 					reviewedAt: completedAt
 				})
-				.where(and(scope, selectionVersionCondition))
+				.where(and(scope, eq(mediaItems.selectionRevision, selectionRevision)))
 				.returning({ id: mediaItems.id });
 			if (!cleared) throw new ApplyAndNextError('selection_changed');
 			await tx
