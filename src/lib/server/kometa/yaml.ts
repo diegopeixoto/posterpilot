@@ -21,6 +21,12 @@ import {
 } from 'yaml';
 import { readConfig, withConfigLock, writeConfigAtomic } from './config-io';
 import {
+	assertManagedLogicalKeys,
+	findLogicalPair,
+	isYamlNull,
+	yamlKeyValue
+} from './yaml-logical-keys';
+import {
 	isCanonicalKometaNumericId,
 	isKometaDestinationV2,
 	kometaYamlMappingKey,
@@ -161,6 +167,7 @@ function normalizeMetadataKey(key: unknown): KometaYamlKey | null {
 
 function metadataMapFrom(value: unknown): KometaMetadataMap {
 	const metadata: KometaMetadataMap = new Map();
+	const logicalKeys = new Set<string>();
 	const entries =
 		value instanceof Map
 			? value.entries()
@@ -169,7 +176,13 @@ function metadataMapFrom(value: unknown): KometaMetadataMap {
 				: [];
 	for (const [rawKey, entry] of entries) {
 		const key = normalizeMetadataKey(rawKey);
-		if (key !== null) setMetadataEntry(metadata, key, entry as KometaEntry);
+		if (key === null) continue;
+		const logicalKey = String(key);
+		if (logicalKeys.has(logicalKey)) {
+			throw new Error('Ambiguous existing Kometa YAML keys');
+		}
+		logicalKeys.add(logicalKey);
+		setMetadataEntry(metadata, key, entry as KometaEntry);
 	}
 	return metadata;
 }
@@ -255,20 +268,6 @@ export function toYaml(obj: Record<string, unknown>): string {
 	return stringify(obj);
 }
 
-/** Return the plain value of a scalar map key without resolving the document. */
-function keyValue(key: unknown): unknown {
-	return isScalar(key) ? key.value : key;
-}
-
-/**
- * Find a map pair while treating quoted and unquoted numeric keys as the same
- * logical Kometa identifier. This matters because YAML parses `550:` as a
- * number, while PosterPilot receives provider IDs as strings.
- */
-function findPair(map: YAMLMap, key: string | number): Pair | undefined {
-	return map.items.find((pair) => String(keyValue(pair.key)) === String(key));
-}
-
 /** Keep comments and whitespace hints when an incompatible node must be replaced. */
 function copyPresentation(source: unknown, target: unknown): void {
 	if (!isNode(source) || !isNode(target)) return;
@@ -283,7 +282,7 @@ function createMap(document: Document<Node>): YAMLMap {
 
 /** Ensure numeric provider IDs remain YAML integers rather than quoted titles. */
 function normalizePairKey(document: Document<Node>, pair: Pair, key: string | number): void {
-	const current = keyValue(pair.key);
+	const current = yamlKeyValue(pair.key);
 	if (current === key && typeof current === typeof key) return;
 	const replacement = document.createNode(key);
 	copyPresentation(pair.key, replacement);
@@ -292,12 +291,18 @@ function normalizePairKey(document: Document<Node>, pair: Pair, key: string | nu
 
 /** Get or create a mapping child without replacing a compatible existing node. */
 function ensureMap(document: Document<Node>, parent: YAMLMap, key: string | number): YAMLMap {
-	const pair = findPair(parent, key);
-	if (pair) normalizePairKey(document, pair, key);
-	if (pair && isMap(pair.value)) return pair.value;
+	const pair = findLogicalPair(parent, key);
+	if (pair && isMap(pair.value)) {
+		normalizePairKey(document, pair, key);
+		return pair.value;
+	}
+	if (pair && !isYamlNull(pair.value)) {
+		throw new Error('Existing Kometa YAML node is not a mapping');
+	}
 
 	const map = createMap(document);
 	if (pair) {
+		normalizePairKey(document, pair, key);
 		copyPresentation(pair.value, map);
 		pair.value = map;
 	} else {
@@ -313,19 +318,19 @@ function setScalar(
 	key: string | number,
 	value: string
 ): void {
-	const pair = findPair(parent, key);
-	if (pair && isScalar(pair.value)) {
+	const pair = findLogicalPair(parent, key);
+	if (
+		pair &&
+		isScalar(pair.value) &&
+		(typeof pair.value.value === 'string' || pair.value.value === null)
+	) {
 		pair.value.value = value;
 		return;
 	}
+	if (pair) throw new Error('Existing Kometa YAML slot is not a string scalar');
 
 	const scalar = document.createNode(value);
-	if (pair) {
-		copyPresentation(pair.value, scalar);
-		pair.value = scalar;
-	} else {
-		parent.items.push(document.createPair(key, scalar));
-	}
+	parent.items.push(document.createPair(key, scalar));
 }
 
 /** Merge one item directly into a YAML document while preserving untouched nodes. */
@@ -371,13 +376,16 @@ function mergeYamlDocument(raw: string | null, items: KometaItemInput[]): string
 	let root: YAMLMap;
 	if (isMap(document.contents)) {
 		root = document.contents;
-	} else {
+	} else if (isYamlNull(document.contents)) {
 		root = createMap(document);
 		copyPresentation(document.contents, root);
 		document.contents = root;
+	} else {
+		throw new Error('Existing Kometa YAML root is not a mapping');
 	}
 
 	const metadata = ensureMap(document, root, 'metadata');
+	assertManagedLogicalKeys(metadata);
 	for (const item of items) mergeItemIntoDocument(document, metadata, item);
 	return document.toString();
 }
@@ -396,7 +404,10 @@ function mergeYamlDocument(raw: string | null, items: KometaItemInput[]): string
 export async function writeKometaYaml(
 	dir: string,
 	items: KometaItemInput[],
-	opts: { validateCurrent?: (raw: string | null) => void | Promise<void> } = {}
+	opts: {
+		validateCurrent?: (raw: string | null) => void | Promise<void>;
+		isCancelled?: () => boolean;
+	} = {}
 ): Promise<void> {
 	const filename = assertTypedItems(items, false);
 	const filePath = resolve(join(dir, filename));
@@ -404,6 +415,7 @@ export async function writeKometaYaml(
 	await withConfigLock(filePath, async () => {
 		const current = readConfig(filePath);
 		await opts.validateCurrent?.(current);
+		if (opts.isCancelled?.()) throw new Error('cancelled');
 		const merged = mergeYamlDocument(current, items);
 		writeConfigAtomic(filePath, merged, new Date().toISOString());
 	});

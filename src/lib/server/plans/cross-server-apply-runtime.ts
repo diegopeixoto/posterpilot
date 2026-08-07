@@ -102,7 +102,10 @@ export async function confirmDatabaseCrossServerApply(
 		matchRepository: databaseCrossServerMatchRepository,
 		store: operationPlanStore,
 		loadItemData: loadDatabaseApplyPlannerItemData,
-		resolveDestinationSlots: createApplyDestinationResolver({ serverRegistry: registry }),
+		resolveDestinationSlots: createApplyDestinationResolver({
+			serverRegistry: registry,
+			cacheKometaReads: true
+		}),
 		enqueue
 	});
 }

@@ -165,29 +165,62 @@ settings:
 		expect(readFileSync(configPath, 'utf8')).toBe(legacyConfig);
 	});
 
-	it.each([
-		{
-			name: 'missing cached library',
-			cached: [],
-			warning: 'kometa_library_missing'
-		},
-		{
-			name: 'unsupported cached library type',
-			cached: [{ key: '1', title: 'Music', type: 'artist' }],
-			warning: 'kometa_library_type_unsupported'
-		}
-	])('fails visibly and without a plan for $name', async ({ cached, warning }) => {
-		h.cachedLibraries = cached;
+	it('fails closed without a plan when the existing layout cannot be classified', async () => {
+		h.cachedLibraries = [{ key: '1', title: 'Movies', type: 'movie' }];
+		const unknownConfig = `libraries:
+  Movies:
+    metadata_files:
+      file: ${LEGACY_FILENAME}
+settings:
+  cache: true
+`;
+		writeFileSync(configPath, unknownConfig, 'utf8');
+
+		const preview = await previewSync(selection(['1']));
+
+		expect(preview).toMatchObject({
+			planId: null,
+			digest: null,
+			warnings: ['kometa_migration_required'],
+			changes: []
+		});
+		expect(await db.select().from(operationPlans)).toHaveLength(0);
+		expect(readFileSync(configPath, 'utf8')).toBe(unknownConfig);
+	});
+
+	it('fails visibly and without a plan for a missing cached library', async () => {
+		h.cachedLibraries = [];
 		const before = readFileSync(configPath, 'utf8');
 		const preview = await previewSync(selection(['1']));
 		expect(preview).toMatchObject({
 			planId: null,
 			digest: null,
-			warnings: [warning],
+			warnings: ['kometa_library_missing'],
 			changes: []
 		});
 		expect(await db.select().from(operationPlans)).toHaveLength(0);
 		expect(readFileSync(configPath, 'utf8')).toBe(before);
+	});
+
+	it('skips an unsupported library without aborting supported config changes', async () => {
+		h.cachedLibraries = [
+			{ key: '1', title: 'Movies', type: 'movie' },
+			{ key: '2', title: 'Music', type: 'artist' }
+		];
+		const preview = await previewSync(selection(['1', '2']));
+
+		expect(preview.planId).toBeTruthy();
+		expect(preview.warnings).toContain('kometa_library_type_unsupported');
+		expect(JSON.stringify(preview.changes)).toContain('Movies');
+		expect(JSON.stringify(preview.changes)).not.toContain('Music');
+
+		await runSync({ planId: preview.planId!, digest: preview.digest! });
+		expect(h.setKometaManagedLibraries).toHaveBeenCalledWith(['1']);
+		const written = parse(readFileSync(configPath, 'utf8')) as {
+			libraries: Record<string, unknown>;
+		};
+		expect(written.libraries).toHaveProperty('Movies');
+		expect(written.libraries).not.toHaveProperty('Music');
 	});
 
 	it('freezes a structured selection, redacts secrets, and requires single-use confirmation', async () => {

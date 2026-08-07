@@ -31,4 +31,72 @@ describe('Kometa legacy layout classification', () => {
 			expect(classifyKometaLegacyConfig(raw).known).toBe(false);
 		}
 	);
+
+	it.each([
+		`defaults: &library
+  metadata_files:
+    - file: posterpilot.yml
+libraries:
+  Movies:
+    <<: *library
+`,
+		`movie_library: &movie_library
+  Movies:
+    metadata_files:
+      - file: posterpilot.yml
+libraries: *movie_library
+`,
+		`defaults: &root
+  libraries:
+    Movies:
+      metadata_files:
+        - file: posterpilot.yml
+<<: *root
+`
+	])('fails closed when YAML indirection can hide a legacy reference', (raw) => {
+		expect(classifyKometaLegacyConfig(raw)).toEqual({ known: false, references: [] });
+	});
+
+	it('allows unrelated YAML indirection outside the libraries subtree', () => {
+		expect(
+			classifyKometaLegacyConfig(`shared: &shared
+  cache: true
+copy: *shared
+libraries:
+  Movies:
+    metadata_files:
+      - file: posterpilot-movies.yml
+`)
+		).toEqual({ known: true, references: [] });
+	});
+
+	it('allows aliases in a clearly unrelated field inside a library', () => {
+		expect(
+			classifyKometaLegacyConfig(`shared: &shared
+  schedule: daily
+libraries:
+  Movies:
+    operations: *shared
+    metadata_files:
+      - file: posterpilot-movies.yml
+`)
+		).toEqual({ known: true, references: [] });
+	});
+
+	it('treats null metadata_files as known absence', () => {
+		expect(
+			classifyKometaLegacyConfig(`libraries:
+  Movies:
+    metadata_files: null
+`)
+		).toEqual({ known: true, references: [] });
+	});
+
+	it('treats an empty library stanza as known absence', () => {
+		expect(
+			classifyKometaLegacyConfig(`libraries:
+  Movies:
+`)
+		).toEqual({ known: true, references: [] });
+	});
 });

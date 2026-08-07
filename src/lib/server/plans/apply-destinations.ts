@@ -27,7 +27,6 @@ export interface KometaDestinationState {
 
 interface KometaDocumentState {
 	filePath: string;
-	destination: KometaDestinationV2;
 	metadata: JsonObject;
 	parseError: boolean;
 	fileFingerprint: string;
@@ -50,6 +49,8 @@ export interface KometaCollisionGuardState {
 export interface ApplyDestinationResolverOptions {
 	serverRegistry: ApplyServerRegistry;
 	loadConfig?: () => Promise<AppConfig>;
+	/** Cache immutable config/file reads for one preview or freshness-validation pass. */
+	cacheKometaReads?: boolean;
 	readKometaState?: (
 		config: AppConfig,
 		destination: KometaDestinationV2,
@@ -206,7 +207,6 @@ function readDatabaseKometaDocument(
 	}
 	return {
 		filePath,
-		destination,
 		metadata,
 		parseError,
 		fileFingerprint: hashCanonicalJson({ exists, content: raw })
@@ -215,17 +215,18 @@ function readDatabaseKometaDocument(
 
 function kometaStateFromDocument(
 	document: KometaDocumentState,
+	destination: KometaDestinationV2,
 	slot: ResolveApplyDestinationsInput['selections'][number]['slot']
 ): KometaDestinationState {
 	// A malformed file is still represented by a distinct identity and will fail
 	// safely during the existing writer. Preview itself remains read-only.
 	const entry = document.parseError
 		? { __posterpilotParseError: true }
-		: child(document.metadata, document.destination.mappingId);
+		: child(document.metadata, destination.mappingId);
 	const url = kometaSlotUrl(entry, slot);
 	const destinationFingerprint = hashCanonicalJson({
 		filePath: document.filePath,
-		destination: document.destination,
+		destination,
 		fileFingerprint: document.fileFingerprint
 	});
 	return {
@@ -245,7 +246,11 @@ async function readDatabaseKometaState(
 	destination: KometaDestinationV2,
 	slot: ResolveApplyDestinationsInput['selections'][number]['slot']
 ): Promise<KometaDestinationState> {
-	return kometaStateFromDocument(readDatabaseKometaDocument(config, destination), slot);
+	return kometaStateFromDocument(
+		readDatabaseKometaDocument(config, destination),
+		destination,
+		slot
+	);
 }
 
 function currentSlot(
@@ -272,6 +277,15 @@ function currentSlot(
 export function createApplyDestinationResolver(options: ApplyDestinationResolverOptions) {
 	const loadConfig = options.loadConfig ?? resolveConfig;
 	const readKometaState = options.readKometaState ?? readDatabaseKometaState;
+	const cacheKometaReads = options.cacheKometaReads ?? false;
+	let cachedConfig: Promise<AppConfig> | null = null;
+	let cachedGuard: KometaCollisionGuardState | null = null;
+	const cachedDocuments = new Map<string, KometaDocumentState>();
+	const resolveKometaConfig = () => {
+		if (!cacheKometaReads) return loadConfig();
+		cachedConfig ??= loadConfig();
+		return cachedConfig;
+	};
 
 	return async function resolveApplyDestinationSlots(
 		input: ResolveApplyDestinationsInput
@@ -283,7 +297,7 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 			wantsServer || wantsKometa
 				? await options.serverRegistry.resolve(input.target.item.identity.serverInstanceId)
 				: null;
-		const config = wantsKometa ? await loadConfig() : null;
+		const config = wantsKometa ? await resolveKometaConfig() : null;
 		if (
 			wantsKometa &&
 			(config?.kometaServerInstanceId !== input.target.item.identity.serverInstanceId ||
@@ -302,8 +316,14 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 					imdbId: input.target.item.identity.imdbId
 				})
 			: null;
-		const kometaGuard = config ? inspectKometaCollisionGuard(config) : null;
-		const kometaDocuments = new Map<string, KometaDocumentState>();
+		const kometaGuard = config
+			? cacheKometaReads
+				? (cachedGuard ??= inspectKometaCollisionGuard(config))
+				: inspectKometaCollisionGuard(config)
+			: null;
+		const kometaDocuments = cacheKometaReads
+			? cachedDocuments
+			: new Map<string, KometaDocumentState>();
 
 		let seasons: Awaited<
 			ReturnType<NonNullable<typeof serverBinding>['server']['listSeasons']>
@@ -378,12 +398,12 @@ export function createApplyDestinationResolver(options: ApplyDestinationResolver
 					if (options.readKometaState) {
 						state = await readKometaState(config, destination, selection.slot);
 					} else {
-						let document = kometaDocuments.get(destination.key);
+						let document = kometaDocuments.get(destination.filename);
 						if (!document) {
 							document = readDatabaseKometaDocument(config, destination);
-							kometaDocuments.set(destination.key, document);
+							kometaDocuments.set(destination.filename, document);
 						}
-						state = kometaStateFromDocument(document, selection.slot);
+						state = kometaStateFromDocument(document, destination, selection.slot);
 					}
 					state = bindCollisionGuard(state, kometaGuard);
 					snapshots.push({

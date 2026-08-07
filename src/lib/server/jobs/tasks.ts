@@ -16,6 +16,7 @@ import { shouldReprocessItem } from './incremental';
 import type { JobContext, JobPayload, JobTaskResult } from './types';
 import { resolveMediaServerInstance } from '$lib/server/server-instances';
 import { executeDatabaseFrozenApplyJob } from '$lib/server/plans/apply-runtime';
+import { countApplyPlanProgressUnits } from '$lib/server/plans/apply-executor';
 import { executeFrozenArtworkUndoJob } from '$lib/server/artwork-revisions/undo-runtime';
 import { createCollectionRepository } from '$lib/server/collections/repository';
 import { reconcileOptionalNativeCollections } from '$lib/server/collections/native-sync';
@@ -40,7 +41,6 @@ function errorMessage(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
 }
 
-export type JobType = 'sync' | 'full_rescan' | 'tmdb_repair' | 'discover' | 'apply';
 export type { JobPayload } from './types';
 
 interface JobTaskExecutionOptions {
@@ -774,7 +774,7 @@ export async function runApplyJob(
 			? payload.plan.scope.serverInstanceIds[0]
 			: undefined;
 	await ctx.setPhase('apply');
-	await ctx.setTotal(payload.plan.summary.itemCount);
+	await ctx.setTotal(countApplyPlanProgressUnits(payload.plan));
 	await logEvent('info', 'apply', 'Frozen apply started', {
 		planId: payload.planId,
 		serverInstanceId,
