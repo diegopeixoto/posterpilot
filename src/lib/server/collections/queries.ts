@@ -5,9 +5,14 @@ import {
 	artworkRevisions,
 	collectionMemberships,
 	mediaCollections,
-	mediaItems,
-	posterCandidates
+	mediaItems
 } from '$lib/server/db/schema';
+import { findEquivalentStagedArtworkCandidate } from '$lib/posters/selection-match';
+import {
+	loadStagedRootCandidateBuckets,
+	stagedRootSelectionKey,
+	type StagedRootSelection
+} from '$lib/server/posters/staged-root-candidates';
 import {
 	calculateCollectionConsistency,
 	collectionArtworkFamilyKey,
@@ -187,6 +192,8 @@ export function createCollectionQueries(database: Database) {
 				selectedBackground: mediaItems.selectedBackgroundUrl,
 				selectedPosterCandidateId: mediaItems.selectedPosterCandidateId,
 				selectedBackgroundCandidateId: mediaItems.selectedBackgroundCandidateId,
+				selectedPosterProvider: mediaItems.selectedPosterProvider,
+				selectedBackgroundProvider: mediaItems.selectedBackgroundProvider,
 				selectionUpdatedAt: mediaItems.selectionUpdatedAt,
 				selectionRevision: mediaItems.selectionRevision,
 				artworkVersion: mediaItems.artworkVersion
@@ -348,61 +355,85 @@ export function createCollectionQueries(database: Database) {
 
 		const itemRows = [...localRows.values()];
 		const itemIds = itemRows.map((row) => row.itemId!);
-		const selectedCandidateIds = [
-			...new Set(
-				itemRows.flatMap((row) =>
-					[row.selectedPosterCandidateId, row.selectedBackgroundCandidateId].filter(
-						(value): value is number => value !== null
+		const stagedSelections: StagedRootSelection[] = itemRows.flatMap((row) => {
+			const selections: StagedRootSelection[] = [];
+			if (row.selectedPoster) {
+				selections.push({
+					mediaItemId: row.itemId!,
+					kind: 'poster',
+					url: row.selectedPoster,
+					candidateId: row.selectedPosterCandidateId,
+					provider: row.selectedPosterProvider
+				});
+			}
+			if (row.selectedBackground) {
+				selections.push({
+					mediaItemId: row.itemId!,
+					kind: 'background',
+					url: row.selectedBackground,
+					candidateId: row.selectedBackgroundCandidateId,
+					provider: row.selectedBackgroundProvider
+				});
+			}
+			return selections;
+		});
+		const stagedCandidateBuckets = await loadStagedRootCandidateBuckets(
+			database,
+			serverId,
+			stagedSelections
+		);
+		const stagedFamilyBySlot = new Map<string, CollectionArtworkFamily | null>();
+		const stagedCandidateIdBySlot = new Map<string, number | null>();
+		for (const selection of stagedSelections) {
+			const key = stagedRootSelectionKey(selection.mediaItemId, selection.kind);
+			const candidate = findEquivalentStagedArtworkCandidate(
+				stagedCandidateBuckets.get(key) ?? [],
+				selection
+			);
+			stagedCandidateIdBySlot.set(key, candidate?.id ?? null);
+			stagedFamilyBySlot.set(
+				key,
+				candidate
+					? familyFromValues({
+							provider: candidate.provider,
+							setId: candidate.setId,
+							designFamily: candidate.designFamily,
+							language: candidate.language,
+							setAuthor: candidate.setAuthor
+						})
+					: null
+			);
+		}
+
+		const loadRevisionChunk = (chunk: number[]) =>
+			database
+				.select({
+					id: artworkRevisions.id,
+					mediaItemId: artworkRevisions.mediaItemId,
+					action: artworkRevisions.action,
+					kind: artworkRevisions.kind,
+					sourceProvider: artworkRevisions.sourceProvider,
+					provenance: artworkRevisions.provenance,
+					createdAt: artworkRevisions.createdAt
+				})
+				.from(artworkRevisions)
+				.where(
+					and(
+						eq(artworkRevisions.serverInstanceId, serverId),
+						inArray(artworkRevisions.mediaItemId, chunk),
+						eq(artworkRevisions.destination, 'server'),
+						inArray(artworkRevisions.kind, ['poster', 'background']),
+						isNull(artworkRevisions.season),
+						isNull(artworkRevisions.episode),
+						eq(artworkRevisions.outcome, 'success')
 					)
 				)
-			)
-		];
-		const candidates = selectedCandidateIds.length
-			? await database
-					.select({
-						id: posterCandidates.id,
-						mediaItemId: posterCandidates.mediaItemId,
-						provider: posterCandidates.provider,
-						setId: posterCandidates.setId,
-						setAuthor: posterCandidates.setAuthor,
-						designFamily: posterCandidates.designFamily,
-						language: posterCandidates.language
-					})
-					.from(posterCandidates)
-					.where(
-						and(
-							eq(posterCandidates.serverInstanceId, serverId),
-							inArray(posterCandidates.id, selectedCandidateIds)
-						)
-					)
-			: [];
-		const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-
-		const revisions = itemIds.length
-			? await database
-					.select({
-						id: artworkRevisions.id,
-						mediaItemId: artworkRevisions.mediaItemId,
-						action: artworkRevisions.action,
-						kind: artworkRevisions.kind,
-						sourceProvider: artworkRevisions.sourceProvider,
-						provenance: artworkRevisions.provenance,
-						createdAt: artworkRevisions.createdAt
-					})
-					.from(artworkRevisions)
-					.where(
-						and(
-							eq(artworkRevisions.serverInstanceId, serverId),
-							inArray(artworkRevisions.mediaItemId, itemIds),
-							eq(artworkRevisions.destination, 'server'),
-							inArray(artworkRevisions.kind, ['poster', 'background']),
-							isNull(artworkRevisions.season),
-							isNull(artworkRevisions.episode),
-							eq(artworkRevisions.outcome, 'success')
-						)
-					)
-					.orderBy(desc(artworkRevisions.createdAt), desc(artworkRevisions.id))
-			: [];
+				.orderBy(desc(artworkRevisions.createdAt), desc(artworkRevisions.id));
+		const revisionBatches: Awaited<ReturnType<typeof loadRevisionChunk>>[] = [];
+		for (let offset = 0; offset < itemIds.length; offset += 500) {
+			revisionBatches.push(await loadRevisionChunk(itemIds.slice(offset, offset + 500)));
+		}
+		const revisions = revisionBatches.flat();
 		const currentEvidence = new Map<string, CollectionArtworkFamily | null>();
 		for (const revision of revisions) {
 			if (revision.mediaItemId === null) continue;
@@ -418,36 +449,26 @@ export function createCollectionQueries(database: Database) {
 
 		const memberDrafts = itemRows
 			.map((row) => {
-				const posterCandidate = row.selectedPosterCandidateId
-					? candidateById.get(row.selectedPosterCandidateId)
-					: undefined;
-				const backgroundCandidate = row.selectedBackgroundCandidateId
-					? candidateById.get(row.selectedBackgroundCandidateId)
-					: undefined;
-				const candidateFamily = (
-					candidate: (typeof candidates)[number] | undefined,
-					itemId: number
-				) =>
-					candidate?.mediaItemId === itemId
-						? familyFromValues({
-								provider: candidate.provider,
-								setId: candidate.setId,
-								designFamily: candidate.designFamily,
-								language: candidate.language,
-								setAuthor: candidate.setAuthor
-							})
-						: null;
 				const posterStaged = Boolean(row.selectedPoster);
 				const backgroundStaged = Boolean(row.selectedBackground);
+				const posterStagedFamily =
+					stagedFamilyBySlot.get(stagedRootSelectionKey(row.itemId!, 'poster')) ?? null;
+				const backgroundStagedFamily =
+					stagedFamilyBySlot.get(stagedRootSelectionKey(row.itemId!, 'background')) ?? null;
+				const posterStagedCandidateId =
+					stagedCandidateIdBySlot.get(stagedRootSelectionKey(row.itemId!, 'poster')) ?? null;
+				const backgroundStagedCandidateId =
+					stagedCandidateIdBySlot.get(stagedRootSelectionKey(row.itemId!, 'background')) ?? null;
 				return {
 					row,
 					poster: {
 						currentAvailable: Boolean(row.currentPoster),
 						currentFamily: currentEvidence.get(`${row.itemId}:poster`) ?? null,
 						stagedAvailable: posterStaged,
-						stagedFamily: candidateFamily(posterCandidate, row.itemId!),
+						stagedCandidateId: posterStagedCandidateId,
+						stagedFamily: posterStagedFamily,
 						activeFamily: posterStaged
-							? candidateFamily(posterCandidate, row.itemId!)
+							? posterStagedFamily
 							: (currentEvidence.get(`${row.itemId}:poster`) ?? null),
 						activeSource: posterStaged
 							? ('staged' as const)
@@ -459,9 +480,10 @@ export function createCollectionQueries(database: Database) {
 						currentAvailable: Boolean(row.currentBackground),
 						currentFamily: currentEvidence.get(`${row.itemId}:background`) ?? null,
 						stagedAvailable: backgroundStaged,
-						stagedFamily: candidateFamily(backgroundCandidate, row.itemId!),
+						stagedCandidateId: backgroundStagedCandidateId,
+						stagedFamily: backgroundStagedFamily,
 						activeFamily: backgroundStaged
-							? candidateFamily(backgroundCandidate, row.itemId!)
+							? backgroundStagedFamily
 							: (currentEvidence.get(`${row.itemId}:background`) ?? null),
 						activeSource: backgroundStaged
 							? ('staged' as const)
@@ -520,7 +542,7 @@ export function createCollectionQueries(database: Database) {
 					current: { available: poster.currentAvailable, provenance: poster.currentFamily },
 					staged: {
 						available: poster.stagedAvailable,
-						candidateId: row.selectedPosterCandidateId,
+						candidateId: poster.stagedCandidateId,
 						provenance: poster.stagedFamily,
 						version: row.selectionRevision ?? 0
 					},
@@ -530,7 +552,7 @@ export function createCollectionQueries(database: Database) {
 					current: { available: background.currentAvailable, provenance: background.currentFamily },
 					staged: {
 						available: background.stagedAvailable,
-						candidateId: row.selectedBackgroundCandidateId,
+						candidateId: background.stagedCandidateId,
 						provenance: background.stagedFamily,
 						version: row.selectionRevision ?? 0
 					},

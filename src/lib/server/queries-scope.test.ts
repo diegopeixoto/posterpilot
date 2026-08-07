@@ -434,6 +434,22 @@ describe('server-scoped queries', () => {
 			.from(posterCandidates)
 			.where(eq(posterCandidates.mediaItemId, itemA));
 		const ownTmdb = ownCandidates.find((candidate) => candidate.provider === 'tmdb')!;
+		const stagedUrl = 'https://image.tmdb.org/t/p/w500/rediscovered.jpg';
+		const canonicalUrl = 'https://image.tmdb.org/t/p/original/rediscovered.jpg';
+		const rediscoveredPreview = 'https://image.tmdb.org/t/p/w342/rediscovered.jpg';
+		const [rediscoveredCandidate] = await db
+			.insert(posterCandidates)
+			.values({
+				serverInstanceId: 'server-a',
+				mediaItemId: itemA,
+				setId: 'rediscovered-root',
+				provider: 'tmdb',
+				url: canonicalUrl,
+				previewUrl: rediscoveredPreview,
+				kind: 'poster',
+				active: false
+			})
+			.returning({ id: posterCandidates.id });
 		const [otherItem] = await db
 			.insert(mediaItems)
 			.values({
@@ -451,7 +467,7 @@ describe('server-scoped queries', () => {
 				mediaItemId: otherItem.id,
 				setId: 'cross-item',
 				provider: 'tmdb',
-				url: ownTmdb.url,
+				url: canonicalUrl,
 				previewUrl: 'https://images.example.test/w500/cross-item.jpg',
 				kind: 'poster',
 				active: false
@@ -464,10 +480,33 @@ describe('server-scoped queries', () => {
 				mediaItemId: itemA,
 				setId: 'wrong-slot',
 				provider: 'tmdb',
-				url: ownTmdb.url,
+				url: canonicalUrl,
 				previewUrl: 'https://images.example.test/w500/wrong-slot.jpg',
 				kind: 'poster',
 				season: 1,
+				active: false
+			})
+			.returning({ id: posterCandidates.id });
+		const [otherServerItem] = await db
+			.insert(mediaItems)
+			.values({
+				serverInstanceId: 'server-b',
+				ratingKey: 'collection-preview-other-server',
+				sectionKey: 'movies',
+				type: 'movie',
+				title: 'Other server collection member'
+			})
+			.returning({ id: mediaItems.id });
+		const [otherServerCandidate] = await db
+			.insert(posterCandidates)
+			.values({
+				serverInstanceId: 'server-b',
+				mediaItemId: otherServerItem.id,
+				setId: 'cross-server',
+				provider: 'tmdb',
+				url: canonicalUrl,
+				previewUrl: 'https://images.example.test/w500/cross-server.jpg',
+				kind: 'poster',
 				active: false
 			})
 			.returning({ id: posterCandidates.id });
@@ -484,33 +523,48 @@ describe('server-scoped queries', () => {
 			await db
 				.update(mediaItems)
 				.set({
-					selectedPosterUrl: ownTmdb.url,
+					selectedPosterUrl: stagedUrl,
 					selectedPosterCandidateId: ownTmdb.id,
 					selectedPosterProvider: 'tmdb'
 				})
 				.where(eq(mediaItems.id, itemA));
-			await expect(source()).resolves.toBe(ownTmdb.previewUrl);
+			await expect(source()).resolves.toBe(rediscoveredPreview);
 
-			// Legacy provider provenance can recover a matching preview without an id.
+			// Legacy providerless state can still recover a TMDB size variant.
 			await db
 				.update(mediaItems)
-				.set({ selectedPosterCandidateId: null })
+				.set({ selectedPosterCandidateId: null, selectedPosterProvider: null })
 				.where(eq(mediaItems.id, itemA));
-			await expect(source()).resolves.toBe(ownTmdb.previewUrl);
+			await expect(source()).resolves.toBe(rediscoveredPreview);
 
 			// An explicit custom selection never borrows a coincident candidate preview.
 			await db
 				.update(mediaItems)
 				.set({ selectedPosterProvider: 'custom' })
 				.where(eq(mediaItems.id, itemA));
-			await expect(source()).resolves.toBe(ownTmdb.url);
+			await expect(source()).resolves.toBe(stagedUrl);
 
-			for (const candidateId of [crossItemCandidate.id, wrongSlotCandidate.id, 999_999]) {
+			// Even an equal candidate id cannot cross provider provenance.
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterCandidateId: rediscoveredCandidate.id,
+					selectedPosterProvider: 'fanarttv'
+				})
+				.where(eq(mediaItems.id, itemA));
+			await expect(source()).resolves.toBe(stagedUrl);
+
+			for (const candidateId of [
+				crossItemCandidate.id,
+				wrongSlotCandidate.id,
+				otherServerCandidate.id,
+				999_999
+			]) {
 				await db
 					.update(mediaItems)
 					.set({ selectedPosterCandidateId: candidateId, selectedPosterProvider: 'tmdb' })
 					.where(eq(mediaItems.id, itemA));
-				await expect(source()).resolves.toBe(ownTmdb.url);
+				await expect(source()).resolves.toBe(rediscoveredPreview);
 			}
 		} finally {
 			await db
@@ -525,8 +579,10 @@ describe('server-scoped queries', () => {
 				.update(posterCandidates)
 				.set({ active: true })
 				.where(eq(posterCandidates.id, ownTmdb.id));
+			await db.delete(posterCandidates).where(eq(posterCandidates.id, rediscoveredCandidate.id));
 			await db.delete(posterCandidates).where(eq(posterCandidates.id, wrongSlotCandidate.id));
 			await db.delete(mediaItems).where(eq(mediaItems.id, otherItem.id));
+			await db.delete(mediaItems).where(eq(mediaItems.id, otherServerItem.id));
 		}
 	});
 
