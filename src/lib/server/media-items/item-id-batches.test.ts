@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { batchItemIds, ITEM_ID_QUERY_BATCH_SIZE } from './item-id-batches';
 
 describe('batchItemIds', () => {
-	it('keeps large repair scopes within the query parameter budget', () => {
+	it('keeps large item scopes within the query parameter budget', () => {
 		const ids = Array.from({ length: ITEM_ID_QUERY_BATCH_SIZE * 2 + 17 }, (_, index) => index + 1);
 
 		const batches = batchItemIds(ids);

@@ -12,6 +12,10 @@ import {
 	serverInstances
 } from '$lib/server/db/schema';
 import {
+	MediaItemScopeMismatchError,
+	requireScopedMediaItemsById
+} from '$lib/server/media-items/scoped-query';
+import {
 	freezeAutomationOccurrence,
 	initialAutomationNextRun,
 	normalizeAutomationDefinition,
@@ -691,17 +695,18 @@ export function createAutomationStore(database: Database, options: AutomationSto
 		});
 		const itemIds = [...new Set(input.itemIds ?? [])];
 		if (itemIds.length) {
-			const scoped = await database
-				.select({ id: mediaItems.id })
-				.from(mediaItems)
-				.where(
-					and(
-						eq(mediaItems.serverInstanceId, row.serverInstanceId),
-						inArray(mediaItems.sectionKey, row.libraryScopes),
-						inArray(mediaItems.id, itemIds)
-					)
-				);
-			if (scoped.length !== itemIds.length) storeError('event_item_scope_mismatch');
+			try {
+				const scoped = await requireScopedMediaItemsById(database, row.serverInstanceId, itemIds);
+				const allowedLibraries = new Set(row.libraryScopes);
+				if (scoped.some((item) => !allowedLibraries.has(item.sectionKey))) {
+					storeError('event_item_scope_mismatch');
+				}
+			} catch (error) {
+				if (error instanceof MediaItemScopeMismatchError) {
+					storeError('event_item_scope_mismatch');
+				}
+				throw error;
+			}
 		}
 		const payload = freezeAutomationOccurrence({
 			automationId: row.id,
