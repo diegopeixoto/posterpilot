@@ -5,6 +5,10 @@
 	import type { CandidateSet } from '$lib/server/posters/sets';
 	import { groupSetArtwork } from '$lib/posters/season-groups';
 	import { defaultExpanded, providerKey, setKey, seasonKey } from '$lib/posters/collapse';
+	import {
+		stagedArtworkMatchesCandidate,
+		toggleStagedArtworkCandidate
+	} from '$lib/posters/selection-match';
 	import { m } from '$lib/paraglide/messages';
 	import JobProgress from '$lib/components/JobProgress.svelte';
 	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
@@ -179,21 +183,24 @@
 		candidate: PosterCandidate
 	) {
 		const key = childKey(kind, season, episode);
-		const candidateId = childCandidateIds[key];
-		if (candidateId !== null && candidateId !== undefined) return candidateId === candidate.id;
-		const provider = childProviders[key];
-		return (
-			childSel[key] === candidate.url &&
-			(provider === null || provider === undefined || provider === candidate.provider)
+		return stagedArtworkMatchesCandidate(
+			{
+				url: childSel[key],
+				candidateId: childCandidateIds[key],
+				provider: childProviders[key]
+			},
+			candidate
 		);
 	}
 	function isRootStaged(kind: 'poster' | 'background', candidate: PosterCandidate): boolean {
-		const candidateId =
-			kind === 'poster' ? selectedPosterCandidateId : selectedBackgroundCandidateId;
-		if (candidateId !== null) return candidateId === candidate.id;
-		const url = kind === 'poster' ? selectedPoster : selectedBackground;
-		const provider = kind === 'poster' ? selectedPosterProvider : selectedBackgroundProvider;
-		return url === candidate.url && (provider === null || provider === candidate.provider);
+		return stagedArtworkMatchesCandidate(
+			{
+				url: kind === 'poster' ? selectedPoster : selectedBackground,
+				candidateId: kind === 'poster' ? selectedPosterCandidateId : selectedBackgroundCandidateId,
+				provider: kind === 'poster' ? selectedPosterProvider : selectedBackgroundProvider
+			},
+			candidate
+		);
 	}
 	const stagedSeasons = $derived(
 		Object.keys(childSel).filter((k) => k.startsWith('poster:') || k.startsWith('background:'))
@@ -542,36 +549,46 @@
 
 	async function pickPoster(candidate: PosterCandidate) {
 		if (finishingAdvance) return;
-		const clearing = isRootStaged('poster', candidate);
-		const nextUrl = clearing ? null : candidate.url;
-		const nextCandidateId = clearing ? null : candidate.id;
+		const next = toggleStagedArtworkCandidate(
+			{
+				url: selectedPoster,
+				candidateId: selectedPosterCandidateId,
+				provider: selectedPosterProvider
+			},
+			candidate
+		);
 		try {
-			if (!(await persistSelection({ poster: { url: nextUrl, candidateId: nextCandidateId } }))) {
+			if (!(await persistSelection({ poster: { url: next.url, candidateId: next.candidateId } }))) {
 				throw new Error('selection_failed');
 			}
-			selectedPoster = nextUrl;
-			selectedPosterCandidateId = nextCandidateId;
-			selectedPosterProvider = clearing ? null : candidate.provider;
+			selectedPoster = next.url;
+			selectedPosterCandidateId = next.candidateId;
+			selectedPosterProvider = next.provider;
 		} catch {
 			await recoverSelectionFailure();
 		}
 	}
 	async function pickBackground(candidate: PosterCandidate) {
 		if (finishingAdvance) return;
-		const clearing = isRootStaged('background', candidate);
-		const nextUrl = clearing ? null : candidate.url;
-		const nextCandidateId = clearing ? null : candidate.id;
+		const next = toggleStagedArtworkCandidate(
+			{
+				url: selectedBackground,
+				candidateId: selectedBackgroundCandidateId,
+				provider: selectedBackgroundProvider
+			},
+			candidate
+		);
 		try {
 			if (
 				!(await persistSelection({
-					background: { url: nextUrl, candidateId: nextCandidateId }
+					background: { url: next.url, candidateId: next.candidateId }
 				}))
 			) {
 				throw new Error('selection_failed');
 			}
-			selectedBackground = nextUrl;
-			selectedBackgroundCandidateId = nextCandidateId;
-			selectedBackgroundProvider = clearing ? null : candidate.provider;
+			selectedBackground = next.url;
+			selectedBackgroundCandidateId = next.candidateId;
+			selectedBackgroundProvider = next.provider;
 		} catch {
 			await recoverSelectionFailure();
 		}
@@ -589,19 +606,30 @@
 		applyPreview = null;
 		completionRetry = null;
 		const key = childKey(kind, season, episode);
-		const clearing = isChildStaged(kind, season, episode, candidate);
-		const next = clearing ? null : candidate.url;
-		const nextCandidateId = clearing ? null : candidate.id;
+		const next = toggleStagedArtworkCandidate(
+			{
+				url: childSel[key],
+				candidateId: childCandidateIds[key],
+				provider: childProviders[key]
+			},
+			candidate
+		);
 		try {
 			const response = await fetch(`/api/items/${data.item.id}/select`, {
 				method: 'POST',
 				headers: jsonHeaders,
 				body: JSON.stringify({
-					child: { kind, season, episode, url: next, candidateId: nextCandidateId }
+					child: {
+						kind,
+						season,
+						episode,
+						url: next.url,
+						candidateId: next.candidateId
+					}
 				})
 			});
 			if (!response.ok) throw new Error('selection_failed');
-			if (next === null) {
+			if (next.url === null) {
 				const copy = { ...childSel };
 				const idCopy = { ...childCandidateIds };
 				const providerCopy = { ...childProviders };
@@ -612,9 +640,9 @@
 				childCandidateIds = idCopy;
 				childProviders = providerCopy;
 			} else {
-				childSel = { ...childSel, [key]: candidate.url };
-				childCandidateIds = { ...childCandidateIds, [key]: nextCandidateId };
-				childProviders = { ...childProviders, [key]: candidate.provider };
+				childSel = { ...childSel, [key]: next.url };
+				childCandidateIds = { ...childCandidateIds, [key]: next.candidateId };
+				childProviders = { ...childProviders, [key]: next.provider };
 			}
 		} catch {
 			await recoverSelectionFailure();

@@ -1,4 +1,4 @@
-import { storedArtworkMatchesCandidate } from '$lib/server/tmdb/artwork-url';
+import { findEquivalentStagedArtworkCandidate } from '$lib/posters/selection-match';
 
 export type RootArtworkKind = 'poster' | 'background';
 
@@ -28,23 +28,13 @@ export function findStagedArtworkCandidate<T extends ArtworkPreviewCandidate>(
 	candidates: readonly T[],
 	selection: StagedArtworkSelection
 ): T | null {
-	if (!selection.url) return null;
-	const matchesSelection = (candidate: T) =>
-		candidate.mediaItemId === selection.mediaItemId &&
-		candidate.kind === selection.kind &&
-		storedArtworkMatchesCandidate({
-			storedUrl: selection.url as string,
-			storedProvider: selection.provider,
-			candidateUrl: candidate.url,
-			candidateProvider: candidate.provider
-		});
-	const matchedById =
-		selection.candidateId === null
-			? null
-			: candidates.find(
-					(candidate) => candidate.id === selection.candidateId && matchesSelection(candidate)
-				);
-	return matchedById ?? candidates.find(matchesSelection) ?? null;
+	return findEquivalentStagedArtworkCandidate(
+		candidates.filter(
+			(candidate) =>
+				candidate.mediaItemId === selection.mediaItemId && candidate.kind === selection.kind
+		),
+		selection
+	);
 }
 
 /** Keep review thumbnails efficient while preserving custom staged URLs as fallback. */
