@@ -8,6 +8,11 @@ export type TmdbRepairVisibilitySource = {
 	removeEventListener(type: 'visibilitychange', listener: () => void): void;
 };
 
+export type TmdbRepairFocusSource = {
+	addEventListener(type: 'focus', listener: () => void): void;
+	removeEventListener(type: 'focus', listener: () => void): void;
+};
+
 export function isActiveTmdbRepairJob(status: string | null | undefined): boolean {
 	return status !== null && status !== undefined && ACTIVE_JOB_STATUSES.has(status);
 }
@@ -62,4 +67,25 @@ export function observeTmdbRepairVisibility(
 
 	source.addEventListener('visibilitychange', onVisibilityChange);
 	return () => source.removeEventListener('visibilitychange', onVisibilityChange);
+}
+
+/**
+ * Observe both browser wake signals. Focus remains useful for a visible window that never changed
+ * document visibility; the shared refresh coalesces it with visibility and timer signals.
+ */
+export function observeTmdbRepairWakeSignals(
+	visibilitySource: TmdbRepairVisibilitySource,
+	focusSource: TmdbRepairFocusSource,
+	refresh: TmdbRepairRefresh
+): () => void {
+	const stopVisibility = observeTmdbRepairVisibility(visibilitySource, refresh);
+	const onFocus = () => {
+		if (visibilitySource.visibilityState === 'visible') void refresh();
+	};
+	focusSource.addEventListener('focus', onFocus);
+
+	return () => {
+		stopVisibility();
+		focusSource.removeEventListener('focus', onFocus);
+	};
 }
