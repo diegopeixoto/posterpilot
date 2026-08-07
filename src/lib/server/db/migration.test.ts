@@ -11,7 +11,8 @@ const MIGRATIONS = [
 	'0005_pretty_overlord.sql',
 	'0006_breezy_sinister_six.sql',
 	'0007_first_puff_adder.sql',
-	'0008_melodic_purifiers.sql'
+	'0008_melodic_purifiers.sql',
+	'0009_silent_zaran.sql'
 ] as const;
 
 const clients: Client[] = [];
@@ -40,6 +41,22 @@ async function applyThrough(client: Client, lastIndex: number): Promise<void> {
 
 afterEach(async () => {
 	await Promise.all(clients.splice(0).map((client) => client.close()));
+});
+
+describe('0009 TMDB repair query index migration', () => {
+	it('adds the server-scoped mismatch index without rebuilding media rows', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 9);
+
+		const columns = await client.execute("pragma index_info('media_items_tmdb_repair_idx')");
+		expect(columns.rows.map((row) => row.name)).toEqual([
+			'server_instance_id',
+			'manual_match_pinned',
+			'source_removed_at',
+			'type',
+			'media_type'
+		]);
+	});
 });
 
 describe('0008 multi-server foundation migration', () => {

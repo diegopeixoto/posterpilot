@@ -1,0 +1,1 @@
+CREATE INDEX `media_items_tmdb_repair_idx` ON `media_items` (`server_instance_id`,`manual_match_pinned`,`source_removed_at`,`type`,`media_type`);

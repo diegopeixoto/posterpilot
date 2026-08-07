@@ -147,6 +147,13 @@ export const mediaItems = sqliteTable(
 	(t) => [
 		uniqueIndex('media_items_server_rating_key_unique').on(t.serverInstanceId, t.ratingKey),
 		index('media_items_server_section_idx').on(t.serverInstanceId, t.sectionKey),
+		index('media_items_tmdb_repair_idx').on(
+			t.serverInstanceId,
+			t.manualMatchPinned,
+			t.sourceRemovedAt,
+			t.type,
+			t.mediaType
+		),
 		index('media_items_server_review_idx').on(
 			t.serverInstanceId,
 			t.ignored,
