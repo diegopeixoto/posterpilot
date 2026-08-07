@@ -31,6 +31,20 @@ describe('Kometa managed slot state', () => {
 		expect(restored).toContain('custom_key: keep-me');
 	});
 
+	it('creates an absent numeric mapping as an unquoted YAML integer', () => {
+		const restored = restoreKometaSlot('metadata: {}\n', 101, rootPoster, {
+			state: 'present',
+			url: 'https://images.invalid/prior.jpg'
+		});
+
+		expect(restored).toContain('101:');
+		expect(restored).not.toContain('"101":');
+		expect(readKometaSlot(restored, 101, rootPoster)).toEqual({
+			state: 'present',
+			url: 'https://images.invalid/prior.jpg'
+		});
+	});
+
 	it('removes a newly introduced nested slot and only empty managed containers', () => {
 		const raw = [
 			'metadata:',

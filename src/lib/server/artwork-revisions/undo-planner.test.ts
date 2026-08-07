@@ -3,6 +3,12 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '$lib/server/db/schema';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
+import {
+	LEGACY_FILENAME,
+	legacyKometaDestinationKey,
+	resolveKometaDestination,
+	type KometaLegacyDestinationV1
+} from '$lib/server/kometa/destination';
 import type { ApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { sha256Bytes } from '$lib/server/revisions/verification';
@@ -10,6 +16,7 @@ import {
 	ArtworkUndoPlannerError,
 	confirmArtworkUndoPlan,
 	createArtworkUndoPlanner,
+	type ArtworkUndoPlannerDependencies,
 	type UndoOperationPlanStore,
 	type UndoStoredOperationPlan
 } from './undo-planner';
@@ -18,6 +25,22 @@ import { UNDO_PLAN_KIND, type UndoPlanPayloadV1, type UndoPlanScope } from './un
 const PLANNED_AT = new Date('2026-07-11T12:00:00.000Z');
 const CREATED_AT = new Date('2026-07-11T11:00:00.000Z');
 const PRESENT_SHA = sha256Bytes(Uint8Array.of(1, 2, 3));
+
+function movieDestination(mappingId: string) {
+	const result = resolveKometaDestination({ type: 'movie', tmdbId: mappingId });
+	if (!result.ok) throw new Error('test Kometa destination must resolve');
+	return result.destination;
+}
+
+function legacyDestination(mappingId: string): KometaLegacyDestinationV1 {
+	return {
+		version: 1,
+		filename: LEGACY_FILENAME,
+		namespace: 'tmdb',
+		mappingId,
+		key: legacyKometaDestinationKey(mappingId)
+	};
+}
 
 let client: Client;
 let database: ReturnType<typeof drizzle<typeof schema>>;
@@ -193,6 +216,8 @@ interface AddRevisionInput {
 	snapshotSha?: string | null;
 	snapshotPath?: string | null;
 	snapshotValue?: unknown;
+	snapshotMetadata?: unknown;
+	revisionProvenance?: unknown;
 	action?: 'apply' | 'undo' | 'external_observation';
 	undoOfRevisionId?: string | null;
 	createdAt?: Date;
@@ -212,10 +237,22 @@ async function addRevision(input: AddRevisionInput) {
 		input.snapshotValue === undefined && destination === 'kometa' && snapshotState === 'present'
 			? { state: 'present', url: 'https://secret.invalid/prior.jpg?token=never-public' }
 			: input.snapshotValue;
+	const destinationIdentity = (() => {
+		if (destination !== 'kometa') return null;
+		return movieDestination(String(100 + (mediaItemId ?? 1)));
+	})();
+	const snapshotMetadata =
+		input.snapshotMetadata === undefined && destinationIdentity
+			? { kometaDestination: destinationIdentity }
+			: input.snapshotMetadata;
+	const revisionProvenance =
+		input.revisionProvenance === undefined && destinationIdentity
+			? { kometaDestination: destinationIdentity }
+			: input.revisionProvenance;
 	await execute(
 		`INSERT INTO artwork_snapshots
-		 (id, server_instance_id, media_item_id, media_collection_id, destination, kind, season, episode, state, sha256, storage_path, value)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, server_instance_id, media_item_id, media_collection_id, destination, kind, season, episode, state, sha256, storage_path, value, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			snapshotId,
 			serverInstanceId,
@@ -232,14 +269,15 @@ async function addRevision(input: AddRevisionInput) {
 			input.snapshotPath === undefined && destination === 'server' && snapshotState === 'present'
 				? `/private/data/${snapshotId}`
 				: (input.snapshotPath ?? null),
-			snapshotValue === undefined ? null : JSON.stringify(snapshotValue)
+			snapshotValue === undefined ? null : JSON.stringify(snapshotValue),
+			snapshotMetadata === undefined ? null : JSON.stringify(snapshotMetadata)
 		]
 	);
 	await execute(
 		`INSERT INTO artwork_revisions
 		 (id, group_id, server_instance_id, media_item_id, media_collection_id, undo_of_revision_id, before_snapshot_id,
-		  action, destination, kind, season, episode, outcome, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', ?)`,
+		  action, destination, kind, season, episode, provenance, outcome, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', ?)`,
 		[
 			input.id,
 			input.groupId ?? 'group-main',
@@ -253,6 +291,7 @@ async function addRevision(input: AddRevisionInput) {
 			kind,
 			season,
 			episode,
+			revisionProvenance === undefined ? null : JSON.stringify(revisionProvenance),
 			seconds(input.createdAt ?? CREATED_AT)
 		]
 	);
@@ -311,7 +350,7 @@ function planner(
 	options: {
 		server?: ReturnType<typeof testServer>;
 		bindingId?: string;
-		readKometa?: (serverInstanceId: string) => Promise<string | null | undefined>;
+		readKometa?: ArtworkUndoPlannerDependencies['readKometa'];
 		store?: MemoryPlanStore;
 	} = {}
 ) {
@@ -362,13 +401,13 @@ beforeAll(async () => {
 			 id TEXT PRIMARY KEY, server_instance_id TEXT NOT NULL, media_item_id INTEGER,
 			 media_collection_id TEXT, destination TEXT NOT NULL, kind TEXT NOT NULL,
 			 season INTEGER, episode INTEGER, state TEXT NOT NULL, sha256 TEXT,
-			 storage_path TEXT, value TEXT
+			 storage_path TEXT, value TEXT, metadata TEXT
 			)`,
 			`CREATE TABLE artwork_revisions (
 			 id TEXT PRIMARY KEY, group_id TEXT NOT NULL, server_instance_id TEXT NOT NULL,
 			 media_item_id INTEGER, media_collection_id TEXT, undo_of_revision_id TEXT,
 			 before_snapshot_id TEXT, action TEXT NOT NULL, destination TEXT NOT NULL,
-			 kind TEXT NOT NULL, season INTEGER, episode INTEGER, outcome TEXT NOT NULL,
+			 kind TEXT NOT NULL, season INTEGER, episode INTEGER, provenance TEXT, outcome TEXT NOT NULL,
 			 created_at INTEGER NOT NULL
 			)`
 		],
@@ -528,20 +567,124 @@ describe('live destination materialization', () => {
 			scope: { kind: 'revision', serverInstanceId: 'server-a', revisionId: 'rev-kometa' }
 		});
 
-		expect(readKometa).toHaveBeenCalledWith('server-a');
+		expect(readKometa).toHaveBeenCalledWith('server-a', movieDestination('101'));
 		expect(preview.operations[0]).toMatchObject({
 			destination: 'kometa',
+			kometaDestination: movieDestination('101'),
 			current: { state: 'present' },
 			snapshot: { state: 'present', restorable: true }
 		});
 		const payload = runtime.store.plans[0].payload as UndoPlanPayloadV1;
 		expect(payload.operations[0]).toMatchObject({
-			targetId: 'kometa:101',
+			targetId: movieDestination('101').key,
 			current: { state: 'present', fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) },
 			snapshot: { state: 'present', fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) }
 		});
 		expect(JSON.stringify(preview)).not.toMatch(/https?:|token|ultra-secret/i);
 		expect(JSON.stringify(payload)).not.toMatch(/https?:|token|ultra-secret/i);
+	});
+
+	it('uses the recorded typed destination after the media item TMDB id changes', async () => {
+		await addItem(1, 'server-a', { tmdbId: '101' });
+		const recorded = movieDestination('101');
+		await addRevision({
+			id: 'rev-recorded-destination',
+			destination: 'kometa',
+			snapshotMetadata: { kometaDestination: recorded },
+			revisionProvenance: { kometaDestination: recorded }
+		});
+		await execute("UPDATE media_items SET tmdb_id = '999' WHERE id = 1");
+		const readKometa = vi.fn(
+			async () => 'metadata:\n  101:\n    url_poster: https://host.invalid/current-recorded.jpg\n'
+		);
+		const runtime = planner({ readKometa });
+
+		const preview = await runtime.createPreview({
+			scope: {
+				kind: 'revision',
+				serverInstanceId: 'server-a',
+				revisionId: 'rev-recorded-destination'
+			}
+		});
+
+		expect(readKometa).toHaveBeenCalledWith('server-a', recorded);
+		expect(preview.operations[0]).toMatchObject({
+			kometaDestination: recorded,
+			current: { state: 'present' },
+			snapshot: { state: 'present', restorable: true }
+		});
+		const payload = runtime.store.plans[0].payload as UndoPlanPayloadV1;
+		expect(payload.operations[0].targetId).toBe(recorded.key);
+		expect(payload.operations[0].targetId).not.toBe(movieDestination('999').key);
+	});
+
+	it('marks an unproven legacy Kometa revision unavailable without reading a guessed file', async () => {
+		await addItem(1);
+		await addRevision({
+			id: 'rev-legacy-unproven',
+			destination: 'kometa',
+			snapshotMetadata: null,
+			revisionProvenance: null
+		});
+		const readKometa = vi.fn();
+		const runtime = planner({ readKometa });
+
+		const preview = await runtime.createPreview({
+			scope: {
+				kind: 'revision',
+				serverInstanceId: 'server-a',
+				revisionId: 'rev-legacy-unproven'
+			}
+		});
+
+		expect(readKometa).not.toHaveBeenCalled();
+		expect(preview.operations[0]).toMatchObject({
+			destination: 'kometa',
+			current: { state: 'unavailable' },
+			snapshot: { state: 'unavailable', restorable: false }
+		});
+		expect(preview.operations[0]).not.toHaveProperty('kometaDestination');
+		const payload = runtime.store.plans[0].payload as UndoPlanPayloadV1;
+		expect(payload.operations[0]).toMatchObject({
+			targetId: 'kometa:unsafe:rev-legacy-unproven',
+			current: { state: 'unavailable' },
+			snapshot: { state: 'unavailable', restorable: false }
+		});
+	});
+
+	it('recovers the exact released legacy destination from historical snapshot metadata', async () => {
+		await addItem(1);
+		const recorded = legacyDestination('101');
+		await addRevision({
+			id: 'rev-legacy-proven',
+			destination: 'kometa',
+			// This is the shape shipped before split destinations: the hard-coded
+			// filename lived in code and only the exact TMDB id was retained.
+			snapshotMetadata: { tmdbId: recorded.mappingId },
+			revisionProvenance: null
+		});
+		const readKometa = vi.fn(
+			async () => 'metadata:\n  101:\n    url_poster: https://host.invalid/legacy-current.jpg\n'
+		);
+		const runtime = planner({ readKometa });
+
+		const preview = await runtime.createPreview({
+			scope: {
+				kind: 'revision',
+				serverInstanceId: 'server-a',
+				revisionId: 'rev-legacy-proven'
+			}
+		});
+
+		expect(readKometa).toHaveBeenCalledWith('server-a', recorded);
+		expect(preview.operations[0]).toMatchObject({
+			kometaDestination: recorded,
+			current: { state: 'present' },
+			snapshot: { state: 'present', restorable: true }
+		});
+		const payload = runtime.store.plans[0].payload as UndoPlanPayloadV1;
+		expect(payload.operations[0].targetId).toBe(recorded.key);
+		expect(payload.operations[0].targetId).toContain(LEGACY_FILENAME);
 	});
 
 	it('classifies genuine absence and unavailable reads/snapshots independently', async () => {

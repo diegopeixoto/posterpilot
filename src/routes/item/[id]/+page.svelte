@@ -11,6 +11,7 @@
 	} from '$lib/posters/selection-match';
 	import { m } from '$lib/paraglide/messages';
 	import JobProgress from '$lib/components/JobProgress.svelte';
+	import ApplySkipReasons from '$lib/components/ApplySkipReasons.svelte';
 	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
 	import ArtworkTimeline from '$lib/components/ArtworkTimeline.svelte';
 	import ArtworkUndoDialog from '$lib/components/ArtworkUndoDialog.svelte';
@@ -78,6 +79,7 @@
 			skipCount: number;
 			destinations: { server: number; kometa: number };
 		};
+		items: Array<{ skips: Array<{ code: string }> }>;
 	} | null>(null);
 	const confirmTarget = $derived(
 		method === 'both'
@@ -1887,5 +1889,10 @@
 				{/if}
 			{/if}
 		</div>
+		{#if applyPreview}
+			<ApplySkipReasons
+				codes={applyPreview.items.flatMap((item) => item.skips.map((skip) => skip.code))}
+			/>
+		{/if}
 	</div>
 </div>

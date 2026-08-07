@@ -35,15 +35,15 @@
 
 ## 4. Typed Kometa Destinations and Split Files
 
-- [ ] 4.1 Verify the minimum supported Kometa metadata mapping syntax for movie TMDB, show TVDB, and IMDb fallback and record fixtures
-- [ ] 4.2 Implement the typed destination resolver using authoritative media-server kind, namespace, mapping ID, and stable movie/show filenames
-- [ ] 4.3 Add explicit skip/error outcomes for items lacking a Kometa-supported identifier
-- [ ] 4.4 Update YAML merge/write logic to isolate `posterpilot-movies.yml` and `posterpilot-shows.yml` while preserving unrelated content
-- [ ] 4.5 Carry versioned typed destination identity through frozen plans, file fingerprints, locks, previews, verification, revisions, and undo
-- [ ] 4.6 Preserve provable legacy revision destinations and reject unsafe legacy undo instead of inferring a split file
-- [ ] 4.7 Add a protective block that prevents new mixed-kind legacy exports from silently colliding while leaving direct apply available
-- [ ] 4.8 Update Kometa config planning so each managed library references exactly one file selected by authoritative library type
-- [ ] 4.9 Test equal numeric movie/show IDs, provider-type disagreement, IMDb fallback, stale plans, per-file isolation, partial failure, and typed undo
+- [x] 4.1 Verify the minimum supported Kometa metadata mapping syntax for movie TMDB, show TVDB, and IMDb fallback and record fixtures
+- [x] 4.2 Implement the typed destination resolver using authoritative media-server kind, namespace, mapping ID, and stable movie/show filenames
+- [x] 4.3 Add explicit skip/error outcomes for items lacking a Kometa-supported identifier
+- [x] 4.4 Update YAML merge/write logic to isolate `posterpilot-movies.yml` and `posterpilot-shows.yml` while preserving unrelated content
+- [x] 4.5 Carry versioned typed destination identity through frozen plans, file fingerprints, locks, previews, verification, revisions, and undo
+- [x] 4.6 Preserve provable legacy revision destinations and reject unsafe legacy undo instead of inferring a split file
+- [x] 4.7 Add a protective block that prevents new mixed-kind legacy exports from silently colliding while leaving direct apply available
+- [ ] 4.8 Finish Kometa config planning so each managed library references exactly one authoritative typed file, including a validated Kometa-visible relative prefix when required
+- [x] 4.9 Test equal numeric movie/show IDs, provider-type disagreement, IMDb fallback, stale plans, per-file isolation, partial failure, and typed undo
 
 ## 5. Recoverable Kometa Migration
 

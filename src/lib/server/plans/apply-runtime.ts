@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { join } from 'node:path';
 import { createArtworkApplyCoordinator } from '$lib/server/artwork-revisions/apply-coordinator';
 import { createArtworkRevisionLedger } from '$lib/server/artwork-revisions/ledger';
 import {
@@ -10,7 +11,9 @@ import { db } from '$lib/server/db';
 import { assertCollectionApplyContextFresh } from '$lib/server/collections/apply-scope';
 import { appliedPosters } from '$lib/server/db/schema';
 import { resolveDataPaths } from '$lib/server/data-paths';
-import { resolveConfig } from '$lib/server/config';
+import { resolveConfig, type AppConfig } from '$lib/server/config';
+import { withConfigLock } from '$lib/server/kometa/config-io';
+import { LEGACY_FILENAME } from '$lib/server/kometa/destination';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
 import { getActiveServerInstance } from '$lib/server/server-instances';
 import {
@@ -18,7 +21,11 @@ import {
 	confirmApplyPlan,
 	type ConfirmApplyPlanRequest
 } from './apply-api';
-import { createApplyDestinationResolver, kometaOutputDirectory } from './apply-destinations';
+import {
+	createApplyDestinationResolver,
+	inspectKometaCollisionGuard,
+	kometaOutputDirectory
+} from './apply-destinations';
 import {
 	executeFrozenApplyPlan,
 	type ApplyOperationExecutionResult,
@@ -47,6 +54,20 @@ const databaseDestinationResolver = createApplyDestinationResolver({
 const databaseApplyPlanner = createDatabaseApplyPlanner({
 	resolveDestinationSlots: databaseDestinationResolver
 });
+
+/** Hold every in-process collision-guard source stable while a typed file is written. */
+async function withKometaGuardLocks<T>(config: AppConfig, operation: () => Promise<T>): Promise<T> {
+	const outputDirectory = kometaOutputDirectory(config);
+	const paths = [
+		...(config.kometaConfigPath ? [config.kometaConfigPath] : []),
+		join(outputDirectory, LEGACY_FILENAME)
+	]
+		.filter((path, index, all) => all.indexOf(path) === index)
+		.sort();
+	const acquire = (index: number): Promise<T> =>
+		index >= paths.length ? operation() : withConfigLock(paths[index], () => acquire(index + 1));
+	return acquire(0);
+}
 
 /** Resolve the active named server used as the mutation authorization scope. */
 export async function activeApplyServerInstanceId(): Promise<string> {
@@ -148,7 +169,7 @@ export async function executeDatabaseFrozenApplyJob(
 	}
 	const resolveDestinationSlots = createApplyDestinationResolver({
 		serverRegistry: registry,
-		loadConfig: () => Promise.resolve(config)
+		loadConfig: resolveConfig
 	});
 	await assertApplyPlanFresh(payload.plan, {
 		loadItemData: loadDatabaseApplyPlannerItemData,
@@ -181,10 +202,41 @@ export async function executeDatabaseFrozenApplyJob(
 		payload.plan,
 		{
 			serverRegistry: registry,
-			writeKometa: (items, operations = []) =>
-				writeKometaYaml(kometaOutputDirectory(config), items, {
-					validateCurrent: (raw) => coordinator.assertKometaFresh(operations, raw)
-				}),
+			writeKometa: (items, operations = []) => {
+				const filenames = new Set(items.map((item) => item.destination.filename));
+				const operationFilenames = new Set(
+					operations.map((operation) => operation.kometaDestination?.filename)
+				);
+				if (
+					filenames.size !== 1 ||
+					operationFilenames.size !== 1 ||
+					![...operationFilenames].every((filename) => filenames.has(filename!))
+				) {
+					throw new TypeError('One Kometa writer batch must target exactly one file');
+				}
+				return withKometaGuardLocks(config, () => {
+					return writeKometaYaml(kometaOutputDirectory(config), items, {
+						validateCurrent: async (raw) => {
+							// Re-resolve mutable settings as the final awaited step while the
+							// exact typed file and every guard source are locked. After this
+							// callback, the writer performs only synchronous merge/rename I/O.
+							const liveConfig = await resolveConfig();
+							if (
+								liveConfig.kometaServerInstanceId !== config.kometaServerInstanceId ||
+								liveConfig.kometaConfigPath !== config.kometaConfigPath ||
+								kometaOutputDirectory(liveConfig) !== kometaOutputDirectory(config)
+							) {
+								throw new Error('Frozen Kometa configuration changed before the artwork write');
+							}
+							coordinator.assertKometaGuardFresh(
+								operations,
+								inspectKometaCollisionGuard(liveConfig)
+							);
+							coordinator.assertKometaFresh(operations, raw);
+						}
+					});
+				});
+			},
 			prepareOperation: coordinator.prepareOperation,
 			executeServerOperation: coordinator.executeServerOperation,
 			recordOutcome: async (operation, operationResult, operationContext) => {

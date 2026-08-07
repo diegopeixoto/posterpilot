@@ -3,8 +3,16 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 
 import type { AppConfig } from '$lib/server/config';
+import {
+	LEGACY_FILENAME,
+	MOVIE_FILENAME,
+	SHOW_FILENAME,
+	legacyKometaDestinationKey,
+	resolveKometaDestination,
+	type KometaLegacyDestinationV1
+} from '$lib/server/kometa/destination';
 import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
-import { readKometaSlot } from '$lib/server/revisions/kometa-state';
+import { kometaSlotFingerprint, readKometaSlot } from '$lib/server/revisions/kometa-state';
 import { buildUndoPlan, type UndoPlanPayloadV1 } from './undo-plan';
 import type { ArtworkUndoPlannerDependencies, ArtworkUndoPreview } from './undo-planner';
 import {
@@ -15,6 +23,23 @@ import {
 
 const currentFingerprint = 'a'.repeat(64);
 const restoreFingerprint = 'b'.repeat(64);
+const MOVIE_DESTINATION = (() => {
+	const result = resolveKometaDestination({ type: 'movie', tmdbId: '10' });
+	if (!result.ok) throw new Error('test destination must resolve');
+	return result.destination;
+})();
+const SHOW_DESTINATION = (() => {
+	const result = resolveKometaDestination({ type: 'show', tvdbId: '10' });
+	if (!result.ok) throw new Error('test destination must resolve');
+	return result.destination;
+})();
+const LEGACY_DESTINATION = {
+	version: 1,
+	filename: LEGACY_FILENAME,
+	namespace: 'tmdb',
+	mappingId: '10',
+	key: legacyKometaDestinationKey('10')
+} satisfies KometaLegacyDestinationV1;
 
 function plan(mediaItemId = 7, serverInstanceId = 'server-a') {
 	return buildUndoPlan({
@@ -265,7 +290,7 @@ describe('bound Kometa undo runtime', () => {
 
 		await access.mutateKometa({
 			serverInstanceId: 'server-a',
-			tmdbId: '10',
+			destination: MOVIE_DESTINATION,
 			slot,
 			restore: { state: 'present', url: 'https://prior/poster.jpg' },
 			expectedCurrent: {
@@ -274,9 +299,9 @@ describe('bound Kometa undo runtime', () => {
 			}
 		});
 
-		expect(lockCalls).toHaveBeenCalledWith('/kometa/posterpilot.yml');
+		expect(lockCalls).toHaveBeenCalledWith('/kometa/posterpilot-movies.yml');
 		expect(write).toHaveBeenCalledWith(
-			'/kometa/posterpilot.yml',
+			'/kometa/posterpilot-movies.yml',
 			expect.any(String),
 			'2026-07-11T12:00:00.000Z'
 		);
@@ -289,6 +314,145 @@ describe('bound Kometa undo runtime', () => {
 			url: 'https://keep/background.jpg'
 		});
 		expect(raw).toContain('# keep');
+	});
+
+	it('isolates equal numeric movie and show mappings in their recorded typed files', async () => {
+		const moviePath = `/kometa/${MOVIE_FILENAME}`;
+		const showPath = `/kometa/${SHOW_FILENAME}`;
+		const legacyPath = `/kometa/${LEGACY_FILENAME}`;
+		const movieCurrent = { state: 'present', url: 'https://movie/current.jpg' } as const;
+		const showCurrent = { state: 'present', url: 'https://show/keep.jpg' } as const;
+		const showRaw = 'metadata:\n  10:\n    url_poster: https://show/keep.jpg\n';
+		const legacyRaw = 'metadata:\n  10:\n    url_poster: https://legacy/keep.jpg\n';
+		const files = new Map<string, string>([
+			[moviePath, 'metadata:\n  10:\n    url_poster: https://movie/current.jpg\n'],
+			[showPath, showRaw],
+			[legacyPath, legacyRaw]
+		]);
+		const write = vi.fn((path: string, next: string) => files.set(path, next));
+		const lockCalls = vi.fn();
+		async function withLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+			lockCalls(path);
+			return operation();
+		}
+		const access = createBoundKometaUndoAccess({
+			loadConfig: async () => config(),
+			resolveBinding: async () => ({
+				status: 'ready',
+				binding: {
+					id: 'server-a',
+					name: 'Living Room',
+					plexUrl: 'http://plex',
+					plexToken: 'secret'
+				}
+			}),
+			read: (path) => files.get(path) ?? null,
+			write,
+			withLock
+		});
+
+		await access.mutateKometa({
+			serverInstanceId: 'server-a',
+			destination: MOVIE_DESTINATION,
+			slot: { kind: 'poster', season: null, episode: null },
+			restore: { state: 'present', url: 'https://movie/prior.jpg' },
+			expectedCurrent: {
+				state: 'present',
+				fingerprint: kometaSlotFingerprint(movieCurrent)
+			}
+		});
+		const movieAfter = files.get(moviePath)!;
+		await access.mutateKometa({
+			serverInstanceId: 'server-a',
+			destination: SHOW_DESTINATION,
+			slot: { kind: 'poster', season: null, episode: null },
+			restore: { state: 'present', url: 'https://show/prior.jpg' },
+			expectedCurrent: {
+				state: 'present',
+				fingerprint: kometaSlotFingerprint(showCurrent)
+			}
+		});
+
+		expect(MOVIE_DESTINATION.mappingId).toBe(SHOW_DESTINATION.mappingId);
+		expect(MOVIE_DESTINATION.key).not.toBe(SHOW_DESTINATION.key);
+		expect(lockCalls.mock.calls.map(([path]) => path)).toEqual([moviePath, showPath]);
+		expect(write).toHaveBeenCalledWith(moviePath, expect.any(String), expect.any(String));
+		expect(write).toHaveBeenCalledWith(showPath, expect.any(String), expect.any(String));
+		expect(
+			readKometaSlot(files.get(moviePath)!, '10', {
+				kind: 'poster',
+				season: null,
+				episode: null
+			})
+		).toEqual({ state: 'present', url: 'https://movie/prior.jpg' });
+		expect(files.get(moviePath)).toBe(movieAfter);
+		expect(
+			readKometaSlot(files.get(showPath)!, '10', {
+				kind: 'poster',
+				season: null,
+				episode: null
+			})
+		).toEqual({ state: 'present', url: 'https://show/prior.jpg' });
+		expect(files.get(legacyPath)).toBe(legacyRaw);
+	});
+
+	it('targets only posterpilot.yml for an explicitly recorded legacy V1 destination', async () => {
+		const moviePath = `/kometa/${MOVIE_FILENAME}`;
+		const showPath = `/kometa/${SHOW_FILENAME}`;
+		const legacyPath = `/kometa/${LEGACY_FILENAME}`;
+		const movieRaw = 'metadata:\n  10:\n    url_poster: https://movie/keep.jpg\n';
+		const showRaw = 'metadata:\n  10:\n    url_poster: https://show/keep.jpg\n';
+		const legacyCurrent = { state: 'present', url: 'https://legacy/current.jpg' } as const;
+		const files = new Map<string, string>([
+			[moviePath, movieRaw],
+			[showPath, showRaw],
+			[legacyPath, 'metadata:\n  10:\n    url_poster: https://legacy/current.jpg\n']
+		]);
+		const write = vi.fn((path: string, next: string) => files.set(path, next));
+		const lockCalls = vi.fn();
+		async function withLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+			lockCalls(path);
+			return operation();
+		}
+		const access = createBoundKometaUndoAccess({
+			loadConfig: async () => config(),
+			resolveBinding: async () => ({
+				status: 'ready',
+				binding: {
+					id: 'server-a',
+					name: 'Living Room',
+					plexUrl: 'http://plex',
+					plexToken: 'secret'
+				}
+			}),
+			read: (path) => files.get(path) ?? null,
+			write,
+			withLock
+		});
+
+		await access.mutateKometa({
+			serverInstanceId: 'server-a',
+			destination: LEGACY_DESTINATION,
+			slot: { kind: 'poster', season: null, episode: null },
+			restore: { state: 'present', url: 'https://legacy/prior.jpg' },
+			expectedCurrent: {
+				state: 'present',
+				fingerprint: kometaSlotFingerprint(legacyCurrent)
+			}
+		});
+
+		expect(lockCalls).toHaveBeenCalledTimes(1);
+		expect(lockCalls).toHaveBeenCalledWith(legacyPath);
+		expect(write).toHaveBeenCalledWith(legacyPath, expect.any(String), expect.any(String));
+		expect(
+			readKometaSlot(files.get(legacyPath)!, '10', {
+				kind: 'poster',
+				season: null,
+				episode: null
+			})
+		).toEqual({ state: 'present', url: 'https://legacy/prior.jpg' });
+		expect(files.get(moviePath)).toBe(movieRaw);
+		expect(files.get(showPath)).toBe(showRaw);
 	});
 
 	it('rejects an atomic stale comparison without writing', async () => {
@@ -313,7 +477,7 @@ describe('bound Kometa undo runtime', () => {
 		await expect(
 			access.mutateKometa({
 				serverInstanceId: 'server-a',
-				tmdbId: '10',
+				destination: MOVIE_DESTINATION,
 				slot: { kind: 'poster', season: null, episode: null },
 				restore: { state: 'absent', url: null },
 				expectedCurrent: {
@@ -338,7 +502,7 @@ describe('bound Kometa undo runtime', () => {
 			withLock: async (_path, operation) => operation()
 		});
 
-		await expect(access.readKometa('server-a')).rejects.toMatchObject({
+		await expect(access.readKometa('server-a', MOVIE_DESTINATION)).rejects.toMatchObject({
 			code: 'kometa_server_binding_mismatch'
 		});
 		expect(read).not.toHaveBeenCalled();

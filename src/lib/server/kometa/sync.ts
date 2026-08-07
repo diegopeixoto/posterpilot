@@ -48,7 +48,13 @@ import {
 	writeConfigAtomic,
 	type BackupInfo
 } from './config-io';
-import { DEFAULT_FILENAME } from './yaml';
+import {
+	LEGACY_FILENAME,
+	MOVIE_FILENAME,
+	SHOW_FILENAME,
+	type KometaMetadataFilename
+} from './destination';
+import { classifyKometaLegacyConfig } from './legacy-layout';
 import { DEFAULT_COLLECTION_GROUPS, knownDefaults, type DefaultGroup } from './defaults-catalog';
 import { MANAGED_SETTINGS, type ManagedSettingDef } from './managed-settings';
 import {
@@ -94,7 +100,7 @@ export interface KometaTabState {
 	resolvedConfigPath: string;
 	/** True when the configured path is relative (fragile in Docker — CWD is /app). */
 	configPathRelative: boolean;
-	metadataFile: string;
+	metadataFiles: { movie: typeof MOVIE_FILENAME; show: typeof SHOW_FILENAME };
 	exists: boolean;
 	parseError: string | null;
 	/** Client-safe identity of the exact Plex instance that owns this target. */
@@ -132,6 +138,7 @@ export interface KometaTabState {
 			operations: Record<string, string>;
 			settings: Record<string, string>;
 			hasMetadata: boolean;
+			metadataFiles: string[];
 		}
 	>;
 	/** Current non-secret globals plus set-state for secret webhook fields. */
@@ -186,13 +193,29 @@ function planIdentity(plan: OperationPlan<KometaConfigPlanPayload>) {
 	};
 }
 
-/**
- * The `metadata_files` `file:` value written into config.yml. PosterPilot writes
- * `posterpilot.yml` into the config-file's own directory, so the reference is the
- * bare basename — Kometa resolves it relative to its config directory.
- */
-function metadataFilePath(_config: AppConfig): string {
-	return DEFAULT_FILENAME;
+const POSTERPILOT_METADATA_FILES = new Set<string>([
+	LEGACY_FILENAME,
+	MOVIE_FILENAME,
+	SHOW_FILENAME
+]);
+
+class KometaLibraryPlanError extends Error {
+	constructor(
+		readonly code:
+			| 'kometa_library_missing'
+			| 'kometa_library_type_unsupported'
+			| 'kometa_migration_required'
+	) {
+		super(code);
+		this.name = 'KometaLibraryPlanError';
+	}
+}
+
+/** Select a co-located basename from the authoritative media-server library type. */
+function metadataFileForLibraryType(type: string): KometaMetadataFilename {
+	if (type === 'movie') return MOVIE_FILENAME;
+	if (type === 'show') return SHOW_FILENAME;
+	throw new KometaLibraryPlanError('kometa_library_type_unsupported');
 }
 
 /** Build the desired-state plan from the user's selections + resolved config. */
@@ -204,17 +227,19 @@ async function planFromSelections(
 	storedManagedSettings: Record<string, string>
 ): Promise<ConfigPlan> {
 	const cached = await getCachedLibraries(binding.id);
-	const titleByKey = new Map(cached.map((l) => [l.key, l.title]));
-	const libraries = sel.libraries
-		.map((key) => ({
-			name: titleByKey.get(key) ?? '',
+	const libraryByKey = new Map(cached.map((library) => [library.key, library]));
+	const libraries = sel.libraries.map((key) => {
+		const library = libraryByKey.get(key);
+		if (!library?.title) throw new KometaLibraryPlanError('kometa_library_missing');
+		return {
+			name: library.title,
 			defaults: knownDefaults(sel.defaults[key] ?? []),
 			overlays: knownOverlays(sel.overlays[key] ?? []),
 			operations: sel.operations[key] ?? {},
 			settingsOverrides: sel.librarySettings[key] ?? {},
-			metadata: true
-		}))
-		.filter((l) => l.name !== '');
+			metadataFile: metadataFileForLibraryType(library.type)
+		};
+	});
 
 	// A blank secret means "leave the stored value alone" → carry it forward via
 	// connectionKeep so it is not deleted on resync. A blank non-secret means
@@ -260,7 +285,6 @@ async function planFromSelections(
 
 	return buildPlan({
 		creds: { plexUrl: binding.plexUrl, plexToken: binding.plexToken, tmdbKey: config.tmdbKey },
-		metadataFile: metadataFilePath(config),
 		libraries,
 		settings,
 		settingKeep,
@@ -320,7 +344,6 @@ export async function loadKometaState(): Promise<KometaTabState> {
 	}
 
 	const cached = binding ? await getCachedLibraries(binding.id) : [];
-	const metadataRef = metadataFilePath(config);
 	const storedManagedSettings = await getKometaManagedSettings();
 	const currentManagedSettings = readManagedSettingValues(doc);
 	const managedSettings: Record<string, string> = {};
@@ -357,12 +380,14 @@ export async function loadKometaState(): Promise<KometaTabState> {
 	// Per-library current state from the file.
 	const libraryState: KometaTabState['libraryState'] = {};
 	for (const name of readSectionKeys(doc, ['libraries'])) {
+		const metadataFiles = readFileList(doc, name);
 		libraryState[name] = {
 			collections: readDefaultList(doc, name, 'collection_files'),
 			overlays: readDefaultList(doc, name, 'overlay_files'),
 			operations: readScalarMap(doc, ['libraries', name, 'operations']),
 			settings: readScalarMap(doc, ['libraries', name, 'settings']),
-			hasMetadata: readFileList(doc, name).includes(metadataRef)
+			hasMetadata: metadataFiles.some((file) => POSTERPILOT_METADATA_FILES.has(file)),
+			metadataFiles
 		};
 	}
 
@@ -373,12 +398,11 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			plexToken: binding?.plexToken ?? null,
 			tmdbKey: config.tmdbKey
 		},
-		metadataFile: metadataRef,
 		libraries: Object.entries(libraryState).map(([name, s]) => ({
 			name,
 			defaults: s.collections,
 			overlays: s.overlays,
-			metadata: false
+			metadataFile: null
 		}))
 	});
 
@@ -388,7 +412,7 @@ export async function loadKometaState(): Promise<KometaTabState> {
 		configPath: config.kometaConfigPath,
 		resolvedConfigPath: active ? resolve(config.kometaConfigPath) : '',
 		configPathRelative: active && !config.kometaConfigPath.startsWith('/'),
-		metadataFile: metadataRef,
+		metadataFiles: { movie: MOVIE_FILENAME, show: SHOW_FILENAME },
 		exists,
 		parseError,
 		serverBinding: binding ? { id: binding.id, name: binding.name } : null,
@@ -465,6 +489,27 @@ function bindingErrorResult(
 	};
 }
 
+function libraryPlanErrorResult(
+	config: AppConfig,
+	raw: string | null,
+	error: KometaLibraryPlanError
+): SyncResult {
+	return {
+		active: true,
+		mode: config.kometaConfigMode,
+		exists: raw !== null,
+		willScaffold: false,
+		parseError: null,
+		changes: [],
+		warnings: [error.code],
+		dropped: [],
+		consistency: [],
+		planId: null,
+		digest: null,
+		expiresAt: null
+	};
+}
+
 /**
  * Compute what a sync would do against the current file: in `merge` mode this is
  * the surgical diff; in `own` mode it is a full regeneration plus the list of
@@ -511,18 +556,33 @@ export async function previewSync(sel: SyncSelectionInput): Promise<SyncResult> 
 	}
 	const binding = resolvedBinding.binding;
 	const raw = readConfig(config.kometaConfigPath);
+	if (raw !== null && classifyKometaLegacyConfig(raw).references.length > 0) {
+		return libraryPlanErrorResult(
+			config,
+			raw,
+			new KometaLibraryPlanError('kometa_migration_required')
+		);
+	}
 	const sourceDoc = loadDoc(raw ?? '');
 	const [snapshot, storedManagedSettings] = await Promise.all([
 		getKometaLastApplied(),
 		getKometaManagedSettings()
 	]);
-	const plan = await planFromSelections(
-		config,
-		sel,
-		binding,
-		readManagedSettingValues(sourceDoc),
-		storedManagedSettings
-	);
+	let plan: ConfigPlan;
+	try {
+		plan = await planFromSelections(
+			config,
+			sel,
+			binding,
+			readManagedSettingValues(sourceDoc),
+			storedManagedSettings
+		);
+	} catch (error) {
+		if (error instanceof KometaLibraryPlanError) {
+			return libraryPlanErrorResult(config, raw, error);
+		}
+		throw error;
+	}
 
 	const out = computeSync(config, plan, raw, snapshot);
 	if ('parseError' in out) return parseErrorResult(config.kometaConfigMode, out.parseError);
@@ -774,6 +834,13 @@ async function confirmKometaConfigPlan(
 		}
 
 		const current = readConfig(pending.payload.configPath);
+		if (
+			expectedAction === 'structured' &&
+			current !== null &&
+			classifyKometaLegacyConfig(current).references.length > 0
+		) {
+			throw new OperationPlanError('plan_stale', request.planId);
+		}
 		if (kometaFileFingerprint(current) !== pending.payload.sourceFingerprint) {
 			throw new OperationPlanError('plan_stale', request.planId);
 		}

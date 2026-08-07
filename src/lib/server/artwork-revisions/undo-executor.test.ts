@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtworkRevisionGroup, ArtworkSnapshot } from '$lib/server/db/schema';
+import {
+	LEGACY_FILENAME,
+	kometaYamlMappingKey,
+	legacyKometaDestinationKey,
+	resolveKometaDestination
+} from '$lib/server/kometa/destination';
 import type { MediaServer, ServerArtwork, ServerType } from '$lib/server/media-server';
 import { canonicalJsonDigest } from '$lib/server/plans/canonical-json';
 import {
@@ -26,6 +32,18 @@ import {
 const NOW = new Date('2026-07-11T12:00:00.000Z');
 const ROOT_POSTER = { kind: 'poster', season: null, episode: null } as const;
 const ROOT_BACKGROUND = { kind: 'background', season: null, episode: null } as const;
+const MOVIE_DESTINATION = (() => {
+	const result = resolveKometaDestination({ type: 'movie', tmdbId: '100' });
+	if (!result.ok) throw new Error('test destination must resolve');
+	return result.destination;
+})();
+const LEGACY_DESTINATION = {
+	version: 1,
+	filename: LEGACY_FILENAME,
+	namespace: 'tmdb',
+	mappingId: '100',
+	key: legacyKometaDestinationKey('100')
+} as const;
 
 function data(...values: number[]): ArrayBuffer {
 	return Uint8Array.from(values).buffer;
@@ -292,7 +310,8 @@ function defaultKometa() {
 	return {
 		read: vi.fn(async () => raw),
 		mutate: vi.fn(async (input: UndoKometaMutationInput) => {
-			const current = readKometaSlot(raw, input.tmdbId, input.slot);
+			const mappingKey = kometaYamlMappingKey(input.destination);
+			const current = readKometaSlot(raw, mappingKey, input.slot);
 			const fingerprint = current.state === 'present' ? kometaSlotFingerprint(current) : null;
 			if (
 				current.state !== input.expectedCurrent.state ||
@@ -300,7 +319,7 @@ function defaultKometa() {
 			) {
 				throw new Error('stale');
 			}
-			raw = restoreKometaSlot(raw, input.tmdbId, input.slot, input.restore);
+			raw = restoreKometaSlot(raw, mappingKey, input.slot, input.restore);
 		}),
 		setRaw(value: string) {
 			raw = value;
@@ -553,6 +572,58 @@ describe('server artwork undo execution', () => {
 });
 
 describe('Kometa undo execution', () => {
+	it('restores a released pre-split revision recorded only with snapshot tmdbId metadata', async () => {
+		const current = {
+			state: 'present',
+			url: 'https://images.invalid/legacy-current.jpg'
+		} as const;
+		const restore = {
+			state: 'present',
+			url: 'https://images.invalid/legacy-prior.jpg'
+		} as const;
+		const desired = snapshot('snapshot-kometa-historical', {
+			destination: 'kometa',
+			kind: 'poster',
+			state: 'present',
+			value: restore,
+			metadata: { tmdbId: LEGACY_DESTINATION.mappingId }
+		});
+		const snapshots = snapshotHarness([{ row: desired }]);
+		const kometa = defaultKometa();
+		kometa.setRaw('metadata:\n  100:\n    url_poster: https://images.invalid/legacy-current.jpg\n');
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-kometa-historical',
+				destination: 'kometa',
+				targetId: LEGACY_DESTINATION.key,
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: kometaSlotFingerprint(current),
+					artworkVersion: null
+				},
+				snapshot: {
+					state: 'present',
+					fingerprint: kometaSlotFingerprint(restore),
+					restorable: true
+				}
+			})
+		]);
+		const harness = executorHarness({ snapshots, kometa });
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.operations[0]).toMatchObject({ status: 'success', verification: 'exact' });
+		expect(kometa.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({ destination: LEGACY_DESTINATION })
+		);
+		expect(readKometaSlot(kometa.getRaw(), 100, ROOT_POSTER)).toEqual(restore);
+		expect(harness.ledger.records[0]).toMatchObject({
+			outcome: 'success',
+			provenance: { legacyKometaDestination: LEGACY_DESTINATION }
+		});
+	});
+
 	it.each([
 		{
 			label: 'present value',
@@ -574,7 +645,7 @@ describe('Kometa undo execution', () => {
 			kind: 'poster',
 			state: testCase.snapshotState,
 			value: testCase.snapshotState === 'present' ? testCase.restore : null,
-			metadata: { tmdbId: '100' }
+			metadata: { kometaDestination: MOVIE_DESTINATION }
 		});
 		const snapshots = snapshotHarness([{ row: desired }]);
 		const server = serverHarness({ current: artwork([1]) });
@@ -586,7 +657,7 @@ describe('Kometa undo execution', () => {
 			candidate({
 				revisionId: `revision-kometa-${testCase.snapshotState}`,
 				destination: 'kometa',
-				targetId: 'kometa:100',
+				targetId: MOVIE_DESTINATION.key,
 				beforeSnapshotId: desired.id,
 				current: {
 					state: 'present',
@@ -619,7 +690,38 @@ describe('Kometa undo execution', () => {
 			action: 'undo',
 			destination: 'kometa',
 			outcome: 'success',
-			verification: 'exact'
+			verification: 'exact',
+			provenance: { kometaDestination: MOVIE_DESTINATION }
+		});
+	});
+
+	it('skips an unproven legacy target without reading, mutating, or capturing YAML', async () => {
+		const snapshots = snapshotHarness([]);
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-legacy-unproven',
+				destination: 'kometa',
+				targetId: 'kometa:unsafe:revision-legacy-unproven',
+				beforeSnapshotId: 'snapshot-legacy-unproven',
+				current: { state: 'unavailable', fingerprint: null, artworkVersion: null },
+				snapshot: { state: 'unavailable', fingerprint: null, restorable: false }
+			})
+		]);
+		const harness = executorHarness({ snapshots });
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.operations[0]).toMatchObject({
+			status: 'skipped',
+			verification: 'unavailable',
+			errorCode: 'undo_kometa_target_invalid'
+		});
+		expect(harness.kometa.read).not.toHaveBeenCalled();
+		expect(harness.kometa.mutate).not.toHaveBeenCalled();
+		expect(snapshots.captureValue).not.toHaveBeenCalled();
+		expect(harness.ledger.records[0]).toMatchObject({
+			outcome: 'skipped',
+			errorCode: 'undo_kometa_target_invalid'
 		});
 	});
 });

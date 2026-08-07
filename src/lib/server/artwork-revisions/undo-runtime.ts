@@ -10,7 +10,7 @@ import {
 	resolveKometaServerBinding,
 	type ResolvedKometaServerBinding
 } from '$lib/server/kometa/server-binding';
-import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
+import { kometaYamlMappingKey } from '$lib/server/kometa/destination';
 import { enqueueJobDetailed } from '$lib/server/jobs/runner';
 import { assertMutationsAllowed } from '$lib/server/maintenance';
 import { kometaOutputDirectory } from '$lib/server/plans/apply-destinations';
@@ -46,7 +46,8 @@ import {
 	createArtworkUndoPlanner,
 	type ArtworkUndoPlannerDependencies,
 	type ArtworkUndoPreview,
-	type ConfirmedArtworkUndoPlan
+	type ConfirmedArtworkUndoPlan,
+	type UndoKometaDestination
 } from './undo-planner';
 
 export type ActiveItemUndoScope =
@@ -314,6 +315,7 @@ export interface BoundKometaUndoAccessDependencies {
 
 async function boundKometaPath(
 	serverInstanceId: string,
+	destination: UndoKometaDestination,
 	dependencies: BoundKometaUndoAccessDependencies
 ): Promise<string> {
 	const config = await dependencies.loadConfig();
@@ -328,7 +330,7 @@ async function boundKometaPath(
 				: kometaBindingErrorCode(resolvedBinding.status);
 		throw new ArtworkUndoRuntimeError(code);
 	}
-	return resolve(kometaOutputDirectory(config), DEFAULT_FILENAME);
+	return resolve(kometaOutputDirectory(config), destination.filename);
 }
 
 function currentKometaMatches(
@@ -344,22 +346,33 @@ function currentKometaMatches(
 export function createBoundKometaUndoAccess(dependencies: BoundKometaUndoAccessDependencies) {
 	const clock = dependencies.clock ?? (() => new Date());
 
-	async function readKometa(serverInstanceId: string): Promise<string | null> {
-		const path = await boundKometaPath(serverInstanceId, dependencies);
+	async function readKometa(
+		serverInstanceId: string,
+		destination: UndoKometaDestination
+	): Promise<string | null> {
+		const path = await boundKometaPath(serverInstanceId, destination, dependencies);
 		return dependencies.read(path);
 	}
 
 	async function mutateKometa(input: UndoKometaMutationInput): Promise<void> {
-		const plannedPath = await boundKometaPath(input.serverInstanceId, dependencies);
+		const plannedPath = await boundKometaPath(
+			input.serverInstanceId,
+			input.destination,
+			dependencies
+		);
 		await dependencies.withLock(plannedPath, async () => {
 			// Settings/binding may change while waiting for the file lock. Never write
 			// the previously resolved path under a different live binding.
-			const currentPath = await boundKometaPath(input.serverInstanceId, dependencies);
+			const currentPath = await boundKometaPath(
+				input.serverInstanceId,
+				input.destination,
+				dependencies
+			);
 			if (currentPath !== plannedPath) throw new ArtworkUndoRuntimeError('plan_stale');
 			const raw = dependencies.read(currentPath) ?? '';
 			let current: ReturnType<typeof readKometaSlot>;
 			try {
-				current = readKometaSlot(raw, input.tmdbId, input.slot);
+				current = readKometaSlot(raw, kometaYamlMappingKey(input.destination), input.slot);
 			} catch {
 				throw new ArtworkUndoRuntimeError('undo_kometa_unavailable');
 			}
@@ -369,7 +382,12 @@ export function createBoundKometaUndoAccess(dependencies: BoundKometaUndoAccessD
 
 			let next: string;
 			try {
-				next = restoreKometaSlot(raw, input.tmdbId, input.slot, input.restore);
+				next = restoreKometaSlot(
+					raw,
+					kometaYamlMappingKey(input.destination),
+					input.slot,
+					input.restore
+				);
 				const stamp = new Date(clock().getTime());
 				if (!Number.isFinite(stamp.getTime())) {
 					throw new ArtworkUndoRuntimeError('undo_kometa_write_failed');

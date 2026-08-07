@@ -14,15 +14,14 @@ import {
 	topLevelKeys,
 	type ConfigPlan
 } from './config';
+import { LEGACY_FILENAME, MOVIE_FILENAME, SHOW_FILENAME } from './destination';
 
 const CREDS = { plexUrl: 'http://new:32400', plexToken: 'newtoken', tmdbKey: 'newkey' };
-const META = '/data/kometa/posterpilot.yml';
 
 function plan(overrides: Partial<Parameters<typeof buildPlan>[0]> = {}): ConfigPlan {
 	return buildPlan({
 		creds: CREDS,
-		metadataFile: META,
-		libraries: [{ name: 'Movies', defaults: ['genre', 'studio'], metadata: true }],
+		libraries: [{ name: 'Movies', defaults: ['genre', 'studio'], metadataFile: MOVIE_FILENAME }],
 		...overrides
 	});
 }
@@ -72,7 +71,7 @@ describe('applyPlan — libraries & defaults', () => {
 		const doc = loadDoc(SAMPLE);
 		const out = serialize(applyPlan(doc, plan(), null).doc);
 		expect(out).toContain('metadata_files');
-		expect(out).toContain(`file: ${META}`);
+		expect(out).toContain(`file: ${MOVIE_FILENAME}`);
 		expect(out).toContain('default: studio');
 		// genre appears exactly once (user's original, not re-added)
 		expect(out.match(/default: genre/g)?.length).toBe(1);
@@ -82,13 +81,32 @@ describe('applyPlan — libraries & defaults', () => {
 		const doc = loadDoc(SAMPLE);
 		const p = plan({
 			libraries: [
-				{ name: 'Movies', defaults: ['genre', 'studio'], metadata: true },
-				{ name: 'TV Shows', defaults: ['network'], metadata: true }
+				{ name: 'Movies', defaults: ['genre', 'studio'], metadataFile: MOVIE_FILENAME },
+				{ name: 'TV Shows', defaults: ['network'], metadataFile: SHOW_FILENAME }
 			]
 		});
 		const out = serialize(applyPlan(doc, p, null).doc);
 		expect(out).toContain('TV Shows:');
 		expect(out).toContain('default: network');
+		expect(out).toContain(`file: ${MOVIE_FILENAME}`);
+		expect(out).toContain(`file: ${SHOW_FILENAME}`);
+	});
+
+	it('wires mixed libraries to exactly one metadata file selected by type', () => {
+		const mixed = plan({
+			libraries: [
+				{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME },
+				{ name: 'TV Shows', defaults: [], metadataFile: SHOW_FILENAME }
+			]
+		});
+		const result = applyPlan(loadDoc(''), mixed, null);
+		expect(result.doc.getIn(['libraries', 'Movies', 'metadata_files', 0, 'file'])).toBe(
+			MOVIE_FILENAME
+		);
+		expect(result.doc.getIn(['libraries', 'TV Shows', 'metadata_files', 0, 'file'])).toBe(
+			SHOW_FILENAME
+		);
+		expect(serialize(result.doc)).not.toContain(LEGACY_FILENAME);
 	});
 
 	it('is idempotent on re-sync (no new changes, no duplicates)', () => {
@@ -97,7 +115,7 @@ describe('applyPlan — libraries & defaults', () => {
 		const second = applyPlan(loadDoc(serialize(first.doc)), plan(), first.nextSnapshot);
 		expect(second.changes).toHaveLength(0);
 		const out = serialize(second.doc);
-		expect(out.match(new RegExp(`file: ${META.replace(/\//g, '\\/')}`, 'g'))?.length).toBe(1);
+		expect(out.match(new RegExp(`file: ${MOVIE_FILENAME}`, 'g'))?.length).toBe(1);
 	});
 
 	it('removes only our managed default on disable, never the user-authored genre', () => {
@@ -105,7 +123,9 @@ describe('applyPlan — libraries & defaults', () => {
 		const first = applyPlan(doc, plan(), null); // owns ['studio'] (genre was the user's)
 		expect(first.nextSnapshot.libraries['Movies'].defaults).toEqual(['studio']);
 		// Now disable studio (and genre) → only studio (ours) should go; genre stays.
-		const disabled = plan({ libraries: [{ name: 'Movies', defaults: [], metadata: true }] });
+		const disabled = plan({
+			libraries: [{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME }]
+		});
 		const out = serialize(
 			applyPlan(loadDoc(serialize(first.doc)), disabled, first.nextSnapshot).doc
 		);
@@ -118,8 +138,113 @@ describe('applyPlan — libraries & defaults', () => {
 		const first = applyPlan(doc, plan(), null);
 		const none = plan({ libraries: [] });
 		const out = serialize(applyPlan(loadDoc(serialize(first.doc)), none, first.nextSnapshot).doc);
-		expect(out).not.toContain(`file: ${META}`);
+		expect(out).not.toContain(`file: ${MOVIE_FILENAME}`);
 		expect(out).toContain('default: genre'); // user's content stays, library block intact
+	});
+
+	it('repairs only an owned wrong typed reference and preserves its comment and siblings', () => {
+		const source = loadDoc(`libraries:
+  Movies:
+    metadata_files:
+      - file: ${SHOW_FILENAME} # managed note
+      - file: custom.yml # user sibling
+`);
+		const result = applyPlan(
+			source,
+			plan({ libraries: [{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME }] }),
+			{
+				libraries: {
+					Movies: { metadataFile: SHOW_FILENAME, defaults: [] }
+				},
+				managedSettingKeys: []
+			}
+		);
+		const output = serialize(result.doc);
+		expect(output).toContain(`file: ${MOVIE_FILENAME} # managed note`);
+		expect(output).not.toContain(`file: ${SHOW_FILENAME}`);
+		expect(output).toContain('file: custom.yml # user sibling');
+		expect(result.nextSnapshot.libraries.Movies.metadataFile).toBe(MOVIE_FILENAME);
+		expect(result.changes).toContainEqual(
+			expect.objectContaining({
+				op: 'modify',
+				before: SHOW_FILENAME,
+				after: MOVIE_FILENAME
+			})
+		);
+	});
+
+	it('does not claim or later remove a pre-existing identical user reference', () => {
+		const source = loadDoc(`libraries:
+  Movies:
+    metadata_files:
+      - file: ${MOVIE_FILENAME} # user owned
+      - file: custom.yml
+`);
+		const first = applyPlan(
+			source,
+			plan({ libraries: [{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME }] }),
+			null
+		);
+		expect(first.nextSnapshot.libraries.Movies.metadataFile).toBeNull();
+		const deselected = applyPlan(
+			loadDoc(serialize(first.doc)),
+			plan({ libraries: [] }),
+			first.nextSnapshot
+		);
+		const output = serialize(deselected.doc);
+		expect(output).toContain(`file: ${MOVIE_FILENAME} # user owned`);
+		expect(output).toContain('file: custom.yml');
+	});
+
+	it('reads legacy global snapshot ownership and replaces only posterpilot.yml', () => {
+		const source = loadDoc(`libraries:
+  Movies:
+    metadata_files:
+      - file: ${LEGACY_FILENAME} # legacy managed
+      - file: custom.yml # keep
+`);
+		const result = applyPlan(
+			source,
+			plan({ libraries: [{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME }] }),
+			{
+				metadataPath: LEGACY_FILENAME,
+				libraries: { Movies: { metadata: true, defaults: [] } },
+				managedSettingKeys: []
+			}
+		);
+		const output = serialize(result.doc);
+		expect(output).toContain(`file: ${MOVIE_FILENAME} # legacy managed`);
+		expect(output).not.toContain(`file: ${LEGACY_FILENAME}`);
+		expect(output).toContain('file: custom.yml # keep');
+		expect(result.nextSnapshot).not.toHaveProperty('metadataPath');
+		expect(result.nextSnapshot.libraries.Movies).toMatchObject({
+			metadataFile: MOVIE_FILENAME,
+			defaults: []
+		});
+	});
+
+	it('upgrades legacy ownership while an anchored library is skipped', () => {
+		const source = loadDoc(`libraries:
+  Movies: &movies
+    metadata_files:
+      - file: ${LEGACY_FILENAME}
+`);
+		const result = applyPlan(
+			source,
+			plan({ libraries: [{ name: 'Movies', defaults: [], metadataFile: MOVIE_FILENAME }] }),
+			{
+				metadataPath: LEGACY_FILENAME,
+				libraries: { Movies: { metadata: true, defaults: [] } },
+				managedSettingKeys: []
+			}
+		);
+		expect(result.warnings).toContain('libraries.Movies');
+		expect(result.nextSnapshot).not.toHaveProperty('metadataPath');
+		expect(result.nextSnapshot.libraries.Movies).toEqual({
+			metadataFile: LEGACY_FILENAME,
+			defaults: []
+		});
+		expect(serialize(result.doc)).toContain(`file: ${LEGACY_FILENAME}`);
 	});
 });
 
@@ -171,7 +296,7 @@ describe('applyPlan — settings & secrets', () => {
 		const webhook = 'https://discord.com/api/webhooks/123/secret-token';
 		const source = loadDoc(`webhooks:\n  error: ${webhook}\n`);
 		const result = applyPlan(source, plan({ settingKeep: ['webhooks.error'] }), {
-			metadataPath: META,
+			metadataPath: LEGACY_FILENAME,
 			libraries: {},
 			managedSettingKeys: ['webhooks.error']
 		});
@@ -187,7 +312,6 @@ describe('applyPlan — generalized sections', () => {
 	it('manages a connector section and removes a cleared field', () => {
 		const p = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { tautulli: { url: 'http://tt:8181', apikey: 'k' } }
 		});
@@ -199,7 +323,6 @@ describe('applyPlan — generalized sections', () => {
 
 		const p2 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { tautulli: { url: 'http://tt:8181', apikey: '' } }
 		});
@@ -211,7 +334,6 @@ describe('applyPlan — generalized sections', () => {
 	it('preserves a blank (kept) connector secret on resync', () => {
 		const p1 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { tautulli: { url: 'http://tt', apikey: 'k' } }
 		});
@@ -220,7 +342,6 @@ describe('applyPlan — generalized sections', () => {
 		// Resync: the user left apikey blank → kept via connectionKeep, not deleted.
 		const p2 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { tautulli: { url: 'http://tt' } },
 			connectionKeep: { tautulli: ['apikey'] }
@@ -233,7 +354,6 @@ describe('applyPlan — generalized sections', () => {
 	it('preserves a kept secret in a secret-only connector (github.token)', () => {
 		const p1 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { github: { token: 'ghp_x' } }
 		});
@@ -242,7 +362,6 @@ describe('applyPlan — generalized sections', () => {
 		// Resync with the only field (a secret) left blank → kept, section not removed.
 		const p2 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { github: {} },
 			connectionKeep: { github: ['token'] }
@@ -254,7 +373,6 @@ describe('applyPlan — generalized sections', () => {
 	it('redacts connector secrets in the diff, not just plex/tmdb', () => {
 		const p = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [],
 			connections: { tautulli: { url: 'http://tt', apikey: 'supersecret' } }
 		});
@@ -269,9 +387,13 @@ describe('applyPlan — generalized sections', () => {
 		);
 		const p = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [
-				{ name: 'Movies', defaults: [], overlays: ['mediastinger', 'ribbon'], metadata: false }
+				{
+					name: 'Movies',
+					defaults: [],
+					overlays: ['mediastinger', 'ribbon'],
+					metadataFile: null
+				}
 			]
 		});
 		const first = applyPlan(base, p, null);
@@ -285,12 +407,11 @@ describe('applyPlan — generalized sections', () => {
 		const base = loadDoc('libraries:\n  Movies: {}\n');
 		const p = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [
 				{
 					name: 'Movies',
 					defaults: [],
-					metadata: false,
+					metadataFile: null,
 					operations: { mass_genre_update: 'tmdb' },
 					settingsOverrides: { asset_directory: '/assets/movies' }
 				}
@@ -304,9 +425,13 @@ describe('applyPlan — generalized sections', () => {
 
 		const p2 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
 			libraries: [
-				{ name: 'Movies', defaults: [], metadata: false, operations: { mass_genre_update: '' } }
+				{
+					name: 'Movies',
+					defaults: [],
+					metadataFile: null,
+					operations: { mass_genre_update: '' }
+				}
 			]
 		});
 		const out2 = serialize(applyPlan(loadDoc(serialize(first.doc)), p2, first.nextSnapshot).doc);
@@ -335,8 +460,14 @@ describe('checkConsistency', () => {
 	it('warns when a chart/overlay needs a connector that is not configured', () => {
 		const p = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
-			libraries: [{ name: 'Movies', defaults: ['trakt'], overlays: ['ratings'], metadata: false }]
+			libraries: [
+				{
+					name: 'Movies',
+					defaults: ['trakt'],
+					overlays: ['ratings'],
+					metadataFile: null
+				}
+			]
 		});
 		const warns = checkConsistency(p, loadDoc(''));
 		expect(warns.find((w) => w.feature === 'trakt')?.requiresConnector).toBe('trakt');
@@ -346,16 +477,14 @@ describe('checkConsistency', () => {
 	it('is satisfied when the connector is in the plan or already in the file', () => {
 		const p = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
-			libraries: [{ name: 'Movies', defaults: ['trakt'], metadata: false }],
+			libraries: [{ name: 'Movies', defaults: ['trakt'], metadataFile: null }],
 			connections: { trakt: { client_id: 'x', client_secret: 'y' } }
 		});
 		expect(checkConsistency(p, loadDoc('')).some((w) => w.feature === 'trakt')).toBe(false);
 		// or already present in the file
 		const p2 = buildPlan({
 			creds: NO_CREDS,
-			metadataFile: META,
-			libraries: [{ name: 'Movies', defaults: ['tautulli'], metadata: false }]
+			libraries: [{ name: 'Movies', defaults: ['tautulli'], metadataFile: null }]
 		});
 		const doc = loadDoc('tautulli:\n  url: http://t\n  apikey: k\n');
 		expect(checkConsistency(p2, doc).some((w) => w.feature === 'tautulli')).toBe(false);

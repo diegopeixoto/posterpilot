@@ -19,6 +19,16 @@ import {
 	mediaCollections,
 	mediaItems
 } from '$lib/server/db/schema';
+import {
+	isKometaDestinationV2,
+	isKometaLegacyDestinationV1,
+	kometaYamlMappingKey,
+	legacyKometaDestinationKey,
+	parseKometaDestinationKey,
+	parseKometaLegacyDestinationKey,
+	type KometaDestinationV2,
+	type KometaLegacyDestinationV1
+} from '$lib/server/kometa/destination';
 import type { ApplyServerRegistry } from '$lib/server/plans/apply-server-registry';
 import { canonicalJson, hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import { sha256Bytes } from '$lib/server/revisions/verification';
@@ -111,7 +121,12 @@ export interface UndoOperationPlanStore {
  * exist, or `undefined` when it cannot be observed. Throws are also treated as
  * an unavailable observation. No raw YAML leaves this module.
  */
-export type UndoKometaReader = (serverInstanceId: string) => Promise<string | null | undefined>;
+export type UndoKometaDestination = KometaDestinationV2 | KometaLegacyDestinationV1;
+
+export type UndoKometaReader = (
+	serverInstanceId: string,
+	destination: UndoKometaDestination
+) => Promise<string | null | undefined>;
 
 export interface ArtworkUndoPlannerDependencies {
 	database: Database;
@@ -148,6 +163,7 @@ export interface PublicUndoPreviewOperation {
 	serverInstanceId: string;
 	target: UndoPlanTarget;
 	destination: UndoPlanDestination;
+	kometaDestination?: UndoKometaDestination;
 	slot: UndoPlanSlot;
 	current: {
 		state: FrozenUndoCurrentState['state'];
@@ -179,6 +195,7 @@ interface RevisionRow {
 	kind: UndoPlanSlot['kind'];
 	season: number | null;
 	episode: number | null;
+	provenance: Record<string, unknown> | null;
 	createdAt: Date;
 }
 
@@ -338,6 +355,7 @@ async function loadRevisionRows(database: Database, scope: UndoPlanScope): Promi
 			kind: artworkRevisions.kind,
 			season: artworkRevisions.season,
 			episode: artworkRevisions.episode,
+			provenance: artworkRevisions.provenance,
 			createdAt: artworkRevisions.createdAt
 		})
 		.from(artworkRevisions)
@@ -401,10 +419,14 @@ function newestDestinationSlots(rows: RevisionRow[]): RevisionRow[] {
 			row.mediaItemId !== null
 				? `item:${row.mediaItemId}`
 				: `collection:${row.mediaCollectionId ?? ''}`;
+		const recordedDestination = recordedKometaDestination(row.provenance, null);
 		const key = [
 			row.serverInstanceId,
 			target,
 			row.destination,
+			row.destination === 'kometa'
+				? (recordedDestination?.key ?? 'kometa:legacy-unproven')
+				: 'server',
 			row.kind,
 			row.season ?? 'root',
 			row.episode ?? 'root'
@@ -493,7 +515,8 @@ async function loadBeforeSnapshot(
 			state: artworkSnapshots.state,
 			sha256: artworkSnapshots.sha256,
 			storagePath: artworkSnapshots.storagePath,
-			value: artworkSnapshots.value
+			value: artworkSnapshots.value,
+			metadata: artworkSnapshots.metadata
 		})
 		.from(artworkSnapshots)
 		.where(
@@ -547,6 +570,40 @@ function classifySnapshot(
 	return value
 		? { state: 'present', fingerprint: kometaSlotFingerprint(value), restorable: true }
 		: { state: 'unavailable', fingerprint: null, restorable: false };
+}
+
+function recordField(value: unknown, key: string): unknown {
+	return value !== null && typeof value === 'object' && !Array.isArray(value)
+		? (value as Record<string, unknown>)[key]
+		: undefined;
+}
+
+function recordedKometaDestination(
+	provenance: Record<string, unknown> | null,
+	metadata: Record<string, unknown> | null
+): UndoKometaDestination | null {
+	// Released pre-split revisions stored only `{ tmdbId }` on the linked
+	// snapshot. At that time the writer path was unconditionally
+	// `posterpilot.yml`, so this proves the exact legacy file and mapping without
+	// deriving a split destination from the media item's current identity.
+	const historicalTmdbId = recordField(metadata, 'tmdbId');
+	const historical =
+		typeof historicalTmdbId === 'string'
+			? parseKometaLegacyDestinationKey(legacyKometaDestinationKey(historicalTmdbId))
+			: null;
+	const candidates = [
+		recordField(provenance, 'kometaDestination'),
+		recordField(metadata, 'kometaDestination'),
+		recordField(provenance, 'legacyKometaDestination'),
+		recordField(metadata, 'legacyKometaDestination'),
+		historical
+	].filter(
+		(candidate): candidate is UndoKometaDestination =>
+			isKometaDestinationV2(candidate) || isKometaLegacyDestinationV1(candidate)
+	);
+	if (candidates.length === 0) return null;
+	const [first] = candidates;
+	return candidates.every((candidate) => candidate.key === first.key) ? first : null;
 }
 
 function slotStateTargetPredicates(target: UndoPlanTarget): SQL[] {
@@ -661,16 +718,16 @@ async function readCurrentServerState(
 async function readCurrentKometaState(
 	readKometa: UndoKometaReader,
 	serverInstanceId: string,
-	tmdbId: string,
+	destination: UndoKometaDestination,
 	slot: UndoPlanSlot,
 	artworkVersion: number | null
 ): Promise<FrozenUndoCurrentState> {
 	try {
-		const raw = await readKometa(serverInstanceId);
+		const raw = await readKometa(serverInstanceId, destination);
 		if (raw === undefined) {
 			return { state: 'unavailable', fingerprint: null, artworkVersion };
 		}
-		const value = readKometaSlot(raw ?? '', tmdbId, slot);
+		const value = readKometaSlot(raw ?? '', kometaYamlMappingKey(destination), slot);
 		return {
 			state: value.state,
 			fingerprint: value.state === 'present' ? kometaSlotFingerprint(value) : null,
@@ -679,18 +736,6 @@ async function readCurrentKometaState(
 	} catch {
 		return { state: 'unavailable', fingerprint: null, artworkVersion };
 	}
-}
-
-function kometaTargetId(target: TargetRecord): { tmdbId: string; targetId: string } {
-	if (!target.tmdbId) {
-		plannerError(
-			'target_unresolved',
-			target.target.kind === 'item'
-				? String(target.target.mediaItemId)
-				: target.target.mediaCollectionId
-		);
-	}
-	return { tmdbId: target.tmdbId, targetId: `kometa:${target.tmdbId}` };
 }
 
 type UndoServerBinding = Awaited<ReturnType<ApplyServerRegistry['resolve']>>;
@@ -724,13 +769,17 @@ async function materializeRevisionCandidates(
 	const targetCache = new Map<string, Promise<TargetRecord>>();
 	const seasonCache = new Map<string, Awaited<ReturnType<typeof binding.server.listSeasons>>>();
 	const episodeCache = new Map<string, Awaited<ReturnType<typeof binding.server.listEpisodes>>>();
-	let kometaRead: Promise<string | null | undefined> | null = null;
-	const readKometaOnce: UndoKometaReader = async (requestedServerInstanceId) => {
+	const kometaReads = new Map<string, Promise<string | null | undefined>>();
+	const readKometaOnce: UndoKometaReader = async (requestedServerInstanceId, destination) => {
 		if (requestedServerInstanceId !== serverInstanceId) {
 			plannerError('server_scope_mismatch', requestedServerInstanceId);
 		}
-		kometaRead ??= dependencies.readKometa(requestedServerInstanceId);
-		return kometaRead;
+		let pending = kometaReads.get(destination.filename);
+		if (!pending) {
+			pending = dependencies.readKometa(requestedServerInstanceId, destination);
+			kometaReads.set(destination.filename, pending);
+		}
+		return pending;
 	};
 	const candidates: UndoPlanCandidate[] = [];
 
@@ -757,7 +806,7 @@ async function materializeRevisionCandidates(
 			target.target,
 			slot
 		);
-		const snapshot = classifySnapshot(snapshotRow, revision.destination);
+		let snapshot = classifySnapshot(snapshotRow, revision.destination);
 		const artworkVersion = await loadArtworkVersion(
 			dependencies.database,
 			serverInstanceId,
@@ -783,15 +832,24 @@ async function materializeRevisionCandidates(
 				artworkVersion
 			);
 		} else {
-			const kometa = kometaTargetId(target);
-			targetId = kometa.targetId;
-			current = await readCurrentKometaState(
-				readKometaOnce,
-				serverInstanceId,
-				kometa.tmdbId,
-				slot,
-				artworkVersion
+			const kometaDestination = recordedKometaDestination(
+				revision.provenance,
+				snapshotRow.metadata
 			);
+			if (!kometaDestination) {
+				targetId = `kometa:unsafe:${revision.id}`;
+				current = { state: 'unavailable', fingerprint: null, artworkVersion };
+				snapshot = { state: 'unavailable', fingerprint: null, restorable: false };
+			} else {
+				targetId = kometaDestination.key;
+				current = await readCurrentKometaState(
+					readKometaOnce,
+					serverInstanceId,
+					kometaDestination,
+					slot,
+					artworkVersion
+				);
+			}
 		}
 
 		candidates.push({
@@ -815,6 +873,11 @@ async function materializeRevisionCandidates(
 function publicOperation(
 	operation: UndoPlanPayloadV1['operations'][number]
 ): PublicUndoPreviewOperation {
+	const kometaDestination =
+		operation.destination === 'kometa'
+			? (parseKometaDestinationKey(operation.targetId) ??
+				parseKometaLegacyDestinationKey(operation.targetId))
+			: null;
 	return {
 		id: operation.id,
 		revisionId: operation.revisionId,
@@ -823,6 +886,7 @@ function publicOperation(
 		serverInstanceId: operation.serverInstanceId,
 		target: operation.target,
 		destination: operation.destination,
+		...(kometaDestination ? { kometaDestination } : {}),
 		slot: operation.slot,
 		current: {
 			state: operation.current.state,

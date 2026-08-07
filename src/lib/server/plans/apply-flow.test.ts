@@ -32,6 +32,7 @@ import {
 	type OperationPlan,
 	type OperationPlanExpectations
 } from './operation-plan-store';
+import { resolveKometaDestination } from '$lib/server/kometa/destination';
 
 const NOW = new Date('2026-07-10T12:00:00.000Z');
 
@@ -156,6 +157,7 @@ function testStore() {
 
 function setup() {
 	const items = [data(1), data(2)];
+	const kometaFileFingerprints = { movie: 'movie-file-v1', show: 'show-file-v1' };
 	const byRef = new Map(items.map((item) => [`server-a:${item.item.identity.mediaItemId}`, item]));
 	const store = testStore();
 	const loadItemData = async (ref: ApplyItemRef) =>
@@ -170,19 +172,46 @@ function setup() {
 				const current = target.item.currentSlots.find(
 					(state) => applySlotKey(state.slot) === applySlotKey(selection.slot)
 				);
+				const kometa =
+					destination === 'kometa'
+						? resolveKometaDestination({
+								type: target.item.identity.type,
+								tmdbId: target.item.identity.tmdbId,
+								tvdbId: target.item.identity.tvdbId,
+								imdbId: target.item.identity.imdbId
+							})
+						: null;
 				return {
 					destination,
+					...(kometa?.ok
+						? {
+								kometaDestination: kometa.destination,
+								kometaFileFingerprint: hashCanonicalJson({
+									exists: true,
+									content: kometaFileFingerprints[target.item.identity.type]
+								})
+							}
+						: {}),
 					slot: selection.slot,
-					targetId: `${destination}-${target.item.identity.mediaItemId}-${applySlotKey(selection.slot)}`,
+					targetId:
+						destination === 'server'
+							? `${destination}-${target.item.identity.mediaItemId}-${applySlotKey(selection.slot)}`
+							: kometa?.ok
+								? kometa.destination.key
+								: null,
 					capability: 'supported' as const,
 					current: {
 						url: current?.url ?? null,
 						fingerprint: current?.fingerprint ?? null,
 						artworkVersion: current?.artworkVersion ?? null,
 						observedAt: current?.observedAt ?? null,
-						destinationFingerprint: `${destination}-state-${target.item.identity.mediaItemId}`
+						destinationFingerprint:
+							destination === 'kometa'
+								? `kometa-state-${target.item.identity.mediaItemId}-${kometaFileFingerprints[target.item.identity.type]}`
+								: `server-state-${target.item.identity.mediaItemId}`
 					},
-					skipCode: null,
+					skipCode:
+						destination === 'kometa' && !kometa?.ok ? ('missing_kometa_identifier' as const) : null,
 					parameters: {}
 				};
 			})
@@ -216,7 +245,14 @@ function setup() {
 		persistPlan: (input) => store.create(input),
 		clock: () => NOW
 	});
-	return { items, planner, store, loadItemData, resolveDestinationSlots };
+	return {
+		items,
+		planner,
+		store,
+		loadItemData,
+		resolveDestinationSlots,
+		kometaFileFingerprints
+	};
 }
 
 function asLegacyRevisionlessPlan(payload: ApplyPlanPayloadV1): ApplyPlanPayloadV1 {
@@ -252,6 +288,24 @@ function asLegacyRevisionlessPlan(payload: ApplyPlanPayloadV1): ApplyPlanPayload
 	return legacy;
 }
 
+function rehashApplyPlanSources(payload: ApplyPlanPayloadV1): void {
+	for (const item of payload.items) {
+		item.sourceFingerprint = hashCanonicalJson({
+			target: item.target,
+			selectionFrom: item.selectionFrom,
+			selectionFingerprint: item.selectionFingerprint,
+			currentStateFingerprint: item.currentStateFingerprint,
+			operations: item.operations.map((operation) => operation.id),
+			skips: item.skips
+		});
+	}
+	payload.sourceFingerprint = hashCanonicalJson({
+		context: payload.context,
+		defaults: payload.defaults,
+		items: payload.items.map((item) => item.sourceFingerprint)
+	});
+}
+
 describe('frozen apply flow', () => {
 	it('accepts a revisionless v1 payload only while the migrated selection revision is zero', async () => {
 		const fixture = setup();
@@ -275,6 +329,111 @@ describe('frozen apply flow', () => {
 		fixture.items[0].item.identity.selectionRevision = 1;
 		await expect(
 			assertApplyPlanFresh(legacy, {
+				loadItemData: fixture.loadItemData,
+				resolveDestinationSlots: fixture.resolveDestinationSlots
+			})
+		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
+	it('rejects a durable v1 Kometa mutation without a typed destination', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+		const unsafeLegacy = structuredClone(preview.payload);
+		for (const item of unsafeLegacy.items) {
+			for (const snapshot of item.destinationSlots) {
+				Reflect.deleteProperty(snapshot, 'kometaDestination');
+				Reflect.deleteProperty(snapshot, 'kometaFileFingerprint');
+			}
+			for (const operation of item.operations) {
+				Reflect.deleteProperty(operation, 'kometaDestination');
+				Reflect.deleteProperty(operation, 'kometaFileFingerprint');
+			}
+		}
+
+		expect(() => assertApplyPlanPayload(unsafeLegacy)).toThrowError(
+			expect.objectContaining({ code: 'invalid_plan' })
+		);
+	});
+
+	it('keeps a durable v1 untyped Kometa snapshot readable when it cannot mutate', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'both'
+		});
+		const durableV1 = structuredClone(preview.payload);
+		for (const item of durableV1.items) {
+			item.operations = item.operations.filter((operation) => operation.destination === 'server');
+			for (const snapshot of item.destinationSlots) {
+				if (snapshot.destination !== 'kometa') continue;
+				Reflect.deleteProperty(snapshot, 'kometaDestination');
+				Reflect.deleteProperty(snapshot, 'kometaFileFingerprint');
+				snapshot.targetId = '1';
+				snapshot.capability = 'unsupported';
+				snapshot.skipCode = 'unsupported_slot';
+				item.skips.push({
+					destination: 'kometa',
+					slot: snapshot.slot,
+					code: 'unsupported_slot',
+					parameters: {}
+				});
+			}
+			item.currentStateFingerprint = hashCanonicalJson({
+				targetUpdatedAt: item.target.updatedAt,
+				destinationSlots: item.destinationSlots.map((snapshot) => ({
+					destination: snapshot.destination,
+					slot: snapshot.slot,
+					targetId: snapshot.targetId,
+					capability: snapshot.capability,
+					current: snapshot.current,
+					skipCode: snapshot.skipCode
+				}))
+			});
+		}
+		durableV1.summary = {
+			itemCount: durableV1.items.length,
+			actionableItemCount: durableV1.items.filter((item) => item.operations.length > 0).length,
+			operationCount: durableV1.items.flatMap((item) => item.operations).length,
+			skipCount: durableV1.items.flatMap((item) => item.skips).length,
+			destinations: {
+				server: durableV1.items
+					.flatMap((item) => item.operations)
+					.filter((operation) => operation.destination === 'server').length,
+				kometa: 0
+			}
+		};
+		rehashApplyPlanSources(durableV1);
+
+		expect(() => assertApplyPlanPayload(durableV1)).not.toThrow();
+	});
+
+	it('stales only when the exact typed Kometa file fingerprint changes', async () => {
+		const fixture = setup();
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+
+		fixture.kometaFileFingerprints.show = 'show-file-v2';
+		await expect(
+			assertApplyPlanFresh(preview.payload, {
+				loadItemData: fixture.loadItemData,
+				resolveDestinationSlots: fixture.resolveDestinationSlots
+			})
+		).resolves.toBeUndefined();
+
+		fixture.kometaFileFingerprints.movie = 'movie-file-v2';
+		await expect(
+			assertApplyPlanFresh(preview.payload, {
 				loadItemData: fixture.loadItemData,
 				resolveDestinationSlots: fixture.resolveDestinationSlots
 			})
@@ -384,12 +543,81 @@ describe('frozen apply flow', () => {
 				)
 				.map((operation) => [operation.targetId, operation.selection.url])
 		);
-		expect(writeKometa).toHaveBeenCalledTimes(2);
+		expect(writeKometa).toHaveBeenCalledTimes(1);
+		expect(writeKometa.mock.calls[0]?.[0]).toHaveLength(2);
+		expect(writeKometa.mock.calls[0]?.[1]).toHaveLength(4);
 		expect(writeKometa.mock.calls[0]?.[0][0]).toMatchObject({
+			destination: {
+				mediaKind: 'movie',
+				namespace: 'tmdb',
+				filename: 'posterpilot-movies.yml'
+			},
 			posterUrl: 'https://image.tmdb.org/t/p/original/flow-poster.jpg',
 			backgroundUrl: 'https://image.tmdb.org/t/p/original/flow-background.jpg'
 		});
 		expect(result.summary).toMatchObject({ operationCount: 8, succeeded: 8, failed: 0 });
+	});
+
+	it('keeps direct-server operations actionable when a show has no Kometa identifier', async () => {
+		const fixture = setup();
+		fixture.items[0].item.identity.type = 'show';
+		fixture.items[0].item.identity.mediaType = 'tv';
+		fixture.items[0].item.identity.tvdbId = null;
+		fixture.items[0].item.identity.imdbId = null;
+		for (const candidate of fixture.items[0].candidates) candidate.resolvedMediaType = 'tv';
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'auto',
+			method: 'both'
+		});
+		const applyPosterUrl = vi.fn(async () => undefined);
+		const applyBackgroundUrl = vi.fn(async () => undefined);
+		const writeKometa = vi.fn();
+
+		expect(preview.payload.items[0].operations.map((operation) => operation.destination)).toEqual([
+			'server',
+			'server'
+		]);
+		expect(preview.payload.items[0].skips).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					destination: 'kometa',
+					code: 'missing_kometa_identifier'
+				})
+			])
+		);
+		const durableV1Skip = structuredClone(preview.payload);
+		for (const item of durableV1Skip.items) {
+			for (const skip of item.skips) {
+				if (skip.code === 'missing_kometa_identifier') skip.code = 'missing_tmdb_id';
+			}
+		}
+		rehashApplyPlanSources(durableV1Skip);
+		expect(() => assertApplyPlanPayload(durableV1Skip)).not.toThrow();
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: {
+					resolve: async () => ({
+						serverInstanceId: 'server-a',
+						fingerprint: 'server-fingerprint',
+						server: {
+							type: 'plex',
+							applyPosterUrl,
+							applyBackgroundUrl
+						} as never
+					})
+				},
+				writeKometa
+			}
+		);
+
+		expect(writeKometa).not.toHaveBeenCalled();
+		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
 	});
 
 	it('delegates coordinated server mutations without invoking the URL fallback', async () => {
@@ -434,6 +662,57 @@ describe('frozen apply flow', () => {
 		expect(applyPosterUrl).not.toHaveBeenCalled();
 		expect(applyBackgroundUrl).not.toHaveBeenCalled();
 		expect(result.summary).toMatchObject({ operationCount: 2, succeeded: 2, failed: 0 });
+	});
+
+	it('isolates an atomic failure in one typed file from the other file batch', async () => {
+		const fixture = setup();
+		fixture.items[1].item.identity.type = 'show';
+		fixture.items[1].item.identity.mediaType = 'tv';
+		fixture.items[1].item.identity.tvdbId = '1';
+		for (const candidate of fixture.items[1].candidates) {
+			candidate.resolvedMediaType = 'tv';
+		}
+		const preview = await fixture.planner({
+			context: { source: 'bulk', resultSetFingerprint: 'typed-files' },
+			targets: [
+				{ serverInstanceId: 'server-a', mediaItemId: 1 },
+				{ serverInstanceId: 'server-a', mediaItemId: 2 }
+			],
+			selectionMode: 'auto',
+			method: 'kometa'
+		});
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(async (items) => {
+			if (items[0]?.destination.filename === 'posterpilot-shows.yml') {
+				throw new Error('show file unavailable');
+			}
+		});
+
+		const result = await executeFrozenApplyPlan(
+			preview.plan!.id,
+			preview.plan!.digest,
+			preview.payload,
+			{
+				serverRegistry: { resolve: vi.fn() },
+				writeKometa
+			}
+		);
+
+		expect(writeKometa).toHaveBeenCalledTimes(2);
+		expect(writeKometa.mock.calls.map(([items]) => items[0]?.destination.filename)).toEqual([
+			'posterpilot-movies.yml',
+			'posterpilot-shows.yml'
+		]);
+		expect(preview.payload.items.map((item) => item.operations[0]?.targetId)).toEqual([
+			'kometa:v2:movie:tmdb:1:posterpilot-movies.yml',
+			'kometa:v2:show:tvdb:1:posterpilot-shows.yml'
+		]);
+		expect(result.items[0].operations.every((operation) => operation.status === 'success')).toBe(
+			true
+		);
+		expect(result.items[1].operations.every((operation) => operation.status === 'failed')).toBe(
+			true
+		);
+		expect(result.summary).toMatchObject({ succeeded: 2, failed: 2 });
 	});
 
 	it.each([

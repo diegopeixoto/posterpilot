@@ -367,6 +367,7 @@ function operationSlotKey(operation: UndoPlanCandidate): string {
 		operation.serverInstanceId,
 		targetKey(operation.target),
 		operation.destination,
+		operation.targetId,
 		undoSlotKey(operation.slot)
 	].join('|');
 }

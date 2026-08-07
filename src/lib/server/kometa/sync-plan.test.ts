@@ -2,10 +2,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { parse } from 'yaml';
+import { LEGACY_FILENAME, MOVIE_FILENAME, SHOW_FILENAME } from './destination';
 
 const h = vi.hoisted(() => ({
 	config: {} as Record<string, unknown>,
 	managedSettings: {} as Record<string, string>,
+	cachedLibraries: [] as { key: string; title: string; type: string }[],
 	logEvent: vi.fn(),
 	setKometaManagedLibraries: vi.fn(),
 	setKometaDefaultCollections: vi.fn(),
@@ -36,7 +39,7 @@ vi.mock('$lib/server/db', async () => {
 
 vi.mock('$lib/server/config', () => ({
 	resolveConfig: async () => h.config,
-	getCachedLibraries: async () => [],
+	getCachedLibraries: async () => h.cachedLibraries,
 	getKometaDefaultCollections: async () => ({}),
 	getKometaLastApplied: async () => null,
 	getKometaManagedLibraries: async () => [],
@@ -76,6 +79,19 @@ import {
 let directory: string;
 let configPath: string;
 
+function selection(libraries: string[]) {
+	return {
+		libraries,
+		defaults: {},
+		overlays: {},
+		operations: {},
+		librarySettings: {},
+		connections: {},
+		settings: {},
+		webhooks: {}
+	};
+}
+
 beforeAll(() => {
 	directory = mkdtempSync(join(tmpdir(), 'posterpilot-kometa-plan-'));
 	configPath = join(directory, 'config.yml');
@@ -92,12 +108,88 @@ beforeEach(async () => {
 		tmdbKey: 'tmdb-secret'
 	};
 	h.managedSettings = {};
+	h.cachedLibraries = [];
 	writeFileSync(configPath, 'settings:\n  cache: true\n', 'utf8');
 });
 
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 describe('Kometa raw/restore exact confirmation', () => {
+	it('freezes and writes one authoritative typed metadata file per movie/show library', async () => {
+		h.cachedLibraries = [
+			{ key: '1', title: 'Movies', type: 'movie' },
+			{ key: '2', title: 'TV Shows', type: 'show' }
+		];
+		const preview = await previewSync(selection(['1', '2']));
+		expect(preview.planId).toBeTruthy();
+		expect(JSON.stringify(preview.changes)).toContain(MOVIE_FILENAME);
+		expect(JSON.stringify(preview.changes)).toContain(SHOW_FILENAME);
+		expect(JSON.stringify(preview.changes)).not.toContain(LEGACY_FILENAME);
+
+		await runSync({ planId: preview.planId!, digest: preview.digest! });
+		const written = parse(readFileSync(configPath, 'utf8')) as {
+			libraries: Record<string, { metadata_files: { file: string }[] }>;
+		};
+		expect(written.libraries.Movies.metadata_files).toEqual([{ file: MOVIE_FILENAME }]);
+		expect(written.libraries['TV Shows'].metadata_files).toEqual([{ file: SHOW_FILENAME }]);
+		expect(h.setKometaLastApplied).toHaveBeenCalledWith(
+			expect.objectContaining({
+				libraries: expect.objectContaining({
+					Movies: expect.objectContaining({ metadataFile: MOVIE_FILENAME }),
+					'TV Shows': expect.objectContaining({ metadataFile: SHOW_FILENAME })
+				})
+			})
+		);
+	});
+
+	it('requires the dedicated migration before structured sync rewires a legacy reference', async () => {
+		h.cachedLibraries = [{ key: '1', title: 'Movies', type: 'movie' }];
+		const legacyConfig = `libraries:
+  Movies:
+    metadata_files:
+      - file: config/${LEGACY_FILENAME}
+settings:
+  cache: true
+`;
+		writeFileSync(configPath, legacyConfig, 'utf8');
+
+		const preview = await previewSync(selection(['1']));
+
+		expect(preview).toMatchObject({
+			planId: null,
+			digest: null,
+			warnings: ['kometa_migration_required'],
+			changes: []
+		});
+		expect(await db.select().from(operationPlans)).toHaveLength(0);
+		expect(readFileSync(configPath, 'utf8')).toBe(legacyConfig);
+	});
+
+	it.each([
+		{
+			name: 'missing cached library',
+			cached: [],
+			warning: 'kometa_library_missing'
+		},
+		{
+			name: 'unsupported cached library type',
+			cached: [{ key: '1', title: 'Music', type: 'artist' }],
+			warning: 'kometa_library_type_unsupported'
+		}
+	])('fails visibly and without a plan for $name', async ({ cached, warning }) => {
+		h.cachedLibraries = cached;
+		const before = readFileSync(configPath, 'utf8');
+		const preview = await previewSync(selection(['1']));
+		expect(preview).toMatchObject({
+			planId: null,
+			digest: null,
+			warnings: [warning],
+			changes: []
+		});
+		expect(await db.select().from(operationPlans)).toHaveLength(0);
+		expect(readFileSync(configPath, 'utf8')).toBe(before);
+	});
+
 	it('freezes a structured selection, redacts secrets, and requires single-use confirmation', async () => {
 		const selection = {
 			libraries: [],

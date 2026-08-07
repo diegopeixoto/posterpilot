@@ -1,6 +1,10 @@
 import { join } from 'node:path';
 import { readConfig } from '$lib/server/kometa/config-io';
-import { DEFAULT_FILENAME } from '$lib/server/kometa/yaml';
+import {
+	isKometaDestinationV2,
+	kometaYamlMappingKey,
+	type KometaDestinationV2
+} from '$lib/server/kometa/destination';
 import type { MediaServer, ServerArtwork } from '$lib/server/media-server';
 import {
 	downloadRemoteArtwork,
@@ -16,6 +20,7 @@ import type {
 	ApplyPlanExecutionResult
 } from '$lib/server/plans/apply-executor';
 import type { ApplyPlanOperation } from '$lib/server/plans/apply-plan';
+import { hashCanonicalJson } from '$lib/server/plans/canonical-json';
 import {
 	kometaSlotFingerprint,
 	readKometaSlot,
@@ -44,6 +49,8 @@ interface PreparedKometaOperation {
 	destination: 'kometa';
 	beforeSnapshotId: string;
 	beforeValue: KometaSlotSnapshotValue;
+	kometaDestination: KometaDestinationV2;
+	fileFingerprint: string;
 }
 
 type PreparedOperation = PreparedServerOperation | PreparedKometaOperation;
@@ -185,8 +192,26 @@ function safeSelectionProvenance(operation: ApplyPlanOperation): Record<string, 
 		resolvedMediaType: operation.selection.resolvedMediaType,
 		score: operation.selection.score,
 		width: operation.selection.width,
-		height: operation.selection.height
+		height: operation.selection.height,
+		...(operation.destination === 'kometa' && operation.kometaDestination
+			? { kometaDestination: operation.kometaDestination }
+			: {})
 	};
+}
+
+function typedKometaDestination(operation: ApplyPlanOperation): KometaDestinationV2 {
+	if (
+		operation.destination !== 'kometa' ||
+		!isKometaDestinationV2(operation.kometaDestination) ||
+		operation.targetId !== operation.kometaDestination.key
+	) {
+		throw new TypeError('Kometa operation is missing a valid typed destination');
+	}
+	return operation.kometaDestination;
+}
+
+function kometaFileFingerprint(raw: string | null): string {
+	return hashCanonicalJson({ exists: raw !== null, content: raw });
 }
 
 function failedVerification(result: ApplyOperationExecutionResult): ArtworkVerificationResult {
@@ -206,7 +231,6 @@ function failedVerification(result: ApplyOperationExecutionResult): ArtworkVerif
  */
 export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOptions) {
 	const clock = options.clock ?? (() => new Date());
-	const kometaPath = join(options.kometaAssetsDirectory, DEFAULT_FILENAME);
 	const prepared = new Map<string, PreparedOperation>();
 	const groups = new Map<string, Promise<string>>();
 
@@ -302,10 +326,19 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 	}
 
 	async function prepareKometa(operation: ApplyPlanOperation): Promise<void> {
-		const raw = readConfig(kometaPath) ?? '';
-		const tmdbId = operation.target.tmdbId;
-		if (!tmdbId) throw new TypeError('Kometa operation is missing a TMDB id');
-		const beforeValue = readKometaSlot(raw, tmdbId, operation.slot);
+		const kometaDestination = typedKometaDestination(operation);
+		const kometaPath = join(options.kometaAssetsDirectory, kometaDestination.filename);
+		const rawDocument = readConfig(kometaPath);
+		const raw = rawDocument ?? '';
+		const fileFingerprint = kometaFileFingerprint(rawDocument);
+		if (operation.kometaFileFingerprint !== fileFingerprint) {
+			throw new Error('Frozen Kometa metadata file changed before preparation');
+		}
+		const beforeValue = readKometaSlot(
+			raw,
+			kometaYamlMappingKey(kometaDestination),
+			operation.slot
+		);
 		const scope = {
 			serverInstanceId: operation.target.serverInstanceId,
 			mediaItemId: operation.target.mediaItemId,
@@ -313,14 +346,15 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			slot: operation.slot,
 			state: snapshotState(beforeValue),
 			value: beforeValue.state === 'present' ? beforeValue : undefined,
-			metadata: { tmdbId }
+			metadata: { kometaDestination }
 		};
-		await options.snapshots.captureValue({ ...scope, isOriginal: true });
 		const before = await options.snapshots.captureValue(scope);
 		prepared.set(operation.id, {
 			destination: 'kometa',
 			beforeSnapshotId: before.id,
-			beforeValue
+			beforeValue,
+			kometaDestination,
+			fileFingerprint
 		});
 	}
 
@@ -438,21 +472,22 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 	): Promise<ApplyOperationExecutionResult> {
 		const captured = prepared.get(operation.id);
 		const before = captured?.destination === 'kometa' ? captured : null;
-		const tmdbId = operation.target.tmdbId;
-		if (!tmdbId) throw new TypeError('Kometa operation is missing a TMDB id');
+		const kometaDestination = typedKometaDestination(operation);
+		const kometaPath = join(options.kometaAssetsDirectory, kometaDestination.filename);
 		let afterValue: KometaSlotSnapshotValue | null = null;
 		let verification: 'exact' | 'mismatch' | 'failed';
 		let errorCode: string | null = null;
 		let error: string | null = result.error ?? null;
 		try {
 			const raw = readConfig(kometaPath) ?? '';
-			afterValue = readKometaSlot(raw, tmdbId, operation.slot);
+			afterValue = readKometaSlot(raw, kometaYamlMappingKey(kometaDestination), operation.slot);
 			const expected: KometaSlotSnapshotValue = {
 				state: 'present',
 				url: operation.selection.url
 			};
 			verification =
-				result.status === 'success' && verifyKometaSlot(raw, tmdbId, operation.slot, expected)
+				result.status === 'success' &&
+				verifyKometaSlot(raw, kometaYamlMappingKey(kometaDestination), operation.slot, expected)
 					? 'exact'
 					: result.status === 'failed'
 						? 'failed'
@@ -474,7 +509,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			slot: operation.slot,
 			state: afterValue ? snapshotState(afterValue) : 'unavailable',
 			value: afterValue?.state === 'present' ? afterValue : undefined,
-			metadata: { tmdbId }
+			metadata: { kometaDestination }
 		});
 		await options.ledger.recordOutcome({
 			groupId,
@@ -531,11 +566,48 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			if (captured?.destination !== 'kometa') {
 				throw new Error('Kometa operation was not prepared');
 			}
-			const tmdbId = operation.target.tmdbId;
-			if (!tmdbId) throw new TypeError('Kometa operation is missing a TMDB id');
-			const current = readKometaSlot(raw ?? '', tmdbId, operation.slot);
+			const kometaDestination = typedKometaDestination(operation);
+			if (captured.kometaDestination.key !== kometaDestination.key) {
+				throw new Error('Frozen Kometa destination identity changed before the artwork write');
+			}
+			if (kometaFileFingerprint(raw) !== captured.fileFingerprint) {
+				throw new Error('Frozen Kometa metadata file changed before the artwork write');
+			}
+			const current = readKometaSlot(
+				raw ?? '',
+				kometaYamlMappingKey(kometaDestination),
+				operation.slot
+			);
 			if (kometaSlotFingerprint(current) !== kometaSlotFingerprint(captured.beforeValue)) {
 				throw new Error('Frozen Kometa destination changed before the artwork write');
+			}
+		}
+	}
+
+	function assertKometaGuardFresh(
+		operations: ApplyPlanOperation[],
+		guard: { migrationRequired: boolean; fingerprint: string }
+	): void {
+		if (guard.migrationRequired) {
+			throw new Error('Kometa legacy layout requires migration before export');
+		}
+		for (const operation of operations) {
+			const captured = prepared.get(operation.id);
+			if (captured?.destination !== 'kometa') {
+				throw new Error('Kometa operation was not prepared');
+			}
+			const destination = typedKometaDestination(operation);
+			const typedDestinationFingerprint = hashCanonicalJson({
+				filePath: join(options.kometaAssetsDirectory, destination.filename),
+				destination,
+				fileFingerprint: captured.fileFingerprint
+			});
+			const currentDestinationFingerprint = hashCanonicalJson({
+				typedDestinationFingerprint,
+				collisionGuardFingerprint: guard.fingerprint
+			});
+			if (operation.current.destinationFingerprint !== currentDestinationFingerprint) {
+				throw new Error('Frozen Kometa collision guard changed before the artwork write');
 			}
 		}
 	}
@@ -557,7 +629,14 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		}
 	}
 
-	return { prepareOperation, executeServerOperation, recordOutcome, assertKometaFresh, finalize };
+	return {
+		prepareOperation,
+		executeServerOperation,
+		recordOutcome,
+		assertKometaFresh,
+		assertKometaGuardFresh,
+		finalize
+	};
 }
 
 export type ArtworkApplyCoordinator = ReturnType<typeof createArtworkApplyCoordinator>;
