@@ -19,10 +19,10 @@ Tailwind v4 (`@theme` tokens + `@layer components` in `src/app.css`), Paraglide 
   instead of every intermediate commit. Keep no `type: description` lines in a PR body;
   release-please reads them as extra changelog entries.
 - **Release notes are curated, not generated** — release-please owns the version, tag, and
-  raw ledger; the `release-notes` skill rewrites that into user-facing notes in both
-  `CHANGELOG.md` and the release PR body _before_ the release PR merges. Run it after the
-  last merge — release-please force-pushes the release branch on every push to `main`.
-- **No Claude trailers** in commits (no `Co-Authored-By: Claude`, no `Claude-Session:`).
+  raw ledger; `.claude/skills/release-notes/SKILL.md` documents how that becomes user-facing
+  notes in both `CHANGELOG.md` and the release PR body *before* the release PR merges. Run it
+  after the last merge — release-please force-pushes the release branch on every push to `main`.
+- **No Codex trailers** in commits (no `Co-Authored-By: Codex`, no `Codex-Session:`).
   Commits are authored under the maintainer's git identity.
 - **Quality gates before a PR is ready:** `bun run check` (0 errors), `bun run test`,
   `bun run build`, `bun run lint`. `check` compiles Paraglide first; the generated
@@ -32,7 +32,7 @@ Tailwind v4 (`@theme` tokens + `@layer components` in `src/app.css`), Paraglide 
 - **Before push:** `bun run fallow` — apply only unambiguous dead-code fixes.
 - **Signed commits required on `main`** — ruleset rejects unsigned; rebase-sign
   contributor branches, verify `git log --format=%G?` = `G`.
-- **AGENTS.md mirrors this file** — update both together (it already drifted once).
+- **This file mirrors CLAUDE.md** — update both together (it already drifted once).
 - **i18n:** add keys to every `messages/*.json` catalog; keep the 6 languages at parity.
 - **Tests stay `$env`-free:** extract pure functions into their own modules and test those.
 
