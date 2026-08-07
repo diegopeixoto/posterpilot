@@ -60,6 +60,7 @@ import {
 	listPosterMatchEligibleItems
 } from './queries';
 import { queryReviewInbox } from './review/query';
+import { resolveStagedRootArtworkSource } from './collections/staged-artwork-source';
 
 let itemA = 0;
 let terminalJobA = 0;
@@ -424,6 +425,196 @@ describe('server-scoped queries', () => {
 					selectedPosterCandidateId: null
 				})
 				.where(eq(mediaItems.id, itemA));
+		}
+	});
+
+	it('uses only proven staged candidates for collection preview sources, including inactive TMDB rows', async () => {
+		const ownCandidates = await db
+			.select()
+			.from(posterCandidates)
+			.where(eq(posterCandidates.mediaItemId, itemA));
+		const ownTmdb = ownCandidates.find((candidate) => candidate.provider === 'tmdb')!;
+		const [otherItem] = await db
+			.insert(mediaItems)
+			.values({
+				serverInstanceId: 'server-a',
+				ratingKey: 'collection-preview-other',
+				sectionKey: 'movies',
+				type: 'movie',
+				title: 'Other collection member'
+			})
+			.returning({ id: mediaItems.id });
+		const [crossItemCandidate] = await db
+			.insert(posterCandidates)
+			.values({
+				serverInstanceId: 'server-a',
+				mediaItemId: otherItem.id,
+				setId: 'cross-item',
+				provider: 'tmdb',
+				url: ownTmdb.url,
+				previewUrl: 'https://images.example.test/w500/cross-item.jpg',
+				kind: 'poster',
+				active: false
+			})
+			.returning({ id: posterCandidates.id });
+		const [wrongSlotCandidate] = await db
+			.insert(posterCandidates)
+			.values({
+				serverInstanceId: 'server-a',
+				mediaItemId: itemA,
+				setId: 'wrong-slot',
+				provider: 'tmdb',
+				url: ownTmdb.url,
+				previewUrl: 'https://images.example.test/w500/wrong-slot.jpg',
+				kind: 'poster',
+				season: 1,
+				active: false
+			})
+			.returning({ id: posterCandidates.id });
+		const source = async () => {
+			const item = await getMediaItem(itemA, 'server-a');
+			return resolveStagedRootArtworkSource(db, item!, 'poster');
+		};
+
+		try {
+			await db
+				.update(posterCandidates)
+				.set({ active: false })
+				.where(eq(posterCandidates.id, ownTmdb.id));
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterUrl: ownTmdb.url,
+					selectedPosterCandidateId: ownTmdb.id,
+					selectedPosterProvider: 'tmdb'
+				})
+				.where(eq(mediaItems.id, itemA));
+			await expect(source()).resolves.toBe(ownTmdb.previewUrl);
+
+			// Legacy provider provenance can recover a matching preview without an id.
+			await db
+				.update(mediaItems)
+				.set({ selectedPosterCandidateId: null })
+				.where(eq(mediaItems.id, itemA));
+			await expect(source()).resolves.toBe(ownTmdb.previewUrl);
+
+			// An explicit custom selection never borrows a coincident candidate preview.
+			await db
+				.update(mediaItems)
+				.set({ selectedPosterProvider: 'custom' })
+				.where(eq(mediaItems.id, itemA));
+			await expect(source()).resolves.toBe(ownTmdb.url);
+
+			for (const candidateId of [crossItemCandidate.id, wrongSlotCandidate.id, 999_999]) {
+				await db
+					.update(mediaItems)
+					.set({ selectedPosterCandidateId: candidateId, selectedPosterProvider: 'tmdb' })
+					.where(eq(mediaItems.id, itemA));
+				await expect(source()).resolves.toBe(ownTmdb.url);
+			}
+		} finally {
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterUrl: 'https://provider.invalid/staged?secret=value',
+					selectedPosterCandidateId: null,
+					selectedPosterProvider: null
+				})
+				.where(eq(mediaItems.id, itemA));
+			await db
+				.update(posterCandidates)
+				.set({ active: true })
+				.where(eq(posterCandidates.id, ownTmdb.id));
+			await db.delete(posterCandidates).where(eq(posterCandidates.id, wrongSlotCandidate.id));
+			await db.delete(mediaItems).where(eq(mediaItems.id, otherItem.id));
+		}
+	});
+
+	it('hydrates a selected inactive candidate for review without exposing inactive inventory', async () => {
+		const ownCandidates = await db
+			.select()
+			.from(posterCandidates)
+			.where(eq(posterCandidates.mediaItemId, itemA));
+		const ownTmdb = ownCandidates.find((candidate) => candidate.provider === 'tmdb')!;
+		const activeFallback = ownCandidates.find((candidate) => candidate.provider === 'fanarttv')!;
+		const [otherItem] = await db
+			.insert(mediaItems)
+			.values({
+				serverInstanceId: 'server-a',
+				ratingKey: 'review-preview-other',
+				sectionKey: 'movies',
+				type: 'movie',
+				title: 'Review preview other'
+			})
+			.returning({ id: mediaItems.id });
+		const [crossItemCandidate] = await db
+			.insert(posterCandidates)
+			.values({
+				serverInstanceId: 'server-a',
+				mediaItemId: otherItem.id,
+				setId: 'review-cross-item',
+				provider: 'tmdb',
+				url: ownTmdb.url,
+				previewUrl: 'https://images.example.test/w500/review-cross-item.jpg',
+				kind: 'poster',
+				active: false
+			})
+			.returning({ id: posterCandidates.id });
+		const reviewEntry = async () =>
+			(
+				await queryReviewInbox({ serverInstanceId: 'server-a' }, { limit: 100, offset: 0 })
+			).items.find((entry) => entry.item.id === itemA)!;
+
+		try {
+			await db
+				.update(posterCandidates)
+				.set({ active: false })
+				.where(eq(posterCandidates.id, ownTmdb.id));
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterUrl: ownTmdb.url,
+					selectedPosterCandidateId: ownTmdb.id,
+					selectedPosterProvider: 'tmdb'
+				})
+				.where(eq(mediaItems.id, itemA));
+			await expect(reviewEntry()).resolves.toMatchObject({
+				item: { selectedPosterPreviewUrl: ownTmdb.previewUrl },
+				suggestion: { poster: { id: activeFallback.id } }
+			});
+
+			await db
+				.update(mediaItems)
+				.set({ selectedPosterCandidateId: null, selectedPosterProvider: 'custom' })
+				.where(eq(mediaItems.id, itemA));
+			await expect(reviewEntry()).resolves.toMatchObject({
+				item: { selectedPosterPreviewUrl: ownTmdb.url },
+				suggestion: { poster: { id: activeFallback.id } }
+			});
+
+			for (const candidateId of [crossItemCandidate.id, 999_999]) {
+				await db
+					.update(mediaItems)
+					.set({ selectedPosterCandidateId: candidateId, selectedPosterProvider: 'tmdb' })
+					.where(eq(mediaItems.id, itemA));
+				await expect(reviewEntry()).resolves.toMatchObject({
+					item: { selectedPosterPreviewUrl: ownTmdb.url }
+				});
+			}
+		} finally {
+			await db
+				.update(mediaItems)
+				.set({
+					selectedPosterUrl: 'https://provider.invalid/staged?secret=value',
+					selectedPosterCandidateId: null,
+					selectedPosterProvider: null
+				})
+				.where(eq(mediaItems.id, itemA));
+			await db
+				.update(posterCandidates)
+				.set({ active: true })
+				.where(eq(posterCandidates.id, ownTmdb.id));
+			await db.delete(mediaItems).where(eq(mediaItems.id, otherItem.id));
 		}
 	});
 
