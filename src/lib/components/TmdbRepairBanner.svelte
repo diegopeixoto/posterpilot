@@ -4,6 +4,7 @@
 	import {
 		createSingleFlightTmdbRepairRefresh,
 		isActiveTmdbRepairJob,
+		observeTmdbRepairVisibility,
 		tmdbRepairPollInterval
 	} from './tmdb-repair-polling';
 
@@ -33,15 +34,15 @@
 
 	// Durable database state remains authoritative. Poll only while a repair job is active;
 	// an idle warning can otherwise live for days and must not keep invalidating every root
-	// load in every open tab. A one-shot focus refresh still picks up work done elsewhere.
+	// load in every open tab. A one-shot hidden-to-visible refresh still picks up work done
+	// elsewhere while the tab was idle.
 	$effect(() => {
-		if (repair.pendingCount === 0) return;
-		const refreshOnFocus = () => void refresh();
-		window.addEventListener('focus', refreshOnFocus);
+		if (repair.pendingCount === 0 || typeof document === 'undefined') return;
+		const stopVisibilityRefresh = observeTmdbRepairVisibility(document, refresh);
 		const interval = tmdbRepairPollInterval(repair.pendingCount, repair.job?.status);
 		const timer = interval === null ? null : setInterval(() => void refresh(), interval);
 		return () => {
-			window.removeEventListener('focus', refreshOnFocus);
+			stopVisibilityRefresh();
 			if (timer !== null) clearInterval(timer);
 		};
 	});
