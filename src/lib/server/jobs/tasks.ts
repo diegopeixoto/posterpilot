@@ -31,6 +31,7 @@ import {
 	type TmdbIdentityGuard
 } from '$lib/server/tmdb/repair';
 import { requireScopedMediaItemsById } from './scoped-item-query';
+import { requireScopedDiscoverItemsById } from './discover-scope';
 
 const collectionRepository = createCollectionRepository(db);
 const observeFullRescanArtwork = createDatabaseFullRescanArtworkObserver(db);
@@ -609,23 +610,10 @@ export async function runDiscoverJob(
 	const config = await resolveConfig();
 	const serverInstanceId = payload.serverInstanceId;
 	// Ignored items are excluded from discovery regardless of how they're selected.
-	const requestedIds = payload.itemIds
-		? [...new Set(payload.itemIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
-		: [];
+	const requestedIds = payload.itemIds ? [...new Set(payload.itemIds)] : [];
 	const libraryScopes = options.libraryScopes ? [...new Set(options.libraryScopes)] : null;
 	const items = requestedIds.length
-		? await db
-				.select()
-				.from(mediaItems)
-				.where(
-					and(
-						eq(mediaItems.serverInstanceId, serverInstanceId),
-						inArray(mediaItems.id, requestedIds),
-						libraryScopes ? inArray(mediaItems.sectionKey, libraryScopes) : undefined,
-						isNull(mediaItems.sourceRemovedAt),
-						eq(mediaItems.ignored, false)
-					)
-				)
+		? await requireScopedDiscoverItemsById(db, serverInstanceId, requestedIds, libraryScopes)
 		: await db
 				.select()
 				.from(mediaItems)
@@ -638,10 +626,6 @@ export async function runDiscoverJob(
 						eq(mediaItems.ignored, false)
 					)
 				);
-	if (requestedIds.length && items.length !== requestedIds.length) {
-		throw new Error('job_item_scope_mismatch');
-	}
-
 	await ctx.setPhase('discovery');
 	await ctx.setTotal(items.length);
 	await logEvent('info', 'discover', 'Discovery started', {

@@ -1,4 +1,3 @@
-import { inArray } from 'drizzle-orm';
 import { env } from '$env/dynamic/private';
 import { createArtworkApplyCoordinator } from '$lib/server/artwork-revisions/apply-coordinator';
 import { createArtworkRevisionLedger } from '$lib/server/artwork-revisions/ledger';
@@ -9,7 +8,7 @@ import {
 import { createArtworkSnapshotRepository } from '$lib/server/artwork-revisions/snapshots';
 import { db } from '$lib/server/db';
 import { assertCollectionApplyContextFresh } from '$lib/server/collections/apply-scope';
-import { appliedPosters, mediaItems } from '$lib/server/db/schema';
+import { appliedPosters } from '$lib/server/db/schema';
 import { resolveDataPaths } from '$lib/server/data-paths';
 import { resolveConfig } from '$lib/server/config';
 import { writeKometaYaml } from '$lib/server/kometa/yaml';
@@ -39,6 +38,7 @@ import {
 	type ApplyServerRegistry
 } from './apply-server-registry';
 import { operationPlanStore } from './operation-plan-store';
+import { resolveScopedApplyTargets } from './apply-targets';
 
 const databaseServerRegistry = createDatabaseApplyServerRegistry();
 const databaseDestinationResolver = createApplyDestinationResolver({
@@ -55,33 +55,11 @@ export async function activeApplyServerInstanceId(): Promise<string> {
 	return active.id;
 }
 
-/** Materialize ids into explicit scoped planner refs without silently dropping rows. */
 export async function resolveDatabaseApplyTargets(
 	itemIds: number[],
 	expectedServerInstanceId: string
 ): Promise<ApplyItemRef[]> {
-	if (
-		itemIds.length === 0 ||
-		itemIds.some((id) => !Number.isInteger(id) || id <= 0) ||
-		new Set(itemIds).size !== itemIds.length
-	) {
-		throw new ApplyPlannerError(
-			'invalid_request',
-			'Apply item ids must be unique positive integers'
-		);
-	}
-	const rows = await db
-		.select({ id: mediaItems.id, serverInstanceId: mediaItems.serverInstanceId })
-		.from(mediaItems)
-		.where(inArray(mediaItems.id, itemIds));
-	const byId = new Map(rows.map((row) => [row.id, row]));
-	return itemIds.map((id) => {
-		const row = byId.get(id);
-		if (!row || row.serverInstanceId !== expectedServerInstanceId) {
-			throw new ApplyPlannerError('scope_mismatch', 'Apply item does not belong to active scope');
-		}
-		return { serverInstanceId: row.serverInstanceId, mediaItemId: row.id };
-	});
+	return resolveScopedApplyTargets(db, itemIds, expectedServerInstanceId);
 }
 
 export async function previewDatabaseArtworkApply(request: PlanArtworkApplyRequest) {

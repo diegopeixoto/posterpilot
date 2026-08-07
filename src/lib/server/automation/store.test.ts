@@ -189,6 +189,61 @@ describe('automation store', () => {
 		).rejects.toMatchObject({ code: 'event_item_scope_mismatch' });
 	});
 
+	it('validates a large event item scope in bounded batches before freezing it', async () => {
+		const repository = store();
+		const created = await repository.create(
+			definition({ timing: { triggerType: 'event', eventType: 'new_items' } })
+		);
+		const values = Array.from({ length: 517 }, (_, index) => ({
+			serverInstanceId: 'server-a',
+			ratingKey: `event-large-${index + 1}`,
+			sectionKey: 'movies',
+			type: 'movie' as const,
+			title: `Event large ${index + 1}`
+		}));
+		const itemIds: number[] = [];
+		for (let offset = 0; offset < values.length; offset += 80) {
+			const inserted = await database
+				.insert(mediaItems)
+				.values(values.slice(offset, offset + 80))
+				.returning({ id: mediaItems.id });
+			itemIds.push(...inserted.map((item) => item.id));
+		}
+
+		const queries: Array<{ sql: string; params: unknown[] }> = [];
+		const loggedDatabase = drizzle(client, {
+			schema,
+			logger: {
+				logQuery(sql, params) {
+					queries.push({ sql, params });
+				}
+			}
+		});
+		const loggedRepository = createAutomationStore(loggedDatabase, {
+			clock: () => new Date(now),
+			idFactory: () => `automation-${++idSequence}`
+		});
+
+		await loggedRepository.materializeEventOccurrence({
+			scheduleId: created.id,
+			serverInstanceId: 'server-a',
+			eventType: 'new_items',
+			eventIdentity: 'sync:large:new-items',
+			occurredAt: new Date('2026-07-10T12:05:00.000Z'),
+			itemIds: [...itemIds, itemIds[0]]
+		});
+
+		const itemScopeQueries = queries.filter(
+			(query) =>
+				query.sql.includes('from "media_items"') && query.sql.includes('"media_items"."id" in')
+		);
+		expect(itemScopeQueries.map((query) => query.params.length)).toEqual([501, 18]);
+		const [occurrence] = await database
+			.select({ payload: automationOccurrences.payload })
+			.from(automationOccurrences);
+		expect(occurrence.payload).toMatchObject({ itemIds });
+	});
+
 	it('authenticates hashed webhook tokens and coalesces duplicate deliveries', async () => {
 		const repository = store();
 		const created = await repository.create(

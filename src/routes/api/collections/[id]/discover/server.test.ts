@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
 	getActiveServerInstance: vi.fn(),
 	resolveConfig: vi.fn(),
 	logEvent: vi.fn(),
-	dbWhere: vi.fn()
+	requireScopedMediaItemsById: vi.fn()
 }));
 
 vi.mock('$lib/server/posters/service', () => ({ discoverForItem: h.discoverForItem }));
@@ -19,16 +19,11 @@ vi.mock('$lib/server/server-instances', () => ({
 }));
 vi.mock('$lib/server/config', () => ({ resolveConfig: h.resolveConfig }));
 vi.mock('$lib/server/events', () => ({ logEvent: h.logEvent }));
-vi.mock('$lib/server/db/schema', () => ({ mediaItems: {}, posterCandidates: {}, settings: {} }));
-vi.mock('$lib/server/db', () => ({
-	db: {
-		select: () => ({
-			from: () => ({
-				where: h.dbWhere
-			})
-		})
-	}
+vi.mock('$lib/server/media-items/scoped-query', () => ({
+	requireScopedMediaItemsById: h.requireScopedMediaItemsById
 }));
+vi.mock('$lib/server/db/schema', () => ({ posterCandidates: {}, settings: {} }));
+vi.mock('$lib/server/db', () => ({ db: {} }));
 
 import { POST } from './+server';
 
@@ -51,7 +46,7 @@ describe('POST /api/collections/[id]/discover', () => {
 			localMembers: [{ id: 1 }, { id: 2 }]
 		});
 		h.resolveConfig.mockResolvedValue({});
-		h.dbWhere.mockResolvedValue([
+		h.requireScopedMediaItemsById.mockResolvedValue([
 			{ id: 1, title: 'Batman Begins' },
 			{ id: 2, title: 'The Dark Knight' }
 		]);
@@ -69,6 +64,27 @@ describe('POST /api/collections/[id]/discover', () => {
 			{ forceRefresh: true, providers: ['theposterdb'] }
 		);
 		expect(await response.json()).toEqual({ total: 2, succeeded: 2, failed: 0 });
+	});
+
+	it('delegates a 1,100-member collection to the bounded scoped loader', async () => {
+		const memberIds = Array.from({ length: 1_100 }, (_, index) => index + 1);
+		h.getCollection.mockResolvedValue({
+			localMembers: memberIds.map((id) => ({ id }))
+		});
+		h.requireScopedMediaItemsById.mockResolvedValue(
+			memberIds.map((id) => ({ id, title: `Member ${id}` }))
+		);
+
+		const response = await POST(request({ providers: ['mediux'] }));
+
+		expect(h.requireScopedMediaItemsById).toHaveBeenCalledOnce();
+		expect(h.requireScopedMediaItemsById).toHaveBeenCalledWith(
+			expect.anything(),
+			'server-a',
+			memberIds
+		);
+		expect(h.discoverForItem).toHaveBeenCalledTimes(1_100);
+		expect(await response.json()).toEqual({ total: 1_100, succeeded: 1_100, failed: 0 });
 	});
 
 	it('spans every enabled provider when the body names none', async () => {
@@ -105,6 +121,7 @@ describe('POST /api/collections/[id]/discover', () => {
 	it('skips the discovery loop when there are no local members', async () => {
 		h.getCollection.mockResolvedValue({ localMembers: [] });
 		const response = await POST(request({}));
+		expect(h.requireScopedMediaItemsById).not.toHaveBeenCalled();
 		expect(h.discoverForItem).not.toHaveBeenCalled();
 		expect(await response.json()).toEqual({ total: 0, succeeded: 0, failed: 0 });
 	});

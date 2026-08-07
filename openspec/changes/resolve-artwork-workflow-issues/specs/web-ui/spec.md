@@ -34,6 +34,16 @@ The application shell SHALL show a localized, non-dismissible normalization bann
 - **WHEN** the active server has no eligible legacy mismatch, including on a fresh installation
 - **THEN** the normalization banner is absent
 
+#### Scenario: Repair progress refresh is bounded
+
+- **WHEN** pending mismatches remain but no matching repair job is active
+- **THEN** the shell performs no periodic route invalidation solely for the banner
+
+#### Scenario: An idle tab becomes visible again
+
+- **WHEN** the document returns to the visible state after being hidden while normalization state may have changed elsewhere
+- **THEN** the shell performs one coalesced refresh of durable repair state without starting idle polling
+
 ### Requirement: TMDB artwork language controls
 
 The item detail view SHALL filter TMDB artwork using the global artwork-language preference and SHALL provide an item-local control to switch temporarily between preferred-language results and all languages. Language eligibility SHALL be evaluated before batching, counts, visible suggestions, and progressive disclosure.

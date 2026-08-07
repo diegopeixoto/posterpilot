@@ -9,6 +9,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type { TmdbCastMember } from '$lib/server/types';
+import { pendingTmdbTypeMismatchIndexCondition } from './tmdb-repair-condition';
 
 /** A named Plex, Jellyfin, or Emby connection. Credentials are encrypted before storage. */
 export const serverInstances = sqliteTable(
@@ -152,13 +153,9 @@ export const mediaItems = sqliteTable(
 	(t) => [
 		uniqueIndex('media_items_server_rating_key_unique').on(t.serverInstanceId, t.ratingKey),
 		index('media_items_server_section_idx').on(t.serverInstanceId, t.sectionKey),
-		index('media_items_tmdb_repair_idx').on(
-			t.serverInstanceId,
-			t.manualMatchPinned,
-			t.sourceRemovedAt,
-			t.type,
-			t.mediaType
-		),
+		index('media_items_tmdb_repair_idx')
+			.on(t.serverInstanceId)
+			.where(pendingTmdbTypeMismatchIndexCondition(t)),
 		index('media_items_server_review_idx').on(
 			t.serverInstanceId,
 			t.ignored,

@@ -3636,13 +3636,10 @@
         "media_items_tmdb_repair_idx": {
           "name": "media_items_tmdb_repair_idx",
           "columns": [
-            "server_instance_id",
-            "manual_match_pinned",
-            "source_removed_at",
-            "type",
-            "media_type"
+            "server_instance_id"
           ],
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"media_items\".\"manual_match_pinned\" = 0 and \"media_items\".\"source_removed_at\" is null and ((\"media_items\".\"type\" = 'show' and \"media_items\".\"media_type\" = 'movie') or (\"media_items\".\"type\" = 'movie' and \"media_items\".\"media_type\" = 'tv'))"
         },
         "media_items_server_review_idx": {
           "name": "media_items_server_review_idx",
