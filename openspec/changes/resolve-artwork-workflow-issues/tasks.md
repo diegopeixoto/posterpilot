@@ -21,14 +21,14 @@
 
 ## 3. Canonical Artwork Assets and Original-Resolution Application
 
-- [ ] 3.1 Add backward-compatible candidate preview-URL and language-provenance schema fields with migration and legacy defaults
-- [ ] 3.2 Extend provider candidate types and persistence to retain canonical URL, preview URL, provider asset ID, dimensions, language, and provenance state
-- [ ] 3.3 Implement a pure idempotent TMDB URL canonicalizer restricted to trusted HTTPS host/path patterns with comprehensive negative cases
-- [ ] 3.4 Canonicalize legacy TMDB selections before operation plan digest, destination fingerprint, preview, and revision creation
-- [ ] 3.5 Make candidate grids/thumb cache use preview URLs while direct server and Kometa execution use the frozen canonical destination URL
-- [ ] 3.6 Add streamed remote-artwork download limits, timeout/content-type enforcement, and redirect target revalidation
-- [ ] 3.7 Test new and legacy candidates across preview, direct apply, Kometa export, verification, history, undo, and non-TMDB/custom URL preservation
-- [ ] 3.8 Run check/test/build/lint and direct-apply E2E coverage for the original-asset phase
+- [x] 3.1 Add backward-compatible candidate preview-URL and language-provenance schema fields with migration and legacy defaults
+- [x] 3.2 Extend provider candidate types and persistence to retain canonical URL, preview URL, provider asset ID, dimensions, language, and provenance state
+- [x] 3.3 Implement a pure idempotent TMDB URL canonicalizer restricted to trusted HTTPS host/path patterns with comprehensive negative cases
+- [x] 3.4 Canonicalize legacy TMDB selections before operation plan digest, destination fingerprint, preview, and revision creation
+- [x] 3.5 Make candidate grids/thumb cache use preview URLs while direct server and Kometa execution use the frozen canonical destination URL
+- [x] 3.6 Add streamed remote-artwork download limits, timeout/content-type enforcement, and redirect target revalidation
+- [x] 3.7 Test new and legacy candidates across preview, direct apply, Kometa export, verification, history, undo, and non-TMDB/custom URL preservation
+- [x] 3.8 Run check/test/build/lint and direct-apply E2E coverage for the original-asset phase
 
 ## 4. Typed Kometa Destinations and Split Files
 
