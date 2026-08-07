@@ -18,9 +18,9 @@
 - [x] 2.6 Build the localized non-dismissible shell banner with pending, running/retrying, incomplete, retry, job-detail, server-switch, and completed behavior
 - [x] 2.7 Add integration/E2E coverage for multi-server isolation, restart durability, partial failure, cancellation, manual pinning during repair, and zero-count dismissal
 - [x] 2.8 Run check/test/build/lint and relevant Playwright flows for the TMDB hotfix phase
-- [ ] 2.9 Replace the broad TMDB-repair covering index with a predicate-matching partial index and verify migration/query-plan behavior
-- [ ] 2.10 Reuse bounded server-scoped item lookup across retryable sync, discovery, apply, and automation paths with large-scope regression tests
-- [ ] 2.11 Reconcile repair state when a hidden document becomes visible, then rerun Phase 2 gates and independent review
+- [x] 2.9 Replace the broad TMDB-repair covering index with a predicate-matching partial index and verify migration/query-plan behavior
+- [x] 2.10 Reuse bounded server-scoped item lookup across retryable sync, discovery, apply, and automation paths with large-scope regression tests
+- [x] 2.11 Reconcile repair state when a hidden document becomes visible, then rerun Phase 2 gates and independent review
 
 ## 3. Canonical Artwork Assets and Original-Resolution Application
 
