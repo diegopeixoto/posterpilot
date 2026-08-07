@@ -113,37 +113,26 @@ const isolatedPosterPilotEnvironment = Object.fromEntries(
 		'BODY_SIZE_LIMIT'
 	].map((key) => [key, ''])
 );
-const application = spawn(
-	'bun',
-	[
-		'run',
-		'dev',
-		'--host',
-		'127.0.0.1',
-		'--port',
-		String(appPort)
-	],
-	{
-		cwd: repositoryRoot,
-		stdio: 'inherit',
-		env: {
-			...inheritedEnvironment,
-			...isolatedPosterPilotEnvironment,
-			DATABASE_URL: `file:${databaseFile}`,
-			APP_SECRET: 'posterpilot-local-e2e-secret',
-			// Keep language genuinely unset so the first wizard step is exercised;
-			// Playwright's en-US browser locale still makes selectors deterministic.
-			APP_LANGUAGE: '',
-			// `vite` follows its Node shebang, so preload the deterministic artwork
-			// transport in that child process rather than only in Bun's script runner.
-			NODE_OPTIONS: `--import=${fetchBridgeFile}`,
-			POSTERPILOT_E2E_ASSET_ORIGIN: runtime.fakeJellyfinUrl,
-			LOG_DIR: join(dataDirectory, 'logs'),
-			EVENT_RETENTION: '500',
-			NO_COLOR: '1'
-		}
+const application = spawn('bun', ['run', 'dev', '--host', '127.0.0.1', '--port', String(appPort)], {
+	cwd: repositoryRoot,
+	stdio: 'inherit',
+	env: {
+		...inheritedEnvironment,
+		...isolatedPosterPilotEnvironment,
+		DATABASE_URL: `file:${databaseFile}`,
+		APP_SECRET: 'posterpilot-local-e2e-secret',
+		// Keep language genuinely unset so the first wizard step is exercised;
+		// Playwright's en-US browser locale still makes selectors deterministic.
+		APP_LANGUAGE: '',
+		// `vite` follows its Node shebang, so preload the deterministic artwork
+		// transport in that child process rather than only in Bun's script runner.
+		NODE_OPTIONS: `--import=${fetchBridgeFile}`,
+		POSTERPILOT_E2E_ASSET_ORIGIN: runtime.fakeJellyfinUrl,
+		LOG_DIR: join(dataDirectory, 'logs'),
+		EVENT_RETENTION: '500',
+		NO_COLOR: '1'
 	}
-);
+});
 
 let stopping = false;
 async function stopApplication() {
