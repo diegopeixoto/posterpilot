@@ -14,6 +14,7 @@ import {
 	type ApplyPlannerItemData,
 	type ResolveApplyDestinationsInput
 } from './apply-planner';
+import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
 
 export type ApplyPlanValidationErrorCode = 'invalid_plan' | 'plan_stale' | 'plan_scope_mismatch';
 
@@ -373,7 +374,8 @@ function currentSelection(
 			(row) =>
 				row.candidateId === planned.candidateId &&
 				row.active &&
-				row.url === planned.url &&
+				row.provider === planned.provider &&
+				equivalentProviderArtworkUrls(row.url, planned.url, planned.provider) &&
 				applySlotKey(row.slot) === applySlotKey(planned.slot)
 		);
 		return candidate
@@ -381,10 +383,17 @@ function currentSelection(
 			: null;
 	}
 
-	const stored = data.storedSelections.find(
-		(row) => row.url === planned.url && applySlotKey(row.slot) === applySlotKey(planned.slot)
-	);
-	return stored ? freezeApplyStoredSelection(stored, data) : null;
+	for (const stored of data.storedSelections) {
+		if (applySlotKey(stored.slot) !== applySlotKey(planned.slot)) continue;
+		const frozen = freezeApplyStoredSelection(stored, data);
+		if (
+			frozen.provider === planned.provider &&
+			equivalentProviderArtworkUrls(frozen.url, planned.url, planned.provider)
+		) {
+			return frozen;
+		}
+	}
+	return null;
 }
 
 /**

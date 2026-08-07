@@ -24,6 +24,7 @@ import type {
 	AutomaticSelectionInputs
 } from '$lib/server/posters/automatic-selection';
 import type { ScoreWeights } from '$lib/server/posters/score';
+import { canonicalizeProviderArtworkUrl } from '$lib/server/tmdb/artwork-url';
 
 export type ApplyMethodInput = ApplyPlanMethod | 'plex';
 
@@ -355,7 +356,7 @@ function candidateComparable(candidate: PlannerCandidateSnapshot) {
 		setAuthor: candidate.setAuthor,
 		designFamily: candidate.designFamily,
 		language: candidate.language,
-		url: candidate.url,
+		url: canonicalizeProviderArtworkUrl(candidate.url, candidate.provider),
 		slot: candidate.slot,
 		resolvedTmdbId: candidate.resolvedTmdbId,
 		resolvedMediaType: candidate.resolvedMediaType,
@@ -398,6 +399,7 @@ export function freezeApplyCandidateSelection(
 	sourceItem: ApplyItemIdentity,
 	scoreOverride?: number | null
 ): FrozenArtworkSelection {
+	const url = canonicalizeProviderArtworkUrl(candidate.url, candidate.provider);
 	const selection = {
 		selectionSource,
 		sourceItem: {
@@ -406,7 +408,7 @@ export function freezeApplyCandidateSelection(
 		},
 		slot: candidate.slot,
 		candidateId: candidate.candidateId,
-		url: candidate.url,
+		url,
 		provider: candidate.provider,
 		providerAssetId: candidate.providerAssetId,
 		setId: candidate.setId,
@@ -428,7 +430,9 @@ export function freezeApplyStoredSelection(
 	stored: PlannerStoredSelection,
 	data: ApplyPlannerItemData
 ): FrozenArtworkSelection {
-	const matched =
+	// Resolve provenance against the exact persisted URL before canonicalizing it.
+	// This prevents a providerless/custom URL from becoming trusted based on shape alone.
+	const matchedById =
 		stored.candidateId === null
 			? null
 			: data.candidates.find(
@@ -437,8 +441,15 @@ export function freezeApplyStoredSelection(
 						candidate.url === stored.url &&
 						applySlotKey(candidate.slot) === applySlotKey(stored.slot)
 				);
+	const matched =
+		matchedById ??
+		data.candidates.find(
+			(candidate) =>
+				candidate.url === stored.url && applySlotKey(candidate.slot) === applySlotKey(stored.slot)
+		);
 	if (matched) return freezeApplyCandidateSelection(matched, 'stored', data.item.identity);
 
+	const url = canonicalizeProviderArtworkUrl(stored.url, stored.provider);
 	const selection = {
 		selectionSource: 'stored' as const,
 		sourceItem: {
@@ -447,7 +458,7 @@ export function freezeApplyStoredSelection(
 		},
 		slot: stored.slot,
 		candidateId: null,
-		url: stored.url,
+		url,
 		provider: stored.provider,
 		providerAssetId: null,
 		setId: stored.setId,

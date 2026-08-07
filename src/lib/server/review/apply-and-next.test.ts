@@ -25,7 +25,13 @@ const mediaItemId = 1;
 
 function operation(
 	id: string,
-	input: { kind?: string; season?: number | null; episode?: number | null; url?: string } = {}
+	input: {
+		kind?: string;
+		season?: number | null;
+		episode?: number | null;
+		url?: string;
+		provider?: string | null;
+	} = {}
 ) {
 	return {
 		id,
@@ -36,7 +42,10 @@ function operation(
 			season: input.season ?? null,
 			episode: input.episode ?? null
 		},
-		selection: { url: input.url ?? `https://art.example/${id}.jpg` }
+		selection: {
+			url: input.url ?? `https://art.example/${id}.jpg`,
+			provider: input.provider ?? null
+		}
 	};
 }
 
@@ -241,6 +250,78 @@ describe('Apply and next completion service', () => {
 		expect(item.selectedPosterUrl).toBe('https://art.example/newer.jpg');
 		expect(await database.select().from(childSelections)).toHaveLength(1);
 		expect(await database.select().from(reviewEvents)).toEqual([]);
+	});
+
+	it('accepts a legacy TMDB preview size as the frozen canonical selection', async () => {
+		const operations = [
+			operation('poster', {
+				url: 'https://image.tmdb.org/t/p/original/apply-next.jpg',
+				provider: 'tmdb'
+			})
+		];
+		await database
+			.update(mediaItems)
+			.set({ selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/apply-next.jpg' })
+			.where(eq(mediaItems.id, mediaItemId));
+		await database.insert(jobs).values({
+			id: 7,
+			serverInstanceId,
+			type: 'apply',
+			status: 'completed',
+			payload: job(operations).payload,
+			result: job(operations).result
+		});
+		await database.insert(jobItemOutcomes).values(
+			outcomes(operations).map((outcome) => ({
+				jobId: 7,
+				serverInstanceId,
+				mediaItemId,
+				status: outcome.status as 'success',
+				result: outcome.result
+			}))
+		);
+
+		await expect(
+			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
+		).resolves.toMatchObject({ state: 'completed' });
+		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
+		expect(item.selectedPosterUrl).toBeNull();
+	});
+
+	it('does not canonicalize a custom TMDB-shaped staging URL during completion', async () => {
+		const operations = [
+			operation('poster', {
+				url: 'https://image.tmdb.org/t/p/original/custom.jpg',
+				provider: 'custom'
+			})
+		];
+		await database
+			.update(mediaItems)
+			.set({ selectedPosterUrl: 'https://image.tmdb.org/t/p/w500/custom.jpg' })
+			.where(eq(mediaItems.id, mediaItemId));
+		await database.insert(jobs).values({
+			id: 7,
+			serverInstanceId,
+			type: 'apply',
+			status: 'completed',
+			payload: job(operations).payload,
+			result: job(operations).result
+		});
+		await database.insert(jobItemOutcomes).values(
+			outcomes(operations).map((outcome) => ({
+				jobId: 7,
+				serverInstanceId,
+				mediaItemId,
+				status: outcome.status as 'success',
+				result: outcome.result
+			}))
+		);
+
+		await expect(
+			createApplyAndNextCompletionService(database)({ serverInstanceId, mediaItemId, jobId: 7 })
+		).rejects.toMatchObject({ code: 'selection_changed' });
+		const [item] = await database.select().from(mediaItems).where(eq(mediaItems.id, mediaItemId));
+		expect(item.selectedPosterUrl).toBe('https://image.tmdb.org/t/p/w500/custom.jpg');
 	});
 
 	it('does not let an idempotent replay skip newly staged review work', async () => {

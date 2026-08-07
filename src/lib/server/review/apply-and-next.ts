@@ -9,6 +9,7 @@ import {
 	reviewEvents
 } from '$lib/server/db/schema';
 import { reviewStateExpression } from './state-sql';
+import { equivalentProviderArtworkUrls } from '$lib/server/tmdb/artwork-url';
 
 type Database = LibSQLDatabase<typeof schema>;
 
@@ -33,7 +34,7 @@ interface ApplyOperationProjection {
 	target: { serverInstanceId: string; mediaItemId: number };
 	destination: 'server' | 'kometa';
 	slot: { kind: string; season: number | null; episode: number | null };
-	selection: { url: string };
+	selection: { url: string; provider?: string | null };
 }
 
 interface ApplyJobProjection {
@@ -144,17 +145,48 @@ function slotKey(slot: ApplyOperationProjection['slot']): string {
 	return `${slot.kind}:${slot.season ?? 'root'}:${slot.episode ?? 'root'}`;
 }
 
-function frozenSelections(operations: ApplyOperationProjection[]): Map<string, string> {
-	const selections = new Map<string, string>();
+interface FrozenSelectionProjection {
+	url: string;
+	provider: string | null;
+}
+
+function sameFrozenSelection(
+	left: FrozenSelectionProjection,
+	right: FrozenSelectionProjection
+): boolean {
+	return (
+		left.provider === right.provider &&
+		equivalentProviderArtworkUrls(left.url, right.url, left.provider)
+	);
+}
+
+function frozenSelections(
+	operations: ApplyOperationProjection[]
+): Map<string, FrozenSelectionProjection> {
+	const selections = new Map<string, FrozenSelectionProjection>();
 	for (const operation of operations) {
 		const key = slotKey(operation.slot);
 		const prior = selections.get(key);
-		if (prior && prior !== operation.selection.url) {
+		const selection = {
+			url: operation.selection.url,
+			provider: operation.selection.provider ?? null
+		};
+		if (prior && !sameFrozenSelection(prior, selection)) {
 			throw new ApplyAndNextError('job_not_verified');
 		}
-		selections.set(key, operation.selection.url);
+		selections.set(key, selection);
 	}
 	return selections;
+}
+
+function stagedSelectionMatches(
+	stagedUrl: string | null,
+	planned: FrozenSelectionProjection | undefined
+): boolean {
+	if (!planned) return stagedUrl === null;
+	return (
+		stagedUrl !== null && equivalentProviderArtworkUrls(stagedUrl, planned.url, planned.provider)
+	);
 }
 
 /** Atomically complete review intent only while the exact applied staging is unchanged. */
@@ -260,16 +292,18 @@ export function createApplyAndNextCompletionService(
 					)
 				);
 
-			const expectedPoster = expected.get('poster:root:root') ?? null;
-			const expectedBackground = expected.get('background:root:root') ?? null;
+			const expectedPoster = expected.get('poster:root:root');
+			const expectedBackground = expected.get('background:root:root');
 			const expectedChildren = new Map(
 				[...expected].filter(([key]) => !key.endsWith(':root:root'))
 			);
 			if (
-				item.selectedPosterUrl !== expectedPoster ||
-				item.selectedBackgroundUrl !== expectedBackground ||
+				!stagedSelectionMatches(item.selectedPosterUrl, expectedPoster) ||
+				!stagedSelectionMatches(item.selectedBackgroundUrl, expectedBackground) ||
 				children.length !== expectedChildren.size ||
-				children.some((child) => expectedChildren.get(slotKey(child)) !== child.url)
+				children.some(
+					(child) => !stagedSelectionMatches(child.url, expectedChildren.get(slotKey(child)))
+				)
 			) {
 				throw new ApplyAndNextError('selection_changed');
 			}

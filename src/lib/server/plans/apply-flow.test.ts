@@ -6,7 +6,7 @@ import { DEFAULT_SCORE_WEIGHTS } from '$lib/server/posters/score';
 import { selectAutomaticArtwork } from '$lib/server/posters/automatic-selection';
 import { canonicalJsonDigest } from './canonical-json';
 import { confirmApplyPlan, exactApplyPreviewResponse } from './apply-api';
-import { executeFrozenApplyPlan } from './apply-executor';
+import { executeFrozenApplyPlan, type ApplyPlanExecutorDependencies } from './apply-executor';
 import {
 	applySlotKey,
 	type ApplyPlanDestination,
@@ -216,6 +216,10 @@ function setup() {
 describe('frozen apply flow', () => {
 	it('executes exactly the per-item/per-slot operations returned by preview', async () => {
 		const fixture = setup();
+		fixture.items[0].candidates[0].provider = 'tmdb';
+		fixture.items[0].candidates[0].url = 'https://image.tmdb.org/t/p/w500/flow-poster.jpg';
+		fixture.items[0].candidates[1].provider = 'tmdb';
+		fixture.items[0].candidates[1].url = 'https://image.tmdb.org/t/p/w1280/flow-background.jpg';
 		const preview = await fixture.planner({
 			context: { source: 'bulk', resultSetFingerprint: 'result-set-a' },
 			targets: [
@@ -251,7 +255,7 @@ describe('frozen apply flow', () => {
 
 		const applyPosterUrl = vi.fn(async () => undefined);
 		const applyBackgroundUrl = vi.fn(async () => undefined);
-		const writeKometa = vi.fn(async () => undefined);
+		const writeKometa = vi.fn<ApplyPlanExecutorDependencies['writeKometa']>(async () => undefined);
 		const result = await executeFrozenApplyPlan(queued!.planId, queued!.digest, queued!.plan, {
 			serverRegistry: {
 				resolve: async () => ({
@@ -287,6 +291,16 @@ describe('frozen apply flow', () => {
 		});
 
 		const planned = response.items.flatMap((item) => item.operations);
+		expect(
+			planned
+				.filter((operation) => operation.target.mediaItemId === 1)
+				.map((operation) => operation.selection.url)
+		).toEqual([
+			'https://image.tmdb.org/t/p/original/flow-background.jpg',
+			'https://image.tmdb.org/t/p/original/flow-poster.jpg',
+			'https://image.tmdb.org/t/p/original/flow-background.jpg',
+			'https://image.tmdb.org/t/p/original/flow-poster.jpg'
+		]);
 		const executed = result.items.flatMap((item) => item.operations);
 		expect(executed.map((row) => row.operationId)).toEqual(planned.map((row) => row.id));
 		expect(applyPosterUrl.mock.calls).toEqual(
@@ -304,6 +318,10 @@ describe('frozen apply flow', () => {
 				.map((operation) => [operation.targetId, operation.selection.url])
 		);
 		expect(writeKometa).toHaveBeenCalledTimes(2);
+		expect(writeKometa.mock.calls[0]?.[0][0]).toMatchObject({
+			posterUrl: 'https://image.tmdb.org/t/p/original/flow-poster.jpg',
+			backgroundUrl: 'https://image.tmdb.org/t/p/original/flow-background.jpg'
+		});
 		expect(result.summary).toMatchObject({ operationCount: 8, succeeded: 8, failed: 0 });
 	});
 
@@ -480,6 +498,64 @@ describe('frozen apply flow', () => {
 				}
 			)
 		).rejects.toMatchObject({ code: 'plan_stale' });
+	});
+
+	it('keeps a legacy TMDB stored selection fresh after freezing its canonical URL', async () => {
+		const fixture = setup();
+		const item = fixture.items[0];
+		item.candidates[0].provider = 'tmdb';
+		item.candidates[0].url = 'https://image.tmdb.org/t/p/w500/fresh-poster.jpg';
+		item.storedSelections = [
+			{
+				slot: item.candidates[0].slot,
+				candidateId: null,
+				url: item.candidates[0].url,
+				provider: null,
+				setId: null,
+				setAuthor: null
+			}
+		];
+		const preview = await fixture.planner({
+			context: { source: 'single' },
+			targets: [{ serverInstanceId: 'server-a', mediaItemId: 1 }],
+			selectionMode: 'stored',
+			method: 'server'
+		});
+		expect(preview.payload.items[0].selections[0].url).toBe(
+			'https://image.tmdb.org/t/p/original/fresh-poster.jpg'
+		);
+		item.candidates[0].url = 'https://image.tmdb.org/t/p/w780/fresh-poster.jpg';
+		item.storedSelections[0].url = item.candidates[0].url;
+		const enqueue = vi.fn(async () => 99);
+
+		await expect(
+			confirmApplyPlan(
+				{
+					planId: preview.plan!.id,
+					digest: preview.plan!.digest,
+					serverInstanceId: 'server-a'
+				},
+				{
+					store: fixture.store,
+					loadItemData: fixture.loadItemData,
+					resolveDestinationSlots: fixture.resolveDestinationSlots,
+					enqueue
+				}
+			)
+		).resolves.toMatchObject({ jobId: 99 });
+		expect(enqueue).toHaveBeenCalledWith(
+			expect.objectContaining({
+				plan: expect.objectContaining({
+					items: [
+						expect.objectContaining({
+							selections: [
+								expect.objectContaining({ url: preview.payload.items[0].selections[0].url })
+							]
+						})
+					]
+				})
+			})
+		);
 	});
 
 	it('enforces server scope and rejects replay after the single consume', async () => {
