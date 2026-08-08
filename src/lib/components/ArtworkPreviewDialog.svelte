@@ -75,11 +75,23 @@
 		if (!artwork) return '';
 		const parts = [artwork.provider];
 		if (artwork.width && artwork.height) parts.push(`${artwork.width} × ${artwork.height}`);
-		// Only providers that report a language get a language line. Saying "no
-		// language tag" for MediUX would describe the source, not this artwork, on
-		// every single candidate it will ever return.
-		if (artwork.language) parts.push(artworkLanguageName(artwork.language));
-		else if (providerTagsArtworkLanguage(artwork.provider)) parts.push(m.item_preview_untagged());
+		// Only providers that report a language get a language line at all: saying
+		// "no language tag" for MediUX would describe the source, not this artwork,
+		// on every candidate it will ever return.
+		//
+		// Within those, provenance decides the wording. `untagged` is the provider
+		// stating the artwork is textless — useful. `unknown` is a row stored before
+		// provenance existed, which is missing data and says so, matching how the
+		// item page labels the same candidates.
+		if (artwork.languageProvenance === 'tagged' && artwork.language) {
+			parts.push(artworkLanguageName(artwork.language));
+		} else if (providerTagsArtworkLanguage(artwork.provider)) {
+			parts.push(
+				artwork.languageProvenance === 'untagged'
+					? m.item_preview_untagged()
+					: m.item_language_unverified()
+			);
+		}
 		return parts.join(' · ');
 	});
 
@@ -121,7 +133,11 @@
 			close();
 			return;
 		}
-		if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+		// Unmodified arrows only, matching `review-shortcuts`: Alt+Left and Alt+Right
+		// are browser back and forward, and swallowing them to change artwork would
+		// take away navigation the user expects to work everywhere.
+		const modified = event.altKey || event.ctrlKey || event.metaKey;
+		if (!modified && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
 			event.preventDefault();
 			void move(event.key === 'ArrowLeft' ? -1 : 1);
 			return;

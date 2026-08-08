@@ -28,6 +28,13 @@ export interface PreviewArtwork extends PreviewIdentity {
 	width: number | null;
 	height: number | null;
 	language: string | null;
+	/**
+	 * Carried because `language: null` alone is ambiguous: it covers both artwork
+	 * the provider explicitly marked as textless and rows stored before provenance
+	 * was recorded. Reporting the second as the first would present missing data
+	 * as a statement by the provider.
+	 */
+	languageProvenance: 'tagged' | 'untagged' | 'unknown';
 }
 
 /** Position and bounds for the dialog's controls and its localized announcement. */

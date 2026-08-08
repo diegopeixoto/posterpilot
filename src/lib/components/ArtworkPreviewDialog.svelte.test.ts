@@ -30,6 +30,7 @@ function artwork(id: number, overrides: Partial<PreviewArtwork> = {}): PreviewAr
 		width: 2000,
 		height: 3000,
 		language: 'en',
+		languageProvenance: 'tagged',
 		...overrides
 	};
 }
@@ -76,12 +77,62 @@ const control = (name: 'close' | 'previous' | 'next') =>
 	document.getElementById(`artwork-preview-${name}`) as HTMLButtonElement;
 const positionText = () =>
 	document.querySelector('[data-preview-position]')?.textContent?.trim() ?? '';
+/** The provenance line: provider, dimensions, and language when there is one to state. */
+const details = () => document.getElementById('artwork-preview-details')?.textContent?.trim() ?? '';
 
 afterEach(() => {
 	document.querySelectorAll('[data-test-triggers]').forEach((host) => host.remove());
 });
 
 describe('artwork preview dialog', () => {
+	it('separates artwork the provider marked textless from data we never recorded', async () => {
+		// `language: null` covers both. Calling an unrecorded legacy row "no language
+		// tag" would present missing data as a statement by the provider.
+		const untagged = mount({
+			sequence: [artwork(1, { provider: 'tmdb', language: null, languageProvenance: 'untagged' })]
+		});
+		await openFrom(untagged);
+		const asUntagged = details();
+		untagged.open = false;
+		await tick();
+
+		const legacy = mount({
+			sequence: [artwork(2, { provider: 'tmdb', language: null, languageProvenance: 'unknown' })]
+		});
+		await openFrom(legacy);
+		expect(details()).not.toBe(asUntagged);
+	});
+
+	it('says nothing about language for a provider that never reports one', async () => {
+		const props = mount({
+			sequence: [artwork(1, { provider: 'mediux', language: null, languageProvenance: 'unknown' })]
+		});
+		await openFrom(props);
+
+		// MediUX records `unknown` for everything it will ever return, so any label
+		// here would describe the source rather than this artwork.
+		expect(details()).toBe('mediux · 2000 × 3000');
+	});
+
+	it('leaves modified arrow keys to the browser', async () => {
+		const props = mount();
+		await openFrom(props);
+		const before = positionText();
+
+		// Alt+Left/Right is back/forward. Swallowing it to change artwork would take
+		// away navigation the user expects to work everywhere.
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true })
+		);
+		await tick();
+		expect(positionText()).toBe(before);
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+		await tick();
+		await tick();
+		expect(positionText()).not.toBe(before);
+	});
+
 	it('opens on the requested candidate and moves focus into the dialog', async () => {
 		const props = mount({ index: 1 });
 		await openFrom(props);
