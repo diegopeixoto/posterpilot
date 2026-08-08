@@ -26,8 +26,10 @@ import {
 	jobs,
 	mediaItems,
 	posterCandidates,
+	providerDiscoveryOutcomes,
 	type MediaItem
 } from './db/schema';
+import type { CandidateKind } from './types';
 import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 import { PROVIDERS } from './posters/providers';
 import { providerAvailability } from './posters/providers/availability';
@@ -801,6 +803,39 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 				eq(childSelections.mediaItemId, id)
 			)
 		);
+	// Discovery keeps only a bounded number of candidates per kind, so a grid can be
+	// showing an incomplete inventory. The outcome each retained candidate came from is
+	// the exact scope for that notice — no extra rows, and no guessing at which run
+	// produced what is on screen.
+	const outcomeIds = [
+		...new Set(
+			candidates
+				.map((candidate) => candidate.providerOutcomeId)
+				.filter((outcomeId): outcomeId is number => outcomeId !== null)
+		)
+	];
+	const discoveryOutcomes = outcomeIds.length
+		? await db
+				.select({
+					provider: providerDiscoveryOutcomes.provider,
+					truncatedKinds: providerDiscoveryOutcomes.truncatedKinds
+				})
+				.from(providerDiscoveryOutcomes)
+				.where(
+					and(
+						eq(providerDiscoveryOutcomes.serverInstanceId, item.serverInstanceId),
+						eq(providerDiscoveryOutcomes.mediaItemId, id),
+						inArray(providerDiscoveryOutcomes.id, outcomeIds)
+					)
+				)
+		: [];
+	const truncatedKinds: Record<string, CandidateKind[]> = {};
+	for (const outcome of discoveryOutcomes) {
+		for (const kind of outcome.truncatedKinds ?? []) {
+			const kinds = truncatedKinds[outcome.provider] ?? [];
+			if (!kinds.includes(kind)) truncatedKinds[outcome.provider] = [...kinds, kind];
+		}
+	}
 	const { currentPosterUrl, currentBackgroundUrl, ...publicItem } = item;
 	return {
 		item: {
@@ -811,6 +846,8 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 		candidates,
 		sets: groupCandidatesBySet(candidates),
 		providerGroups: groupByProvider(candidates),
+		/** Artwork kinds each provider cut off at its retention guard, keyed by provider. */
+		truncatedKinds,
 		selectedRootPreviews: {
 			poster: selectedPosterCandidate?.previewUrl ?? selectedPosterCandidate?.url ?? null,
 			background:
