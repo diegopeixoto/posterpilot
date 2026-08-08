@@ -103,6 +103,7 @@ const isolatedPosterPilotEnvironment = Object.fromEntries(
 		'THUMB_CACHE_MAX_MB',
 		'FUN_ENABLED',
 		'LIBRARY_DEFAULT_SORT',
+		'TMDB_ARTWORK_LANGUAGE',
 		'AUTH_MODE',
 		'APP_KEY_FILE',
 		'ADDRESS_HEADER',
