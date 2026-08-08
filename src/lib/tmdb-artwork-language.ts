@@ -35,8 +35,15 @@ export type ArtworkLanguagePolicy = { mode: 'all' } | { mode: 'preferred'; langu
 /** How one candidate stands against a policy. */
 export type ArtworkLanguageEligibility = 'eligible' | 'foreign' | 'unknown';
 
-/** The language provenance recorded per candidate at discovery time. */
+/**
+ * The provider this preference governs. Kept as a literal rather than imported
+ * from the server provider registry so this module stays `$env`-free.
+ */
+const TMDB_PROVIDER = 'tmdb';
+
+/** The provenance recorded per candidate at discovery time, plus its provider. */
 type CandidateLanguageFields = {
+	provider: string;
 	language: string | null;
 	languageProvenance: 'tagged' | 'untagged' | 'unknown';
 };
@@ -94,10 +101,20 @@ export function resolveArtworkLanguagePolicy(
 /**
  * Classify one candidate against a policy.
  *
- * Explicitly untagged artwork counts as language-neutral and stays eligible.
- * Candidates whose provenance is `unknown` are NOT assumed neutral — they were
- * stored before provenance was recorded, so they are reported as `unknown` and
- * the caller is expected to offer refreshed discovery rather than silently
+ * This is a *TMDB* artwork-language preference, so every other provider is
+ * always eligible. That is not a shortcut — it is the whole rule:
+ *
+ * - MediUX and ThePosterDB record `unknown` for every candidate they will ever
+ *   produce, so treating `unknown` as ineligible would erase their grids
+ *   entirely the moment any preference was set, and refreshed discovery could
+ *   never bring them back because it records `unknown` again.
+ * - Fanart.tv *does* tag languages, so it would be filtered on a signal this
+ *   setting was never meant to govern, silently losing a higher-ranked asset.
+ *
+ * Within TMDB: explicitly untagged artwork counts as language-neutral and stays
+ * eligible, while `unknown` is genuinely legacy — rows stored before provenance
+ * was recorded. Those are reported as `unknown` so the caller can offer
+ * refreshed discovery, which now does record provenance, rather than silently
  * including or excluding them.
  */
 export function classifyCandidateLanguage(
@@ -105,6 +122,7 @@ export function classifyCandidateLanguage(
 	policy: ArtworkLanguagePolicy
 ): ArtworkLanguageEligibility {
 	if (policy.mode === 'all') return 'eligible';
+	if (candidate.provider !== TMDB_PROVIDER) return 'eligible';
 	if (candidate.languageProvenance === 'untagged') return 'eligible';
 	if (candidate.languageProvenance === 'unknown') return 'unknown';
 	return artworkLanguageCode(candidate.language) === policy.language ? 'eligible' : 'foreign';

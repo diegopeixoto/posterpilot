@@ -90,9 +90,13 @@ describe('resolveArtworkLanguagePolicy', () => {
 });
 
 describe('classifyCandidateLanguage', () => {
-	const tagged = (language: string) => ({ language, languageProvenance: 'tagged' as const });
-	const untagged = { language: null, languageProvenance: 'untagged' as const };
-	const legacy = { language: null, languageProvenance: 'unknown' as const };
+	const tagged = (language: string) => ({
+		provider: 'tmdb',
+		language,
+		languageProvenance: 'tagged' as const
+	});
+	const untagged = { provider: 'tmdb', language: null, languageProvenance: 'untagged' as const };
+	const legacy = { provider: 'tmdb', language: null, languageProvenance: 'unknown' as const };
 
 	it('accepts everything under an all-languages policy', () => {
 		const policy = { mode: 'all' } as const;
@@ -123,5 +127,26 @@ describe('classifyCandidateLanguage', () => {
 	it('compares regional tags on their base code', () => {
 		const policy = { mode: 'preferred', language: 'pt' } as const;
 		expect(classifyCandidateLanguage(tagged('pt-BR'), policy)).toBe('eligible');
+	});
+
+	it('leaves providers that record no provenance untouched', () => {
+		// MediUX and ThePosterDB record `unknown` for every candidate they will
+		// ever produce. Treating that as ineligible would erase their grids the
+		// moment any preference was set, and refreshed discovery could not bring
+		// them back because it records `unknown` again.
+		const policy = { mode: 'preferred', language: 'en' } as const;
+		for (const provider of ['mediux', 'theposterdb']) {
+			const candidate = { provider, language: null, languageProvenance: 'unknown' as const };
+			expect(classifyCandidateLanguage(candidate, policy)).toBe('eligible');
+			expect(isArtworkLanguageEligible(candidate, policy)).toBe(true);
+		}
+	});
+
+	it('does not filter a provider that tags languages but is not TMDB', () => {
+		// Fanart.tv does record tagged provenance, so without this it would be
+		// filtered on a signal this setting was never meant to govern.
+		const policy = { mode: 'preferred', language: 'en' } as const;
+		const fanart = { provider: 'fanarttv', language: 'de', languageProvenance: 'tagged' as const };
+		expect(classifyCandidateLanguage(fanart, policy)).toBe('eligible');
 	});
 });

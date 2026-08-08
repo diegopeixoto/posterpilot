@@ -164,10 +164,12 @@ describe('selectAutomaticArtwork language policy', () => {
 		});
 	});
 
-	it('never demotes providers that record no language provenance', () => {
+	it('never demotes a provider the preference does not govern', () => {
 		// MediUX and ThePosterDB always store `unknown`. If a preference pushed them
 		// below TMDB, setting one would quietly swap every curated set for a TMDB
-		// image, so `unknown` shares the leading tier and keeps its score advantage.
+		// image. They are outside this TMDB preference entirely, so they rank as
+		// eligible and keep their score advantage — reporting them as `unknown`
+		// would send the UI offering a refresh that could never change the answer.
 		const result = selectAutomaticArtwork(
 			[
 				candidate(1, { provider: 'mediux' }),
@@ -179,9 +181,24 @@ describe('selectAutomaticArtwork language policy', () => {
 		expect(result.poster?.provider).toBe('mediux');
 		expect(result.poster?.languageDecision).toEqual({
 			language: null,
-			eligibility: 'unknown',
+			eligibility: 'eligible',
 			fallback: false
 		});
+	});
+
+	it('does not tier a provider that tags languages but is not TMDB', () => {
+		// Fanart.tv records tagged provenance, but this setting governs TMDB art.
+		// Without the provider check its higher score would lose to a TMDB match.
+		const result = selectAutomaticArtwork(
+			[
+				candidate(1, { provider: 'fanarttv', language: 'de', languageProvenance: 'tagged' }),
+				candidate(2, { provider: 'tmdb', language: 'en', languageProvenance: 'tagged' })
+			],
+			{ languagePolicy: preferred }
+		);
+
+		expect(result.poster?.provider).toBe('fanarttv');
+		expect(result.poster?.languageDecision?.fallback).toBe(false);
 	});
 
 	it('treats an omitted provenance field as unrecorded rather than neutral', () => {

@@ -138,15 +138,16 @@ interface RankedCandidate extends AutomaticCandidateSelection {
  * - explicitly untagged artwork — textless art is language-neutral by definition;
  * - artwork whose provenance was never recorded (`unknown`).
  *
- * That last group is the load-bearing one. MediUX and ThePosterDB report no
- * language at all, so *every* candidate they produce is permanently `unknown`, as
- * is every TMDB row stored before provenance existed. Ranking `unknown` below
- * `eligible` would mean that setting any preference silently replaces hand-curated
- * MediUX sets with whatever TMDB happens to tag in that language — the preference
- * is about which of TMDB's language-tagged images to take, not a licence to
- * re-order the providers on a signal three of them never supply. So `unknown`
- * means "not provably foreign" here, and it is still reported on the winner so the
- * UI can offer refreshed discovery instead of implying the language was verified.
+ * That last group is the load-bearing one: it is every TMDB row stored before
+ * provenance existed. Ranking it below `eligible` would mean that setting a
+ * preference quietly demotes a library's entire existing TMDB inventory in favour
+ * of whatever a fresh search happens to tag. So `unknown` means "not provably
+ * foreign" here, and is still reported on the winner so the UI can offer
+ * refreshed discovery instead of implying the language was verified.
+ *
+ * Candidates from other providers never reach a tier decision at all —
+ * `classifyCandidateLanguage` returns them eligible, because this preference
+ * governs TMDB alone.
  */
 function languageTier(eligibility: ArtworkLanguageEligibility): number {
 	return eligibility === 'foreign' ? 1 : 0;
@@ -186,7 +187,11 @@ export function selectAutomaticArtwork(
 			slot,
 			language,
 			eligibility: classifyCandidateLanguage(
-				{ language, languageProvenance: candidate.languageProvenance ?? 'unknown' },
+				{
+					provider: candidate.provider,
+					language,
+					languageProvenance: candidate.languageProvenance ?? 'unknown'
+				},
 				policy
 			)
 		});

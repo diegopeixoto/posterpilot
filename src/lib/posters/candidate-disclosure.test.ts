@@ -20,9 +20,10 @@ const EN: ArtworkLanguagePolicy = { mode: 'preferred', language: 'en' };
 function artwork(
 	language: string | null,
 	languageProvenance: LanguageTaggedArtwork['languageProvenance'],
-	id = 0
+	id = 0,
+	provider = 'tmdb'
 ): LanguageTaggedArtwork & { id: number } {
-	return { language, languageProvenance, id };
+	return { provider, language, languageProvenance, id };
 }
 
 describe('candidateDisclosureKey', () => {
@@ -74,6 +75,18 @@ describe('visibleArtworkCandidates', () => {
 	it('keeps a pinned candidate the policy would otherwise hide', () => {
 		const visible = visibleArtworkCandidates(candidates, EN, (c) => c.id === 2);
 		expect(visible.map((c) => c.id)).toEqual([1, 2, 3]);
+	});
+
+	it('never hides a provider the preference does not govern', () => {
+		// MediUX and ThePosterDB record `unknown` for everything they produce, and
+		// Fanart.tv tags languages this TMDB preference has no say over. Filtering
+		// either would empty whole grids that no refresh could restore.
+		const others = [
+			artwork(null, 'unknown', 10, 'mediux'),
+			artwork(null, 'unknown', 11, 'theposterdb'),
+			artwork('de', 'tagged', 12, 'fanarttv')
+		];
+		expect(visibleArtworkCandidates(others, EN).map((c) => c.id)).toEqual([10, 11, 12]);
 	});
 });
 

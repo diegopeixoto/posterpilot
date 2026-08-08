@@ -58,8 +58,13 @@ export function candidateDisclosureKey(
 	return `artwork-pane-${parts.map((part) => part.replace(/[^A-Za-z0-9_-]+/g, '_')).join('-')}`;
 }
 
-/** The language provenance a candidate carries (a `PosterCandidate` satisfies it). */
+/**
+ * The provenance a candidate carries (a `PosterCandidate` satisfies it). The
+ * provider is part of it because the preference governs TMDB alone — see
+ * `classifyCandidateLanguage`.
+ */
 export interface LanguageTaggedArtwork {
+	provider: string;
 	language: string | null;
 	languageProvenance: 'tagged' | 'untagged' | 'unknown';
 }
