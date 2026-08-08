@@ -1,6 +1,6 @@
 import { tmdbImageUrl } from '$lib/server/tmdb/metadata';
-import type { ArtworkLanguageProvenance, TmdbMediaType } from '$lib/server/types';
-import type { ArtworkSet } from './types';
+import type { ArtworkLanguageProvenance, CandidateKind, TmdbMediaType } from '$lib/server/types';
+import type { ArtworkSet, ProviderDiscovery } from './types';
 
 /**
  * Pure response parsers for the artwork providers. Kept free of HTTP/config/$env
@@ -8,7 +8,23 @@ import type { ArtworkSet } from './types';
  * network calls and pass raw responses here.
  */
 
-const MAX_PER_KIND = 20;
+/**
+ * Defensive ceiling on how many candidates one TMDB artwork kind may contribute.
+ *
+ * TMDB returns every image it holds for a title and every one of them is persisted
+ * per discovery run, so this bounds storage and render cost for the handful of
+ * blockbusters with hundreds of posters — it is not a preference or a quality
+ * filter, and reaching it is reported as truncation rather than passed over in
+ * silence.
+ *
+ * Measured and kept at 200: a candidate row serializes to ~735 B, so a title
+ * sitting at the guard in both kinds carries ~289 KB of item payload, and four
+ * providers all at it would be ~1.2 MB. The ceiling is defensive rather than
+ * typical, and the whole retained inventory ships in the item payload today — if
+ * real libraries push closer to it, the design's cursor endpoint replaces that
+ * delivery without changing the disclosure UX. Named once so it retunes here.
+ */
+export const TMDB_MAX_CANDIDATES_PER_KIND = 200;
 
 interface TmdbImage {
 	file_path?: string;
@@ -17,8 +33,10 @@ interface TmdbImage {
 	iso_639_1?: string | null;
 }
 interface TmdbImagesResponse {
-	posters?: TmdbImage[];
-	backdrops?: TmdbImage[];
+	// Left as `unknown`: TMDB's arrays are only asserted to be arrays at the point
+	// of use, so a malformed response cannot reach `.map` as a non-array.
+	posters?: unknown;
+	backdrops?: unknown;
 }
 
 interface CandidateLanguage {
@@ -51,41 +69,73 @@ function unknownMetadata(providerAssetId: string | null = null) {
 }
 
 function tmdbCandidate(
-	image: TmdbImage,
+	image: unknown,
 	kind: 'poster' | 'background',
 	previewSize: 'w500' | 'w1280'
 ) {
-	const url = tmdbImageUrl(image.file_path, 'original');
-	const previewUrl = tmdbImageUrl(image.file_path, previewSize);
-	if (!url || !previewUrl || !image.file_path) return null;
+	if (!image || typeof image !== 'object') return null;
+	const { file_path, width, height, iso_639_1 } = image as TmdbImage;
+	const url = tmdbImageUrl(file_path, 'original');
+	const previewUrl = tmdbImageUrl(file_path, previewSize);
+	if (!url || !previewUrl || !file_path) return null;
 	return {
 		setId: 'tmdb',
 		setAuthor: null,
-		providerAssetId: image.file_path,
+		providerAssetId: file_path,
 		url,
 		previewUrl,
 		kind,
 		season: null,
 		episode: null,
-		width: image.width ?? null,
-		height: image.height ?? null,
-		...candidateLanguage(image.iso_639_1)
+		width: width ?? null,
+		height: height ?? null,
+		...candidateLanguage(iso_639_1)
 	};
 }
 
+/**
+ * Validate → deduplicate → bound, strictly in that order.
+ *
+ * The bound used to be applied first, so a single malformed `file_path` inside the
+ * window silently cost a candidate: a title whose first entry was unusable yielded
+ * one fewer poster than the guard allows even though TMDB had returned plenty more.
+ * Deduplication keys on `file_path` — TMDB's own file identity, the same value
+ * stored as `providerAssetId` — and the FIRST occurrence wins so the order TMDB
+ * ranked the images in survives. (Note the `new Map(...)` idiom in
+ * collections/native-artwork-candidates.ts keeps the last occurrence instead; that
+ * list is re-sorted by score afterwards, this one is not.)
+ */
+function tmdbCandidates(
+	images: unknown,
+	kind: 'poster' | 'background',
+	previewSize: 'w500' | 'w1280'
+) {
+	const candidates: NonNullable<ReturnType<typeof tmdbCandidate>>[] = [];
+	if (!Array.isArray(images)) return { candidates, truncated: false };
+	const seen = new Set<string>();
+	for (const image of images) {
+		const candidate = tmdbCandidate(image, kind, previewSize);
+		if (!candidate || seen.has(candidate.providerAssetId)) continue;
+		// Only a candidate that would otherwise have been retained counts as truncation:
+		// dropping malformed or duplicate entries loses nothing the user could have picked.
+		if (candidates.length === TMDB_MAX_CANDIDATES_PER_KIND) return { candidates, truncated: true };
+		seen.add(candidate.providerAssetId);
+		candidates.push(candidate);
+	}
+	return { candidates, truncated: false };
+}
+
 /** Build a single TMDB set (posters + backdrops) from an images response. */
-export function parseTmdbImages(json: unknown): ArtworkSet[] {
+export function parseTmdbImages(json: unknown): ProviderDiscovery {
 	const data = (json ?? {}) as TmdbImagesResponse;
-	const posters = (data.posters ?? [])
-		.slice(0, MAX_PER_KIND)
-		.map((image) => tmdbCandidate(image, 'poster', 'w500'))
-		.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
-	const backdrops = (data.backdrops ?? [])
-		.slice(0, MAX_PER_KIND)
-		.map((image) => tmdbCandidate(image, 'background', 'w1280'))
-		.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
-	const candidates = [...posters, ...backdrops];
-	return candidates.length ? [{ setId: 'tmdb', author: null, candidates }] : [];
+	const posters = tmdbCandidates(data.posters, 'poster', 'w500');
+	const backdrops = tmdbCandidates(data.backdrops, 'background', 'w1280');
+	const candidates = [...posters.candidates, ...backdrops.candidates];
+	const truncatedKinds: CandidateKind[] = [];
+	if (posters.truncated) truncatedKinds.push('poster');
+	if (backdrops.truncated) truncatedKinds.push('background');
+	const sets: ArtworkSet[] = candidates.length ? [{ setId: 'tmdb', author: null, candidates }] : [];
+	return { sets, truncatedKinds };
 }
 
 interface FanartImage {

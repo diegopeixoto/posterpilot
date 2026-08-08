@@ -1,5 +1,11 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages';
+	import { artworkLanguageChoices, artworkLanguageName } from '$lib/posters/candidate-disclosure';
+	import {
+		ARTWORK_LANGUAGE_ANY,
+		ARTWORK_LANGUAGE_UI,
+		type TmdbArtworkLanguage
+	} from '$lib/tmdb-artwork-language';
 
 	let {
 		tmdbKey = $bindable(),
@@ -8,6 +14,7 @@
 		providerTmdb = $bindable(),
 		providerFanart = $bindable(),
 		providerThePosterDb = $bindable(),
+		tmdbArtworkLanguage = $bindable(),
 		fanartKey = $bindable(),
 		fanartKeySet,
 		thePosterDbUsername = $bindable(),
@@ -22,6 +29,7 @@
 		providerTmdb: boolean;
 		providerFanart: boolean;
 		providerThePosterDb: boolean;
+		tmdbArtworkLanguage: TmdbArtworkLanguage;
 		fanartKey: string;
 		fanartKeySet: boolean;
 		thePosterDbUsername: string;
@@ -30,6 +38,12 @@
 		thePosterDbPasswordClear: boolean;
 		env: Record<string, boolean>;
 	} = $props();
+
+	// Values stay ISO 639-1 base codes: `resolveConfig` narrows what it reads
+	// (`pt-BR` comes back as `pt`), so a regional value would never match its
+	// own option after a save. Option labels are native names, like the UI
+	// language switcher, so the list reads the same in every locale.
+	const languageChoices = $derived(artworkLanguageChoices(tmdbArtworkLanguage));
 </script>
 
 <div>
@@ -72,6 +86,27 @@
 			{m.settings_provider_theposterdb()}
 			<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
 		</label>
+	</div>
+	<div class="mt-4 max-w-xs">
+		<label for="tmdbArtworkLanguage" class="mb-1 block text-sm font-medium">
+			{m.settings_tmdb_artwork_language()}
+		</label>
+		<select
+			id="tmdbArtworkLanguage"
+			bind:value={tmdbArtworkLanguage}
+			disabled={env.tmdbArtworkLanguage}
+			class="input w-full disabled:opacity-50"
+		>
+			<option value={ARTWORK_LANGUAGE_ANY}>{m.settings_tmdb_artwork_language_any()}</option>
+			<option value={ARTWORK_LANGUAGE_UI}>{m.settings_tmdb_artwork_language_ui()}</option>
+			{#each languageChoices as code (code)}
+				<option value={code}>{artworkLanguageName(code)}</option>
+			{/each}
+		</select>
+		<p class="mt-1 text-xs text-neutral-400">{m.settings_tmdb_artwork_language_hint()}</p>
+		{#if env.tmdbArtworkLanguage}<p class="mt-1 text-xs text-amber-400">
+				{m.settings_set_from_env()}
+			</p>{/if}
 	</div>
 	{#if providerThePosterDb}
 		<div class="mt-3 space-y-2 rounded-md border border-neutral-800 p-3">

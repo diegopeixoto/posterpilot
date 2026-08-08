@@ -8,7 +8,9 @@ import { getServerInstanceConnection, listServerInstances } from '$lib/server/se
 import { version } from '$lib/version';
 import { buildSupportBundle } from './builder';
 
-const LATEST_SCHEMA_MIGRATION = '0008_melodic_purifiers';
+// Reported as `latestExpected` and compared against the applied migrations, so a
+// stale value makes a healthy database look behind. Bump it with every migration.
+const LATEST_SCHEMA_MIGRATION = '0011_provider_discovery_truncation';
 
 function secretMarker(value: string | null): '<redacted>' | '<unset>' {
 	return value ? '<redacted>' : '<unset>';
@@ -71,6 +73,7 @@ export async function createSupportBundle(includeTitles = false) {
 					status: providerDiscoveryOutcomes.status,
 					candidateCount: providerDiscoveryOutcomes.candidateCount,
 					retainedStaleCandidates: providerDiscoveryOutcomes.retainedStaleCandidates,
+					truncatedKinds: providerDiscoveryOutcomes.truncatedKinds,
 					latencyMs: providerDiscoveryOutcomes.latencyMs,
 					errorCode: providerDiscoveryOutcomes.errorCode,
 					error: providerDiscoveryOutcomes.error,

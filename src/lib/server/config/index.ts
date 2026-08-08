@@ -4,6 +4,11 @@ import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { normalizeLocale } from '$lib/i18n/resolve';
 import { parseLibrarySort, type LibrarySort } from '$lib/library-sort';
+import {
+	ARTWORK_LANGUAGE_ANY,
+	parseTmdbArtworkLanguage,
+	type TmdbArtworkLanguage
+} from '$lib/tmdb-artwork-language';
 import { getEncryptionKey } from '$lib/server/secrets/key';
 import { decryptSecret, encryptSecret } from '$lib/server/secrets/crypto';
 import type { KometaSnapshot } from '$lib/server/kometa/config';
@@ -109,6 +114,12 @@ export interface AppConfig {
 	funEnabled: boolean;
 	/** Sort the library grid opens with when the URL specifies none. */
 	libraryDefaultSort: LibrarySort;
+	/**
+	 * Which language TMDB artwork must be tagged with: `any`, `ui` (follow the
+	 * resolved UI locale), or an explicit ISO 639-1 base code. Independent of
+	 * `language` on purpose — an English UI may still want German posters.
+	 */
+	tmdbArtworkLanguage: TmdbArtworkLanguage;
 }
 
 /** Config keys that are secrets — never returned to the client, redacted in logs. */
@@ -162,7 +173,11 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	thumbCacheTtlDays: 'THUMB_CACHE_TTL_DAYS',
 	thumbCacheMaxMb: 'THUMB_CACHE_MAX_MB',
 	funEnabled: 'FUN_ENABLED',
-	libraryDefaultSort: 'LIBRARY_DEFAULT_SORT'
+	libraryDefaultSort: 'LIBRARY_DEFAULT_SORT',
+	// Its own variable rather than a mode of APP_LANGUAGE: artwork language is a
+	// separate axis from the UI language (the `ui` value is what ties them), and it
+	// accepts any ISO 639-1 code TMDB tags with, not only the supported UI locales.
+	tmdbArtworkLanguage: 'TMDB_ARTWORK_LANGUAGE'
 };
 
 const DEFAULTS = {
@@ -190,7 +205,10 @@ const DEFAULTS = {
 	thumbCacheTtlDays: 30,
 	thumbCacheMaxMb: 512,
 	funEnabled: false,
-	libraryDefaultSort: 'title' as LibrarySort
+	libraryDefaultSort: 'title' as LibrarySort,
+	// `any` is the pre-feature behavior: every language TMDB returned stays visible,
+	// so upgrading never hides artwork someone was already browsing.
+	tmdbArtworkLanguage: ARTWORK_LANGUAGE_ANY as TmdbArtworkLanguage
 	// `language` has no default: when unset the UI locale resolver falls through
 	// to the request's Accept-Language header, then English.
 };
@@ -230,7 +248,8 @@ const WRITABLE_KEYS: ConfigKey[] = [
 	'thumbCacheTtlDays',
 	'thumbCacheMaxMb',
 	'funEnabled',
-	'libraryDefaultSort'
+	'libraryDefaultSort',
+	'tmdbArtworkLanguage'
 ];
 
 /** True when a settings key holds a secret value (encrypted at rest). */
@@ -355,7 +374,13 @@ export async function resolveConfig(): Promise<AppConfig> {
 		thumbCacheMaxMb: toInt(rawValue('thumbCacheMaxMb', persisted), DEFAULTS.thumbCacheMaxMb),
 		funEnabled: toBool(rawValue('funEnabled', persisted), DEFAULTS.funEnabled),
 		libraryDefaultSort:
-			parseLibrarySort(rawValue('libraryDefaultSort', persisted)) ?? DEFAULTS.libraryDefaultSort
+			parseLibrarySort(rawValue('libraryDefaultSort', persisted)) ?? DEFAULTS.libraryDefaultSort,
+		// A typo (`TMDB_ARTWORK_LANGUAGE=english`) parses to undefined and lands on
+		// `any`: an unreadable preference must widen browsing, never quietly filter
+		// artwork down to a language nobody asked for.
+		tmdbArtworkLanguage:
+			parseTmdbArtworkLanguage(rawValue('tmdbArtworkLanguage', persisted)) ??
+			DEFAULTS.tmdbArtworkLanguage
 	};
 }
 
@@ -772,6 +797,8 @@ export interface PublicConfig {
 	funEnabled: boolean;
 	/** Sort the library grid opens with when the URL specifies none. */
 	libraryDefaultSort: LibrarySort;
+	/** Which language TMDB artwork must be tagged with (`any`, `ui`, or a base code). */
+	tmdbArtworkLanguage: TmdbArtworkLanguage;
 	envManaged: Partial<Record<ConfigKey, boolean>>;
 }
 
@@ -818,6 +845,7 @@ export async function publicConfig(serverInstanceId?: string): Promise<PublicCon
 		thumbCacheMaxMb: c.thumbCacheMaxMb,
 		funEnabled: c.funEnabled,
 		libraryDefaultSort: c.libraryDefaultSort,
+		tmdbArtworkLanguage: c.tmdbArtworkLanguage,
 		envManaged
 	};
 }

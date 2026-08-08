@@ -308,7 +308,15 @@ async function loadEffectiveDefaults(): Promise<ApplyPlannerDefaults> {
 	return {
 		defaultMethod: config.defaultApplyMethod,
 		providerPriority,
-		scoreWeights
+		scoreWeights,
+		// The raw preference; the planner resolves it once and freezes the result
+		// into the plan. `ui` follows the persisted application language because an
+		// unattended job has no request locale, and an unresolvable one degrades to
+		// browsing every language rather than inventing a restriction. An
+		// interactive caller that wants the request locale instead overrides this
+		// whole resolver through `loadDefaults`.
+		artworkLanguage: config.tmdbArtworkLanguage,
+		uiLocale: config.language
 	};
 }
 

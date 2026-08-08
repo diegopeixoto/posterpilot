@@ -57,6 +57,39 @@ Em **Metadados e provedores**, ordene a prioridade e ajuste pesos de provedor,
 resolução e proporção. A mesma configuração determinística vale na prévia e execução.
 `SUGGEST_PRESELECT` mostra a melhor sugestão, mas aceitar/preparar é sempre explícito.
 
+## Idioma das artes do TMDB
+
+`TMDB_ARTWORK_LANGUAGE` (padrão `any`) define em qual idioma você navega e o que a
+seleção automática pode escolher entre as artes do TMDB, independentemente de
+`APP_LANGUAGE`: `any` mantém todos os idiomas que o TMDB devolveu, `ui` segue o
+idioma da interface normalizado para o código base (uma interface `pt-BR` prefere
+`pt`) e um código ISO 639-1 explícito (`en`, `de`…) não se limita aos seis locales
+traduzidos. Um valor não reconhecido é tratado como ausente e volta para `any` em
+vez de aplicar um filtro quebrado. Como nos demais, o ambiente prevalece e o campo
+aparece como gerenciado pelo ambiente.
+
+Artes que o TMDB não etiqueta contam como neutras e continuam disponíveis em
+qualquer preferência, então uma preferência nunca esvazia um painel que só tem
+arte neutra. A descoberta sempre guarda todos os idiomas — a preferência rege a
+navegação e a seleção automática, não o que é baixado —, de modo que alterá-la
+refiltra o que você já tem e nunca exige refazer a busca. A seleção automática só
+recorre a um pôster em outro idioma quando não resta nenhuma opção preferida nem
+sem etiqueta, e sinaliza quando isso acontece. A página do item traz ainda um
+alternador temporário **Preferido / Todos** que não muda a configuração global.
+
+## Inventário de candidatos e «carregar mais»
+
+A ingestão do TMDB parava antes em 20 imagens **por tipo de arte** — pôsteres e
+fundos eram contados separadamente, daí os relatos de «limitado a 40 capas».
+Agora muitas mais são mantidas, sem duplicatas pela identidade de arquivo do
+próprio TMDB e na ordem em que o TMDB as classificou, e cada painel de provedor e
+tipo mostra um lote limitado com um controle **carregar mais** que informa quantos
+candidatos continuam ocultos. Os painéis de pôsteres e de fundos se expandem de
+forma independente. A descoberta mantém um teto defensivo de **200 candidatos por
+tipo de arte** — um limite de armazenamento e renderização, não um filtro de
+qualidade: quando um painel o atinge, ele avisa que o inventário está **truncado**
+em vez de sugerir que está completo.
+
 ## Kometa e método de aplicação
 
 `DEFAULT_APPLY_METHOD` aceita `plex` (servidor direto), `kometa` ou `both`. É o
@@ -116,6 +149,7 @@ suportados são `en`, `es`, `zh`, `ja`, `pt-BR` e `fr`.
 | `FANART_KEY` | — | Chave Fanart.tv (segredo). |
 | `THEPOSTERDB_USERNAME` | — | Usuário ou e-mail opcional do ThePosterDB para buscar com login. |
 | `THEPOSTERDB_PASSWORD` | — | Senha da conta opcional do ThePosterDB (segredo, criptografada em repouso). |
+| `TMDB_ARTWORK_LANGUAGE` | `any` | Artes do TMDB navegadas e autosselecionadas: `any`, `ui` (segue a interface) ou um código ISO 639-1 como `en`; valor inválido volta para `any`. |
 | `MEDIUX_REQUEST_DELAY_MS` | `2000` | Intervalo entre requisições MediUX, ms. |
 | `MEDIUX_CONCURRENCY` | `5` | Requisições MediUX simultâneas. |
 | `HTTP_CACHE_TTL_DAYS` | `7` | TTL do cache HTTP em dias. |

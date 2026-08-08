@@ -1,3 +1,8 @@
+import {
+	classifyCandidateLanguage,
+	type ArtworkLanguageEligibility,
+	type ArtworkLanguagePolicy
+} from '$lib/tmdb-artwork-language';
 import { DEFAULT_SCORE_WEIGHTS, scorePoster, type ScoreWeights } from './score';
 
 export type AutomaticSlotKind = 'poster' | 'background' | 'title_card';
@@ -13,12 +18,48 @@ export interface AutomaticCandidateInput {
 	episode: number | null;
 	width: number | null;
 	height: number | null;
+	/** ISO 639-1 base code recorded at discovery, or null when none was reported. */
+	language?: string | null;
+	/**
+	 * How that language was obtained. Optional, defaulting to `unknown`, so the
+	 * shape mirrors `poster_candidates.language_provenance` — a NOT NULL column
+	 * whose own default is `unknown`, because every row written before provenance
+	 * was recorded is exactly that: unknown, not neutral.
+	 */
+	languageProvenance?: 'tagged' | 'untagged' | 'unknown';
 }
 
 export interface AutomaticSelectionInputs {
 	weights?: ScoreWeights;
 	/** Earlier providers win a deterministic tie after the numeric score. */
 	providerPriority?: readonly string[];
+	/**
+	 * Artwork-language preference, already resolved by the caller. Omitting it means
+	 * `{ mode: 'all' }`, under which no tiering runs at all and the ranking is
+	 * identical to the one produced before the preference existed.
+	 */
+	languagePolicy?: ArtworkLanguagePolicy;
+}
+
+/**
+ * Why a winning candidate survived the artwork-language policy.
+ *
+ * Present only when a preference was actually in force, so its absence is a
+ * meaningful "no language preference applied" rather than missing data. It rides
+ * on the selection itself instead of a parallel per-slot map because every caller
+ * already flattens `poster`/`background`/`children` into one list — a sibling map
+ * would force each of them to rebuild slot keys just to rejoin the two halves.
+ */
+export interface AutomaticLanguageDecision {
+	/** The candidate's own base code, so the UI can name the language it settled for. */
+	language: string | null;
+	eligibility: ArtworkLanguageEligibility;
+	/**
+	 * The preferred tier for this slot was empty and a foreign-language candidate
+	 * won anyway. Surfacing this is what lets the UI label the pick rather than
+	 * look like it ignored the preference.
+	 */
+	fallback: boolean;
 }
 
 export interface AutomaticCandidateSelection {
@@ -35,6 +76,7 @@ export interface AutomaticCandidateSelection {
 		season: number | null;
 		episode: number | null;
 	};
+	languageDecision?: AutomaticLanguageDecision;
 }
 
 export interface AutomaticArtworkSelection {
@@ -79,25 +121,60 @@ function compareSlot(
 	return a.kind.localeCompare(b.kind);
 }
 
+/** A ranked candidate plus the language facts that only the ranking needs. */
+interface RankedCandidate extends AutomaticCandidateSelection {
+	language: string | null;
+	eligibility: ArtworkLanguageEligibility;
+}
+
+/**
+ * Rank order of a candidate's language standing: 0 for anything that is not
+ * provably foreign, 1 for a proven mismatch.
+ *
+ * Only artwork a provider explicitly tagged with a *different* language is demoted.
+ * Three groups deliberately share the leading tier:
+ *
+ * - a matching tag — the preference is satisfied outright;
+ * - explicitly untagged artwork — textless art is language-neutral by definition;
+ * - artwork whose provenance was never recorded (`unknown`).
+ *
+ * That last group is the load-bearing one: it is every TMDB row stored before
+ * provenance existed. Ranking it below `eligible` would mean that setting a
+ * preference quietly demotes a library's entire existing TMDB inventory in favour
+ * of whatever a fresh search happens to tag. So `unknown` means "not provably
+ * foreign" here, and is still reported on the winner so the UI can offer
+ * refreshed discovery instead of implying the language was verified.
+ *
+ * Candidates from other providers never reach a tier decision at all —
+ * `classifyCandidateLanguage` returns them eligible, because this preference
+ * governs TMDB alone.
+ */
+function languageTier(eligibility: ArtworkLanguageEligibility): number {
+	return eligibility === 'foreign' ? 1 : 0;
+}
+
 /**
  * Select one candidate for every artwork slot from frozen discovery inputs.
  *
- * Numeric score is the primary signal. Ties are stable across database insertion
- * order: configured provider priority, provider id, set id, URL, then candidate id.
- * The returned provenance is complete enough for an operation plan to explain and
- * later reproduce exactly why each asset was chosen.
+ * Language tier is consulted first, then numeric score as the primary signal. Ties
+ * are stable across database insertion order: configured provider priority,
+ * provider id, set id, URL, then candidate id. The returned provenance is complete
+ * enough for an operation plan to explain and later reproduce exactly why each
+ * asset was chosen.
  */
 export function selectAutomaticArtwork(
 	candidates: readonly AutomaticCandidateInput[],
 	inputs: AutomaticSelectionInputs = {}
 ): AutomaticArtworkSelection {
 	const weights = inputs.weights ?? DEFAULT_SCORE_WEIGHTS;
+	const policy: ArtworkLanguagePolicy = inputs.languagePolicy ?? { mode: 'all' };
 	const priority = new Map(inputs.providerPriority?.map((provider, index) => [provider, index]));
-	const ranked: AutomaticCandidateSelection[] = [];
+	const ranked: RankedCandidate[] = [];
 
 	for (const candidate of candidates) {
 		const slot = normalizeSlot(candidate);
 		if (!slot) continue;
+		const language = candidate.language ?? null;
 		ranked.push({
 			candidateId: candidate.id,
 			url: candidate.url,
@@ -107,11 +184,26 @@ export function selectAutomaticArtwork(
 			score: scorePoster(candidate, weights),
 			width: candidate.width,
 			height: candidate.height,
-			slot
+			slot,
+			language,
+			eligibility: classifyCandidateLanguage(
+				{
+					provider: candidate.provider,
+					language,
+					languageProvenance: candidate.languageProvenance ?? 'unknown'
+				},
+				policy
+			)
 		});
 	}
 
 	ranked.sort((a, b) => {
+		// Tiering runs ahead of the existing comparator rather than replacing it, so a
+		// foreign-language candidate can only reach a slot the preferred tier left
+		// empty. Under `{ mode: 'all' }` every tier is 0 and everything below this line
+		// decides the order exactly as it did before the preference existed.
+		const tier = languageTier(a.eligibility) - languageTier(b.eligibility);
+		if (tier !== 0) return tier;
 		const score = b.score - a.score;
 		if (score !== 0) return score;
 		const providerRank =
@@ -126,17 +218,38 @@ export function selectAutomaticArtwork(
 		);
 	});
 
-	const winners = new Map<string, AutomaticCandidateSelection>();
+	const winners = new Map<string, RankedCandidate>();
 	for (const candidate of ranked) {
 		const key = slotKey(candidate.slot);
 		if (!winners.has(key)) winners.set(key, candidate);
 	}
 
-	const poster = winners.get('poster:root:root') ?? null;
-	const background = winners.get('background:root:root') ?? null;
+	/**
+	 * Strip the ranking-only fields and, when a preference was in force, report how
+	 * this slot was resolved.
+	 *
+	 * `fallback` needs no extra bookkeeping: the tier is the first term of the sort,
+	 * so a foreign winner proves its slot held nothing better — any non-foreign
+	 * candidate for the same slot would have been taken first.
+	 */
+	const decide = (winner: RankedCandidate): AutomaticCandidateSelection => {
+		const { language, eligibility, ...selection } = winner;
+		if (policy.mode === 'all') return selection;
+		return {
+			...selection,
+			languageDecision: { language, eligibility, fallback: eligibility === 'foreign' }
+		};
+	};
+
+	const poster = winners.get('poster:root:root');
+	const background = winners.get('background:root:root');
 	const children = [...winners.values()]
 		.filter((candidate) => candidate.slot.season !== null)
 		.sort((a, b) => compareSlot(a.slot, b.slot));
 
-	return { poster, background, children };
+	return {
+		poster: poster ? decide(poster) : null,
+		background: background ? decide(background) : null,
+		children: children.map(decide)
+	};
 }

@@ -28,6 +28,11 @@ import {
 	canonicalizeProviderArtworkUrl,
 	storedArtworkMatchesCandidate
 } from '$lib/server/tmdb/artwork-url';
+import {
+	resolveArtworkLanguagePolicy,
+	type ArtworkLanguagePolicy,
+	type TmdbArtworkLanguage
+} from '$lib/tmdb-artwork-language';
 
 export type ApplyMethodInput = ApplyPlanMethod | 'plex';
 
@@ -72,6 +77,40 @@ export interface ApplyPlannerDefaults {
 	defaultMethod: ApplyMethodInput;
 	providerPriority: readonly string[];
 	scoreWeights: ScoreWeights;
+	/**
+	 * The configured TMDB artwork-language preference, still raw (`any`, `ui`, or a
+	 * base code) rather than an already-resolved policy: the planner is the last
+	 * point at which the decision is still free to change, so it is also the only
+	 * place allowed to resolve it. Absent means no preference was ever configured.
+	 */
+	artworkLanguage?: TmdbArtworkLanguage;
+	/** Active UI locale; consulted only to resolve the `ui` preference. */
+	uiLocale?: string | null;
+}
+
+/**
+ * The artwork-language decision frozen next to the scoring defaults.
+ *
+ * Declared here rather than as a field on `FrozenApplyDefaults`, whose durable
+ * shape lives in `apply-plan.ts` — outside this change. The block still rides on
+ * the same object that `buildApplyPlanPayload` persists and hashes into the plan's
+ * source fingerprint, so it is genuinely frozen; fold it into `FrozenApplyDefaults`
+ * the next time that schema is revised.
+ */
+export interface FrozenArtworkLanguageDefaults {
+	/** The preference exactly as configured, so `ui` stays distinguishable from `en`. */
+	preference: TmdbArtworkLanguage;
+	/** What that preference resolved to, and what automatic selection actually ran under. */
+	policy: ArtworkLanguagePolicy;
+}
+
+/** One slot the automatic selector could fill only with foreign-language artwork. */
+export interface ApplyArtworkLanguageFallback {
+	selectionFrom: ApplyItemRef;
+	slot: ApplySlot;
+	candidateId: number;
+	/** The language settled for; null only if a provider tagged artwork with no code. */
+	language: string | null;
 }
 
 export interface PlannerCandidateSnapshot {
@@ -164,6 +203,13 @@ export interface ApplyPlanPreview {
 	payload: ApplyPlanPayloadV1;
 	/** Empty previews are intentionally not confirmation-bearing plans. */
 	plan: OperationPlan<ApplyPlanPayloadV1> | null;
+	/**
+	 * Slots whose preferred-language tier was empty, so the confirmation surface can
+	 * label them instead of appearing to have ignored the preference. Omitted when
+	 * nothing fell back. Explanatory only: it is not part of the frozen payload, is
+	 * never re-derived at apply time, and never gates an operation.
+	 */
+	artworkLanguageFallbacks?: ApplyArtworkLanguageFallback[];
 }
 
 export type ApplyPlannerErrorCode =
@@ -276,7 +322,7 @@ function validateFiniteWeight(value: number): void {
 function freezeDefaults(
 	defaults: ApplyPlannerDefaults,
 	request: PlanArtworkApplyRequest
-): FrozenApplyDefaults {
+): FrozenApplyDefaults & { artworkLanguage?: FrozenArtworkLanguageDefaults } {
 	const providerPriority = [...defaults.providerPriority];
 	if (
 		providerPriority.some((provider) => !provider.trim() || provider.trim() !== provider) ||
@@ -295,6 +341,15 @@ function freezeDefaults(
 
 	const configuredMethod = normalizeMethod(defaults.defaultMethod);
 	const effectiveMethod = request.method ? normalizeMethod(request.method) : configuredMethod;
+	// Resolve the preference exactly once, here, and freeze the answer. Apply only
+	// re-validates a plan against its frozen selections and never re-selects, so a
+	// preference edited between plan and apply must not be able to change what gets
+	// written — and an operator reading the plan can see which policy produced it.
+	// The block is emitted only when the preference actually constrained selection,
+	// so unrestricted plans stay byte-identical to the ones planned before the
+	// preference existed and their source fingerprints do not shift.
+	const artworkLanguage = defaults.artworkLanguage;
+	const artworkLanguagePolicy = resolveArtworkLanguagePolicy(artworkLanguage, defaults.uiLocale);
 	return {
 		configuredMethod,
 		effectiveMethod,
@@ -307,7 +362,10 @@ function freezeDefaults(
 				resolutionWeight: defaults.scoreWeights.resolutionWeight,
 				aspectWeight: defaults.scoreWeights.aspectWeight
 			}
-		}
+		},
+		...(artworkLanguage && artworkLanguagePolicy.mode === 'preferred'
+			? { artworkLanguage: { preference: artworkLanguage, policy: artworkLanguagePolicy } }
+			: {})
 	};
 }
 
@@ -490,6 +548,31 @@ function automaticEntries(selection: AutomaticArtworkSelection) {
 	return [selection.poster, selection.background, ...selection.children].filter(
 		(entry): entry is NonNullable<typeof entry> => entry !== null
 	);
+}
+
+/**
+ * The slots the selector could fill only from outside the preferred language tier.
+ *
+ * Read off the selection result rather than the frozen record: `FrozenArtworkSelection`
+ * carries the winner's `language` but has no field for *why* it was taken, and adding
+ * one would break `assertApplyPlanFresh`, which re-derives every auto selection from
+ * the candidate row alone and would compute a different fingerprint for it.
+ */
+function automaticLanguageFallbacks(
+	selection: AutomaticArtworkSelection,
+	selectionFrom: ApplyItemRef
+): ApplyArtworkLanguageFallback[] {
+	return automaticEntries(selection)
+		.filter((entry) => entry.languageDecision?.fallback === true)
+		.map((entry) => ({
+			selectionFrom: {
+				serverInstanceId: selectionFrom.serverInstanceId,
+				mediaItemId: selectionFrom.mediaItemId
+			},
+			slot: entry.slot,
+			candidateId: entry.candidateId,
+			language: entry.languageDecision?.language ?? null
+		}));
 }
 
 function freezeAutomaticSelections(
@@ -732,6 +815,9 @@ export function createApplyPlanner(dependencies: ApplyPlannerDependencies) {
 		const destinations = destinationsForMethod(defaults.effectiveMethod);
 		const cache = new Map<string, Promise<ApplyPlannerItemData>>();
 		const selectionCache = new Map<string, Promise<FrozenArtworkSelection[]>>();
+		// Keyed by selection source, not by target: one source item can feed many
+		// cross-server targets, and its fallback slots must be reported once.
+		const languageFallbacks = new Map<string, ApplyArtworkLanguageFallback[]>();
 
 		const load = (ref: ApplyItemRef): Promise<ApplyPlannerItemData> => {
 			const key = refKey(ref);
@@ -810,8 +896,15 @@ export function createApplyPlanner(dependencies: ApplyPlannerDependencies) {
 						if (request.selectionMode === 'auto') {
 							const automatic = await dependencies.selectAutomatic(selectionRef, {
 								weights: defaults.scoring.weights,
-								providerPriority: defaults.scoring.providerPriority
+								providerPriority: defaults.scoring.providerPriority,
+								// The policy frozen above, never the live preference: selection and
+								// the plan that records it must describe one and the same decision.
+								...(defaults.artworkLanguage
+									? { languagePolicy: defaults.artworkLanguage.policy }
+									: {})
 							});
+							const fallbacks = automaticLanguageFallbacks(automatic, selectionRef);
+							if (fallbacks.length) languageFallbacks.set(refKey(selectionRef), fallbacks);
 							return freezeAutomaticSelections(automatic, selectionFrom);
 						}
 						return selectionFrom.storedSelections.map((selection) =>
@@ -854,7 +947,18 @@ export function createApplyPlanner(dependencies: ApplyPlannerDependencies) {
 			defaults,
 			items: materialized
 		});
-		if (payload.summary.operationCount === 0) return { payload, plan: null };
+		// Ordered exactly like the plan's own items, so the confirmation surface reads
+		// in plan order rather than in the order the targets happened to be loaded.
+		const fallbacks = [...languageFallbacks.values()]
+			.flat()
+			.sort(
+				(a, b) =>
+					a.selectionFrom.serverInstanceId.localeCompare(b.selectionFrom.serverInstanceId) ||
+					a.selectionFrom.mediaItemId - b.selectionFrom.mediaItemId ||
+					applySlotKey(a.slot).localeCompare(applySlotKey(b.slot))
+			);
+		const preview = fallbacks.length ? { artworkLanguageFallbacks: fallbacks } : {};
+		if (payload.summary.operationCount === 0) return { payload, plan: null, ...preview };
 
 		const serverInstanceId =
 			context.source === 'cross_server' || payload.scope.serverInstanceIds.length !== 1
@@ -871,6 +975,6 @@ export function createApplyPlanner(dependencies: ApplyPlannerDependencies) {
 			librarySectionKey,
 			ttlMs: request.ttlMs
 		});
-		return { payload, plan };
+		return { payload, plan, ...preview };
 	};
 }

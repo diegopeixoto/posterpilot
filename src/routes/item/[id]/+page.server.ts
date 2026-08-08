@@ -51,6 +51,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		...detail,
 		suggestPreselect: config.suggestPreselect,
 		defaultApplyMethod: config.defaultApplyMethod,
+		// The preference travels as-is; the page resolves it against the active UI
+		// locale so `ui` follows whichever language the visitor is actually reading.
+		tmdbArtworkLanguage: config.tmdbArtworkLanguage,
 		returnTo,
 		isReviewReturn: focusedReviewReturn !== null,
 		// Review detail can move item-to-item, so browser history may point at another

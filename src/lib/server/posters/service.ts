@@ -14,6 +14,7 @@ import { redact } from '$lib/server/config/redact';
 import { logEvent } from '$lib/server/events';
 import { PROVIDERS } from './providers';
 import { providerAvailability } from './providers/availability';
+import { providerDiscovery } from './providers/types';
 import { scorePoster } from './score';
 import { getScoreWeights } from './score-weights';
 import {
@@ -96,8 +97,10 @@ export async function discoverForItem(
 
 			attempted += 1;
 			try {
-				const sets = await provider.discover(item, config, { forceRefresh: opts?.forceRefresh });
-				const candidates = sets.flatMap((set) =>
+				const discovery = providerDiscovery(
+					await provider.discover(item, config, { forceRefresh: opts?.forceRefresh })
+				);
+				const candidates = discovery.sets.flatMap((set) =>
 					set.candidates.map((candidate) => {
 						const width = candidate.width ?? null;
 						const height = candidate.height ?? null;
@@ -141,6 +144,10 @@ export async function discoverForItem(
 								provider: provider.id,
 								status: candidates.length ? 'succeeded' : 'empty',
 								candidateCount: candidates.length,
+								// Recorded on the outcome, not inferred later: once the response is
+								// discarded there is no way to tell a title with exactly the guard's
+								// worth of posters from one whose list was cut short.
+								truncatedKinds: [...discovery.truncatedKinds],
 								latencyMs: Date.now() - providerStarted.getTime(),
 								lastSuccessAt: new Date(),
 								startedAt: providerStarted,

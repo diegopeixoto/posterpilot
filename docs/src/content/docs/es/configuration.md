@@ -59,6 +59,40 @@ proveedor, resolución y proporción. La misma configuración determinista se us
 vista previa y ejecución. `SUGGEST_PRESELECT` muestra la mejor sugerencia, pero
 aceptarla/prepararla siempre es explícito.
 
+## Idioma de las ilustraciones de TMDB
+
+`TMDB_ARTWORK_LANGUAGE` (`any` por defecto) decide en qué idioma exploras y
+seleccionas automáticamente las ilustraciones de TMDB, con independencia de
+`APP_LANGUAGE`: `any` mantiene todos los idiomas que devolvió TMDB, `ui` sigue el
+idioma de la interfaz normalizado a su código base (una interfaz `pt-BR` prefiere
+`pt`) y un código ISO 639-1 explícito (`en`, `de`…) no se limita a los seis
+locales traducidos. Un valor no reconocido se trata como ausente y vuelve a `any`
+en lugar de aplicar un filtro roto. Como el resto, el entorno tiene prioridad y
+el campo aparece como gestionado por el entorno.
+
+Las ilustraciones que TMDB no etiqueta cuentan como neutras y siguen disponibles
+con cualquier preferencia, así que una preferencia nunca vacía un panel que solo
+contiene arte neutro. El descubrimiento conserva siempre todos los idiomas —la
+preferencia rige la exploración y la selección automática, no lo que se
+descarga—, de modo que cambiarla vuelve a filtrar lo que ya tienes y nunca obliga
+a repetir la búsqueda. La selección automática solo recurre a un póster en otro
+idioma cuando no queda ninguna opción preferida ni sin etiquetar, y lo indica
+cuando ocurre. La página del elemento añade un conmutador temporal
+**Preferido / Todos** que no modifica el ajuste global.
+
+## Inventario de candidatos y «cargar más»
+
+La ingesta de TMDB se detenía antes en 20 imágenes **por tipo de ilustración**
+—pósteres y fondos se contaban por separado, de ahí los avisos de «limitado a 40
+carátulas»—. Ahora se conservan muchas más, sin duplicados por la identidad de
+archivo de TMDB y en el orden en que TMDB las clasificó, y cada panel de proveedor
+y tipo muestra un lote acotado con un control **cargar más** que indica cuántos
+candidatos siguen ocultos. Los paneles de pósteres y de fondos se despliegan de
+forma independiente. El descubrimiento mantiene un tope defensivo de **200
+candidatos por tipo de ilustración** —un límite de almacenamiento y renderizado,
+no un filtro de calidad—: cuando un panel lo alcanza, avisa de que el inventario
+está **truncado** en lugar de dar a entender que está completo.
+
 ## Kometa y método de aplicación
 
 `DEFAULT_APPLY_METHOD` acepta `plex` (servidor directo), `kometa` o `both`. Es el
@@ -120,6 +154,7 @@ admitidos son `en`, `es`, `zh`, `ja`, `pt-BR` y `fr`.
 | `FANART_KEY` | — | Clave Fanart.tv (secreto). |
 | `THEPOSTERDB_USERNAME` | — | Usuario o correo opcional de ThePosterDB para buscar con sesión iniciada. |
 | `THEPOSTERDB_PASSWORD` | — | Contraseña de la cuenta opcional de ThePosterDB (secreto, cifrada en reposo). |
+| `TMDB_ARTWORK_LANGUAGE` | `any` | Ilustraciones de TMDB que se exploran y autoseleccionan: `any`, `ui` (sigue la interfaz) o un código ISO 639-1 como `en`; un valor no válido vuelve a `any`. |
 | `MEDIUX_REQUEST_DELAY_MS` | `2000` | Pausa entre solicitudes MediUX, ms. |
 | `MEDIUX_CONCURRENCY` | `5` | Solicitudes MediUX simultáneas. |
 | `HTTP_CACHE_TTL_DAYS` | `7` | TTL de respuestas HTTP en caché. |

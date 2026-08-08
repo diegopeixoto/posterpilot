@@ -6,6 +6,20 @@
 	import { groupSetArtwork } from '$lib/posters/season-groups';
 	import { defaultExpanded, providerKey, setKey, seasonKey } from '$lib/posters/collapse';
 	import {
+		CANDIDATE_DISCLOSURE_BATCH_SIZE,
+		artworkLanguageName,
+		candidateDisclosureKey,
+		disclosureState,
+		isLanguageFallbackCandidate,
+		nextDisclosureLimit,
+		summarizeCandidateLanguages,
+		visibleArtworkCandidates
+	} from '$lib/posters/candidate-disclosure';
+	import {
+		resolveArtworkLanguagePolicy,
+		type ArtworkLanguagePolicy
+	} from '$lib/tmdb-artwork-language';
+	import {
 		stagedArtworkMatchesCandidate,
 		toggleStagedArtworkCandidate
 	} from '$lib/posters/selection-match';
@@ -265,8 +279,92 @@
 		}
 		return out;
 	}
-	// Reactive (recomputes after discovery refreshes the candidate list).
-	const suggestions = $derived(computeSuggestions(data.candidates, data.suggestPreselect));
+	// ---- Artwork language ------------------------------------------------------
+	// The saved preference decides what this page shows; the toggle below is
+	// item-local `$state` and deliberately never writes to /api/settings, so
+	// browsing every language for one title cannot change the global default.
+	let showAllLanguages = $state(false);
+	const preferredLanguagePolicy = $derived(
+		resolveArtworkLanguagePolicy(data.tmdbArtworkLanguage, data.locale)
+	);
+	const languagePolicy = $derived<ArtworkLanguagePolicy>(
+		showAllLanguages ? { mode: 'all' } : preferredLanguagePolicy
+	);
+	const preferredLanguageName = $derived(
+		preferredLanguagePolicy.mode === 'preferred'
+			? artworkLanguageName(preferredLanguagePolicy.language)
+			: ''
+	);
+	// A persisted pick stays visible under a restricted policy: an automatic
+	// language fallback has to be reviewable (and revocable) rather than hidden by
+	// the very preference that produced it. Read from the server payload, not from
+	// local staging, so picking artwork never makes a tile vanish mid-session.
+	const pinnedCandidateIds = $derived(
+		new Set(
+			[
+				data.item.selectedPosterCandidateId,
+				data.item.selectedBackgroundCandidateId,
+				...data.childSelections.map((row) => row.candidateId)
+			].filter((id): id is number => id !== null)
+		)
+	);
+	function visibleCandidatesOf(candidates: PosterCandidate[]): PosterCandidate[] {
+		return visibleArtworkCandidates(candidates, languagePolicy, (candidate) =>
+			pinnedCandidateIds.has(candidate.id)
+		);
+	}
+	/** True for a rendered tile the preference would otherwise have filtered away. */
+	function isLanguageFallback(candidate: PosterCandidate): boolean {
+		return isLanguageFallbackCandidate(candidate, preferredLanguagePolicy);
+	}
+	function candidateLanguageName(candidate: PosterCandidate): string {
+		return candidate.languageProvenance === 'tagged'
+			? artworkLanguageName(candidate.language)
+			: m.item_language_unverified();
+	}
+	const visibleCandidates = $derived(visibleCandidatesOf(data.candidates));
+	const languageSummary = $derived(summarizeCandidateLanguages(data.candidates, languagePolicy));
+	// Provider groups re-derived from the filtered inventory so every set count,
+	// every grid and every "load more" total describes what is actually reachable.
+	const visibleProviderGroups = $derived(
+		data.providerGroups.map((group) => ({
+			provider: group.provider,
+			sets: group.sets
+				.map((set) => ({ ...set, candidates: visibleCandidatesOf(set.candidates) }))
+				.filter((set) => set.candidates.length > 0),
+			language: summarizeCandidateLanguages(
+				group.sets.flatMap((set) => set.candidates),
+				languagePolicy
+			),
+			truncatedKinds: data.truncatedKinds[group.provider] ?? []
+		}))
+	);
+
+	// ---- Progressive disclosure (per provider × set × artwork kind) -------------
+	// Undisclosed tiles are not rendered at all: `loading="lazy"` still mounts the
+	// element, and a set can carry hundreds of images.
+	let disclosureLimits = $state<Record<string, number>>({});
+	let disclosureAnnouncement = $state('');
+	function disclosureFor(key: string, total: number) {
+		return disclosureState(
+			disclosureLimits[key] ?? CANDIDATE_DISCLOSURE_BATCH_SIZE,
+			total,
+			CANDIDATE_DISCLOSURE_BATCH_SIZE
+		);
+	}
+	function revealMore(key: string, total: number) {
+		const next = nextDisclosureLimit(
+			disclosureLimits[key] ?? CANDIDATE_DISCLOSURE_BATCH_SIZE,
+			total,
+			CANDIDATE_DISCLOSURE_BATCH_SIZE
+		);
+		disclosureLimits = { ...disclosureLimits, [key]: next };
+		disclosureAnnouncement = m.item_disclosure_announcement({ shown: next, total });
+	}
+
+	// Reactive (recomputes after discovery refreshes the candidate list). Fed the
+	// language-filtered list so a suggestion is never hidden by the filter.
+	const suggestions = $derived(computeSuggestions(visibleCandidates, data.suggestPreselect));
 
 	/**
 	 * Explicitly stage the suggested pick for every slot the user hasn't already chosen,
@@ -430,6 +528,9 @@
 			undoPreview = null;
 			undoContextLabel = '';
 			undoAvailable = false;
+			showAllLanguages = false;
+			disclosureLimits = {};
+			disclosureAnnouncement = '';
 		}
 	});
 
@@ -1185,6 +1286,7 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
 		<img
 			src={thumb(c.previewUrl ?? c.url)}
 			alt=""
@@ -1205,6 +1307,7 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
 		<img
 			src={thumb(c.previewUrl ?? c.url)}
 			alt=""
@@ -1233,6 +1336,7 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
 		<img
 			src={thumb(c.previewUrl ?? c.url)}
 			alt=""
@@ -1261,6 +1365,7 @@
 			: 'border-transparent hover:border-neutral-600'}"
 	>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
+		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
 		<img
 			src={thumb(c.previewUrl ?? c.url)}
 			alt=""
@@ -1277,6 +1382,50 @@
 	>
 		<span aria-hidden="true">✦</span>{m.item_suggested()}
 	</span>
+{/snippet}
+
+{#snippet languageChip(c: PosterCandidate)}
+	<!-- Artwork the language preference would hide, kept because it is the staged pick.
+	     Icon + language name (never color alone) so the fallback is legible as such. -->
+	<span
+		class="pointer-events-none absolute top-1.5 right-1.5 z-10 inline-flex items-center gap-1 rounded-full bg-neutral-950/90 px-1.5 py-0.5 text-[10px] font-medium text-amber-200 shadow-sm ring-1 ring-black/30"
+		aria-label={m.item_language_fallback({ language: candidateLanguageName(c) })}
+	>
+		<span aria-hidden="true">⚑</span>{candidateLanguageName(c)}
+	</span>
+{/snippet}
+
+{#snippet disclosureFooter(key: string, total: number)}
+	{#if total > CANDIDATE_DISCLOSURE_BATCH_SIZE}
+		{@const disclosure = disclosureFor(key, total)}
+		<div class="mt-1 flex flex-wrap items-center gap-2">
+			<p class="text-[11px] text-neutral-400">
+				{m.item_disclosure_count({
+					shown: disclosure.shown,
+					total,
+					remaining: disclosure.remaining
+				})}
+			</p>
+			<button
+				type="button"
+				class="btn btn-ghost min-h-11 px-2 py-1 text-xs"
+				disabled={disclosure.remaining === 0}
+				aria-controls={key}
+				onclick={() => revealMore(key, total)}
+			>
+				{disclosure.remaining > 0
+					? m.item_load_more({ count: disclosure.next, remaining: disclosure.remaining })
+					: m.item_all_shown({ total })}
+			</button>
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet truncatedNotice(provider: string)}
+	<p class="mt-1 text-[11px] text-amber-300">
+		<span aria-hidden="true">⚠</span>
+		{m.item_truncated_pane({ provider: providerLabel(provider) })}
+	</p>
 {/snippet}
 
 {#snippet chevron(open: boolean)}
@@ -1498,9 +1647,59 @@
 
 <!-- Artwork sets, grouped by provider (collapsible) -->
 <div id="artwork-compare" tabindex="-1" class="scroll-mt-20 focus-visible:outline-none"></div>
+{#if preferredLanguagePolicy.mode === 'preferred' && data.providerGroups.length}
+	<!-- Item-local language filter. Flipping it never touches the saved preference. -->
+	<section
+		class="mt-8 rounded-xl border border-neutral-800 bg-neutral-950/60 p-3"
+		aria-label={m.item_language_filter_title()}
+	>
+		<div class="flex flex-wrap items-center justify-between gap-2">
+			<p class="text-xs text-neutral-300">
+				<span aria-hidden="true">🌐</span>
+				{#if showAllLanguages}
+					{m.item_language_showing_all()}
+				{:else if languageSummary.foreign + languageSummary.unknown > 0}
+					{m.item_language_filter_hidden({
+						language: preferredLanguageName,
+						hidden: languageSummary.foreign + languageSummary.unknown
+					})}
+				{:else}
+					{m.item_language_filter_active({ language: preferredLanguageName })}
+				{/if}
+			</p>
+			<button
+				type="button"
+				class="btn btn-ghost min-h-11 px-3 text-xs"
+				aria-pressed={showAllLanguages}
+				onclick={() => (showAllLanguages = !showAllLanguages)}
+			>
+				{showAllLanguages
+					? m.item_language_show_preferred({ language: preferredLanguageName })
+					: m.item_language_show_all()}
+			</button>
+		</div>
+		{#if languageSummary.emptyForPreference}
+			<div class="mt-2 flex flex-wrap items-center gap-2">
+				<p class="text-xs text-amber-300">
+					<span aria-hidden="true">⚠</span>
+					{m.item_language_empty({
+						language: preferredLanguageName,
+						count: languageSummary.foreign + languageSummary.unknown
+					})}
+				</p>
+				<button
+					type="button"
+					class="btn btn-subtle min-h-11 px-3 text-xs"
+					onclick={() => (showAllLanguages = true)}>{m.item_language_show_all()}</button
+				>
+			</div>
+		{/if}
+	</section>
+{/if}
+<p class="sr-only" aria-live="polite" aria-atomic="true">{disclosureAnnouncement}</p>
 {#if data.providerGroups.length}
 	<section class="mt-8 space-y-6 pb-4">
-		{#each data.providerGroups as group (group.provider)}
+		{#each visibleProviderGroups as group (group.provider)}
 			{@const pKey = providerKey(group.provider)}
 			<div>
 				<div class="flex items-center gap-2">
@@ -1538,6 +1737,36 @@
 
 				{#if isExpanded(pKey)}
 					<div class="mt-2 space-y-4">
+						{#if group.language.needsRefresh}
+							<!-- Stored before provenance existed: ask for a fresh search instead of
+							     guessing that untagged-looking artwork is language-neutral. -->
+							<div
+								class="flex flex-wrap items-center gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2"
+							>
+								<p class="text-xs text-amber-200">
+									<span aria-hidden="true">⚠</span>
+									{m.item_language_unverified_hint({
+										provider: providerLabel(group.provider),
+										count: group.language.unknown
+									})}
+								</p>
+								<button
+									type="button"
+									class="btn btn-ghost min-h-11 px-3 text-xs"
+									disabled={busy}
+									onclick={() => refreshProvider(group.provider)}
+									>{m.item_refresh_provider({ provider: providerLabel(group.provider) })}</button
+								>
+							</div>
+						{/if}
+						{#if group.sets.length === 0}
+							<p class="text-xs text-neutral-400">
+								{m.item_language_provider_empty({
+									provider: providerLabel(group.provider),
+									language: preferredLanguageName
+								})}
+							</p>
+						{/if}
 						{#each group.sets as set (set.setId)}
 							{@const sKey = setKey(set.setId)}
 							{@const g = groupSetArtwork(set.candidates)}
@@ -1565,25 +1794,43 @@
 								{#if isExpanded(sKey)}
 									<div class="mt-3 flex flex-col gap-4 sm:flex-row">
 										{#if g.posters.length}
+											{@const pane = candidateDisclosureKey(group.provider, set.setId, 'poster')}
 											<div class="min-w-0 flex-1">
 												<p class="mb-1 text-[11px] text-neutral-400">
 													{g.posters.length > 1 ? m.item_posters() : m.item_poster()}
 												</p>
-												<div class="flex gap-2 overflow-x-auto pb-2">
-													{#each g.posters as c (c.id)}<div class="w-20 flex-none">
+												<div id={pane} class="flex gap-2 overflow-x-auto pb-2">
+													{#each g.posters.slice(0, disclosureFor(pane, g.posters.length).shown) as c (c.id)}<div
+															class="w-20 flex-none"
+														>
 															{@render posterTile(c)}
 														</div>{/each}
 												</div>
+												{@render disclosureFooter(pane, g.posters.length)}
+												{#if group.truncatedKinds.includes('poster')}
+													{@render truncatedNotice(group.provider)}
+												{/if}
 											</div>
 										{/if}
 										{#if g.backgrounds.length}
+											{@const pane = candidateDisclosureKey(
+												group.provider,
+												set.setId,
+												'background'
+											)}
 											<div class="min-w-0 flex-1">
 												<p class="mb-1 text-[11px] text-neutral-400">
 													{g.backgrounds.length > 1 ? m.item_backdrops() : m.item_backdrop()}
 												</p>
-												<div class="grid grid-cols-2 gap-2">
-													{#each g.backgrounds as c (c.id)}{@render backdropTile(c)}{/each}
+												<div id={pane} class="grid grid-cols-2 gap-2">
+													{#each g.backgrounds.slice(0, disclosureFor(pane, g.backgrounds.length).shown) as c (c.id)}{@render backdropTile(
+															c
+														)}{/each}
 												</div>
+												{@render disclosureFooter(pane, g.backgrounds.length)}
+												{#if group.truncatedKinds.includes('background')}
+													{@render truncatedNotice(group.provider)}
+												{/if}
 											</div>
 										{/if}
 									</div>
@@ -1614,26 +1861,46 @@
 
 												{#if isExpanded(seaKey)}
 													{#if sg.posters.length}
+														{@const pane = candidateDisclosureKey(
+															group.provider,
+															set.setId,
+															'season',
+															sg.season
+														)}
 														<p class="mt-2 mb-1 text-[11px] text-neutral-400">
 															{sg.posters.length > 1 ? m.item_posters() : m.item_poster()}
 														</p>
-														<div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
-															{#each sg.posters as c (c.id)}{@render seasonPosterTile(
+														<div id={pane} class="grid grid-cols-4 gap-2 sm:grid-cols-8">
+															{#each sg.posters.slice(0, disclosureFor(pane, sg.posters.length).shown) as c (c.id)}{@render seasonPosterTile(
 																	c,
 																	sg.season
 																)}{/each}
 														</div>
+														{@render disclosureFooter(pane, sg.posters.length)}
+														{#if group.truncatedKinds.includes('season')}
+															{@render truncatedNotice(group.provider)}
+														{/if}
 													{/if}
 													{#if sg.titleCards.length}
+														{@const pane = candidateDisclosureKey(
+															group.provider,
+															set.setId,
+															'title_card',
+															sg.season
+														)}
 														<p class="mt-3 mb-1 text-[11px] text-neutral-400">
 															{m.item_title_cards({ count: sg.titleCards.length })}
 														</p>
-														<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-															{#each sg.titleCards as c (c.id)}{@render titleCardTile(
+														<div id={pane} class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+															{#each sg.titleCards.slice(0, disclosureFor(pane, sg.titleCards.length).shown) as c (c.id)}{@render titleCardTile(
 																	c,
 																	sg.season
 																)}{/each}
 														</div>
+														{@render disclosureFooter(pane, sg.titleCards.length)}
+														{#if group.truncatedKinds.includes('title_card')}
+															{@render truncatedNotice(group.provider)}
+														{/if}
 													{/if}
 												{/if}
 											</div>

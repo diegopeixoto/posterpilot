@@ -133,6 +133,46 @@ describe('resolveConfig — Kometa keys', () => {
 	});
 });
 
+describe('resolveConfig — TMDB artwork language', () => {
+	it('defaults to browsing every language when neither source sets it', async () => {
+		expect((await resolveConfig()).tmdbArtworkLanguage).toBe('any');
+	});
+
+	it('env wins over persisted for the artwork language', async () => {
+		h.store.set('tmdbArtworkLanguage', 'de');
+		expect((await resolveConfig()).tmdbArtworkLanguage).toBe('de');
+		h.env.TMDB_ARTWORK_LANGUAGE = 'ja';
+		expect((await resolveConfig()).tmdbArtworkLanguage).toBe('ja');
+	});
+
+	it('falls back to "any" for an unparseable value instead of filtering on it', async () => {
+		h.store.set('tmdbArtworkLanguage', 'english');
+		expect((await resolveConfig()).tmdbArtworkLanguage).toBe('any');
+		h.env.TMDB_ARTWORK_LANGUAGE = 'english';
+		expect((await resolveConfig()).tmdbArtworkLanguage).toBe('any');
+	});
+
+	it('exposes the resolved value publicly and locks it while env-managed', async () => {
+		const open = await publicConfig();
+		expect(open.tmdbArtworkLanguage).toBe('any');
+		expect(open.envManaged.tmdbArtworkLanguage).toBe(false);
+
+		h.env.TMDB_ARTWORK_LANGUAGE = 'ui';
+		const locked = await publicConfig();
+		expect(locked.tmdbArtworkLanguage).toBe('ui');
+		expect(locked.envManaged.tmdbArtworkLanguage).toBe(true);
+	});
+
+	it('narrows a UI-shaped locale to the ISO 639-1 code TMDB tags images with', async () => {
+		await saveSettings({ tmdbArtworkLanguage: 'pt-BR' });
+		// Stored verbatim; the base-code narrowing happens on resolution, so a later
+		// parser change re-reads the user's choice rather than a lossy rewrite of it.
+		expect(h.store.get('tmdbArtworkLanguage')).toBe('pt-BR');
+		expect((await resolveConfig()).tmdbArtworkLanguage).toBe('pt');
+		expect((await publicConfig()).tmdbArtworkLanguage).toBe('pt');
+	});
+});
+
 describe('server-scoped library settings', () => {
 	it('isolates cached libraries with a legacy-only fallback', async () => {
 		h.store.set(

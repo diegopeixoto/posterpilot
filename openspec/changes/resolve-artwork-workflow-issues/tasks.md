@@ -59,15 +59,15 @@
 
 ## 6. TMDB Artwork Language and Complete Candidate Inventory
 
-- [ ] 6.1 Add validated `tmdbArtworkLanguage` configuration, `TMDB_ARTWORK_LANGUAGE` precedence, public config exposure, and any/ui/base-language normalization
-- [ ] 6.2 Persist TMDB file identity and tagged/untagged language provenance and refresh unknown legacy candidates before restricted filtering
-- [ ] 6.3 Replace the 20-result ingestion slice with stable validation/deduplication up to the measured per-kind guard and record truncation explicitly
-- [ ] 6.4 Measure high-volume fixtures and confirm or adjust the proposed 200-per-kind guard and 20-item disclosure batch
-- [ ] 6.5 Apply the resolved language policy to automatic selection, freeze it in plans, and expose foreign-language fallback metadata
-- [ ] 6.6 Add the global Provider setting and item-local Preferred/All control with explicit empty/fallback/refresh states
-- [ ] 6.7 Add independent poster/backdrop load-more state, remaining counts, stable append, live announcement, and unmounted hidden images
-- [ ] 6.8 Ensure filtering precedes batching/counts/suggestions and that every automatic suggestion is visible
-- [ ] 6.9 Add parser, persistence, configuration, ranking, payload-size, component, and E2E tests for language and progressive disclosure
+- [x] 6.1 Add validated `tmdbArtworkLanguage` configuration, `TMDB_ARTWORK_LANGUAGE` precedence, public config exposure, and any/ui/base-language normalization
+- [x] 6.2 Persist TMDB file identity and tagged/untagged language provenance and refresh unknown legacy candidates before restricted filtering
+- [x] 6.3 Replace the 20-result ingestion slice with stable validation/deduplication up to the measured per-kind guard and record truncation explicitly
+- [x] 6.4 Measure high-volume fixtures and confirm or adjust the proposed 200-per-kind guard and 20-item disclosure batch
+- [x] 6.5 Apply the resolved language policy to automatic selection, freeze it in plans, and expose foreign-language fallback metadata
+- [x] 6.6 Add the global Provider setting and item-local Preferred/All control with explicit empty/fallback/refresh states
+- [x] 6.7 Add independent poster/backdrop load-more state, remaining counts, stable append, live announcement, and unmounted hidden images
+- [x] 6.8 Ensure filtering precedes batching/counts/suggestions and that every automatic suggestion is visible
+- [x] 6.9 Add parser, persistence, configuration, ranking, payload-size, component, and E2E tests for language and progressive disclosure
 
 ## 7. Canonical Provider Ordering
 

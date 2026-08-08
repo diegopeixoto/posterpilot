@@ -1,5 +1,5 @@
 import { APPLY_PLAN_KIND, type ApplyPlanPayloadV1, type FrozenApplyJobPayload } from './apply-plan';
-import type { ApplyPlanPreview } from './apply-planner';
+import type { ApplyArtworkLanguageFallback, ApplyPlanPreview } from './apply-planner';
 import {
 	ApplyPlanValidationError,
 	assertApplyPlanFresh,
@@ -17,6 +17,15 @@ export interface ExactApplyPreviewResponse extends ApplyPlanPayloadV1 {
 	planId: string | null;
 	digest: string | null;
 	expiresAt: string | null;
+	/**
+	 * Slots an automatic selection filled with artwork outside the configured
+	 * language because nothing preferred existed. Rides beside the frozen payload
+	 * rather than inside it: the payload is hashed into the digest and re-derived
+	 * on freshness checks, where the policy is not in scope. Present only when a
+	 * fallback actually happened, so the confirmation surface can say so instead of
+	 * silently applying artwork the preference would have excluded.
+	 */
+	artworkLanguageFallbacks?: ApplyArtworkLanguageFallback[];
 }
 
 /**
@@ -41,7 +50,10 @@ export function exactApplyPreviewResponse(preview: ApplyPlanPreview): ExactApply
 		...payload,
 		planId: preview.plan?.id ?? null,
 		digest: preview.plan?.digest ?? null,
-		expiresAt: preview.plan?.expiresAt.toISOString() ?? null
+		expiresAt: preview.plan?.expiresAt.toISOString() ?? null,
+		...(preview.artworkLanguageFallbacks?.length
+			? { artworkLanguageFallbacks: preview.artworkLanguageFallbacks }
+			: {})
 	};
 }
 

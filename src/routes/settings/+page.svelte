@@ -13,6 +13,7 @@
 	import SecuritySettings from '$lib/components/settings/SecuritySettings.svelte';
 	import ServerSettings from '$lib/components/settings/ServerSettings.svelte';
 	import type { LibrarySort } from '$lib/library-sort';
+	import type { TmdbArtworkLanguage } from '$lib/tmdb-artwork-language';
 	import { m } from '$lib/paraglide/messages';
 	import { toasts } from '$lib/stores/toasts.svelte';
 
@@ -163,6 +164,7 @@
 	let providerTmdb = $state(initialData.config.providerTmdb);
 	let providerFanart = $state(initialData.config.providerFanart);
 	let providerThePosterDb = $state(initialData.config.providerThePosterDb);
+	let tmdbArtworkLanguage = $state<TmdbArtworkLanguage>(initialData.config.tmdbArtworkLanguage);
 	let fanartKey = $state('');
 	let thePosterDbUsername = $state(initialData.config.thePosterDbUsername ?? '');
 	let thePosterDbPassword = $state('');
@@ -263,6 +265,7 @@
 				providerTmdb: String(providerTmdb),
 				providerFanart: String(providerFanart),
 				providerThePosterDb: String(providerThePosterDb),
+				tmdbArtworkLanguage: String(tmdbArtworkLanguage),
 				thePosterDbUsername,
 				includedSections: allSelected ? [] : [...selectedSections],
 				ranking: {
@@ -418,6 +421,7 @@
 			bind:providerTmdb
 			bind:providerFanart
 			bind:providerThePosterDb
+			bind:tmdbArtworkLanguage
 			bind:fanartKey
 			bind:thePosterDbUsername
 			bind:thePosterDbPassword

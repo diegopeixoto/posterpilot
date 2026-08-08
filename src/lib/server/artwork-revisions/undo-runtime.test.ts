@@ -280,7 +280,8 @@ function config(serverInstanceId: string | null = 'server-a'): AppConfig {
 		thumbCacheTtlDays: 1,
 		thumbCacheMaxMb: 10,
 		funEnabled: false,
-		libraryDefaultSort: 'title'
+		libraryDefaultSort: 'title',
+		tmdbArtworkLanguage: 'any'
 	};
 }
 

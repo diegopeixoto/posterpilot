@@ -18,7 +18,7 @@ export const tmdbProvider: PosterProvider = {
 	requiresKey: false, // reuses the existing TMDB credential
 	isAvailable: (config) => config.providerTmdb && Boolean(config.tmdbKey),
 	async discover(item: MediaItem, config: AppConfig, opts) {
-		if (!item.tmdbId || !item.mediaType || !config.tmdbKey) return [];
+		if (!item.tmdbId || !item.mediaType || !config.tmdbKey) return { sets: [], truncatedKinds: [] };
 		const auth = tmdbAuth(config.tmdbKey);
 		const base = `${TMDB_BASE}/${item.mediaType}/${item.tmdbId}/images`;
 		const url = auth.query ? `${base}?${auth.query}` : base;

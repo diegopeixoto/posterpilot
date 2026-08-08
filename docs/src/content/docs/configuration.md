@@ -232,6 +232,61 @@ changed credentials take effect on the next discovery without a restart.
 
 ![PosterPilot provider settings with ThePosterDB enabled and its optional account username and password fields](/posterpilot/screenshots/settings-providers.webp)
 
+### TMDB artwork language
+
+TMDB tags most posters and backdrops with the language of the text printed on
+them. `TMDB_ARTWORK_LANGUAGE` (or **Settings → Metadata & providers**) decides
+which of those you browse and which ones an automatic suggestion may pick. It is
+deliberately **independent of `APP_LANGUAGE`** — a Portuguese interface with
+English posters is a perfectly reasonable combination, and so is the reverse.
+
+Three shapes of value are accepted:
+
+- **`any`** (default) — browse and auto-select across every language TMDB
+  returned. This is exactly the behavior that predates the setting, so upgrading
+  changes nothing until you opt in.
+- **`ui`** — follow the application's UI language, normalized to its base code: a
+  `pt-BR` interface prefers `pt`-tagged artwork.
+- **An explicit ISO 639-1 base code** — `en`, `de`, `it`, … These are _not_
+  limited to the six translated UI locales: TMDB tags artwork in far more
+  languages than PosterPilot is translated into.
+
+A value that is none of those is treated as unset and falls back to `any` rather
+than applying a broken filter — a typo never empties your candidate grid. Like
+every other environment-backed setting, `TMDB_ARTWORK_LANGUAGE` overrides the
+persisted value and the Settings field shows as environment-managed.
+
+Three behaviors are worth knowing before you set it:
+
+- **Textless artwork always stays.** Artwork that TMDB does not tag with a
+  language counts as language-neutral and remains available under every
+  preference, so a preference can never empty a pane that only holds neutral art.
+- **Discovery keeps everything.** The preference controls browsing and automatic
+  selection, not what gets downloaded — every language TMDB returned is stored.
+  Changing it re-filters what you already have and never requires a re-search.
+- **Automatic selection stays honest.** A suggestion falls back to a
+  foreign-language poster only when no preferred or untagged option exists, and
+  labels it when it does.
+
+Item pages also carry a temporary **Preferred / All** switch, so you can look
+past the preference for one title without changing the global setting.
+
+### Candidate inventory and load more
+
+TMDB ingestion used to stop at 20 images **per artwork kind** — posters and
+backdrops counted separately, which is where the "capped at 40 covers" reports
+came from. Discovery now retains far more than that — deduplicated on TMDB's own
+file identity, in the order TMDB ranked them — and each provider/artwork-kind
+pane shows a bounded batch with a **load more** control that reports how many
+candidates are still hidden. Poster and backdrop panes disclose independently, so
+expanding one does not expand the other.
+
+Discovery still applies a defensive ceiling of **200 candidates per artwork
+kind**, so that one pathological title cannot pull in an unbounded number of
+images. That is a storage and render bound, not a quality filter — and when a
+pane reaches it, the pane says the inventory was **truncated** rather than
+implying you are looking at everything TMDB has.
+
 ## Performance and tuning
 
 A handful of advanced settings (in the **Kometa & advanced** Settings tab, or via
@@ -375,6 +430,7 @@ and are locked in the UI.
 | `FANART_KEY`              | Fanart.tv key (secret)    | —                                     | Fanart.tv API key (the only keyed provider).                                                  |
 | `THEPOSTERDB_USERNAME`    | ThePosterDB username      | —                                     | Optional ThePosterDB account username or email for signed-in scraping.                        |
 | `THEPOSTERDB_PASSWORD`    | ThePosterDB password (secret) | —                                 | Password for the optional ThePosterDB account (encrypted at rest).                            |
+| `TMDB_ARTWORK_LANGUAGE`   | TMDB artwork language     | `any`                                 | Which TMDB artwork to browse and auto-select: `any`, `ui` (follow the UI language), or an ISO 639-1 base code such as `en`. Invalid values fall back to `any`. |
 | `MEDIUX_REQUEST_DELAY_MS` | MediUX request delay      | `2000`                                | Delay between MediUX requests, in milliseconds (throttling).                                  |
 | `MEDIUX_CONCURRENCY`      | MediUX concurrency        | `5`                                   | Max concurrent MediUX requests.                                                               |
 | `HTTP_CACHE_TTL_DAYS`     | HTTP cache TTL            | `7`                                   | How long cached HTTP responses (scrapes) are reused, in days.                                 |
