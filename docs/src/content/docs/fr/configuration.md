@@ -264,6 +264,68 @@ la découverte suivante, sans redémarrage.
 
 ![Paramètres des fournisseurs de PosterPilot avec ThePosterDB activé et ses champs facultatifs de nom d'utilisateur et de mot de passe](/posterpilot/screenshots/settings-providers.webp)
 
+### Langue des visuels TMDB
+
+TMDB étiquette la plupart des affiches et des arrière-plans avec la langue du
+texte qui y figure. `TMDB_ARTWORK_LANGUAGE` (ou **Paramètres → Métadonnées et
+fournisseurs**) décide lesquels vous parcourez et lesquels une suggestion
+automatique a le droit de choisir. Ce réglage est **délibérément indépendant
+d'`APP_LANGUAGE`** : une interface en portugais avec des affiches en anglais est
+une combinaison parfaitement raisonnable, et l'inverse aussi.
+
+Trois formes de valeur sont acceptées :
+
+- **`any`** (par défaut) — parcourir et sélectionner automatiquement dans toutes
+  les langues renvoyées par TMDB. C'est exactement le comportement qui précédait
+  ce réglage : la mise à jour ne change rien tant que vous ne l'activez pas.
+- **`ui`** — suivre la langue de l'interface, normalisée vers son code de base :
+  une interface en `pt-BR` préfère les visuels étiquetés `pt`.
+- **Un code de base ISO 639-1 explicite** — `en`, `de`, `it`, … Ces codes ne sont
+  _pas_ limités aux six locales d'interface traduites : TMDB étiquette des
+  visuels dans bien plus de langues que celles dans lesquelles PosterPilot est
+  traduit.
+
+Une valeur qui n'entre dans aucun de ces cas est traitée comme absente et
+retombe sur `any` au lieu d'appliquer un filtre cassé — une faute de frappe ne
+vide jamais votre grille de candidats. Comme tout autre paramètre adossé à
+l'environnement, `TMDB_ARTWORK_LANGUAGE` écrase la valeur persistée et le champ
+correspondant s'affiche comme géré par l'environnement dans les paramètres.
+
+Trois comportements méritent d'être connus avant de le définir :
+
+- **Les visuels sans texte restent toujours là.** Un visuel que TMDB n'étiquette
+  dans aucune langue compte comme neutre et reste disponible quelle que soit la
+  préférence ; une préférence ne peut donc jamais vider un volet qui ne contient
+  que des visuels neutres.
+- **La découverte conserve tout.** La préférence gouverne la navigation et la
+  sélection automatique, pas ce qui est téléchargé — toutes les langues renvoyées
+  par TMDB sont stockées. La modifier refiltre ce que vous avez déjà et n'oblige
+  jamais à relancer une recherche.
+- **La sélection automatique reste honnête.** Une suggestion ne se rabat sur une
+  affiche en langue étrangère que lorsqu'il n'existe aucune option préférée ni
+  non étiquetée, et elle le signale lorsque cela arrive.
+
+Les pages d'élément portent en plus un sélecteur temporaire **Préférée / Toutes**,
+qui permet de regarder au-delà de la préférence pour un titre donné sans modifier
+le réglage global.
+
+### Inventaire des candidats et bouton « charger plus »
+
+L'ingestion TMDB s'arrêtait auparavant à 20 images **par type de visuel** — les
+affiches et les arrière-plans étant comptés séparément, d'où les signalements de
+« plafonné à 40 couvertures ». La découverte en conserve désormais bien
+davantage — dédoublonnées sur l'identité de fichier propre à TMDB, dans l'ordre
+de classement de TMDB — et chaque volet fournisseur/type de visuel affiche un lot
+borné avec une commande **charger plus** qui indique combien de candidats restent
+masqués. Les volets d'affiches et d'arrière-plans se déploient indépendamment :
+ouvrir l'un ne déploie pas l'autre.
+
+La découverte applique toujours un plafond défensif de **200 candidats par type
+de visuel**, afin qu'un titre pathologique ne puisse pas ramener un nombre
+illimité d'images. C'est une borne de stockage et d'affichage, pas un filtre de
+qualité — et quand un volet l'atteint, il indique que l'inventaire est **tronqué**
+au lieu de laisser croire que vous voyez tout ce que TMDB possède.
+
 ## Performance et réglages
 
 Une poignée de paramètres avancés (dans l'onglet **Kometa et avancé** des
@@ -428,6 +490,7 @@ l'environnement, ils prennent la priorité et sont verrouillés dans l'interface
 | `FANART_KEY`              | Clé Fanart.tv (secret)           | —                                      | Clé API Fanart.tv (le seul fournisseur à clé).                                                    |
 | `THEPOSTERDB_USERNAME`    | Nom d'utilisateur ThePosterDB    | —                                      | Nom d'utilisateur ou e-mail facultatif du compte ThePosterDB pour la collecte connectée.          |
 | `THEPOSTERDB_PASSWORD`    | Mot de passe ThePosterDB (secret) | —                                     | Mot de passe du compte ThePosterDB facultatif (chiffré au repos).                                 |
+| `TMDB_ARTWORK_LANGUAGE`   | Langue des visuels TMDB          | `any`                                  | Quels visuels TMDB parcourir et sélectionner automatiquement : `any`, `ui` (suit la langue de l'interface) ou un code de base ISO 639-1 tel que `en`. Une valeur invalide retombe sur `any`. |
 | `MEDIUX_REQUEST_DELAY_MS` | Délai des requêtes MediUX        | `2000`                                 | Délai entre les requêtes MediUX, en millisecondes (limitation de débit).                          |
 | `MEDIUX_CONCURRENCY`      | Concurrence MediUX               | `5`                                    | Nombre maximal de requêtes MediUX simultanées.                                                    |
 | `HTTP_CACHE_TTL_DAYS`     | TTL du cache HTTP                | `7`                                    | Durée de réutilisation des réponses HTTP en cache (collectes), en jours.                          |
