@@ -8,6 +8,7 @@ import { drizzle, type LibSQLDatabase } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '$lib/server/db/schema';
 import {
+	artworkCoverage,
 	artworkRevisionGroups,
 	artworkRevisions,
 	artworkSnapshots,
@@ -328,6 +329,35 @@ async function seed(): Promise<void> {
 			completedAt: NOW
 		}
 	]);
+	// One coverage row per server. They are a rebuildable projection, so they are
+	// absent from the purge impact and fingerprint — but foreign keys are off at
+	// runtime, so nothing deletes them unless the purge names the table itself.
+	await database.insert(artworkCoverage).values([
+		{
+			serverInstanceId: 'server-a',
+			mediaItemId: 1,
+			librarySectionKey: 'movies',
+			canonicalKey: 'movie:105',
+			destination: 'server',
+			kind: 'poster',
+			status: 'applied_on_server',
+			evidenceSource: 'server_verified_match',
+			observedAt: NOW,
+			updatedAt: NOW
+		},
+		{
+			serverInstanceId: 'server-b',
+			mediaItemId: 2,
+			librarySectionKey: 'movies',
+			canonicalKey: 'movie:106',
+			destination: 'server',
+			kind: 'poster',
+			status: 'applied_on_server',
+			evidenceSource: 'server_verified_match',
+			observedAt: NOW,
+			updatedAt: NOW
+		}
+	]);
 	await database.insert(artworkRevisions).values([
 		{
 			id: 'revision-a',
@@ -515,6 +545,9 @@ describe('server permanent purge', () => {
 		expect((await database.select().from(artworkRevisions)).map((row) => row.id)).toEqual([
 			'revision-b'
 		]);
+		expect(
+			(await database.select().from(artworkCoverage)).map((row) => row.serverInstanceId)
+		).toEqual(['server-b']);
 		expect(await database.select().from(backupRecords)).toHaveLength(1);
 		expect(
 			(await database.select().from(settings).where(eq(settings.key, 'language')))[0]?.value

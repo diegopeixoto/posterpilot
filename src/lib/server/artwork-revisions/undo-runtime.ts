@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import type { AppConfig } from '$lib/server/config';
 import { resolveConfig } from '$lib/server/config';
 import { resolveDataPaths } from '$lib/server/data-paths';
+import { refreshCoverageAfter } from '$lib/server/coverage/refresh';
 import { db } from '$lib/server/db';
 import {
 	canonicalConfigPath,
@@ -692,10 +693,40 @@ function runtime() {
 }
 
 /** Execute a frozen undo job. Called by the durable worker, never by a request. */
-export function executeFrozenArtworkUndoJob(
+export async function executeFrozenArtworkUndoJob(
 	input: ExecuteArtworkUndoInput
 ): Promise<ArtworkUndoExecutionResult> {
-	return executor()(input);
+	const result = await executor()(input);
+	await refreshUndoneCoverage(result);
+	return result;
+}
+
+/**
+ * Re-derive coverage for the occurrences this undo touched.
+ *
+ * An undo is the one operation that *withdraws* a claim: the ledger's successful
+ * undo cancels the apply it reverses, so without this pass the projection would
+ * keep reporting artwork we deliberately removed. The scoped replace also drops
+ * rows for slots that now have no evidence at all, which an upsert-only refresh
+ * would strand.
+ *
+ * Collection-scoped operations are skipped: a collection carries no canonical
+ * identity, so it is outside coverage entirely.
+ */
+async function refreshUndoneCoverage(result: ArtworkUndoExecutionResult): Promise<void> {
+	const byServer = new Map<string, Set<number>>();
+	for (const operation of result.operations) {
+		if (operation.target.kind !== 'item') continue;
+		let ids = byServer.get(operation.serverInstanceId);
+		if (!ids) {
+			ids = new Set<number>();
+			byServer.set(operation.serverInstanceId, ids);
+		}
+		ids.add(operation.target.mediaItemId);
+	}
+	for (const [serverInstanceId, mediaItemIds] of byServer) {
+		await refreshCoverageAfter('undo', { serverInstanceId, mediaItemIds: [...mediaItemIds] });
+	}
 }
 
 export function previewActiveItemArtworkUndo(

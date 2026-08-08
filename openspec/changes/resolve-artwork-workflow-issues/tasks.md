@@ -88,14 +88,14 @@
 
 ## 9. Artwork Coverage Projection and Queries
 
-- [ ] 9.1 Add an indexed rebuildable coverage projection keyed by canonical kind/TMDB identity, occurrence, destination, and artwork slot
-- [ ] 9.2 Implement canonical occurrence grouping that preserves server/library provenance, separates movie/show numeric collisions, and never title-matches unresolved items
-- [ ] 9.3 Reconcile direct-server coverage from immutable revisions and current verified fingerprints into applied, unverified, externally-changed, missing, or unknown evidence
-- [ ] 9.4 Reconcile Kometa coverage from current typed files and only provable legacy entries into exported, missing, or unknown evidence without implying execution
-- [ ] 9.5 Trigger or refresh reconciliation after sync verification, apply, undo, Kometa migration/config inspection, and stale on-demand reads
-- [ ] 9.6 Add server/library occurrence counts and coverage filters to library/review queries without mutating `reviewedAt`
-- [ ] 9.7 Backfill/rebuild coverage safely for existing revisions and destinations while leaving ambiguous legacy entries unknown
-- [ ] 9.8 Test duplicate identities across servers/libraries, movie/show ID collisions, partial slots, external changes, parse failures, entry removal, and review-state independence
+- [x] 9.1 Add an indexed rebuildable coverage projection keyed by canonical kind/TMDB identity, occurrence, destination, and artwork slot
+- [x] 9.2 Implement canonical occurrence grouping that preserves server/library provenance, separates movie/show numeric collisions, and never title-matches unresolved items
+- [x] 9.3 Reconcile direct-server coverage from immutable revisions and current verified fingerprints into applied, unverified, externally-changed, missing, or unknown evidence
+- [x] 9.4 Reconcile Kometa coverage from current typed files and only provable legacy entries into exported, missing, or unknown evidence without implying execution
+- [x] 9.5 Trigger or refresh reconciliation after sync verification, apply, undo, Kometa migration/config inspection, and stale on-demand reads
+- [x] 9.6 Add server/library occurrence counts and coverage filters to library/review queries without mutating `reviewedAt`
+- [x] 9.7 Backfill/rebuild coverage safely for existing revisions and destinations while leaving ambiguous legacy entries unknown
+- [x] 9.8 Test duplicate identities across servers/libraries, movie/show ID collisions, partial slots, external changes, parse failures, entry removal, and review-state independence
 
 ## 10. Coverage and Workflow UI
 

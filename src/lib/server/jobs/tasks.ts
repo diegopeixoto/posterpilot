@@ -11,6 +11,7 @@ import { fetchMetadata, resolveTmdbStrict } from '$lib/server/tmdb/client';
 import { pickExternalId } from '$lib/server/tmdb/auth';
 import { manualMatchRepository } from '$lib/server/tmdb/manual-match-runtime';
 import { discoverForItem } from '$lib/server/posters/service';
+import { refreshCoverageAfter } from '$lib/server/coverage/refresh';
 import { logEvent, pruneEvents } from '$lib/server/events';
 import { shouldReprocessItem } from './incremental';
 import type { JobContext, JobPayload, JobTaskResult } from './types';
@@ -552,6 +553,34 @@ export async function runSyncJob(
 		await logEvent('info', 'sync', `Library sync finished (${processed} items)`, {
 			processed,
 			serverInstanceId
+		});
+	}
+
+	// Every source coverage is derived from can have moved in this pass: a full
+	// rescan re-observes current server artwork, TMDB resolution can change an
+	// item's canonical identity, and the reconciliation above marks copies that
+	// left their library. Reconciling here reads those and writes only the
+	// projection — no artwork, no YAML, no manual match, no reviewed state — and
+	// a failure to refresh a cache never fails a sync that already ran.
+	const syncedItemIds = repairItemIds ?? payload.itemIds ?? null;
+	if (syncedItemIds) {
+		await refreshCoverageAfter('sync', {
+			serverInstanceId,
+			mediaItemIds: [...new Set(syncedItemIds)]
+		});
+	} else {
+		for (const section of sections) {
+			await refreshCoverageAfter('sync', { serverInstanceId, librarySectionKey: section.key });
+		}
+	}
+	// A copy that left its library keeps its immutable history but must stop
+	// reporting coverage on a server that no longer serves it. Naming the ids is
+	// what drops those rows: the evidence queries skip removed items, so the
+	// scoped replace deletes their coverage and writes nothing back.
+	if (unavailableItemIds.size) {
+		await refreshCoverageAfter('sync', {
+			serverInstanceId,
+			mediaItemIds: [...unavailableItemIds]
 		});
 	}
 	await pruneEvents();

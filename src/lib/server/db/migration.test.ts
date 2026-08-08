@@ -318,7 +318,7 @@ describe('0012 artwork coverage projection migration', () => {
 		await client.execute({
 			sql: `insert into artwork_coverage (${columns.join(', ')})
 				values (${columns.map(() => '?').join(', ')})`,
-			args: columns.map((column) => row[column] as never)
+			args: columns.map((column) => row[column as keyof typeof row] as never)
 		});
 	}
 
