@@ -41,6 +41,18 @@ export type ArtworkLanguageEligibility = 'eligible' | 'foreign' | 'unknown';
  */
 const TMDB_PROVIDER = 'tmdb';
 
+/**
+ * True when this provider reports a language at all.
+ *
+ * MediUX and ThePosterDB never do, so telling someone their MediUX poster has
+ * "no language tag" states a permanent property of the source as though it were
+ * a fact about the artwork. Callers use this to omit the field entirely rather
+ * than render an absence that can never be anything else.
+ */
+export function providerTagsArtworkLanguage(provider: string): boolean {
+	return provider === TMDB_PROVIDER || provider === 'fanarttv';
+}
+
 /** The provenance recorded per candidate at discovery time, plus its provider. */
 type CandidateLanguageFields = {
 	provider: string;
