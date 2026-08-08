@@ -1,7 +1,9 @@
 /**
  * Reorder arithmetic behind the canonical provider-order control in Settings →
- * Providers. Kept out of the component because the repo has no DOM testing library:
- * whatever stays in `.svelte` is untested, so the move/drop maths lives here.
+ * Providers. Kept out of the component so each edge case is one call rather than a
+ * rendered interaction: the component test covers what only a browser can answer
+ * (focus, live regions, DOM order after a keyed re-render), and the clamping and
+ * pointer-position-to-index maths lives here.
  *
  * Mirrors `ArtworkProviderId` from `$lib/server/posters/score`, which the browser
  * bundle cannot import (`$lib/server` is server-only).

@@ -628,6 +628,8 @@
 	"settings_provider_order_announcement": "{provider} を {total} 件中 {position} 番目に移動しました",
 	"settings_provider_order_drag": "ドラッグして並べ替え",
 	"settings_provider_order_disabled": "無効 — 位置は保持",
+	"settings_provider_order_reset": "既定の順序に戻す",
+	"settings_provider_order_reset_announcement": "プロバイダーの順序を既定に戻しました。",
 	"settings_provider_credential_set": "認証情報を保存済み",
 	"settings_provider_credential_missing": "認証情報が必要",
 	"settings_provider_credential_optional": "サインインは任意",

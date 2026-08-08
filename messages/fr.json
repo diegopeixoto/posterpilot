@@ -628,6 +628,8 @@
 	"settings_provider_order_announcement": "{provider} déplacé à la position {position} sur {total}",
 	"settings_provider_order_drag": "Faire glisser pour réordonner",
 	"settings_provider_order_disabled": "Désactivé — position conservée",
+	"settings_provider_order_reset": "Rétablir l'ordre par défaut",
+	"settings_provider_order_reset_announcement": "Ordre des fournisseurs rétabli par défaut.",
 	"settings_provider_credential_set": "Identifiants enregistrés",
 	"settings_provider_credential_missing": "Identifiants requis",
 	"settings_provider_credential_optional": "Connexion facultative",

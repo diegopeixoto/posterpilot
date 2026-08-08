@@ -628,6 +628,8 @@
 	"settings_provider_order_announcement": "{provider} 已移动到第 {position} 位，共 {total} 位",
 	"settings_provider_order_drag": "拖动以重新排序",
 	"settings_provider_order_disabled": "已停用——保留位置",
+	"settings_provider_order_reset": "恢复默认顺序",
+	"settings_provider_order_reset_announcement": "来源顺序已恢复为默认。",
 	"settings_provider_credential_set": "凭据已保存",
 	"settings_provider_credential_missing": "需要凭据",
 	"settings_provider_credential_optional": "登录为可选",

@@ -5,6 +5,7 @@
 	import {
 		dropIndexForPointer,
 		moveProvider,
+		RANKING_PROVIDERS,
 		reorderProviders,
 		type ProviderRowBounds,
 		type RankingProvider
@@ -106,6 +107,19 @@
 	let dragProvider = $state<RankingProvider | null>(null);
 	let dropIndex = $state(-1);
 	const dragFromIndex = $derived(dragProvider ? providerPriority.indexOf(dragProvider) : -1);
+
+	// Shown only when there is something to undo, so the control never invites a
+	// no-op. Like every other field here it stages the change and waits for the
+	// page-wide Save, rather than writing on click.
+	const isDefaultOrder = $derived(
+		providerPriority.length === RANKING_PROVIDERS.length &&
+			providerPriority.every((provider, index) => provider === RANKING_PROVIDERS[index])
+	);
+
+	function resetOrder(): void {
+		providerPriority = [...RANKING_PROVIDERS];
+		orderAnnouncement = m.settings_provider_order_reset_announcement();
+	}
 
 	function announceOrder(provider: RankingProvider): void {
 		orderAnnouncement = m.settings_provider_order_announcement({
@@ -263,23 +277,7 @@
 							onchange={(event) => setProviderEnabled(provider, event.currentTarget.checked)}
 						/>
 						<span class="truncate">{providerNames[provider]()}</span>
-						{#if provider === 'theposterdb'}
-							<span class="shrink-0 text-xs text-neutral-400">{m.settings_experimental()}</span>
-						{/if}
 					</label>
-					<div class="flex shrink-0 flex-wrap items-center gap-2">
-						{#if !providerEnabled[provider]}
-							<span class="badge badge-muted">{m.settings_provider_order_disabled()}</span>
-						{/if}
-						{#if credential}
-							<span class="badge {credential === 'missing' ? 'badge-warn' : 'badge-muted'}">
-								{credentialLabels[credential]()}
-							</span>
-						{/if}
-						{#if providerEnvManaged[provider]}
-							<span class="text-xs text-amber-400">{m.settings_set_from_env()}</span>
-						{/if}
-					</div>
 					<div class="ml-auto flex shrink-0 gap-1">
 						<button
 							id={`provider-order-up-${provider}`}
@@ -299,10 +297,36 @@
 						>
 					</div>
 				</div>
+				<!-- Status sits on its own line rather than competing with the name for
+				     width: as one row these badges never shrink, so the provider name
+				     truncated toward nothing on narrow screens while they stayed intact. -->
+				{#if !providerEnabled[provider] || credential || providerEnvManaged[provider] || provider === 'theposterdb'}
+					<div class="mt-2 flex flex-wrap items-center gap-2 pl-11">
+						{#if !providerEnabled[provider]}
+							<span class="badge badge-muted">{m.settings_provider_order_disabled()}</span>
+						{/if}
+						{#if credential}
+							<span class="badge {credential === 'missing' ? 'badge-warn' : 'badge-muted'}">
+								{credentialLabels[credential]()}
+							</span>
+						{/if}
+						{#if provider === 'theposterdb'}
+							<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
+						{/if}
+						{#if providerEnvManaged[provider]}
+							<span class="text-xs text-amber-400">{m.settings_set_from_env()}</span>
+						{/if}
+					</div>
+				{/if}
 			</li>
 		{/each}
 	</ul>
 	<p class="sr-only" aria-live="polite" aria-atomic="true">{orderAnnouncement}</p>
+	{#if !isDefaultOrder}
+		<button type="button" class="btn btn-ghost mt-2 min-h-11" onclick={resetOrder}>
+			{m.settings_provider_order_reset()}
+		</button>
+	{/if}
 	<div class="mt-4 max-w-xs">
 		<label for="tmdbArtworkLanguage" class="mb-1 block text-sm font-medium">
 			{m.settings_tmdb_artwork_language()}

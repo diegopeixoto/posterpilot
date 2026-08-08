@@ -628,6 +628,8 @@
 	"settings_provider_order_announcement": "{provider} moved to position {position} of {total}",
 	"settings_provider_order_drag": "Drag to reorder",
 	"settings_provider_order_disabled": "Disabled — position kept",
+	"settings_provider_order_reset": "Reset to default order",
+	"settings_provider_order_reset_announcement": "Provider order reset to the default.",
 	"settings_provider_credential_set": "Credential saved",
 	"settings_provider_credential_missing": "Credential needed",
 	"settings_provider_credential_optional": "Sign-in optional",
