@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.11.0](https://github.com/diegopeixoto/posterpilot/compare/v0.10.0...v0.11.0) (2026-08-08)
+
+
+### Features
+
+* add recoverable Kometa split migration ([f809bfe](https://github.com/diegopeixoto/posterpilot/commit/f809bfe3987a5c7f4e08c686acda9bdc1ab969b6))
+* add recoverable Kometa split migration ([3a7da77](https://github.com/diegopeixoto/posterpilot/commit/3a7da776c2382230509cbcab889868ea0b266511))
+* enlarge any artwork candidate without staging it ([#81](https://github.com/diegopeixoto/posterpilot/issues/81)) ([aab39b5](https://github.com/diegopeixoto/posterpilot/commit/aab39b58690d66a1638fef69fb749e2d5bf6dd05))
+* order artwork providers canonically and reorder them from Provider settings ([#80](https://github.com/diegopeixoto/posterpilot/issues/80)) ([aaf0bf0](https://github.com/diegopeixoto/posterpilot/commit/aaf0bf0dc4c3ab0da573fa75ab484ca172ed1db7))
+* prefer an artwork language and load more TMDB results ([#79](https://github.com/diegopeixoto/posterpilot/issues/79)) ([286054b](https://github.com/diegopeixoto/posterpilot/commit/286054b5b5626da922707f3766ff3d64efce38be))
+
+
+### Bug Fixes
+
+* accept reverse legacy TMDB variants ([eeca36d](https://github.com/diegopeixoto/posterpilot/commit/eeca36dc6d96a78aad8181458dd42cd8e6669b7d))
+* allow empty Kometa library stanzas ([525aae8](https://github.com/diegopeixoto/posterpilot/commit/525aae8384ccca257acae0e33def73cf4ee06531))
+* apply canonical original artwork safely ([37b1b99](https://github.com/diegopeixoto/posterpilot/commit/37b1b99171cafd0543c61bbd4a3052439c99fd53))
+* apply preflighted artwork bytes ([b47a060](https://github.com/diegopeixoto/posterpilot/commit/b47a0600b30b13a81e57b436c512cdb50d528011))
+* bound media item scope queries ([c261d79](https://github.com/diegopeixoto/posterpilot/commit/c261d795ab1e13a8d75d248f22a0c32cf1137309))
+* bound TMDB repair refresh and queries ([e1069db](https://github.com/diegopeixoto/posterpilot/commit/e1069db733ea37f4bb521e2668346d9740b871d4))
+* bound TMDB repair refresh and queries ([9fa5066](https://github.com/diegopeixoto/posterpilot/commit/9fa5066ceaa274221a2f3c715fd6d80aef7d9e7f))
+* canonicalize TMDB artwork in apply plans ([58f294b](https://github.com/diegopeixoto/posterpilot/commit/58f294b1e5a2ec7c89d9483c7b28d00f120c5fe1))
+* guard apply-and-next selection races ([c57dad7](https://github.com/diegopeixoto/posterpilot/commit/c57dad747c970dfc8fff8729e5f5917e96bfc8a6))
+* guard legacy apply completion by timestamp ([0ed7409](https://github.com/diegopeixoto/posterpilot/commit/0ed7409f15a225b0f634c606ae2eab76a1e3f930))
+* harden artwork redirect handling ([735a70e](https://github.com/diegopeixoto/posterpilot/commit/735a70ec2b110b09f6812eed97842baaaafb11ae))
+* harden Kometa apply safety ([a95d0ef](https://github.com/diegopeixoto/posterpilot/commit/a95d0ef200c83cdb8c23d009982f20032b65b60a))
+* harden Kometa apply safety ([7faf8df](https://github.com/diegopeixoto/posterpilot/commit/7faf8dfb47b4f646be15f61a0dfb76f5fed312fa))
+* harden Kometa migration workflow ([21efd76](https://github.com/diegopeixoto/posterpilot/commit/21efd76cad1ab8e05ca0a60f51d5508438787fd1))
+* harden legacy apply plan compatibility ([4d9f4d0](https://github.com/diegopeixoto/posterpilot/commit/4d9f4d06deb65363c4ffa6513a3c8f5c6c5240c8))
+* harden remote artwork downloads ([9166082](https://github.com/diegopeixoto/posterpilot/commit/9166082bcb352b0a6abdca7092a7519a94a0cf41))
+* harden TMDB repair and collection discovery ([799c7ed](https://github.com/diegopeixoto/posterpilot/commit/799c7edc20bbbc770248eec4ebfed6f813396ee3))
+* harden TMDB repair polling and batching ([a375115](https://github.com/diegopeixoto/posterpilot/commit/a37511591ed1feafe7a57a58d5ccab9d4af96d88))
+* keep release curation off the release branch ([#78](https://github.com/diegopeixoto/posterpilot/issues/78)) ([01f9295](https://github.com/diegopeixoto/posterpilot/commit/01f9295d4f3d627171004193d990c9a91f9d4124))
+* keep staged artwork previews consistent ([cac4fbe](https://github.com/diegopeixoto/posterpilot/commit/cac4fbe826ce873b917a6c179249ed3b078eb737))
+* keep staged artwork previews efficient ([c711311](https://github.com/diegopeixoto/posterpilot/commit/c711311f35858051ba0f1f748f91216cc542de10))
+* make TMDB resolution type-safe ([4ab8eb2](https://github.com/diegopeixoto/posterpilot/commit/4ab8eb2ea15c3f6f4648cb8047877efe86f36c8e))
+* make TMDB resolution type-safe ([8f91dde](https://github.com/diegopeixoto/posterpilot/commit/8f91dde7bcb23cd60dff5dae196d81e068e9b926))
+* match staged artwork after rediscovery ([6dc4016](https://github.com/diegopeixoto/posterpilot/commit/6dc4016b0fff6e7c8188285d091be33ae4e7e938))
+* migrate canonical artwork provenance ([0ab5702](https://github.com/diegopeixoto/posterpilot/commit/0ab5702f7800d1429656f6b12fddc86c1a685c4f))
+* preserve Emby backdrops on upload failure ([51a776d](https://github.com/diegopeixoto/posterpilot/commit/51a776d60f0007294c71dce316b3a83215f1c5d5))
+* preserve legacy v1 apply plans ([9fd2713](https://github.com/diegopeixoto/posterpilot/commit/9fd2713f962866d1ee5e67ed32883cd9905d0aa0))
+* preserve optimized staged previews ([2dd146f](https://github.com/diegopeixoto/posterpilot/commit/2dd146f55871f311192fc331dbfe66992559c19d))
+* preserve original artwork candidate assets ([f6bda22](https://github.com/diegopeixoto/posterpilot/commit/f6bda220a3688193407abcc4fc5e5dd73b69a53b))
+* preserve staged artwork provenance ([6869ce0](https://github.com/diegopeixoto/posterpilot/commit/6869ce0f647469b0e5e8d6d3d3b592f63faba758))
+* refresh TMDB repair state on visibility ([8306bdf](https://github.com/diegopeixoto/posterpilot/commit/8306bdf8289919be6f3799de44e63436f45590aa))
+* release prepared artwork after outcomes ([7ad4113](https://github.com/diegopeixoto/posterpilot/commit/7ad41132752af968211c6fecd3252b4d50740483))
+* require artwork preflight before apply ([0091133](https://github.com/diegopeixoto/posterpilot/commit/0091133fd232e1366baf0f1c83f2b1cda9756a41))
+* resolve rediscovered collection artwork ([52321c8](https://github.com/diegopeixoto/posterpilot/commit/52321c844807fc5482b3d2ba2c18b63b8c509044))
+* retain TMDB repair focus refresh ([53091b3](https://github.com/diegopeixoto/posterpilot/commit/53091b308eda34f79ed714172ae46a1f9c89112f))
+* split Kometa destinations by media type ([c41ac12](https://github.com/diegopeixoto/posterpilot/commit/c41ac122e98fcd29b9f701a3632ba78f6c6bb4eb))
+* split Kometa destinations by media type ([abe21be](https://github.com/diegopeixoto/posterpilot/commit/abe21befc1c295fe96d7a3032ffaa37e49825ef0))
+* stop artwork writes after cancellation ([6fb47a0](https://github.com/diegopeixoto/posterpilot/commit/6fb47a05362085d3c58abf9661a0873712bef438))
+* use partial TMDB repair index ([a19bce3](https://github.com/diegopeixoto/posterpilot/commit/a19bce39f5ec7d09176c7da1a53a9fbfaa7d5722))
+* use revisions for apply-and-next CAS ([7fef02c](https://github.com/diegopeixoto/posterpilot/commit/7fef02c4e20d713de0748f1488b3f85bb21deacd))
+
+
+### Under the hood
+
+* capture TMDB repair hardening ([1dffddb](https://github.com/diegopeixoto/posterpilot/commit/1dffddbf35e9700f7174738e8b7e4b31666fe560))
+* complete TMDB repair hardening ([62a4173](https://github.com/diegopeixoto/posterpilot/commit/62a41733c1f1b45721e26061bb130eb3c0a8bedb))
+* plan artwork workflow issue resolution ([87cd64a](https://github.com/diegopeixoto/posterpilot/commit/87cd64acd6b150eee4b4dace4f27241495097154))
+
 ## [0.10.0](https://github.com/diegopeixoto/posterpilot/compare/v0.9.0...v0.10.0) (2026-07-26)
 
 This is the first PosterPilot release built with the community — every Jellyfin fix
