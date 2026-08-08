@@ -8,7 +8,7 @@ import {
 	type AnySQLiteColumn
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import type { TmdbCastMember } from '$lib/server/types';
+import type { CandidateKind, TmdbCastMember } from '$lib/server/types';
 import { pendingTmdbTypeMismatchIndexCondition } from './tmdb-repair-condition';
 
 /** A named Plex, Jellyfin, or Emby connection. Credentials are encrypted before storage. */
@@ -835,6 +835,17 @@ export const providerDiscoveryOutcomes = sqliteTable(
 		retainedStaleCandidates: integer('retained_stale_candidates', { mode: 'boolean' })
 			.notNull()
 			.default(false),
+		/**
+		 * Artwork kinds the provider cut off at its per-kind retention guard, e.g.
+		 * `["poster"]`. A JSON array rather than a boolean because the UI has to name
+		 * the incomplete pane, and a title regularly truncates posters while keeping
+		 * every backdrop. `[]` — also the value backfilled onto rows written before
+		 * the guard existed — means nothing was dropped.
+		 */
+		truncatedKinds: text('truncated_kinds', { mode: 'json' })
+			.$type<CandidateKind[]>()
+			.notNull()
+			.default([]),
 		latencyMs: integer('latency_ms'),
 		errorCode: text('error_code'),
 		error: text('error'),

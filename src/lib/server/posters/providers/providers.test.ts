@@ -5,12 +5,18 @@ import {
 	parseThePosterDb,
 	parseThePosterDbAssets,
 	parseThePosterDbSearchResults,
-	bestThePosterDbResultId
+	bestThePosterDbResultId,
+	TMDB_MAX_CANDIDATES_PER_KIND
 } from './parse';
+
+/** `count` well-formed TMDB image entries, distinct by `file_path`. */
+function tmdbImages(count: number, prefix = 'p'): { file_path: string }[] {
+	return Array.from({ length: count }, (_, index) => ({ file_path: `/${prefix}${index}.jpg` }));
+}
 
 describe('parseTmdbImages', () => {
 	it('builds poster + backdrop candidates in one set', () => {
-		const sets = parseTmdbImages({
+		const { sets, truncatedKinds } = parseTmdbImages({
 			posters: [
 				{ file_path: '/p.jpg', width: 2000, height: 3000, iso_639_1: 'pt-BR' },
 				{ file_path: '/untagged.jpg', iso_639_1: null },
@@ -19,6 +25,7 @@ describe('parseTmdbImages', () => {
 			backdrops: [{ file_path: '/b.jpg', width: 3840, height: 2160, iso_639_1: 'en' }]
 		});
 		expect(sets).toHaveLength(1);
+		expect(truncatedKinds).toEqual([]);
 		const c = sets[0].candidates;
 		expect(c.find((x) => x.providerAssetId === '/p.jpg')).toMatchObject({
 			url: 'https://image.tmdb.org/t/p/original/p.jpg',
@@ -47,9 +54,73 @@ describe('parseTmdbImages', () => {
 		expect(c.every((x) => x.setId === 'tmdb')).toBe(true);
 	});
 
-	it('returns [] when there are no images', () => {
-		expect(parseTmdbImages({})).toEqual([]);
-		expect(parseTmdbImages({ posters: [], backdrops: [] })).toEqual([]);
+	it('returns no sets when there are no images', () => {
+		expect(parseTmdbImages({})).toEqual({ sets: [], truncatedKinds: [] });
+		expect(parseTmdbImages({ posters: [], backdrops: [] })).toEqual({
+			sets: [],
+			truncatedKinds: []
+		});
+	});
+
+	it('retains up to the guard and reports the kind that was cut', () => {
+		const { sets, truncatedKinds } = parseTmdbImages({
+			posters: tmdbImages(TMDB_MAX_CANDIDATES_PER_KIND + 40),
+			backdrops: tmdbImages(3, 'b')
+		});
+		const posters = sets[0].candidates.filter((c) => c.kind === 'poster');
+		expect(posters).toHaveLength(TMDB_MAX_CANDIDATES_PER_KIND);
+		// The guard is per kind, so a truncated poster pane must not implicate the
+		// backdrop pane the UI renders beside it.
+		expect(truncatedKinds).toEqual(['poster']);
+		expect(sets[0].candidates.filter((c) => c.kind === 'background')).toHaveLength(3);
+	});
+
+	it('does not report truncation for a response that lands exactly on the guard', () => {
+		const { sets, truncatedKinds } = parseTmdbImages({
+			posters: tmdbImages(TMDB_MAX_CANDIDATES_PER_KIND)
+		});
+		expect(sets[0].candidates).toHaveLength(TMDB_MAX_CANDIDATES_PER_KIND);
+		expect(truncatedKinds).toEqual([]);
+	});
+
+	it('reports both kinds when both overflow', () => {
+		const { truncatedKinds } = parseTmdbImages({
+			posters: tmdbImages(TMDB_MAX_CANDIDATES_PER_KIND + 1),
+			backdrops: tmdbImages(TMDB_MAX_CANDIDATES_PER_KIND + 1, 'b')
+		});
+		expect(truncatedKinds).toEqual(['poster', 'background']);
+	});
+
+	it('collapses a repeated file_path, keeping the first occurrence and TMDB order', () => {
+		const { sets } = parseTmdbImages({
+			posters: [
+				{ file_path: '/a.jpg', width: 1000 },
+				{ file_path: '/b.jpg' },
+				{ file_path: '/a.jpg', width: 9999 }
+			]
+		});
+		expect(sets[0].candidates.map((c) => c.providerAssetId)).toEqual(['/a.jpg', '/b.jpg']);
+		// First occurrence wins: the later duplicate's metadata must not overwrite it.
+		expect(sets[0].candidates[0].width).toBe(1000);
+	});
+
+	// The bound used to be applied before the malformed entries were dropped, so a
+	// single unusable file_path near the top of the response cost a real candidate.
+	it('keeps a full yield when a malformed entry sits inside the old 20-wide window', () => {
+		const { sets } = parseTmdbImages({
+			posters: [{ file_path: '' }, null, { width: 500 }, 'not-an-object', ...tmdbImages(20)]
+		});
+		expect(sets[0].candidates).toHaveLength(20);
+		expect(sets[0].candidates[0].providerAssetId).toBe('/p0.jpg');
+	});
+
+	it('ignores non-array image collections instead of throwing', () => {
+		expect(parseTmdbImages({ posters: 'nope', backdrops: { file_path: '/b.jpg' } })).toEqual({
+			sets: [],
+			truncatedKinds: []
+		});
+		expect(parseTmdbImages(null)).toEqual({ sets: [], truncatedKinds: [] });
+		expect(parseTmdbImages('unexpected')).toEqual({ sets: [], truncatedKinds: [] });
 	});
 });
 

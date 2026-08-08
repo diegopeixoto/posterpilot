@@ -18,7 +18,8 @@ const MIGRATIONS = [
 	'0007_first_puff_adder.sql',
 	'0008_melodic_purifiers.sql',
 	'0009_silent_zaran.sql',
-	'0010_canonical_artwork_assets.sql'
+	'0010_canonical_artwork_assets.sql',
+	'0011_provider_discovery_truncation.sql'
 ] as const;
 
 const clients: Client[] = [];
@@ -180,6 +181,67 @@ describe('0010 canonical artwork assets migration', () => {
 		]);
 		const violations = await client.execute('pragma foreign_key_check');
 		expect(violations.rows).toHaveLength(0);
+	});
+});
+
+describe('0011 provider discovery truncation migration', () => {
+	it('reads outcomes recorded before the guard existed as "nothing was truncated"', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 10);
+		const now = 1_700_000_000;
+		await client.execute({
+			sql: `insert into server_instances
+				(id, name, normalized_name, type, enabled, protected, connection_status, created_at, updated_at)
+				values ('server-a', 'Server A', 'server a', 'plex', 1, 0, 'unknown', ?, ?)`,
+			args: [now, now]
+		});
+		await client.execute({
+			sql: `insert into media_items
+				(id, server_instance_id, rating_key, section_key, type, title, resolved, ignored,
+				 has_candidates, has_mediux, watched, artwork_version, manual_match_pinned,
+				 discovery_status, updated_at)
+				values (51, 'server-a', 'movie-a', 'movies', 'movie', 'Movie A', 1, 0, 1, 0, 0, 0, 0,
+				 'succeeded', ?)`,
+			args: [now]
+		});
+		await client.execute({
+			sql: `insert into provider_discovery_runs
+				(id, server_instance_id, media_item_id, status, started_at, completed_at)
+				values ('run-a', 'server-a', 51, 'succeeded', ?, ?)`,
+			args: [now, now]
+		});
+		await client.execute({
+			sql: `insert into provider_discovery_outcomes
+				(id, run_id, server_instance_id, media_item_id, provider, status, candidate_count,
+				 started_at, completed_at)
+				values (61, 'run-a', 'server-a', 51, 'tmdb', 'succeeded', 20, ?, ?)`,
+			args: [now, now]
+		});
+
+		await applyMigration(client, MIGRATIONS[11]);
+
+		// A legacy row predates the signal entirely; backfilling '[]' says "nothing was
+		// dropped", which is the only reading that does not invent a truncated pane.
+		const outcomes = await client.execute(
+			'select id, truncated_kinds from provider_discovery_outcomes order by id'
+		);
+		expect(outcomes.rows).toEqual([{ id: 61, truncated_kinds: '[]' }]);
+
+		// New rows carry the kinds; the column is NOT NULL, so nothing can write "unknown".
+		await client.execute({
+			sql: `insert into provider_discovery_outcomes
+				(id, run_id, server_instance_id, media_item_id, provider, status, candidate_count,
+				 truncated_kinds, started_at, completed_at)
+				values (62, 'run-a', 'server-a', 51, 'fanarttv', 'succeeded', 200, '["poster"]', ?, ?)`,
+			args: [now, now]
+		});
+		const truncated = await client.execute(
+			'select truncated_kinds from provider_discovery_outcomes where id = 62'
+		);
+		expect(truncated.rows[0]?.truncated_kinds).toBe('["poster"]');
+		await expect(
+			client.execute('update provider_discovery_outcomes set truncated_kinds = null where id = 61')
+		).rejects.toThrow();
 	});
 });
 
