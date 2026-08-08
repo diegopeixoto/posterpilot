@@ -85,6 +85,13 @@
       "when": 1786148180853,
       "tag": "0011_provider_discovery_truncation",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1786157967917,
+      "tag": "0012_artwork_coverage_projection",
+      "breakpoints": true
     }
   ]
 }

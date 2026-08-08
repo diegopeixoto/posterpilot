@@ -1,5 +1,6 @@
 import {
 	sqliteTable,
+	check,
 	integer,
 	real,
 	text,
@@ -7,7 +8,12 @@ import {
 	uniqueIndex,
 	type AnySQLiteColumn
 } from 'drizzle-orm/sqlite-core';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
+import {
+	COVERAGE_DESTINATIONS,
+	COVERAGE_STATUSES,
+	isStatusValidForDestination
+} from '$lib/artwork-coverage';
 import type { CandidateKind, TmdbCastMember } from '$lib/server/types';
 import { pendingTmdbTypeMismatchIndexCondition } from './tmdb-repair-condition';
 
@@ -786,6 +792,154 @@ export const artworkRevisions = sqliteTable(
 	]
 );
 
+/**
+ * The destination/status pairing from `$lib/artwork-coverage`, rendered as a table CHECK.
+ *
+ * Generated from `isStatusValidForDestination` rather than hand-written so the DDL cannot
+ * drift from the vocabulary the reconcilers, queries, and UI share. The store validates the
+ * same rule and raises a typed error, but only a constraint holds for a writer that reaches
+ * the table another way — a future migration, a restored backup, a manual repair. If
+ * `exported_to_kometa` could ever be stored against `server`, the UI would tell someone
+ * their artwork is live on Plex when only a YAML entry exists.
+ *
+ * The interpolated values are compile-time members of two `as const` tuples, so `sql.raw`
+ * here is a literal-rendering detail (a CHECK body cannot carry bound parameters), not an
+ * injection surface.
+ */
+function coverageStatusDestinationCheck(t: {
+	destination: AnySQLiteColumn;
+	status: AnySQLiteColumn;
+}): SQL {
+	const clauses = COVERAGE_DESTINATIONS.map((destination) => {
+		const allowed = COVERAGE_STATUSES.filter((status) =>
+			isStatusValidForDestination(destination, status)
+		);
+		const list = sql.raw(allowed.map((status) => `'${status}'`).join(', '));
+		return sql`(${t.destination} = ${sql.raw(`'${destination}'`)} and ${t.status} in (${list}))`;
+	});
+	return sql.join(clauses, sql` or `);
+}
+
+/**
+ * Rebuildable evidence projection: what currently proves a title's artwork is in place, for
+ * exactly one occurrence, one destination, and one artwork slot.
+ *
+ * This is a cache, never the system of record. Its sources of truth stay immutable artwork
+ * revisions, current media-server verification, and safely parsed current Kometa files; the
+ * whole table can be dropped and recomputed without touching artwork, YAML, revisions, or
+ * review state. That is also why several columns below are denormalized copies — a stale
+ * copy in a cache is a rebuild away from correct, and it buys single-index reads.
+ *
+ * Only *observed* slots get rows. Absence is computed by anti-joining the requested root and
+ * child slots against this table, because materializing a `missing` row for every slot of
+ * every episode of every show would dwarf the evidence it surrounds.
+ */
+export const artworkCoverage = sqliteTable(
+	'artwork_coverage',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		serverInstanceId: text('server_instance_id')
+			.notNull()
+			.references(() => serverInstances.id),
+		mediaItemId: integer('media_item_id')
+			.notNull()
+			.references(() => mediaItems.id, { onDelete: 'cascade' }),
+		/**
+		 * Denormalized from the occurrence's `media_items.section_key`. The library rollup
+		 * ("87 of 412 covered in Movies") is a page-load query; carrying the section here turns
+		 * it into one index range scan instead of a join that visits every item row.
+		 */
+		librarySectionKey: text('library_section_key').notNull(),
+		/**
+		 * `canonicalIdentityKey(mediaType, tmdbId)` — `'movie:105'`, `'tv:105'`, or NULL when the
+		 * occurrence is unresolved. Stored, not joined, because relating copies across servers
+		 * would otherwise mean a two-column join on unindexed `media_items` columns. NULL is the
+		 * deliberate dead end: an unresolved occurrence keeps only its own evidence and is never
+		 * related to another by title or year.
+		 */
+		canonicalKey: text('canonical_key'),
+		destination: text('destination', { enum: COVERAGE_DESTINATIONS }).notNull(),
+		kind: text('kind', { enum: ['poster', 'background', 'title_card'] }).notNull(),
+		season: integer('season'),
+		episode: integer('episode'),
+		status: text('status', { enum: COVERAGE_STATUSES }).notNull(),
+		/**
+		 * Locale-neutral code naming what was actually looked at — e.g. `revision`,
+		 * `server_verification`, `kometa_file`, `legacy_kometa_entry`, `kometa_parse_failure`.
+		 * NOT NULL because a status nobody can explain is worse than no row: it is the
+		 * difference between "we read movies.yml and the slot was absent" and "we could not
+		 * read movies.yml at all", which are `missing` and `unknown` respectively. Left as free
+		 * text (like `poster_candidates.provider`) so the reconcilers can name a new source
+		 * without a migration; the closed set that must not drift is status × destination, and
+		 * that one is a constraint.
+		 */
+		evidenceSource: text('evidence_source').notNull(),
+		/**
+		 * The immutable revision that justified this status, when one did. `set null` rather
+		 * than cascade: a pruned or restored-away revision costs the row its citation, not the
+		 * observation — the fingerprint and `observed_at` still explain it, and the next rebuild
+		 * restores the pointer if the revision is still there.
+		 */
+		evidenceRevisionId: text('evidence_revision_id').references(() => artworkRevisions.id, {
+			onDelete: 'set null'
+		}),
+		/** The fingerprint compared against current destination state, when there was one. */
+		evidenceFingerprint: text('evidence_fingerprint'),
+		/**
+		 * Bounded structured context for the pane that explains a status, e.g.
+		 * `{ "file": "movies.yml", "reason": "parse_failed" }`. Never secrets or full signed
+		 * provider URLs — this reaches the client and support bundles.
+		 */
+		evidenceDetail: text('evidence_detail', { mode: 'json' }).$type<Record<string, unknown>>(),
+		/**
+		 * When the evidence was *observed*, which is not when the row was written: a rebuild
+		 * replays an hour-old verification and must not claim it just happened. Staleness-driven
+		 * re-reconciliation reads this column, so it is NOT NULL.
+		 */
+		observedAt: integer('observed_at', { mode: 'timestamp' }).notNull(),
+		updatedAt: integer('updated_at', { mode: 'timestamp' })
+			.notNull()
+			.$defaultFn(() => new Date())
+	},
+	// SQLite treats NULLs as distinct in unique indexes, so the root, season, and episode slot
+	// shapes each need their own partial unique index — the same split `artwork_slot_states`
+	// and `child_selections` use. Together they are the "one row per occurrence × destination
+	// × slot" rule: coverage of one slot must never be able to stand in for another.
+	(t) => [
+		uniqueIndex('artwork_coverage_root_slot_unique')
+			.on(t.serverInstanceId, t.mediaItemId, t.destination, t.kind)
+			.where(sql`${t.season} is null and ${t.episode} is null`),
+		uniqueIndex('artwork_coverage_season_slot_unique')
+			.on(t.serverInstanceId, t.mediaItemId, t.destination, t.kind, t.season)
+			.where(sql`${t.season} is not null and ${t.episode} is null`),
+		uniqueIndex('artwork_coverage_episode_slot_unique')
+			.on(t.serverInstanceId, t.mediaItemId, t.destination, t.kind, t.season, t.episode)
+			.where(sql`${t.episode} is not null`),
+		// "Coverage for this item" — the detail pane wants every destination and slot at once,
+		// which none of the partial uniques above can serve because a full-item read carries no
+		// season/episode predicate to match their WHERE clauses.
+		index('artwork_coverage_item_idx').on(t.serverInstanceId, t.mediaItemId, t.destination),
+		// "Counts across a library" — grouping by status inside one library and destination is
+		// covered end to end by this index, so the rollup never touches the table heap.
+		index('artwork_coverage_library_status_idx').on(
+			t.serverInstanceId,
+			t.librarySectionKey,
+			t.destination,
+			t.status
+		),
+		// "Every copy of this title" — partial so unresolved rows are absent from the index
+		// entirely rather than clustering under a shared NULL, which is both smaller and a
+		// structural restatement that a missing canonical key is not an identity to group by.
+		index('artwork_coverage_canonical_idx')
+			.on(t.canonicalKey, t.destination, t.kind)
+			.where(sql`${t.canonicalKey} is not null`),
+		// "What has gone stale here" — reconciliation after sync/apply/undo and on-demand stale
+		// reads both need the oldest observations for a server without scanning the projection.
+		index('artwork_coverage_stale_idx').on(t.serverInstanceId, t.observedAt),
+		check('artwork_coverage_status_destination_check', coverageStatusDestinationCheck(t))
+	]
+);
+
 /** One aggregate candidate-discovery pass for an item and resolved identity. */
 export const providerDiscoveryRuns = sqliteTable(
 	'provider_discovery_runs',
@@ -1218,6 +1372,8 @@ export type ArtworkSlotState = typeof artworkSlotStates.$inferSelect;
 export type ArtworkSnapshot = typeof artworkSnapshots.$inferSelect;
 export type ArtworkRevisionGroup = typeof artworkRevisionGroups.$inferSelect;
 export type ArtworkRevision = typeof artworkRevisions.$inferSelect;
+export type ArtworkCoverageRow = typeof artworkCoverage.$inferSelect;
+export type NewArtworkCoverageRow = typeof artworkCoverage.$inferInsert;
 export type ProviderDiscoveryRun = typeof providerDiscoveryRuns.$inferSelect;
 export type ProviderDiscoveryOutcome = typeof providerDiscoveryOutcomes.$inferSelect;
 export type ProviderStatus = typeof providerStatuses.$inferSelect;

@@ -19,7 +19,8 @@ const MIGRATIONS = [
 	'0008_melodic_purifiers.sql',
 	'0009_silent_zaran.sql',
 	'0010_canonical_artwork_assets.sql',
-	'0011_provider_discovery_truncation.sql'
+	'0011_provider_discovery_truncation.sql',
+	'0012_artwork_coverage_projection.sql'
 ] as const;
 
 const clients: Client[] = [];
@@ -242,6 +243,264 @@ describe('0011 provider discovery truncation migration', () => {
 		await expect(
 			client.execute('update provider_discovery_outcomes set truncated_kinds = null where id = 61')
 		).rejects.toThrow();
+	});
+});
+
+describe('0012 artwork coverage projection migration', () => {
+	const now = 1_700_000_000;
+
+	/** A server, a resolved movie, a legacy application record, and one immutable revision. */
+	async function seedLegacyEvidence(client: Client): Promise<void> {
+		await client.execute({
+			sql: `insert into server_instances
+				(id, name, normalized_name, type, enabled, protected, connection_status, created_at, updated_at)
+				values ('server-a', 'Server A', 'server a', 'plex', 1, 0, 'unknown', ?, ?),
+				       ('server-b', 'Server B', 'server b', 'jellyfin', 1, 0, 'unknown', ?, ?)`,
+			args: [now, now, now, now]
+		});
+		await client.execute({
+			sql: `insert into media_items
+				(id, server_instance_id, rating_key, section_key, type, title, media_type, tmdb_id,
+				 resolved, ignored, has_candidates, has_mediux, watched, artwork_version,
+				 manual_match_pinned, discovery_status, updated_at)
+				values
+				 (91, 'server-a', 'movie-a', 'movies', 'movie', 'Movie A', 'movie', '105', 1, 0, 1, 0, 0,
+				  0, 0, 'succeeded', ?),
+				 (92, 'server-a', 'movie-b', 'movies', 'movie', 'Movie B', 'movie', '106', 1, 0, 1, 0, 0,
+				  0, 0, 'succeeded', ?)`,
+			args: [now, now]
+		});
+		// A pre-projection application record whose destination was never typed.
+		await client.execute({
+			sql: `insert into applied_posters
+				(id, server_instance_id, media_item_id, url, method, status, applied_at)
+				values (95, 'server-a', 91, 'https://images.example.test/a.jpg', 'both', 'success', ?)`,
+			args: [now]
+		});
+		await client.execute({
+			sql: `insert into artwork_revision_groups
+				(id, server_instance_id, kind, initiator, outcome, created_at)
+				values ('group-1', 'server-a', 'apply', 'user', 'success', ?)`,
+			args: [now]
+		});
+		await client.execute({
+			sql: `insert into artwork_revisions
+				(id, group_id, server_instance_id, media_item_id, action, destination, kind, outcome,
+				 verification, created_at)
+				values ('revision-1', 'group-1', 'server-a', 91, 'apply', 'server', 'poster', 'success',
+				 'exact', ?)`,
+			args: [now]
+		});
+	}
+
+	async function insertCoverage(
+		client: Client,
+		overrides: Partial<Record<string, unknown>> = {}
+	): Promise<void> {
+		const row = {
+			server_instance_id: 'server-a',
+			media_item_id: 91,
+			library_section_key: 'movies',
+			canonical_key: 'movie:105',
+			destination: 'server',
+			kind: 'poster',
+			season: null,
+			episode: null,
+			status: 'applied_on_server',
+			evidence_source: 'revision',
+			evidence_revision_id: 'revision-1',
+			evidence_fingerprint: 'sha256:a',
+			observed_at: now,
+			updated_at: now,
+			...overrides
+		};
+		const columns = Object.keys(row);
+		await client.execute({
+			sql: `insert into artwork_coverage (${columns.join(', ')})
+				values (${columns.map(() => '?').join(', ')})`,
+			args: columns.map((column) => row[column as keyof typeof row] as never)
+		});
+	}
+
+	it('adds an empty projection beside legacy history instead of guessing coverage from it', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 11);
+		await seedLegacyEvidence(client);
+
+		await applyMigration(client, MIGRATIONS[12]);
+
+		// Nothing is backfilled in SQL, and that is the point. A legacy `applied_posters` row
+		// with method 'both' cannot say which destination it reached, and no statement can know
+		// whether the artwork a server serves today still matches — that needs a live read.
+		// Coverage arrives only from a rebuild, where an unprovable entry becomes `unknown`
+		// rather than a fabricated `applied_on_server`.
+		const coverage = await client.execute('select count(*) as count from artwork_coverage');
+		expect(coverage.rows[0]?.count).toBe(0);
+		const legacy = await client.execute('select id, method, status from applied_posters');
+		expect(legacy.rows).toEqual([{ id: 95, method: 'both', status: 'success' }]);
+		const revisions = await client.execute('select id, destination from artwork_revisions');
+		expect(revisions.rows).toEqual([{ id: 'revision-1', destination: 'server' }]);
+		const violations = await client.execute('pragma foreign_key_check');
+		expect(violations.rows).toHaveLength(0);
+	});
+
+	it('refuses every destination/status pairing the shared contract forbids', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 12);
+		await seedLegacyEvidence(client);
+
+		for (const [destination, status] of [
+			['server', 'exported_to_kometa'],
+			['kometa', 'applied_on_server'],
+			['kometa', 'recorded_unverified'],
+			['kometa', 'externally_changed']
+		] as const) {
+			await expect(
+				insertCoverage(client, { destination, status, evidence_revision_id: null })
+			).rejects.toThrow(/CHECK constraint failed/);
+		}
+
+		// The valid pairings still go in, each on its own slot.
+		await insertCoverage(client);
+		await insertCoverage(client, {
+			destination: 'kometa',
+			status: 'exported_to_kometa',
+			evidence_source: 'kometa_file',
+			evidence_revision_id: null
+		});
+		const rows = await client.execute(
+			'select destination, status from artwork_coverage order by destination'
+		);
+		expect(rows.rows).toEqual([
+			{ destination: 'kometa', status: 'exported_to_kometa' },
+			{ destination: 'server', status: 'applied_on_server' }
+		]);
+	});
+
+	it('holds exactly one row per occurrence, destination, and slot', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 12);
+		await seedLegacyEvidence(client);
+
+		await insertCoverage(client);
+		await expect(insertCoverage(client, { status: 'missing' })).rejects.toThrow(/UNIQUE/);
+
+		// Neither the other destination, the other artwork kind, nor a child slot is blocked by
+		// the root row: coverage of one never stands in for another.
+		await insertCoverage(client, {
+			destination: 'kometa',
+			status: 'exported_to_kometa',
+			evidence_source: 'kometa_file',
+			evidence_revision_id: null
+		});
+		await insertCoverage(client, { kind: 'background' });
+		await insertCoverage(client, { season: 1 });
+		await insertCoverage(client, { season: 1, episode: 2, kind: 'title_card' });
+		await expect(insertCoverage(client, { season: 1, status: 'missing' })).rejects.toThrow(
+			/UNIQUE/
+		);
+		await expect(
+			insertCoverage(client, { season: 1, episode: 2, kind: 'title_card', status: 'missing' })
+		).rejects.toThrow(/UNIQUE/);
+
+		const count = await client.execute('select count(*) as count from artwork_coverage');
+		expect(count.rows[0]?.count).toBe(5);
+	});
+
+	it('keeps a row inside the server that owns its occurrence', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 12);
+		await seedLegacyEvidence(client);
+
+		await expect(
+			insertCoverage(client, { server_instance_id: 'server-b', evidence_revision_id: null })
+		).rejects.toThrow('scope_mismatch:artwork_coverage.media_item_id');
+		await insertCoverage(client);
+		await expect(
+			client.execute(
+				"update artwork_coverage set server_instance_id = 'server-b' where media_item_id = 91"
+			)
+		).rejects.toThrow('scope_mismatch:artwork_coverage.media_item_id');
+	});
+
+	it('drops with its occurrence and survives the loss of the revision it cites', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 12);
+		await seedLegacyEvidence(client);
+		await client.execute('pragma foreign_keys = on');
+		await insertCoverage(client);
+		await insertCoverage(client, { media_item_id: 92, canonical_key: 'movie:106' });
+
+		// The projection is a cache of the revision, not its owner: losing the citation costs
+		// the row its link, not the observation.
+		await client.execute("delete from artwork_revisions where id = 'revision-1'");
+		const orphaned = await client.execute(
+			'select media_item_id, evidence_revision_id, evidence_fingerprint, status from artwork_coverage where media_item_id = 91'
+		);
+		expect(orphaned.rows).toEqual([
+			{
+				media_item_id: 91,
+				evidence_revision_id: null,
+				evidence_fingerprint: 'sha256:a',
+				status: 'applied_on_server'
+			}
+		]);
+
+		await client.execute('delete from media_items where id = 92');
+		const remaining = await client.execute(
+			'select media_item_id from artwork_coverage order by media_item_id'
+		);
+		expect(remaining.rows).toEqual([{ media_item_id: 91 }]);
+	});
+
+	it('serves the library rollup and the needs-artwork anti-join from its indexes', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 12);
+		await seedLegacyEvidence(client);
+		await insertCoverage(client);
+
+		const rollup = await client.execute({
+			sql: `explain query plan
+				select status, count(*) as count from artwork_coverage
+				where server_instance_id = ? and library_section_key = ? and destination = ?
+				group by status`,
+			args: ['server-a', 'movies', 'server']
+		});
+		expect(rollup.rows.map((row) => String(row.detail)).join('\n')).toContain(
+			'COVERING INDEX artwork_coverage_library_status_idx'
+		);
+
+		const uncovered = await client.execute({
+			sql: `explain query plan
+				select item.id from media_items as item
+				where item.server_instance_id = ? and item.section_key = ?
+					and not exists (
+						select 1 from artwork_coverage as coverage
+						where coverage.server_instance_id = item.server_instance_id
+							and coverage.media_item_id = item.id
+							and coverage.destination = 'server'
+							and coverage.kind = 'poster'
+							and coverage.season is null
+							and coverage.episode is null
+							and coverage.status = 'applied_on_server'
+					)`,
+			args: ['server-a', 'movies']
+		});
+		// The partial root-slot index is the one that matters here: the anti-join carries the
+		// `season is null and episode is null` predicate the index was made partial for.
+		expect(uncovered.rows.map((row) => String(row.detail)).join('\n')).toContain(
+			'artwork_coverage_root_slot_unique'
+		);
+
+		const identity = await client.execute({
+			sql: `explain query plan
+				select server_instance_id, media_item_id from artwork_coverage
+				where canonical_key = ? and destination = ? and kind = ?`,
+			args: ['movie:105', 'server', 'poster']
+		});
+		expect(identity.rows.map((row) => String(row.detail)).join('\n')).toContain(
+			'artwork_coverage_canonical_idx'
+		);
 	});
 });
 

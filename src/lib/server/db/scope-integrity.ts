@@ -108,6 +108,13 @@ const SCOPE_RELATIONS: readonly ScopeRelation[] = [
 		parentIdColumn: 'id'
 	},
 	{
+		name: 'artwork_coverage.media_item_id',
+		childTable: 'artwork_coverage',
+		childReferenceColumn: 'media_item_id',
+		parentTable: 'media_items',
+		parentIdColumn: 'id'
+	},
+	{
 		name: 'provider_discovery_runs.media_item_id',
 		childTable: 'provider_discovery_runs',
 		childReferenceColumn: 'media_item_id',

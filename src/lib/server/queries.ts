@@ -30,6 +30,14 @@ import {
 	type MediaItem
 } from './db/schema';
 import type { CandidateKind } from './types';
+import {
+	loadCoverageOccurrenceCounts,
+	loadItemCoverageSummaries,
+	coverageSelectionCondition,
+	type CoverageOccurrenceCounts,
+	type CoverageSelection,
+	type ItemCoverageSummary
+} from './coverage/observations-query';
 import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 import { PROVIDERS } from './posters/providers';
 import { providerAvailability } from './posters/providers/availability';
@@ -44,6 +52,7 @@ import {
 } from './jobs/public-progress';
 import { jobServerScopeCondition } from './jobs/scope';
 
+import { canonicalIdentityKey } from '$lib/artwork-coverage';
 import { defaultSortDir, type LibrarySort, type SortDir } from '$lib/library-sort';
 import { isTerminalJobStatus } from '$lib/job-progress';
 
@@ -60,6 +69,12 @@ export interface LibraryFilter {
 	minRating?: number;
 	/** Restrict to items tagged with this genre. */
 	genre?: string;
+	/**
+	 * Derived destination coverage. Evaluated against the projection rather than a
+	 * stored flag, because "applied" cannot express two servers, two destinations,
+	 * artwork changed behind our back, or evidence we simply do not have.
+	 */
+	coverage?: CoverageSelection;
 	sort?: LibrarySort;
 	dir?: SortDir;
 	q?: string;
@@ -163,6 +178,9 @@ function libraryConds(filter: LibraryFilter): SQL[] {
 	if (typeof filter.minRating === 'number' && Number.isFinite(filter.minRating))
 		conds.push(gte(mediaItems.rating, filter.minRating));
 	if (filter.genre) conds.push(genreCondition(filter.genre));
+	// Correlated on the item, never joined: an item covered for both a poster and a
+	// background is one library entry, and a join would list it twice.
+	if (filter.coverage) conds.push(coverageSelectionCondition(filter.coverage));
 	if (filter.q) conds.push(like(mediaItems.title, `%${filter.q}%`));
 	return conds;
 }
@@ -229,6 +247,62 @@ export async function listLibraryIds(filter: LibraryFilter = {}): Promise<number
 		.where(conds.length ? and(...conds) : undefined)
 		.orderBy(orderFor(filter.sort, filter.dir), asc(mediaItems.id));
 	return rows.map((row) => row.id);
+}
+
+/** One occurrence's destination evidence plus how many copies of the title exist. */
+export interface LibraryCoverageEntry {
+	mediaItemId: number;
+	coverage: ItemCoverageSummary;
+	occurrences: CoverageOccurrenceCounts;
+}
+
+/**
+ * Coverage for a page of library ids.
+ *
+ * Deliberately a second call rather than columns on `listLibrary`: that function
+ * is also used without paging, and loading per-item coverage for an entire
+ * forty-thousand-item library to render a grid of sixty would be paid on every
+ * non-UI caller too. The grid asks for the ids it is about to draw.
+ *
+ * Strictly a read. Coverage and `reviewedAt` are independent — a destination
+ * being reconciled is not the user completing their review — so nothing here
+ * writes, including the review state the same rows carry.
+ */
+export async function listLibraryCoverage(
+	serverInstanceId: string,
+	mediaItemIds: number[]
+): Promise<LibraryCoverageEntry[]> {
+	const ids = [...new Set(mediaItemIds)];
+	if (ids.length === 0) return [];
+	const identities = await db
+		.select({
+			id: mediaItems.id,
+			mediaType: mediaItems.mediaType,
+			tmdbId: mediaItems.tmdbId
+		})
+		.from(mediaItems)
+		.where(and(eq(mediaItems.serverInstanceId, serverInstanceId), inArray(mediaItems.id, ids)));
+	// The identity is derived through the shared helper, not rebuilt here: it is the
+	// only thing keeping TMDB movie 105 and show 105 from sharing coverage.
+	const scoped = identities.map((row) => ({
+		mediaItemId: row.id,
+		canonicalKey: canonicalIdentityKey(row.mediaType, row.tmdbId)
+	}));
+	const [summaries, occurrences] = await Promise.all([
+		loadItemCoverageSummaries(
+			db,
+			serverInstanceId,
+			scoped.map((row) => row.mediaItemId)
+		),
+		loadCoverageOccurrenceCounts(db, scoped)
+	]);
+	return scoped.flatMap((row) => {
+		const coverage = summaries.get(row.mediaItemId);
+		const counts = occurrences.get(row.mediaItemId);
+		return coverage && counts
+			? [{ mediaItemId: row.mediaItemId, coverage, occurrences: counts }]
+			: [];
+	});
 }
 
 /** Distinct genres present across the library, for the filter chips. */

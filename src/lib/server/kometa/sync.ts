@@ -16,6 +16,7 @@ import {
 	type AppConfig,
 	type KometaSnapshotScope
 } from '$lib/server/config';
+import { refreshCoverageAfter, refreshStaleCoverageAfter } from '$lib/server/coverage/refresh';
 import { logEvent } from '$lib/server/events';
 import {
 	applyPlan,
@@ -475,6 +476,15 @@ export async function loadKometaState(): Promise<KometaTabState> {
 			if (parsed.errors.length) parseError = parsed.errors[0].message;
 			else doc = parsed;
 		}
+	}
+
+	// Inspecting the destination is the one moment a user is looking straight at
+	// the Kometa files, so it is also the moment stale coverage is most visibly
+	// wrong. Bounded to the oldest observations rather than a whole-server rebuild:
+	// a settings page must render, and repairing the worst evidence on each visit
+	// converges without ever making one page load pay for the entire library.
+	if (binding) {
+		await refreshStaleCoverageAfter('kometa_config', { serverInstanceId: binding.id, limit: 100 });
 	}
 
 	const cached = binding ? await getCachedLibraries(binding.id) : [];
@@ -1082,7 +1092,7 @@ async function confirmKometaConfigPlan(
 	expectedAction: KometaConfigPlanAction
 ): Promise<{ payload: KometaConfigPlanPayload; backup: boolean }> {
 	const initial = await validateStoredKometaPlan(request, expectedAction);
-	return withConfigLock(initial.payload.configPath, async () => {
+	const committed = await withConfigLock(initial.payload.configPath, async () => {
 		const { consumed, backup } = await withKometaMigrationControlLock(
 			async (assertControlLockOwned) => {
 				const pending = await validateStoredKometaPlan(request, expectedAction);
@@ -1272,6 +1282,17 @@ async function confirmKometaConfigPlan(
 
 		return { payload: consumed.payload, backup: backup !== null };
 	});
+
+	// Saving `config.yml` can move `metadata_path`, which is where every Kometa
+	// coverage row's evidence lives — the same title can go from exported to absent
+	// without a single artwork byte changing. Reconciling here re-reads the
+	// destination the new config points at. Deliberately outside the config lock:
+	// the write is committed, and holding a filesystem lock through a projection
+	// rebuild would serialize settings saves behind it.
+	await refreshCoverageAfter('kometa_config', {
+		serverInstanceId: committed.payload.serverInstanceId
+	});
+	return committed;
 }
 
 /** Confirm one unchanged structured preview; never recomputes selections. */
