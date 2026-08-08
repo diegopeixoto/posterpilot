@@ -34,20 +34,55 @@ export interface ProviderGroup {
 }
 
 /**
- * Group candidates first by provider (first-seen order) and then by set within each
- * provider. Two providers may emit the same setId without colliding because they are
- * kept in separate groups. Pure — no DB imports.
+ * Group candidates first by provider and then by set within each provider. Two
+ * providers may emit the same setId without colliding because they are kept in
+ * separate groups. Pure — no DB imports.
+ *
+ * Provider order comes from `providerPriority` and from nothing else. Discovery runs
+ * providers in parallel and each commits its own transaction, so candidate row ids —
+ * and therefore the first-seen provider order this used to follow — record only which
+ * provider answered first, which is exactly the accident the review page must not
+ * present as an ordering.
+ *
+ * `providerPriority` is required rather than defaulted to `DEFAULT_PROVIDER_PRIORITY`:
+ * a caller that forgot it would still render a deterministic-looking page that silently
+ * ignores the user's configured order, and nothing in the output would reveal it. Making
+ * omission a type error costs the one production caller a single argument.
+ *
+ * This is presentation only. Candidate order inside a group is untouched, and scoring
+ * applies the same priority strictly as a tie-break after the numeric score (see
+ * `selectAutomaticArtwork`), so a better-scoring candidate still wins regardless of
+ * where its provider's card sits.
  */
-export function groupByProvider(candidates: PosterCandidate[]): ProviderGroup[] {
+export function groupByProvider(
+	candidates: PosterCandidate[],
+	providerPriority: readonly string[]
+): ProviderGroup[] {
 	const byProvider = new Map<string, PosterCandidate[]>();
-	const order: string[] = [];
+	const firstSeen: string[] = [];
 	for (const c of candidates) {
-		if (!byProvider.has(c.provider)) {
-			byProvider.set(c.provider, []);
-			order.push(c.provider);
+		let group = byProvider.get(c.provider);
+		if (!group) {
+			group = [];
+			byProvider.set(c.provider, group);
+			firstSeen.push(c.provider);
 		}
-		byProvider.get(c.provider)!.push(c);
+		group.push(c);
 	}
+
+	// A Set both de-duplicates a malformed priority list (which would otherwise emit the
+	// same provider's card twice) and gives the unknown-provider lookup below O(1).
+	const configured = new Set(providerPriority);
+	// Configured providers that produced nothing simply have no map entry and drop out
+	// without shifting the ones around them.
+	const order = [...configured].filter((provider) => byProvider.has(provider));
+	// Providers the configured order does not mention — a newly added source, or a row
+	// left behind by a removed one — go last in first-seen order. Sorting them
+	// alphabetically instead would let one new provider id reshuffle the others.
+	for (const provider of firstSeen) {
+		if (!configured.has(provider)) order.push(provider);
+	}
+
 	return order.map((provider) => ({
 		provider,
 		sets: groupProviderCandidates(provider, byProvider.get(provider)!)

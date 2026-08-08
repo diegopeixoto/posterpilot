@@ -71,12 +71,12 @@
 
 ## 7. Canonical Provider Ordering
 
-- [ ] 7.1 Sort provider groups explicitly from persisted priority and place unknown providers last without changing internal candidate order
-- [ ] 7.2 Test visual/default-expanded order against inverse provider completion and candidate insertion order
-- [ ] 7.3 Move the single order control to Provider settings and clarify its presentation/equal-score behavior separately from score weights
-- [ ] 7.4 Implement handle-only Pointer Events drag for mouse/touch without adding a dependency or blocking page scroll outside the handle
-- [ ] 7.5 Keep always-visible 44px move buttons, disabled-provider positions, focus continuity, position text, polite announcements, reset default, and reduced-motion behavior
-- [ ] 7.6 Add unit/component/E2E coverage for save/reload, buttons, drag, touch scroll, boundaries, disabled providers, unknown providers, and unchanged unequal-score ranking
+- [x] 7.1 Sort provider groups explicitly from persisted priority and place unknown providers last without changing internal candidate order
+- [x] 7.2 Test visual/default-expanded order against inverse provider completion and candidate insertion order
+- [x] 7.3 Move the single order control to Provider settings and clarify its presentation/equal-score behavior separately from score weights
+- [x] 7.4 Implement handle-only Pointer Events drag for mouse/touch without adding a dependency or blocking page scroll outside the handle
+- [x] 7.5 Keep always-visible 44px move buttons, disabled-provider positions, focus continuity, position text, polite announcements, reset default, and reduced-motion behavior
+- [x] 7.6 Add unit/component/E2E coverage for save/reload, buttons, drag, touch scroll, boundaries, disabled providers, unknown providers, and unchanged unequal-score ranking
 
 ## 8. Accessible Full-Size Candidate Preview
 

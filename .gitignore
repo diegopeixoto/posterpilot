@@ -52,3 +52,8 @@ vite.config.ts.timestamp-*
 /tests/e2e/.scenario*.json
 /test-results/
 /playwright-report/
+
+# Vitest browser-mode run artifacts (component project). The specs are committed;
+# these are per-run screenshots/attachments the runner writes beside them.
+/.vitest-attachments/
+**/__screenshots__/

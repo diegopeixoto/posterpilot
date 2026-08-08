@@ -32,8 +32,18 @@ Tailwind v4 (`@theme` tokens + `@layer components` in `src/app.css`), Paraglide 
 - **Quality gates before a PR is ready:** `bun run check` (0 errors), `bun run test`,
   `bun run build`, `bun run lint`. `check` compiles Paraglide first; the generated
   `src/lib/paraglide/` is git-ignored.
-- **E2E:** `bun run test:e2e` (Playwright) for browser-flow changes — CI runs only
-  check/test/lint, so build and e2e are local-only gates.
+- **Three test layers.** `bun run test` runs the first two; CI runs check/test/lint, so
+  build and e2e are local-only gates.
+  - **unit** (`test:unit`) — pure logic in plain node. Keep these `$env`-free.
+  - **component** (`test:component`) — `*.svelte.test.ts` rendered in real Chromium via
+    `vitest-browser-svelte`, with `app.css` loaded so computed style is assertable. Use
+    this for focus, `activeElement`, live regions, pointer capture, and DOM order after a
+    keyed re-render — an emulated DOM models exactly those least faithfully. Components
+    under test must import only `svelte` and `$lib/*`; anything reaching for `$app/*`
+    belongs in E2E.
+  - **e2e** (`test:e2e`, Playwright) — whole flows against a built app.
+- **Extract logic that a component test cannot reach** into a pure module and unit-test it,
+  rather than leaving it untested inside a `.svelte` file.
 - **Before push:** `bun run fallow` — apply only unambiguous dead-code fixes.
 - **Signed commits required on `main`** — ruleset rejects unsigned; rebase-sign
   contributor branches, verify `git log --format=%G?` = `G`.

@@ -77,6 +77,23 @@ describe('selectAutomaticArtwork', () => {
 		expect(result.poster?.provider).toBe('beta');
 	});
 
+	it('lets an unequal score beat the configured provider order', () => {
+		// The order governs presentation and equal-score ties only. A better
+		// candidate still wins from a provider ordered last, so reordering the
+		// list can never quietly override ranking.
+		const weights = {
+			providerWeights: { alpha: 1, beta: 4 },
+			resolutionWeight: 0,
+			aspectWeight: 0
+		};
+		const result = selectAutomaticArtwork(
+			[candidate(1, { provider: 'alpha' }), candidate(2, { provider: 'beta' })],
+			{ weights, providerPriority: ['alpha', 'beta'] }
+		);
+
+		expect(result.poster?.provider).toBe('beta');
+	});
+
 	it('rejects candidates that cannot identify a complete slot', () => {
 		const result = selectAutomaticArtwork([
 			candidate(1, { kind: 'season', season: null }),

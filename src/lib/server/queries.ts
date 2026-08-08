@@ -34,6 +34,7 @@ import { groupByProvider, groupCandidatesBySet } from './posters/sets';
 import { PROVIDERS } from './posters/providers';
 import { providerAvailability } from './posters/providers/availability';
 import { findStagedArtworkCandidate } from './posters/selection-preview';
+import { getProviderPriority } from './posters/score-weights';
 import { resolveConfig } from './config';
 import { rankFunItems, type PickFilter } from './fun-pick';
 import {
@@ -728,8 +729,11 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 	if (!item) return null;
 	// A provider can be disabled in settings without re-running discovery, which would
 	// leave its stored candidates active. Hide them at display time so the item page
-	// only ever shows sources the user currently has enabled.
-	const config = await resolveConfig();
+	// only ever shows sources the user currently has enabled. The configured provider
+	// priority is read alongside it: candidate rows arrive ordered by insertion id, which
+	// records which provider's discovery transaction committed first, so the order the
+	// provider cards are shown in has to come from settings instead.
+	const [config, providerPriority] = await Promise.all([resolveConfig(), getProviderPriority()]);
 	const enabledProviders = PROVIDERS.filter(
 		(p) => providerAvailability(p.id, config) === 'available'
 	).map((p) => p.id);
@@ -845,7 +849,7 @@ export async function getItemDetail(id: number, serverInstanceId?: string) {
 		},
 		candidates,
 		sets: groupCandidatesBySet(candidates),
-		providerGroups: groupByProvider(candidates),
+		providerGroups: groupByProvider(candidates, providerPriority),
 		/** Artwork kinds each provider cut off at its retention guard, keyed by provider. */
 		truncatedKinds,
 		selectedRootPreviews: {

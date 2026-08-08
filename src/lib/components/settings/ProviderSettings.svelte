@@ -1,6 +1,15 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { artworkLanguageChoices, artworkLanguageName } from '$lib/posters/candidate-disclosure';
+	import {
+		dropIndexForPointer,
+		moveProvider,
+		RANKING_PROVIDERS,
+		reorderProviders,
+		type ProviderRowBounds,
+		type RankingProvider
+	} from '$lib/settings/provider-order';
 	import {
 		ARTWORK_LANGUAGE_ANY,
 		ARTWORK_LANGUAGE_UI,
@@ -14,6 +23,7 @@
 		providerTmdb = $bindable(),
 		providerFanart = $bindable(),
 		providerThePosterDb = $bindable(),
+		providerPriority = $bindable(),
 		tmdbArtworkLanguage = $bindable(),
 		fanartKey = $bindable(),
 		fanartKeySet,
@@ -29,6 +39,7 @@
 		providerTmdb: boolean;
 		providerFanart: boolean;
 		providerThePosterDb: boolean;
+		providerPriority: RankingProvider[];
 		tmdbArtworkLanguage: TmdbArtworkLanguage;
 		fanartKey: string;
 		fanartKeySet: boolean;
@@ -44,6 +55,146 @@
 	// own option after a save. Option labels are native names, like the UI
 	// language switcher, so the list reads the same in every locale.
 	const languageChoices = $derived(artworkLanguageChoices(tmdbArtworkLanguage));
+
+	// Enablement, credentials and env overrides are four independent scalars in the
+	// save payload; these maps let one ordered row render the right one per provider.
+	const providerNames: Record<RankingProvider, () => string> = {
+		mediux: m.settings_provider_mediux,
+		theposterdb: m.settings_provider_theposterdb,
+		fanarttv: m.settings_provider_fanart,
+		tmdb: m.settings_provider_tmdb
+	};
+	const providerEnabled: Record<RankingProvider, boolean> = $derived({
+		mediux: providerMediux,
+		theposterdb: providerThePosterDb,
+		fanarttv: providerFanart,
+		tmdb: providerTmdb
+	});
+	const providerEnvManaged: Record<RankingProvider, boolean> = $derived({
+		mediux: env.providerMediux,
+		theposterdb: env.providerThePosterDb,
+		fanarttv: env.providerFanart,
+		tmdb: env.providerTmdb
+	});
+
+	function setProviderEnabled(provider: RankingProvider, enabled: boolean): void {
+		if (provider === 'mediux') providerMediux = enabled;
+		else if (provider === 'theposterdb') providerThePosterDb = enabled;
+		else if (provider === 'fanarttv') providerFanart = enabled;
+		else providerTmdb = enabled;
+	}
+
+	// `null` means the provider needs no credential at all (MediUX is anonymous), so its
+	// row simply omits the badge rather than claiming a state it does not have.
+	type ProviderCredentialState = 'set' | 'missing' | 'optional';
+	const credentialState: Record<RankingProvider, ProviderCredentialState | null> = $derived({
+		mediux: null,
+		theposterdb:
+			thePosterDbPassword !== '' || (thePosterDbPasswordSet && !thePosterDbPasswordClear)
+				? 'set'
+				: 'optional',
+		fanarttv: fanartKey !== '' || fanartKeySet ? 'set' : 'missing',
+		tmdb: tmdbKey !== '' || tmdbKeySet ? 'set' : 'missing'
+	});
+	const credentialLabels: Record<ProviderCredentialState, () => string> = {
+		set: m.settings_provider_credential_set,
+		missing: m.settings_provider_credential_missing,
+		optional: m.settings_provider_credential_optional
+	};
+
+	let orderList: HTMLUListElement | null = $state(null);
+	let orderAnnouncement = $state('');
+	let dragProvider = $state<RankingProvider | null>(null);
+	let dropIndex = $state(-1);
+	const dragFromIndex = $derived(dragProvider ? providerPriority.indexOf(dragProvider) : -1);
+
+	// Shown only when there is something to undo, so the control never invites a
+	// no-op. Like every other field here it stages the change and waits for the
+	// page-wide Save, rather than writing on click.
+	const isDefaultOrder = $derived(
+		providerPriority.length === RANKING_PROVIDERS.length &&
+			providerPriority.every((provider, index) => provider === RANKING_PROVIDERS[index])
+	);
+
+	function resetOrder(): void {
+		providerPriority = [...RANKING_PROVIDERS];
+		orderAnnouncement = m.settings_provider_order_reset_announcement();
+	}
+
+	function announceOrder(provider: RankingProvider): void {
+		orderAnnouncement = m.settings_provider_order_announcement({
+			provider: providerNames[provider](),
+			position: providerPriority.indexOf(provider) + 1,
+			total: providerPriority.length
+		});
+	}
+
+	function moveButton(provider: RankingProvider, direction: 'up' | 'down'): HTMLElement | null {
+		return document.getElementById(`provider-order-${direction}-${provider}`);
+	}
+
+	async function moveByButton(provider: RankingProvider, delta: -1 | 1): Promise<void> {
+		const from = providerPriority.indexOf(provider);
+		const next = moveProvider(providerPriority, from, delta);
+		if (next[from] === provider) return;
+		providerPriority = next;
+		announceOrder(provider);
+		// The keyed `{#each}` re-inserts the row it moved and browsers drop focus from a
+		// re-inserted node, so put focus back on the provider the user moved — on the
+		// button they pressed, or its sibling when that one just hit the list bound.
+		//
+		// `tick()` rather than `requestAnimationFrame`: this list is a `$bindable()`
+		// prop, so the update travels child → parent → child and the rows are still
+		// the pre-move nodes on the next frame. Focusing there lands on a node the
+		// re-insertion then discards, leaving focus on `<body>`.
+		await tick();
+		const pressed = moveButton(provider, delta < 0 ? 'up' : 'down');
+		if (pressed instanceof HTMLButtonElement && !pressed.disabled) pressed.focus();
+		else moveButton(provider, delta < 0 ? 'down' : 'up')?.focus();
+	}
+
+	/** Rows keep their DOM order for the whole drag, so bounds index like `providerPriority`. */
+	function rowBounds(): ProviderRowBounds[] {
+		const rows = orderList?.querySelectorAll<HTMLElement>('[data-provider-row]') ?? [];
+		return [...rows].map((row) => {
+			const rect = row.getBoundingClientRect();
+			return { top: rect.top, height: rect.height };
+		});
+	}
+
+	function startDrag(event: PointerEvent, provider: RankingProvider): void {
+		if (event.pointerType === 'mouse' && event.button !== 0) return;
+		// Only the handle carries `touch-action: none`, so a touch anywhere else on the
+		// page still scrolls; capture keeps the moves coming here once the finger leaves it.
+		event.preventDefault();
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		dragProvider = provider;
+		dropIndex = providerPriority.indexOf(provider);
+	}
+
+	function trackDrag(event: PointerEvent): void {
+		if (!dragProvider) return;
+		dropIndex = dropIndexForPointer(event.clientY, rowBounds());
+	}
+
+	// Reordering waits for the drop: moving rows mid-drag would detach the capturing
+	// handle and kill the gesture, so the pending landing spot is previewed instead.
+	function endDrag(): void {
+		const provider = dragProvider;
+		const target = dropIndex;
+		dragProvider = null;
+		dropIndex = -1;
+		if (!provider || target < 0) return;
+		const from = providerPriority.indexOf(provider);
+		if (target === from) return;
+		providerPriority = reorderProviders(providerPriority, from, target);
+		announceOrder(provider);
+	}
+
+	function cancelDrag(): void {
+		dragProvider = null;
+		dropIndex = -1;
+	}
 </script>
 
 <div>
@@ -62,31 +213,120 @@
 </div>
 
 <div>
-	<span class="mb-1 block text-sm font-medium">{m.settings_providers()}</span>
-	<p class="mb-2 text-xs text-neutral-400">{m.settings_providers_hint()}</p>
-	<div class="space-y-1">
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
-			<input type="checkbox" bind:checked={providerMediux} disabled={env.providerMediux} />
-			{m.settings_provider_mediux()}
-		</label>
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
-			<input type="checkbox" bind:checked={providerTmdb} disabled={env.providerTmdb} />
-			{m.settings_provider_tmdb()}
-		</label>
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
-			<input type="checkbox" bind:checked={providerFanart} disabled={env.providerFanart} />
-			{m.settings_provider_fanart()}
-		</label>
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
-			<input
-				type="checkbox"
-				bind:checked={providerThePosterDb}
-				disabled={env.providerThePosterDb}
-			/>
-			{m.settings_provider_theposterdb()}
-			<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
-		</label>
-	</div>
+	<span id="provider-order-label" class="mb-1 block text-sm font-medium">
+		{m.settings_providers()}
+	</span>
+	<p class="text-xs text-neutral-400">{m.settings_providers_hint()}</p>
+	<p class="mt-1 mb-3 text-xs text-neutral-400">{m.settings_provider_order_hint()}</p>
+	<ul class="space-y-2" aria-labelledby="provider-order-label" bind:this={orderList}>
+		{#each providerPriority as provider, index (provider)}
+			{@const dragging = dragProvider === provider}
+			{@const position = dragging && dropIndex >= 0 ? dropIndex + 1 : index + 1}
+			{@const credential = credentialState[provider]}
+			<li
+				data-provider-row
+				class="relative rounded-lg border bg-neutral-950/40 p-2 transition-colors {dragging
+					? 'border-accent-600'
+					: 'border-neutral-800'}"
+			>
+				{#if dropIndex === index && dragFromIndex >= 0 && dropIndex !== dragFromIndex}
+					<span
+						class="pointer-events-none absolute right-0 left-0 h-0.5 rounded bg-accent-500 {dropIndex <
+						dragFromIndex
+							? '-top-1.5'
+							: '-bottom-1.5'}"
+						aria-hidden="true"
+					></span>
+				{/if}
+				<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+					<button
+						type="button"
+						tabindex="-1"
+						aria-hidden="true"
+						title={m.settings_provider_order_drag()}
+						onpointerdown={(event) => startDrag(event, provider)}
+						onpointermove={trackDrag}
+						onpointerup={endDrag}
+						onpointercancel={cancelDrag}
+						class="shrink-0 touch-none rounded-md p-2 text-neutral-500 select-none hover:text-neutral-300 {dragging
+							? 'cursor-grabbing text-accent-300'
+							: 'cursor-grab'}"
+					>
+						<svg viewBox="0 0 10 16" class="size-4" fill="currentColor" aria-hidden="true">
+							<circle cx="3" cy="3" r="1.4" />
+							<circle cx="7" cy="3" r="1.4" />
+							<circle cx="3" cy="8" r="1.4" />
+							<circle cx="7" cy="8" r="1.4" />
+							<circle cx="3" cy="13" r="1.4" />
+							<circle cx="7" cy="13" r="1.4" />
+						</svg>
+					</button>
+					<span
+						class="w-5 shrink-0 text-center text-sm font-semibold text-neutral-300 tabular-nums"
+					>
+						<span aria-hidden="true">{position}</span>
+						<span class="sr-only">
+							{m.settings_provider_order_position({ position, total: providerPriority.length })}
+						</span>
+					</span>
+					<label class="flex min-w-0 flex-1 items-center gap-2 text-sm text-neutral-300">
+						<input
+							type="checkbox"
+							checked={providerEnabled[provider]}
+							disabled={providerEnvManaged[provider]}
+							onchange={(event) => setProviderEnabled(provider, event.currentTarget.checked)}
+						/>
+						<span class="truncate">{providerNames[provider]()}</span>
+					</label>
+					<div class="ml-auto flex shrink-0 gap-1">
+						<button
+							id={`provider-order-up-${provider}`}
+							type="button"
+							class="btn btn-ghost min-h-11 min-w-11"
+							disabled={index === 0}
+							aria-label={m.settings_priority_up({ provider: providerNames[provider]() })}
+							onclick={() => moveByButton(provider, -1)}>↑</button
+						>
+						<button
+							id={`provider-order-down-${provider}`}
+							type="button"
+							class="btn btn-ghost min-h-11 min-w-11"
+							disabled={index === providerPriority.length - 1}
+							aria-label={m.settings_priority_down({ provider: providerNames[provider]() })}
+							onclick={() => moveByButton(provider, 1)}>↓</button
+						>
+					</div>
+				</div>
+				<!-- Status sits on its own line rather than competing with the name for
+				     width: as one row these badges never shrink, so the provider name
+				     truncated toward nothing on narrow screens while they stayed intact. -->
+				{#if !providerEnabled[provider] || credential || providerEnvManaged[provider] || provider === 'theposterdb'}
+					<div class="mt-2 flex flex-wrap items-center gap-2 pl-11">
+						{#if !providerEnabled[provider]}
+							<span class="badge badge-muted">{m.settings_provider_order_disabled()}</span>
+						{/if}
+						{#if credential}
+							<span class="badge {credential === 'missing' ? 'badge-warn' : 'badge-muted'}">
+								{credentialLabels[credential]()}
+							</span>
+						{/if}
+						{#if provider === 'theposterdb'}
+							<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
+						{/if}
+						{#if providerEnvManaged[provider]}
+							<span class="text-xs text-amber-400">{m.settings_set_from_env()}</span>
+						{/if}
+					</div>
+				{/if}
+			</li>
+		{/each}
+	</ul>
+	<p class="sr-only" aria-live="polite" aria-atomic="true">{orderAnnouncement}</p>
+	{#if !isDefaultOrder}
+		<button type="button" class="btn btn-ghost mt-2 min-h-11" onclick={resetOrder}>
+			{m.settings_provider_order_reset()}
+		</button>
+	{/if}
 	<div class="mt-4 max-w-xs">
 		<label for="tmdbArtworkLanguage" class="mb-1 block text-sm font-medium">
 			{m.settings_tmdb_artwork_language()}

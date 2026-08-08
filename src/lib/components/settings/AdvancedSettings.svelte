@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { LIBRARY_SORTS, type LibrarySort } from '$lib/library-sort';
 	import { m } from '$lib/paraglide/messages';
+	import { RANKING_PROVIDER_LABELS, type RankingProvider } from '$lib/settings/provider-order';
 	import { sortLabels } from '$lib/sort-labels';
-
-	type RankingProvider = 'mediux' | 'theposterdb' | 'fanarttv' | 'tmdb';
 
 	let {
 		servers,
@@ -16,7 +15,7 @@
 		mediuxConcurrency = $bindable(),
 		httpCacheTtlDays = $bindable(),
 		defaultApplyMethod = $bindable(),
-		providerPriority = $bindable(),
+		providerPriority,
 		scoreWeightInputs = $bindable(),
 		scoreResolution = $bindable(),
 		scoreAspect = $bindable(),
@@ -44,6 +43,7 @@
 		mediuxConcurrency: string | number;
 		httpCacheTtlDays: string | number;
 		defaultApplyMethod: string;
+		/** Read-only here: the canonical order control lives in Settings → Providers. */
 		providerPriority: RankingProvider[];
 		scoreWeightInputs: Record<RankingProvider, string>;
 		scoreResolution: string | number;
@@ -56,21 +56,6 @@
 		funEnabled: boolean;
 		libraryDefaultSort: LibrarySort;
 	} = $props();
-
-	const rankingProviderLabels: Record<RankingProvider, string> = {
-		mediux: 'MediUX',
-		theposterdb: 'ThePosterDB',
-		fanarttv: 'Fanart.tv',
-		tmdb: 'TMDB'
-	};
-
-	function moveRankingProvider(index: number, delta: -1 | 1) {
-		const target = index + delta;
-		if (target < 0 || target >= providerPriority.length) return;
-		const next = [...providerPriority];
-		[next[index], next[target]] = [next[target], next[index]];
-		providerPriority = next;
-	}
 </script>
 
 <div>
@@ -184,16 +169,15 @@
 		</span>
 	</div>
 
+	<p class="mt-3 max-w-2xl text-xs text-neutral-400">{m.settings_score_weights_order_note()}</p>
+
 	<div class="mt-4 space-y-2">
-		{#each providerPriority as provider, index (provider)}
+		{#each providerPriority as provider (provider)}
 			<div
-				class="grid items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3 sm:grid-cols-[2rem_1fr_8rem_auto]"
+				class="grid items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3 sm:grid-cols-[1fr_8rem]"
 			>
-				<span class="text-center text-xs font-semibold text-neutral-500" aria-hidden="true">
-					{index + 1}
-				</span>
 				<label class="text-sm text-neutral-200" for={`score-${provider}`}>
-					{rankingProviderLabels[provider]}
+					{RANKING_PROVIDER_LABELS[provider]}
 				</label>
 				<input
 					id={`score-${provider}`}
@@ -205,26 +189,6 @@
 					oninput={(event) => (scoreWeightInputs[provider] = event.currentTarget.value)}
 					class="input w-full"
 				/>
-				<div class="flex gap-1">
-					<button
-						type="button"
-						class="btn btn-ghost px-2"
-						disabled={index === 0}
-						aria-label={m.settings_priority_up({
-							provider: rankingProviderLabels[provider]
-						})}
-						onclick={() => moveRankingProvider(index, -1)}>↑</button
-					>
-					<button
-						type="button"
-						class="btn btn-ghost px-2"
-						disabled={index === providerPriority.length - 1}
-						aria-label={m.settings_priority_down({
-							provider: rankingProviderLabels[provider]
-						})}
-						onclick={() => moveRankingProvider(index, 1)}>↓</button
-					>
-				</div>
 			</div>
 		{/each}
 	</div>

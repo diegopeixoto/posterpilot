@@ -16,6 +16,11 @@ jobs:
           bun-version: '1.2'
       - run: bun install --frozen-lockfile
       - run: bun run check
+      # `test` includes the component project, which runs in a real browser:
+      # focus, activeElement and pointer capture are exactly what those
+      # components get wrong, and an emulated DOM models them least faithfully.
+      # Chromium only — the full Playwright E2E suite stays a local gate.
+      - run: bunx playwright install --with-deps chromium
       - run: bun run test
       - run: bun run lint
 
