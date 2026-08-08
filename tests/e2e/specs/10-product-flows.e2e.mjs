@@ -652,4 +652,85 @@ test.describe
 				.first()
 		).toBeVisible();
 	});
+
+	test('enlarges a candidate by pointer and keyboard without staging anything', async ({
+		page,
+		scenario
+	}) => {
+		const itemId = scenario.primaryItems.alpha;
+		// Staging is the only thing allowed to write a slot. Nothing the preview does —
+		// opening, navigating, closing — may reach this endpoint.
+		const selectionWrites = [];
+		page.on('request', (request) => {
+			if (request.method() !== 'POST') return;
+			if (new URL(request.url()).pathname === `/api/items/${itemId}/select`) {
+				selectionWrites.push(request.postData());
+			}
+		});
+
+		await gotoHydrated(page, `/item/${itemId}`);
+		const select = page.locator('button[data-artwork-select]');
+		const enlarge = page.locator('button[data-artwork-preview]');
+		await expect(select.first()).toBeVisible();
+		const total = await enlarge.count();
+		expect(total).toBeGreaterThan(1);
+		// One of each per tile, and neither control nested inside the other.
+		expect(await select.count()).toBe(total);
+		const nested = await page
+			.locator('button[data-artwork-select], button[data-artwork-preview]')
+			.evaluateAll(
+				(nodes) =>
+					nodes.filter(
+						(node) => node.querySelector('button') || node.parentElement?.closest('button')
+					).length
+			);
+		expect(nested, 'candidate controls nested inside another button').toBe(0);
+
+		// The localized pair is what a screen-reader user hears on the same tile.
+		const posterKind = { kind: t('item_poster'), provider: 'mediux' };
+		const choosePoster = page.getByRole('button', { name: t('item_candidate_label', posterKind) });
+		const enlargePoster = page.getByRole('button', { name: t('item_preview_open', posterKind) });
+		expect(await enlargePoster.count()).toBe(await choosePoster.count());
+
+		const stagedState = () =>
+			select.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-pressed')));
+		const before = await stagedState();
+		const unstaged = before.indexOf('false');
+		expect(unstaged, 'an unstaged candidate to preview').toBeGreaterThanOrEqual(0);
+		const trigger = enlarge.nth(unstaged);
+		// Always rendered at a 44px target rather than revealed on hover.
+		expect((await trigger.boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+		await trigger.click();
+		const dialog = page.getByRole('dialog', { name: t('item_preview_title') });
+		const close = dialog.getByRole('button', { name: t('item_preview_close') });
+		await expect(dialog).toBeVisible();
+		await expect(close).toBeFocused();
+		await expect(dialog.locator('[data-preview-position]')).toHaveText(
+			t('item_preview_position', { position: unstaged + 1, total })
+		);
+		await close.click();
+		await expect(dialog).toBeHidden();
+		await expect(trigger).toBeFocused();
+		expect(await stagedState()).toEqual(before);
+
+		// Keyboard: open from the trigger, walk the visible sequence, dismiss with Escape.
+		await trigger.press('Enter');
+		await expect(dialog).toBeVisible();
+		await page.keyboard.press('ArrowRight');
+		await expect(dialog.locator('[data-preview-position]')).toHaveText(
+			t('item_preview_position', {
+				position: Math.min(unstaged + 2, total),
+				total
+			})
+		);
+		await page.keyboard.press('Escape');
+		await expect(dialog).toBeHidden();
+		// Back on the exact control that opened it, not the one navigated to.
+		await expect(trigger).toBeFocused();
+
+		expect(await stagedState()).toEqual(before);
+		expect(selectionWrites, 'preview must not persist a selection').toEqual([]);
+		await expectNoHorizontalOverflow(page);
+	});
 });

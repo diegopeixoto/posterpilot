@@ -5,6 +5,7 @@ import {
 	classifyCandidateLanguage,
 	isArtworkLanguageEligible,
 	parseTmdbArtworkLanguage,
+	providerTagsArtworkLanguage,
 	resolveArtworkLanguagePolicy
 } from '$lib/tmdb-artwork-language';
 
@@ -140,6 +141,16 @@ describe('classifyCandidateLanguage', () => {
 			expect(classifyCandidateLanguage(candidate, policy)).toBe('eligible');
 			expect(isArtworkLanguageEligible(candidate, policy)).toBe(true);
 		}
+	});
+
+	it('knows which providers report a language at all', () => {
+		// Drives whether "no language tag" is worth rendering. For MediUX and
+		// ThePosterDB it would state a permanent property of the source on every
+		// candidate they will ever return — noise, not provenance.
+		expect(providerTagsArtworkLanguage('tmdb')).toBe(true);
+		expect(providerTagsArtworkLanguage('fanarttv')).toBe(true);
+		expect(providerTagsArtworkLanguage('mediux')).toBe(false);
+		expect(providerTagsArtworkLanguage('theposterdb')).toBe(false);
 	});
 
 	it('does not filter a provider that tags languages but is not TMDB', () => {

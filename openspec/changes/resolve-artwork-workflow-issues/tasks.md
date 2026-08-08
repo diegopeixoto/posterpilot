@@ -80,11 +80,11 @@
 
 ## 8. Accessible Full-Size Candidate Preview
 
-- [ ] 8.1 Refactor each candidate card into a non-interactive wrapper with sibling selection and preview controls for every supported slot kind
-- [ ] 8.2 Build a reusable localized modal with on-demand canonical image loading, object-contain layout, provider/dimension/language/position metadata, and error state
-- [ ] 8.3 Implement focus trap/restore, Escape/close/backdrop behavior, body-scroll lock, shortcut suspension, and reduced-motion-safe transition
-- [ ] 8.4 Add previous/next navigation limited to the current filtered and disclosed sequence with position announcements
-- [ ] 8.5 Add E2E coverage proving preview never stages artwork and works with mouse, keyboard, touch-sized controls, navigation, failure, and focus restoration
+- [x] 8.1 Refactor each candidate card into a non-interactive wrapper with sibling selection and preview controls for every supported slot kind
+- [x] 8.2 Build a reusable localized modal with on-demand canonical image loading, object-contain layout, provider/dimension/language/position metadata, and error state
+- [x] 8.3 Implement focus trap/restore, Escape/close/backdrop behavior, body-scroll lock, shortcut suspension, and reduced-motion-safe transition
+- [x] 8.4 Add previous/next navigation limited to the current filtered and disclosed sequence with position announcements
+- [x] 8.5 Add E2E coverage proving preview never stages artwork and works with mouse, keyboard, touch-sized controls, navigation, failure, and focus restoration
 
 ## 9. Artwork Coverage Projection and Queries
 

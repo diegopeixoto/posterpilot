@@ -29,6 +29,7 @@
 	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
 	import ArtworkTimeline from '$lib/components/ArtworkTimeline.svelte';
 	import ArtworkUndoDialog from '$lib/components/ArtworkUndoDialog.svelte';
+	import ArtworkPreviewDialog from '$lib/components/ArtworkPreviewDialog.svelte';
 	import type { PublicJobProgress } from '$lib/job-progress';
 	import { jobStatusLabel } from '$lib/job-labels';
 	import {
@@ -508,6 +509,64 @@
 		}
 	});
 
+	// ---- Full-size preview -----------------------------------------------------
+	// Preview is a sibling action, never a selection side effect: opening, walking
+	// and closing the dialog touch no staged slot and persist nothing.
+	let previewOpen = $state(false);
+	let previewIndex = $state(0);
+	let previewTrigger = $state<HTMLElement | null>(null);
+	/**
+	 * Exactly the candidates on screen, in render order. Walks the same path the
+	 * markup below does — expanded provider, expanded set, poster then backdrop
+	 * pane, then each expanded season — so previous/next can never reach artwork the
+	 * language filter, the collapse state or a disclosure limit is currently hiding.
+	 * Keep this walk in lockstep with the candidate grids; the dialog is handed this
+	 * sequence rather than re-deriving visibility for itself.
+	 */
+	const previewSequence = $derived.by(() => {
+		const sequence: PosterCandidate[] = [];
+		const disclosed = (key: string, candidates: PosterCandidate[]) =>
+			candidates.slice(0, disclosureFor(key, candidates.length).shown);
+		for (const group of visibleProviderGroups) {
+			if (!isExpanded(providerKey(group.provider))) continue;
+			for (const set of group.sets) {
+				if (!isExpanded(setKey(set.setId))) continue;
+				const g = groupSetArtwork(set.candidates);
+				// `season` carries an explicit default instead of being optional: the dev
+				// server's TypeScript strip drops the annotation but leaves the `?` on
+				// the parameter, which is invalid JS. It 500s the page under `vite dev`
+				// — which is what the E2E suite runs — while `svelte-check` and
+				// `bun run build` both accept it.
+				const pane = (
+					kind: 'poster' | 'background' | 'season' | 'title_card',
+					season: number | null = null
+				) => candidateDisclosureKey(group.provider, set.setId, kind, season);
+				sequence.push(...disclosed(pane('poster'), g.posters));
+				sequence.push(...disclosed(pane('background'), g.backgrounds));
+				if (!isShow) continue;
+				for (const sg of g.seasons) {
+					if (!isExpanded(seasonKey(set.setId, sg.season))) continue;
+					sequence.push(...disclosed(pane('season', sg.season), sg.posters));
+					sequence.push(...disclosed(pane('title_card', sg.season), sg.titleCards));
+				}
+			}
+		}
+		return sequence;
+	});
+	/**
+	 * Open the dialog at one candidate. Handing the dialog the element that was
+	 * activated — rather than letting it read `document.activeElement` — is what
+	 * makes focus come back to this exact tile, including after a touch activation
+	 * that never focused the button.
+	 */
+	function openPreview(candidate: PosterCandidate, trigger: HTMLElement) {
+		const index = previewSequence.findIndex((entry) => entry.id === candidate.id);
+		if (index < 0) return;
+		previewTrigger = trigger;
+		previewIndex = index;
+		previewOpen = true;
+	}
+
 	// Re-sync local selection when navigating to a different item.
 	// svelte-ignore state_referenced_locally
 	let loadedId = data.item.id;
@@ -531,6 +590,9 @@
 			showAllLanguages = false;
 			disclosureLimits = {};
 			disclosureAnnouncement = '';
+			previewOpen = false;
+			previewIndex = 0;
+			previewTrigger = null;
 		}
 	});
 
@@ -1077,7 +1139,10 @@
 				confirmationOpen: confirmApply,
 				undoBusy,
 				undoOpen: undoPreview !== null,
-				modalOpen: Boolean(document.querySelector('dialog[open], [aria-modal="true"]'))
+				// Own state first: the artwork preview suspends page shortcuts even if its
+				// dialog markup changes shape.
+				modalOpen:
+					previewOpen || Boolean(document.querySelector('dialog[open], [aria-modal="true"]'))
 			})
 		)
 			return;
@@ -1275,104 +1340,104 @@
 
 <svelte:head><title>{data.item.title} · PosterPilot</title></svelte:head>
 
-{#snippet posterTile(c: PosterCandidate)}
-	<button
-		type="button"
-		onclick={() => pickPoster(c)}
-		aria-pressed={isRootStaged('poster', c)}
-		aria-label={m.item_candidate_label({ kind: m.item_poster(), provider: c.provider })}
-		class="relative overflow-hidden rounded-lg border-2 transition {isRootStaged('poster', c)
+<!-- Every tile is a non-interactive wrapper holding two sibling controls: the image
+     button stages the slot, the footer button only enlarges it. Nesting the second
+     inside the first would be invalid HTML and unreachable to assistive tech. The
+     staged ring and the hover affordance move to the wrapper so the whole tile still
+     reads as one selectable unit. -->
+{#snippet candidateTile(
+	c: PosterCandidate,
+	kind: string,
+	staged: boolean,
+	aspect: string,
+	stage: () => void
+)}
+	<!-- Clipping stays on the image button, not on the wrapper: the shared
+	     `:focus-visible` outline is drawn 2px outside its control, and a wrapper with
+	     `overflow-hidden` would cut the keyboard focus ring off both siblings. -->
+	<div
+		class="relative flex flex-col rounded-lg border-2 transition-colors {staged
 			? 'border-accent-500'
 			: 'border-transparent hover:border-neutral-600'}"
 	>
+		<button
+			type="button"
+			data-artwork-select
+			onclick={stage}
+			aria-pressed={staged}
+			aria-label={m.item_candidate_label({ kind, provider: c.provider })}
+			class="block overflow-hidden rounded-t-md"
+		>
+			<!-- `block` matters: an inline image leaves baseline space beneath it, which
+			     showed up as a gap between the artwork and the preview strip below. -->
+			<img
+				src={thumb(c.previewUrl ?? c.url)}
+				alt=""
+				loading="lazy"
+				class="{aspect} block w-full object-cover"
+			/>
+		</button>
 		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
 		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
-		<img
-			src={thumb(c.previewUrl ?? c.url)}
-			alt=""
-			loading="lazy"
-			class="aspect-[2/3] w-full object-cover"
-		/>
+		{@render previewControl(c, kind)}
+	</div>
+{/snippet}
+
+{#snippet previewControl(c: PosterCandidate, kind: string)}
+	{@const label = m.item_preview_open({ kind, provider: c.provider })}
+	<!-- Always rendered and always a 44px target: a hover-only control would be
+	     unreachable by touch and invisible to a keyboard user. It sits below the
+	     image rather than over it so it never covers the selection control. -->
+	<button
+		type="button"
+		data-artwork-preview
+		onclick={(event) => openPreview(c, event.currentTarget)}
+		aria-label={label}
+		title={label}
+		class="flex h-11 w-full shrink-0 items-center justify-center rounded-b-md border-t border-neutral-800 bg-neutral-900 text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
+	>
+		<span aria-hidden="true" class="text-base leading-none">⤢</span>
 	</button>
+{/snippet}
+
+{#snippet posterTile(c: PosterCandidate)}
+	{@render candidateTile(
+		c,
+		m.item_poster(),
+		isRootStaged('poster', c),
+		'aspect-[2/3]',
+		() => void pickPoster(c)
+	)}
 {/snippet}
 
 {#snippet backdropTile(c: PosterCandidate)}
-	<button
-		type="button"
-		onclick={() => pickBackground(c)}
-		aria-pressed={isRootStaged('background', c)}
-		aria-label={m.item_candidate_label({ kind: m.item_backdrop(), provider: c.provider })}
-		class="relative overflow-hidden rounded-lg border-2 transition {isRootStaged('background', c)
-			? 'border-accent-500'
-			: 'border-transparent hover:border-neutral-600'}"
-	>
-		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
-		<img
-			src={thumb(c.previewUrl ?? c.url)}
-			alt=""
-			loading="lazy"
-			class="aspect-video w-full object-cover"
-		/>
-	</button>
+	{@render candidateTile(
+		c,
+		m.item_backdrop(),
+		isRootStaged('background', c),
+		'aspect-video',
+		() => void pickBackground(c)
+	)}
 {/snippet}
 
 {#snippet seasonPosterTile(c: PosterCandidate, season: number)}
-	<button
-		type="button"
-		onclick={() => pickChild('poster', season, null, c)}
-		aria-pressed={isChildStaged('poster', season, null, c)}
-		aria-label={m.item_candidate_label({
-			kind: `${m.item_season_label({ number: season })} · ${m.item_poster()}`,
-			provider: c.provider
-		})}
-		class="relative overflow-hidden rounded-lg border-2 transition {isChildStaged(
-			'poster',
-			season,
-			null,
-			c
-		)
-			? 'border-accent-500'
-			: 'border-transparent hover:border-neutral-600'}"
-	>
-		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
-		<img
-			src={thumb(c.previewUrl ?? c.url)}
-			alt=""
-			loading="lazy"
-			class="aspect-[2/3] w-full object-cover"
-		/>
-	</button>
+	{@render candidateTile(
+		c,
+		`${m.item_season_label({ number: season })} · ${m.item_poster()}`,
+		isChildStaged('poster', season, null, c),
+		'aspect-[2/3]',
+		() => void pickChild('poster', season, null, c)
+	)}
 {/snippet}
 
 {#snippet titleCardTile(c: PosterCandidate, season: number)}
-	<button
-		type="button"
-		onclick={() => pickChild('title_card', season, c.episode, c)}
-		aria-pressed={isChildStaged('title_card', season, c.episode, c)}
-		aria-label={m.item_candidate_label({
-			kind: `${m.item_season_label({ number: season })} · ${m.item_episode_label({ number: c.episode ?? 0 })} · ${m.item_title_card()}`,
-			provider: c.provider
-		})}
-		class="relative overflow-hidden rounded-lg border-2 transition {isChildStaged(
-			'title_card',
-			season,
-			c.episode,
-			c
-		)
-			? 'border-accent-500'
-			: 'border-transparent hover:border-neutral-600'}"
-	>
-		{#if suggestions.ids.has(c.id)}{@render suggestedChip()}{/if}
-		{#if isLanguageFallback(c)}{@render languageChip(c)}{/if}
-		<img
-			src={thumb(c.previewUrl ?? c.url)}
-			alt=""
-			loading="lazy"
-			class="aspect-video w-full object-cover"
-		/>
-	</button>
+	{@render candidateTile(
+		c,
+		`${m.item_season_label({ number: season })} · ${m.item_episode_label({ number: c.episode ?? 0 })} · ${m.item_title_card()}`,
+		isChildStaged('title_card', season, c.episode, c),
+		'aspect-video',
+		() => void pickChild('title_card', season, c.episode, c)
+	)}
 {/snippet}
 
 {#snippet suggestedChip()}
@@ -1946,6 +2011,17 @@
 	contextLabel={undoContextLabel}
 	onConfirm={confirmUndo}
 	onCancel={cancelUndo}
+/>
+
+<!-- Mounted once for the page and fed the on-screen sequence; it never filters or
+     discloses candidates itself, and it never stages one. `open` is two-way so the
+     dialog's own Escape, close and backdrop paths dismiss it without a callback
+     that could be mistaken for a selection. -->
+<ArtworkPreviewDialog
+	bind:open={previewOpen}
+	sequence={previewSequence}
+	index={previewIndex}
+	trigger={previewTrigger}
 />
 
 <!-- Sticky custom-set builder -->
