@@ -13,6 +13,7 @@
 	import SecuritySettings from '$lib/components/settings/SecuritySettings.svelte';
 	import ServerSettings from '$lib/components/settings/ServerSettings.svelte';
 	import type { LibrarySort } from '$lib/library-sort';
+	import { RANKING_PROVIDER_LABELS, type RankingProvider } from '$lib/settings/provider-order';
 	import type { TmdbArtworkLanguage } from '$lib/tmdb-artwork-language';
 	import { m } from '$lib/paraglide/messages';
 	import { toasts } from '$lib/stores/toasts.svelte';
@@ -170,7 +171,6 @@
 	let thePosterDbPassword = $state('');
 	let thePosterDbPasswordClear = $state(false);
 
-	type RankingProvider = 'mediux' | 'theposterdb' | 'fanarttv' | 'tmdb';
 	let providerPriority = $state<RankingProvider[]>([...initialData.ranking.providerPriority]);
 	let scoreWeightInputs = $state<Record<RankingProvider, string>>({
 		mediux: String(initialData.ranking.weights.providerWeights.mediux),
@@ -182,12 +182,6 @@
 		String(initialData.ranking.weights.resolutionWeight)
 	);
 	let scoreAspect = $state<string | number>(String(initialData.ranking.weights.aspectWeight));
-	const rankingProviderLabels: Record<RankingProvider, string> = {
-		mediux: 'MediUX',
-		theposterdb: 'ThePosterDB',
-		fanarttv: 'Fanart.tv',
-		tmdb: 'TMDB'
-	};
 
 	let saving = $state(false);
 	let testing = $state(false);
@@ -219,7 +213,7 @@
 		}
 		for (const [raw, label] of [
 			...providerPriority.map(
-				(provider) => [scoreWeightInputs[provider], rankingProviderLabels[provider]] as const
+				(provider) => [scoreWeightInputs[provider], RANKING_PROVIDER_LABELS[provider]] as const
 			),
 			[scoreResolution, m.settings_score_resolution()] as const,
 			[scoreAspect, m.settings_score_aspect()] as const
@@ -421,6 +415,7 @@
 			bind:providerTmdb
 			bind:providerFanart
 			bind:providerThePosterDb
+			bind:providerPriority
 			bind:tmdbArtworkLanguage
 			bind:fanartKey
 			bind:thePosterDbUsername
@@ -439,7 +434,7 @@
 			bind:mediuxConcurrency
 			bind:httpCacheTtlDays
 			bind:defaultApplyMethod
-			bind:providerPriority
+			{providerPriority}
 			bind:scoreWeightInputs
 			bind:scoreResolution
 			bind:scoreAspect

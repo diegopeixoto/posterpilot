@@ -602,4 +602,54 @@ test.describe
 			client.close();
 		}
 	});
+
+	test('reorders artwork providers, keeps focus with the moved row, and persists', async ({
+		page
+	}) => {
+		// The button ids carry the provider id, so the rendered order can be read
+		// without depending on localized labels.
+		const readOrder = () =>
+			page
+				.locator('[data-provider-row]')
+				.evaluateAll((rows) =>
+					rows.map((row) =>
+						row.querySelector('[id^="provider-order-down-"]').id.replace('provider-order-down-', '')
+					)
+				);
+
+		await gotoHydrated(page, '/settings?tab=providers');
+		const before = await readOrder();
+		expect(before.length).toBeGreaterThan(1);
+		const [first, second] = before;
+
+		await page.locator(`#provider-order-down-${first}`).click();
+		expect(await readOrder()).toEqual([second, first, ...before.slice(2)]);
+
+		// Focus has to follow the provider, not the position it used to occupy.
+		// Restored on the next frame, so poll rather than sampling immediately.
+		await expect
+			.poll(() => page.evaluate(() => document.activeElement?.id ?? ''))
+			.toBe(`provider-order-down-${first}`);
+
+		await page.getByRole('button', { name: t('settings_save'), exact: true }).click();
+		await expect(
+			page
+				.getByRole('status')
+				.filter({ hasText: t('settings_saved') })
+				.first()
+		).toBeVisible();
+
+		await gotoHydrated(page, '/settings?tab=providers');
+		expect(await readOrder()).toEqual([second, first, ...before.slice(2)]);
+
+		// Leave the ordering as it was found so later specs see a clean default.
+		await page.locator(`#provider-order-up-${first}`).click();
+		await page.getByRole('button', { name: t('settings_save'), exact: true }).click();
+		await expect(
+			page
+				.getByRole('status')
+				.filter({ hasText: t('settings_saved') })
+				.first()
+		).toBeVisible();
+	});
 });
