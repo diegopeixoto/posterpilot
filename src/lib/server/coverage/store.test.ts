@@ -409,6 +409,30 @@ describe('rebuilding', () => {
 		expect(rows).toEqual([{ library: 'shows' }]);
 	});
 
+	it('rebuilds a library an item moved into without colliding with its old-library rows', async () => {
+		await store.record([observation()]);
+		// The occurrence changes libraries after its coverage was written: its old
+		// row keeps the previous section key, which a section-scoped delete cannot
+		// reach, while the slot unique indexes ignore the section entirely.
+		await db
+			.update(mediaItems)
+			.set({ sectionKey: 'films-4k' })
+			.where(eq(mediaItems.id, ITEMS.movieA));
+
+		const result = await store.replace(
+			{ serverInstanceId: 'server-a', librarySectionKey: 'films-4k' },
+			[observation({ evidenceFingerprint: 'sha256:poster-v3' })]
+		);
+
+		expect(result).toEqual({ deleted: 1, written: 1 });
+		const rows = await db.select().from(artworkCoverage);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			librarySectionKey: 'films-4k',
+			evidenceFingerprint: 'sha256:poster-v3'
+		});
+	});
+
 	it('refuses observations that fall outside the scope being rebuilt', async () => {
 		await expect(
 			store.replace({ serverInstanceId: 'server-a', destination: 'kometa' }, [observation()])
@@ -516,6 +540,41 @@ describe('reads the indexes exist for', () => {
 			observedBefore: new Date('2026-07-15T00:00:00.000Z')
 		});
 		expect(stale.map((row) => row.kind)).toEqual(['poster']);
+	});
+
+	it('lists only evidence a sweep can advance, so pinned rows cannot starve the queue', async () => {
+		await store.record([
+			// Only root poster/background can be re-observed on a server, so this
+			// episode row's observedAt can never move; listing it would park it at
+			// the head of the oldest-first queue on every bounded pass.
+			observation({
+				kind: 'title_card',
+				season: 1,
+				episode: 1,
+				status: 'recorded_unverified',
+				evidenceSource: 'server_verification',
+				observedAt: new Date('2026-06-01T00:00:00.000Z')
+			}),
+			observation({ observedAt: new Date('2026-07-01T00:00:00.000Z') }),
+			// A kometa row is restamped from the files on every rebuild, so even a
+			// child slot there is advanceable.
+			observation({
+				destination: 'kometa',
+				status: 'exported_to_kometa',
+				evidenceSource: 'kometa_file',
+				evidenceRevisionId: null,
+				observedAt: new Date('2026-06-15T00:00:00.000Z')
+			})
+		]);
+
+		const stale = await store.listStale({
+			serverInstanceId: 'server-a',
+			observedBefore: new Date('2026-07-15T00:00:00.000Z')
+		});
+		expect(stale.map((row) => [row.destination, row.kind])).toEqual([
+			['kometa', 'poster'],
+			['server', 'poster']
+		]);
 	});
 });
 

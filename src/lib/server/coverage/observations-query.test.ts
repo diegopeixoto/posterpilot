@@ -286,4 +286,21 @@ describe('occurrence counts', () => {
 		]);
 		expect(counts.get(ITEMS.movieA)).toMatchObject({ occurrences: 1, servers: 1 });
 	});
+
+	it('matches the JS trim for a tmdb_id padded with non-space whitespace', async () => {
+		// `canonicalIdentityKey` strips all Unicode whitespace; SQLite's bare trim()
+		// strips only U+0020. The SQL twin must agree, or a tab-padded id silently
+		// falls back to "one uncovered copy" while its twin is covered elsewhere.
+		await db.update(mediaItems).set({ tmdbId: '105\t' }).where(eq(mediaItems.id, ITEMS.movieB));
+		await cover(ITEMS.movieB, 'server-b', 'server', 'applied_on_server');
+
+		const counts = await loadCoverageOccurrenceCounts(db, [
+			{ mediaItemId: ITEMS.movieA, canonicalKey: 'movie:105' }
+		]);
+		expect(counts.get(ITEMS.movieA)).toMatchObject({
+			occurrences: 2,
+			servers: 2,
+			coveredOccurrences: 1
+		});
+	});
 });

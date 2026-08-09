@@ -60,6 +60,18 @@ export interface ObserveFullRescanArtworkInput {
 	currentBackgroundUrl: string | null;
 	previous: PreviousRootArtwork | null;
 	jobId?: number | null;
+	/**
+	 * What to do with a `url_identity` fallback read.
+	 *
+	 * `record` (the default, and the rescan's behavior) writes it: during a scan
+	 * the list URL is fresh data, and a weaker identity is still an observation.
+	 * `skip` drops it entirely — no ledger row, no projection stamp. The stale
+	 * coverage sweep needs this: it passes the *stored* URL as the current one, so
+	 * a fallback there compares the database with itself, and recording that
+	 * "unchanged" result would advance `lastObservedAt` on evidence that was never
+	 * actually re-checked.
+	 */
+	fallbackPolicy?: 'record' | 'skip';
 }
 
 export interface FullRescanArtworkObservationResult {
@@ -241,15 +253,19 @@ export function createFullRescanArtworkObserver(
 			})
 		]);
 		const stateByKind = new Map(states.map((state) => [state.kind, state]));
-		const classified = observations.map((observation) => {
-			const prior =
-				stateByKind.get(observation.kind) ?? previousFromItem(observation.kind, input.previous);
-			return {
-				observation,
-				prior,
-				decision: classifyFullRescanArtworkObservation(prior, observation)
-			};
-		});
+		const classified = observations
+			.filter(
+				(observation) => input.fallbackPolicy !== 'skip' || observation.evidence !== 'url_identity'
+			)
+			.map((observation) => {
+				const prior =
+					stateByKind.get(observation.kind) ?? previousFromItem(observation.kind, input.previous);
+				return {
+					observation,
+					prior,
+					decision: classifyFullRescanArtworkObservation(prior, observation)
+				};
+			});
 		const external = classified.filter((entry) => entry.decision.status === 'external_change');
 		let groupId: string | null = null;
 		if (external.length) {

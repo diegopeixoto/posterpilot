@@ -112,6 +112,18 @@ export interface KometaCoverageInput {
 	 * so with `{ state: 'unreadable' }` rather than omitting it.
 	 */
 	legacyFile?: KometaLegacyFileEvidence;
+	/**
+	 * How many occurrences on the whole server retain each legacy mapping id.
+	 *
+	 * "Exactly one claimant" is a server-wide invariant — the shared file predates
+	 * sections, so two copies of a title in different libraries contest the same
+	 * line. A scoped caller (an apply, an undo, a stale read) sees only its own
+	 * batch and must supply the global counts, or a key contested elsewhere would
+	 * be confidently attributed to whichever copy happened to be in the batch.
+	 * When omitted, counts are derived from `requests` — correct only when the
+	 * batch spans the server.
+	 */
+	legacyClaimantCounts?: ReadonlyMap<string, number>;
 	/** When the files were read. Stamped onto every row this call produces. */
 	observedAt?: Date | null;
 }
@@ -269,6 +281,19 @@ function retainedLegacyMappingId(request: KometaCoverageRequest): string | null 
 	return retained && isKometaLegacyDestinationV1(retained) ? retained.mappingId : null;
 }
 
+/**
+ * The canonical numeric id a request's `tmdbId` denotes, or `null`.
+ *
+ * Mirrors the draft side's `legacyCandidateKey` (trim, then strict canonical
+ * test): the two must agree on which ids can name a legacy entry, or a key
+ * drafted under one normalization is judged under the other and an existing
+ * entry is reported as never having been looked for.
+ */
+function canonicalRequestTmdbId(tmdbId: string | null | undefined): string | null {
+	const trimmed = tmdbId?.trim();
+	return trimmed && isCanonicalKometaNumericId(trimmed) ? trimmed : null;
+}
+
 export function reconcileKometaCoverage(input: KometaCoverageInput): KometaCoverageReconciliation {
 	const observedAt = input.observedAt ?? null;
 
@@ -295,16 +320,24 @@ export function reconcileKometaCoverage(input: KometaCoverageInput): KometaCover
 
 	// Which occurrences claim which legacy key. Two claimants on one key means the
 	// pre-split file lost the distinction between them, and neither may have it.
-	const legacyClaimants = new Map<string, number>();
-	for (const request of input.requests) {
-		const mappingId = retainedLegacyMappingId(request);
-		if (mappingId === null) continue;
-		legacyClaimants.set(mappingId, (legacyClaimants.get(mappingId) ?? 0) + 1);
+	// Server-wide counts from the caller win over batch-derived ones: a scoped
+	// batch cannot see a claimant that lives in another library or chunk.
+	let legacyClaimants: ReadonlyMap<string, number>;
+	if (input.legacyClaimantCounts) {
+		legacyClaimants = input.legacyClaimantCounts;
+	} else {
+		const derived = new Map<string, number>();
+		for (const request of input.requests) {
+			const mappingId = retainedLegacyMappingId(request);
+			if (mappingId === null) continue;
+			derived.set(mappingId, (derived.get(mappingId) ?? 0) + 1);
+		}
+		legacyClaimants = derived;
 	}
 	const requestTmdbIds = new Set(
 		input.requests
-			.map((request) => request.tmdbId)
-			.filter((tmdbId): tmdbId is string => isCanonicalKometaNumericId(tmdbId))
+			.map((request) => canonicalRequestTmdbId(request.tmdbId))
+			.filter((tmdbId): tmdbId is string => tmdbId !== null)
 	);
 
 	const legacyOutcome = (request: KometaCoverageRequest, slotKey: string): SlotOutcome => {
@@ -319,8 +352,8 @@ export function reconcileKometaCoverage(input: KometaCoverageInput): KometaCover
 			// entry under this item's TMDB number, that entry might be this movie's or
 			// the show that shares the number — unprovable either way, so this item's
 			// legacy coverage is unknown rather than absent.
-			const possible =
-				isCanonicalKometaNumericId(request.tmdbId) && legacyIndex.has(request.tmdbId);
+			const candidateId = canonicalRequestTmdbId(request.tmdbId);
+			const possible = candidateId !== null && legacyIndex.has(candidateId);
 			return possible ? unknown('kometa_legacy_ambiguous') : absent('kometa_no_entry');
 		}
 		if ((legacyClaimants.get(mappingId) ?? 0) > 1) return unknown('kometa_legacy_ambiguous');
@@ -380,7 +413,7 @@ export function reconcileKometaCoverage(input: KometaCoverageInput): KometaCover
  */
 function unassignedLegacy(
 	legacyFile: KometaLegacyFileEvidence,
-	claimants: Map<string, number>,
+	claimants: ReadonlyMap<string, number>,
 	requestTmdbIds: Set<string>
 ): UnassignedLegacyEntry[] {
 	if (legacyFile.state !== 'parsed') return [];
