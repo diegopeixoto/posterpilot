@@ -323,6 +323,28 @@ describe('kometa coverage refresh', () => {
 		expect(rows[0].evidenceFingerprint).not.toContain('example.test');
 	});
 
+	it('reads the legacy file for an unowned key rather than calling it absent', async () => {
+		// Nothing retained a legacy destination for this item, so the entry cannot be
+		// proven ours — but skipping the read would report the shared file absent,
+		// which can only be read as "checked, nothing exported". The honest answer is
+		// that an entry under this id exists and cannot be attributed.
+		// A typed revision puts the item in the Kometa pass; nothing retained a
+		// legacy destination for it, which is the case that used to skip the read.
+		await seedRevision({ id: 'revision-1', mediaItemId: ITEMS.movie, destination: 'kometa' });
+		files.set(
+			'/kometa/posterpilot.yml',
+			'metadata:\n  105:\n    url_poster: https://example.test/legacy.jpg\n'
+		);
+
+		await refresher().refreshKometaCoverage({ serverInstanceId: 'server-a' });
+
+		const kometaRows = (await coverageRows()).filter((row) => row.destination === 'kometa');
+		expect(kometaRows.length).toBeGreaterThan(0);
+		// Unknown, never missing, and never attributed to the movie.
+		expect(kometaRows.every((row) => row.status === 'unknown')).toBe(true);
+		expect(kometaRows.some((row) => row.status === 'exported_to_kometa')).toBe(false);
+	});
+
 	it('reports an absent file as missing and an unparseable one as unknown', async () => {
 		await seedRevision({ id: 'revision-1', mediaItemId: ITEMS.movie, destination: 'kometa' });
 		const refresh = refresher();
@@ -413,6 +435,79 @@ describe('kometa coverage refresh', () => {
 			evidenceSource: 'kometa_unidentified',
 			canonicalKey: null
 		});
+	});
+});
+
+describe('stale sweep re-observation', () => {
+	it('re-reads the media server before reconciling, not just the stored fingerprints', async () => {
+		// Reconciling alone rereads the evidence we already had, so a poster swapped
+		// directly in Plex would go unnoticed while `observedAt` advanced anyway —
+		// the projection would claim fresh evidence it never gathered.
+		const observed: { serverInstanceId: string; mediaItemIds: number[] }[] = [];
+		const refresh = createCoverageRefresher({
+			database: db,
+			store,
+			clock: () => NOW,
+			loadKometaDirectory: async () => null,
+			readMetadataFile: () => null,
+			observeServerArtwork: async (input) => {
+				observed.push(input);
+			}
+		});
+
+		await seedRevision({
+			id: 'revision-stale-1',
+			mediaItemId: ITEMS.movie,
+			destination: 'server',
+			proposedFingerprint: 'sha-a'
+		});
+		await seedSlotState(ITEMS.movie, 'sha-a');
+		await refresh.refreshCoverage({ serverInstanceId: 'server-a', mediaItemIds: [ITEMS.movie] });
+		await refresh.refreshStaleCoverage({
+			serverInstanceId: 'server-a',
+			staleBefore: new Date(NOW.getTime() + 60_000)
+		});
+
+		expect(observed).toHaveLength(1);
+		expect(observed[0].mediaItemIds).toContain(ITEMS.movie);
+	});
+
+	it('does not stamp fresh evidence when the observation fails', async () => {
+		// Reconciling anyway would retire the row from the sweep while leaving stale
+		// coverage in place, so the external change it exists to catch never is.
+		const refresh = createCoverageRefresher({
+			database: db,
+			store,
+			clock: () => NOW,
+			loadKometaDirectory: async () => null,
+			readMetadataFile: () => null,
+			observeServerArtwork: async () => {
+				throw new Error('server unreachable');
+			}
+		});
+
+		await seedRevision({
+			id: 'revision-stale-2',
+			mediaItemId: ITEMS.movie,
+			destination: 'server',
+			proposedFingerprint: 'sha-a'
+		});
+		await seedSlotState(ITEMS.movie, 'sha-a');
+		await refresh.refreshCoverage({ serverInstanceId: 'server-a', mediaItemIds: [ITEMS.movie] });
+		const before = await store.getItemCoverage('server-a', ITEMS.movie);
+		expect(before.length).toBeGreaterThan(0);
+
+		await expect(
+			refresh.refreshStaleCoverage({
+				serverInstanceId: 'server-a',
+				staleBefore: new Date(NOW.getTime() + 60_000)
+			})
+		).rejects.toThrow();
+
+		const after = await store.getItemCoverage('server-a', ITEMS.movie);
+		expect(after.map((row) => row.observedAt?.getTime())).toEqual(
+			before.map((row) => row.observedAt?.getTime())
+		);
 	});
 });
 

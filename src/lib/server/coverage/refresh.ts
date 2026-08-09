@@ -44,6 +44,7 @@ import {
 	type KometaLegacyDestinationV1,
 	type KometaMetadataFilename
 } from '$lib/server/kometa/destination';
+import { observeServerArtworkForCoverage } from './observe-server';
 import { recordedKometaDestination } from '$lib/server/kometa/recorded-destination';
 import { kometaOutputDirectory } from '$lib/server/plans/apply-destinations';
 import { applySlotKey, type ApplySlot } from '$lib/server/plans/apply-plan';
@@ -126,6 +127,21 @@ export interface CoverageRefreshDependencies {
 	loadKometaDirectory: () => Promise<string | null>;
 	/** Reads a metadata file, returning `null` when it does not exist. May throw. */
 	readMetadataFile: (path: string) => string | null;
+	/**
+	 * Re-reads artwork from the media server for these occurrences, refreshing the
+	 * slot-state fingerprints the server pass reconciles from.
+	 *
+	 * Only the stale sweep uses it, and only it can make that sweep mean anything:
+	 * reconciling alone rereads the fingerprints we already had, so a poster
+	 * swapped directly in Plex would never be noticed while the row's `observedAt`
+	 * advanced anyway — the projection would claim fresh evidence it never
+	 * gathered. Injected because this is the one network call in a module that is
+	 * otherwise database-only, and absent in tests by design.
+	 */
+	observeServerArtwork?: (input: {
+		serverInstanceId: string;
+		mediaItemIds: number[];
+	}) => Promise<void>;
 	clock?: () => Date;
 }
 
@@ -254,6 +270,20 @@ function agreedLegacyDestination(
 	if (recorded.length === 0) return null;
 	const [first] = recorded;
 	return recorded.every((entry) => entry.key === first.key) ? first : null;
+}
+
+/**
+ * The bare numeric key a legacy shared file would use for this title, or `null`.
+ *
+ * Speculative by nature — it is the key an entry *would* have, not one anything
+ * recorded — so it is built from the id directly rather than through
+ * `kometaYamlMappingKey`, which exists to render destinations that were actually
+ * resolved or retained.
+ */
+function legacyCandidateKey(tmdbId: string | number | null | undefined): number | null {
+	if (tmdbId === null || tmdbId === undefined) return null;
+	const id = Number(String(tmdbId).trim());
+	return Number.isInteger(id) && id > 0 ? id : null;
 }
 
 /** Entries are keyed by mapping id, not by occurrence: two copies of one title share a YAML line. */
@@ -524,8 +554,19 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 				}
 				drafts.add(kometaYamlMappingKey(resolved.destination), slotValues);
 			}
+			const candidateKey = legacyCandidateKey(occurrence.tmdbId);
 			if (legacyDestination) {
 				legacyDrafts.add(kometaYamlMappingKey(legacyDestination), slotValues);
+			} else if (candidateKey !== null) {
+				// No revision retained a legacy destination for this occurrence, so this
+				// key cannot be proven ours. Draft it anyway: the shared file predates
+				// typed mapping and is keyed by bare TMDB number, so an entry under this
+				// id may well exist, and the reconciler is what decides — it answers
+				// `ambiguous_identity`, leaving coverage unknown and reporting the entry
+				// without attributing it to a movie or a show. Not reading would report
+				// the file absent instead, which can only be read as "checked, nothing
+				// exported" — a claim this evidence does not support.
+				legacyDrafts.add(candidateKey, slotValues);
 			}
 		}
 
@@ -649,6 +690,15 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 		});
 		const mediaItemIds = [...new Set(rows.map((row) => row.mediaItemId))];
 		if (mediaItemIds.length === 0) return [];
+		// Observe before reconciling, and let a failure propagate rather than
+		// reconciling anyway: stamping a fresh `observedAt` onto evidence we did not
+		// actually re-check would retire the row from this sweep while leaving a
+		// stale `applied_on_server` in place — the external change it exists to catch
+		// would then never be caught. Failing keeps the row stale for the next pass.
+		await dependencies.observeServerArtwork?.({
+			serverInstanceId: input.serverInstanceId,
+			mediaItemIds
+		});
 		return refreshCoverage({ serverInstanceId: input.serverInstanceId, mediaItemIds });
 	}
 
@@ -747,7 +797,8 @@ export const coverageRefresher = createCoverageRefresher({
 	database: db,
 	store: coverageStore,
 	loadKometaDirectory: async () => kometaOutputDirectory(await resolveConfig()) || null,
-	readMetadataFile: readConfig
+	readMetadataFile: readConfig,
+	observeServerArtwork: observeServerArtworkForCoverage
 });
 
 /**
