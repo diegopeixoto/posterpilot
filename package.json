@@ -10,7 +10,7 @@
 		"preview": "vite preview",
 		"start": "node build",
 		"db:generate": "drizzle-kit generate",
-		"test": "vitest run",
+		"test": "vitest run --project unit && vitest run --project component",
 		"test:unit": "vitest run --project unit",
 		"test:component": "vitest run --project component",
 		"test:e2e": "playwright test --config playwright.e2e.config.mjs",

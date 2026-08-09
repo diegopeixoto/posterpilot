@@ -14,6 +14,7 @@ import {
 	REVIEW_STATE_VALUES,
 	type ParsedReviewFilter
 } from '$lib/review-filter';
+import { parseCoverageFilter } from '$lib/coverage-filter';
 
 const REVIEW_PAGE_SIZE = 24;
 
@@ -55,10 +56,17 @@ export const load: PageServerLoad = async ({ url }) => {
 	const params = activeView ? withSavedView(url.searchParams, activeView) : url.searchParams;
 	const filter: ParsedReviewFilter = parseReviewFilter(params, serverId);
 	filter.serverInstanceId = serverId;
+	// Coverage is deliberately not part of `ParsedReviewFilter`: the library list
+	// parses the same parameter with the same module, and a review state is a
+	// statement about the user's queue while coverage is a statement about what
+	// reached a destination. Neither implies the other, so a user can ask for
+	// completed-but-uncovered titles, or the reverse.
+	const coverage = parseCoverageFilter(params);
 
 	if (!serverId) {
 		return {
 			filter,
+			coverage,
 			items: [],
 			total: 0,
 			counts: Object.fromEntries(REVIEW_STATE_VALUES.map((state) => [state, 0])) as Record<
@@ -73,13 +81,19 @@ export const load: PageServerLoad = async ({ url }) => {
 		};
 	}
 
+	// The coverage predicate joins the *same* query the navigation context is built
+	// from, so item detail's next/previous walks exactly the list the user filtered.
+	// Both calls are reads: rendering coverage must never advance `reviewedAt`,
+	// because a destination being reconciled is not the user finishing a review.
+	const query = { ...filter, coverage };
 	const [result, views, orderedIds] = await Promise.all([
-		queryReviewInbox(filter, { limit: REVIEW_PAGE_SIZE, offset: filter.offset }),
+		queryReviewInbox(query, { limit: REVIEW_PAGE_SIZE, offset: filter.offset }),
 		listReviewViews(serverId),
-		listReviewItemIds(filter)
+		listReviewItemIds(query)
 	]);
 	return {
 		filter,
+		coverage,
 		...result,
 		scopes,
 		views,

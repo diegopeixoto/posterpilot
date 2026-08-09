@@ -1627,5 +1627,19 @@
 	"library_load_more": "さらに読み込む",
 	"library_loading_more": "読み込み中…",
 	"library_load_error": "追加の項目を読み込めませんでした。",
-	"toast_dismiss": "閉じる"
+	"toast_dismiss": "閉じる",
+	"coverage_status_applied_server": "このサーバーに適用済み",
+	"coverage_status_exported_kometa": "Kometa にエクスポート済み",
+	"coverage_status_externally_changed": "PosterPilot の外部で変更",
+	"coverage_status_unverified": "適用済み・未検証",
+	"coverage_status_missing": "PosterPilot では未適用",
+	"coverage_status_unknown": "適用状況は不明",
+	"coverage_destination_server": "メディアサーバー",
+	"coverage_destination_kometa": "Kometa メタデータ",
+	"coverage_kometa_not_applied": "Kometa ファイルにエクスポート済みです。Kometa が適用したかは PosterPilot では確認できません。",
+	"coverage_filter_label": "アートワークの適用状況",
+	"coverage_filter_all": "すべての適用状況",
+	"coverage_filter_needs_artwork": "アートワークが必要",
+	"coverage_occurrences": "{total} 件中 {covered} 件が適用済み",
+	"coverage_empty_filtered": "この適用状況の条件に一致するタイトルはありません。"
 }

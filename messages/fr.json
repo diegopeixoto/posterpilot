@@ -1627,5 +1627,19 @@
 	"library_load_more": "Charger plus",
 	"library_loading_more": "Chargement…",
 	"library_load_error": "Impossible de charger plus d'éléments.",
-	"toast_dismiss": "Fermer"
+	"toast_dismiss": "Fermer",
+	"coverage_status_applied_server": "Appliqué sur ce serveur",
+	"coverage_status_exported_kometa": "Exporté vers Kometa",
+	"coverage_status_externally_changed": "Modifié en dehors de PosterPilot",
+	"coverage_status_unverified": "Appliqué, non vérifié",
+	"coverage_status_missing": "Non appliqué par PosterPilot",
+	"coverage_status_unknown": "Couverture inconnue",
+	"coverage_destination_server": "Serveur multimédia",
+	"coverage_destination_kometa": "Métadonnées Kometa",
+	"coverage_kometa_not_applied": "Exporté vers un fichier Kometa. PosterPilot ne peut pas confirmer que Kometa l'a appliqué.",
+	"coverage_filter_label": "Couverture des visuels",
+	"coverage_filter_all": "N'importe quelle couverture",
+	"coverage_filter_needs_artwork": "Visuel manquant",
+	"coverage_occurrences": "{covered} copies couvertes sur {total}",
+	"coverage_empty_filtered": "Aucun titre ne correspond à ce filtre de couverture."
 }

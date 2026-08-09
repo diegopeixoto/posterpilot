@@ -4,6 +4,11 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { m } from '$lib/paraglide/messages';
 	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
+	import {
+		COVERAGE_FILTER_VALUES,
+		serializeCoverageFilter,
+		type CoverageFilterValue
+	} from '$lib/coverage-filter';
 
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
@@ -50,6 +55,17 @@
 				return m.review_state_completed();
 		}
 	}
+
+	// Each coverage option says what it means on its own; nothing about the control
+	// is carried by colour or by the order of the options. The wording is the
+	// catalog's: no option claims a title has no artwork, because a poster someone
+	// set by hand on the server is artwork PosterPilot simply did not put there.
+	const coverageFilterLabels: Record<CoverageFilterValue, () => string> = {
+		applied_on_this_server: m.coverage_status_applied_server,
+		exported_to_kometa: m.coverage_status_exported_kometa,
+		needs_artwork: m.coverage_filter_needs_artwork,
+		unknown: m.coverage_status_unknown
+	};
 
 	function stateClass(state: string): string {
 		if (state === 'partial_failure') return 'badge badge-error';
@@ -419,6 +435,26 @@
 			</select>
 		</label>
 		<label class="text-xs text-neutral-400">
+			{m.coverage_filter_label()}
+			<!--
+				Coverage sits with the availability filters, not with the state chips
+				above: state is where the user is in their workflow, coverage is what
+				actually reached a server or a Kometa file, and filtering by one must
+				never quietly filter by the other.
+			-->
+			<select
+				class="input mt-1 min-h-11 w-full"
+				value={data.coverage ?? ''}
+				onchange={(event) =>
+					setFilter('coverage', serializeCoverageFilter(event.currentTarget.value))}
+			>
+				<option value="">{m.coverage_filter_all()}</option>
+				{#each COVERAGE_FILTER_VALUES as value (value)}
+					<option {value}>{coverageFilterLabels[value]()}</option>
+				{/each}
+			</select>
+		</label>
+		<label class="text-xs text-neutral-400">
 			{m.review_sort()}
 			<select
 				class="input mt-1 w-full"
@@ -431,8 +467,10 @@
 				<option value="year">{m.review_sort_year()}</option>
 			</select>
 		</label>
+		<!-- Seven controls in a six-column grid: search takes the second row's slack
+		     rather than leaving a lone narrow field beside five empty cells. -->
 		<form
-			class="text-xs text-neutral-400"
+			class="text-xs text-neutral-400 lg:col-span-2"
 			onsubmit={(event) => {
 				event.preventDefault();
 				void setFilter('q', query.trim());
@@ -448,9 +486,27 @@
 </section>
 
 {#if data.items.length === 0}
-	<div class="surface mt-5 p-8 text-center">
-		<p class="text-sm text-neutral-300">{m.review_empty()}</p>
-		<p class="mt-1 text-xs text-neutral-500">{m.review_empty_hint()}</p>
+	<!--
+		Announced as a status because every filter here navigates client-side: the
+		list is simply replaced by this panel, with no page load a screen reader
+		would otherwise report.
+	-->
+	<div role="status" class="surface mt-5 p-8 text-center">
+		{#if data.coverage}
+			<!-- The generic hint sends people to sync or discovery, which is the wrong
+			     advice when the inbox is full and only this filter is empty. -->
+			<p class="text-sm text-neutral-300">{m.coverage_empty_filtered()}</p>
+			<button
+				type="button"
+				class="btn btn-ghost mt-4 min-h-11 px-3"
+				onclick={() => setFilter('coverage')}
+			>
+				{m.coverage_filter_all()}
+			</button>
+		{:else}
+			<p class="text-sm text-neutral-300">{m.review_empty()}</p>
+			<p class="mt-1 text-xs text-neutral-500">{m.review_empty_hint()}</p>
+		{/if}
 	</div>
 {:else}
 	<div class="mt-5 space-y-4">

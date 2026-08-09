@@ -99,11 +99,11 @@
 
 ## 10. Coverage and Workflow UI
 
-- [ ] 10.1 Add localized text-and-icon coverage badges for applied-on-this-server, exported-to-Kometa, externally-changed, unverified, missing, and unknown states
-- [ ] 10.2 Add library/review filters for destination coverage and needs-artwork with URL persistence and accessible empty states
-- [ ] 10.3 Add item-detail destination/slot breakdown and occurrence counts without collapsing server and Kometa evidence
-- [ ] 10.4 Ensure no YAML-only state is labelled applied or completed and no state relies on color alone
-- [ ] 10.5 Add component/E2E coverage for filtering, multi-occurrence details, unknown evidence, semantic labels, and assistive-technology names
+- [x] 10.1 Add localized text-and-icon coverage badges for applied-on-this-server, exported-to-Kometa, externally-changed, unverified, missing, and unknown states
+- [x] 10.2 Add library/review filters for destination coverage and needs-artwork with URL persistence and accessible empty states
+- [x] 10.3 Add item-detail destination/slot breakdown and occurrence counts without collapsing server and Kometa evidence
+- [x] 10.4 Ensure no YAML-only state is labelled applied or completed and no state relies on color alone
+- [x] 10.5 Add component/E2E coverage for filtering, multi-occurrence details, unknown evidence, semantic labels, and assistive-technology names
 
 ## 11. Documentation, Localization, and Final Verification
 

@@ -9,9 +9,26 @@
 	import LibraryToolbar from '$lib/components/library/LibraryToolbar.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { defaultSortDir, type LibrarySort } from '$lib/library-sort';
+	import {
+		COVERAGE_FILTER_VALUES,
+		serializeCoverageFilter,
+		type CoverageFilterValue
+	} from '$lib/coverage-filter';
 	import { toasts } from '$lib/stores/toasts.svelte';
 
 	let { data } = $props();
+
+	// Every option stands on its own words — the control never conveys a state by
+	// colour, position, or a shared prefix. The wording is the catalog's on purpose:
+	// "needs artwork" is about what PosterPilot has applied, and no option claims a
+	// title has no artwork, because a poster set by hand in Plex is still artwork.
+	const coverageFilterLabels: Record<CoverageFilterValue, () => string> = {
+		applied_on_this_server: m.coverage_status_applied_server,
+		exported_to_kometa: m.coverage_status_exported_kometa,
+		needs_artwork: m.coverage_filter_needs_artwork,
+		unknown: m.coverage_status_unknown
+	};
+	const coverage = $derived(data.coverage);
 
 	const selected = new SvelteSet<number>();
 	let selectionMode = $state<'explicit' | 'all_matching'>('explicit');
@@ -164,7 +181,12 @@
 			(data.filter.missingPoster ? 1 : 0) +
 			(data.filter.unchanged ? 1 : 0)
 	);
-	const hasAnyFilter = $derived(activeFilterCount > 0 || !!data.filter.q || !!data.filter.ignored);
+	// Coverage counts as an active filter (so "Clear all" appears and the empty grid
+	// never reads as an empty library) but not toward the Filter popover's badge —
+	// it isn't one of that popover's controls.
+	const hasAnyFilter = $derived(
+		activeFilterCount > 0 || !!data.filter.q || !!data.filter.ignored || !!coverage
+	);
 
 	// Locally staged params, applied to the URL only when autoApply is off and the user
 	// hits Apply. When autoApply is on, this is kept in sync but each change navigates.
@@ -189,6 +211,15 @@
 	function setParam(key: string, value: string | undefined) {
 		staged[key] = value;
 		if (autoApply) navigate({ [key]: value });
+	}
+
+	/**
+	 * Coverage applies immediately, like sort and unlike the staged filter set: the
+	 * control lives outside the filter popover, so there is no Apply button within
+	 * reach to commit a staged change with.
+	 */
+	function setCoverage(value: string) {
+		navigate({ coverage: serializeCoverageFilter(value) });
 	}
 
 	/** Apply any staged filter changes at once (manual mode). */
@@ -461,6 +492,28 @@
 	onRemoveParam={removeParam}
 />
 
+<!--
+	Coverage sits beside the toolbar rather than inside its filter popover. The
+	toolbar's filters describe the library's own metadata; this one asks what
+	PosterPilot has actually put where, and it is the single filter whose empty
+	result is a real answer ("nothing here is applied yet") — a user reading that
+	answer has to see what produced it without opening anything first.
+-->
+<div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+	<label for="library-coverage" class="text-xs text-neutral-400">{m.coverage_filter_label()}</label>
+	<select
+		id="library-coverage"
+		class="input min-h-11"
+		value={coverage ?? ''}
+		onchange={(event) => setCoverage(event.currentTarget.value)}
+	>
+		<option value="">{m.coverage_filter_all()}</option>
+		{#each COVERAGE_FILTER_VALUES as value (value)}
+			<option {value}>{coverageFilterLabels[value]()}</option>
+		{/each}
+	</select>
+</div>
+
 {#if selectedCount > 0}
 	<div
 		class="surface sticky top-16 z-10 mt-4 flex flex-wrap items-center gap-3 border-accent-800 bg-accent-950/40 px-4 py-2 text-sm backdrop-blur"
@@ -546,22 +599,38 @@
 	<div class="mt-4"><JobProgress {jobId} onDone={() => invalidateAll()} /></div>
 {/if}
 
-<LibraryGrid
-	items={visibleItems}
-	{total}
-	{hasAnyFilter}
-	{hasSort}
-	{ignoreView}
-	{libraryNavigating}
-	{loadingMore}
-	{hasMore}
-	{loadError}
-	{isIgnored}
-	{isSelected}
-	hrefFor={(id) =>
-		`/item/${id}?returnTo=${encodeURIComponent(page.url.pathname + page.url.search)}`}
-	onToggle={toggle}
-	onToggleIgnore={toggleIgnore}
-	onSetIgnoreView={setIgnoreView}
-	onLoadMore={loadMore}
-/>
+{#if coverage && total === 0 && !libraryNavigating}
+	<!--
+		The grid's generic "no match" would be a dead end here: a coverage filter
+		returning nothing is informative, so it says so in its own words and offers
+		the way back out. Announced as a status because the filter change is a
+		client-side navigation — the list simply becomes this, with no page load a
+		screen reader would otherwise report.
+	-->
+	<div role="status" class="surface mt-10 p-10 text-center">
+		<p class="text-sm text-neutral-300">{m.coverage_empty_filtered()}</p>
+		<button type="button" onclick={() => setCoverage('')} class="btn btn-ghost mt-4 min-h-11 px-3">
+			{m.coverage_filter_all()}
+		</button>
+	</div>
+{:else}
+	<LibraryGrid
+		items={visibleItems}
+		{total}
+		{hasAnyFilter}
+		{hasSort}
+		{ignoreView}
+		{libraryNavigating}
+		{loadingMore}
+		{hasMore}
+		{loadError}
+		{isIgnored}
+		{isSelected}
+		hrefFor={(id) =>
+			`/item/${id}?returnTo=${encodeURIComponent(page.url.pathname + page.url.search)}`}
+		onToggle={toggle}
+		onToggleIgnore={toggleIgnore}
+		onSetIgnoreView={setIgnoreView}
+		onLoadMore={loadMore}
+	/>
+{/if}
