@@ -242,7 +242,7 @@ barre d'outils de style Notion. Vous pouvez :
   (inchangé / encore sur l'affiche par défaut) et état ignoré. Le bouton Filtre
   affiche un badge avec le nombre de facettes actives.
 - **Filtrer par couverture des visuels** — _Appliqué sur ce serveur_, _Exporté
-  vers Kometa_, _Aucun visuel appliqué_ ou _Couverture inconnue_. La révision propose
+  vers Kometa_, _Non appliqué par PosterPilot_ ou _Couverture inconnue_. La révision propose
   exactement le même contrôle, et les valeurs y ont le même sens : un lien reste
   donc transposable d'une vue à l'autre. Lisez
   [Couverture des visuels](#couverture-des-visuels) avant de vous y fier — ce
@@ -612,11 +612,12 @@ des visuels** :
   serveur actif.
 - **Exporté vers Kometa** — au moins un emplacement figure dans le fichier de
   métadonnées actuel.
-- **Aucun visuel appliqué** — couvert à _aucune_ des deux destinations. Les
-  titres auxquels PosterPilot n'a jamais touché correspondent à ce filtre, ce
-  qu'une simple consultation de statut ne saurait obtenir. Le nom dit bien ce
+- **Non appliqué par PosterPilot** — couvert à _aucune_ des deux destinations.
+  Les titres auxquels PosterPilot n'a jamais touché correspondent à ce filtre,
+  ce qu'une simple consultation de statut ne saurait obtenir. Le nom dit bien ce
   qu'il affirme : _nous_ n'avons rien posé, ni sur le serveur ni dans Kometa —
-  cela ne dit rien sur le fait que le titre possède ou non une affiche.
+  une affiche posée à la main dans Plex reste une affiche, et ce filtre ne
+  prétend pas le contraire.
 - **Couverture inconnue** — au moins un emplacement dont la preuve est
   indéterminée : _Couverture inconnue_ à l'une ou l'autre destination, ou
   _Appliqué, non vérifié_ sur le serveur.

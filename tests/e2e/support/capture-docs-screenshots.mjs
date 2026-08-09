@@ -15,6 +15,16 @@
  *
  * Output lands in docs/public/screenshots/ as .webp (quality 90). Requires `cwebp`
  * (`brew install webp`) because Playwright only encodes PNG/JPEG.
+ *
+ * Two shots need an id from the instance being captured: `--item-id` (the item
+ * detail, coverage and preview shots) and `--collection-id`.
+ *
+ * `setup-wizard` needs an instance whose database is empty, since the wizard only
+ * exists before setup. Point the script at a throwaway instance started with a
+ * fresh DATABASE_URL and capture it on its own:
+ *
+ *   node tests/e2e/support/capture-docs-screenshots.mjs \
+ *     --base-url http://127.0.0.1:14201 --only setup-wizard
  */
 
 import { chromium } from '@playwright/test';
@@ -58,7 +68,31 @@ const shots = [
 		path: '/item/{{itemId}}',
 		docs: 'usage',
 		viewport: { width: 1280, height: 900 },
-		requiresItemId: true
+		// Framed on the candidate grids, which is what the caption promises and what
+		// distinguishes this from `item-coverage` — both open the same route, and
+		// without this they came out byte-identical.
+		requiresItemId: true,
+		async prepare(page) {
+			// Frame the candidate grids. They sit below the fold and the first provider
+			// group is the only one expanded, so scroll rather than expand: the shot
+			// should show the page as it opens, just further down.
+			const grid = page.locator('[data-artwork-select]').first();
+			await grid.waitFor({ state: 'attached', timeout: 20_000 }).catch(() => undefined);
+			await page.evaluate(() => {
+				document.querySelector('[data-artwork-select]')?.scrollIntoView({ block: 'center' });
+			});
+			await page.waitForTimeout(1200);
+		}
+	},
+	{
+		name: 'collection-discover',
+		path: '/collections/{{collectionId}}',
+		docs: 'fun-collections',
+		viewport: { width: 1280, height: 900 },
+		requiresCollectionId: true,
+		async prepare(page) {
+			await page.waitForTimeout(900);
+		}
 	},
 	{
 		name: 'settings-providers',
@@ -76,6 +110,12 @@ const shots = [
 		name: 'kometa-manager',
 		path: '/kometa',
 		docs: 'kometa-config-sync',
+		viewport: { width: 1280, height: 900 }
+	},
+	{
+		name: 'setup-wizard',
+		path: '/setup',
+		docs: 'installation',
 		viewport: { width: 1280, height: 900 }
 	},
 	{
@@ -173,12 +213,19 @@ const shots = [
 // The history shot is item-scoped; the operator supplies the id from the instance
 // they are capturing against (`--item-id 42`).
 const itemId = flag('item-id', '');
+const collectionId = flag('collection-id', '');
 
 const selected = (only.length ? shots.filter((shot) => only.includes(shot.name)) : shots).filter(
 	(shot) => {
-		if (!shot.requiresItemId || itemId) return true;
-		console.warn(`• skipping ${shot.name}: needs --item-id`);
-		return false;
+		if (shot.requiresItemId && !itemId) {
+			console.warn(`• skipping ${shot.name}: needs --item-id`);
+			return false;
+		}
+		if (shot.requiresCollectionId && !collectionId) {
+			console.warn(`• skipping ${shot.name}: needs --collection-id`);
+			return false;
+		}
+		return true;
 	}
 );
 if (!selected.length) {
@@ -204,7 +251,7 @@ for (const shot of selected) {
 	const page = await context.newPage();
 	await page.setViewportSize(shot.viewport);
 	try {
-		const path = shot.path.replace('{{itemId}}', itemId);
+		const path = shot.path.replace('{{itemId}}', itemId).replace('{{collectionId}}', collectionId);
 		await page.goto(`${baseURL}${path}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 		// The app hydrates before it renders live state; the marker is set by the root
 		// layout, and the extra settle lets images and transitions finish.
