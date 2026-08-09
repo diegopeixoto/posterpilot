@@ -1700,8 +1700,16 @@
 		{#if occurrenceReport.reportable}
 			<!-- Only when the title exists more than once. With a single copy there is
 			     nothing "across servers and libraries" to report, and the panels below
-			     already say what happened to it. -->
-			<p class="text-xs text-neutral-300">{occurrenceReport.label}</p>
+			     already say what happened to it.
+			     Split per destination and never summed: one copy applied to a server
+			     plus a different copy exported to Kometa is not "2 of 2 covered", and
+			     the slot panels below describe only the copy being viewed, so nothing
+			     else on this page would correct the overstatement. -->
+			<ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-300">
+				{#each occurrenceReport.destinations as entry (entry.destination)}
+					<li><span class="text-neutral-400">{entry.destinationLabel}:</span> {entry.label}</li>
+				{/each}
+			</ul>
 		{/if}
 	</div>
 	<div class="grid gap-3 sm:grid-cols-2">

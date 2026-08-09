@@ -240,28 +240,45 @@ describe('coverage breakdown', () => {
 });
 
 describe('coverage occurrence report', () => {
-	it('reports the covered copies of a title that exists more than once', () => {
-		const report = coverageOccurrenceReport({ occurrences: 3, coveredOccurrences: 2 });
-		expect(report).toMatchObject({ covered: 2, total: 3, reportable: true });
-		expect(report.label).toBe('coverage_occurrences(covered=2,total=3)');
+	const on = (server: number, kometa: number) => ({ server, kometa });
+
+	it('reports covered copies per destination, never summed', () => {
+		// One copy applied to a server and a *different* copy exported to Kometa is
+		// not "2 of 2 covered": that would claim artwork reached two servers when it
+		// reached one, and the slot panels describe only the copy being viewed, so
+		// nothing else on the page would correct it.
+		const report = coverageOccurrenceReport({ occurrences: 2, coveredOccurrences: on(1, 1) });
+		expect(report.total).toBe(2);
+		expect(report.destinations.map((entry) => [entry.destination, entry.covered])).toEqual([
+			['server', 1],
+			['kometa', 1]
+		]);
+		expect(report.destinations[0].label).toBe('coverage_occurrences(covered=1,total=2)');
+		expect(report.destinations[0].destinationLabel).toBe('coverage_destination_server');
+	});
+
+	it('always reports both destinations, so an absent one reads as zero', () => {
+		const report = coverageOccurrenceReport({ occurrences: 3, coveredOccurrences: on(2, 0) });
+		expect(report.destinations).toHaveLength(2);
+		expect(report.destinations[1]).toMatchObject({ destination: 'kometa', covered: 0, total: 3 });
 	});
 
 	it('stays quiet for a single copy, which has nothing to report across libraries', () => {
-		expect(coverageOccurrenceReport({ occurrences: 1, coveredOccurrences: 0 }).reportable).toBe(
-			false
-		);
-		expect(coverageOccurrenceReport({ occurrences: 1, coveredOccurrences: 1 }).reportable).toBe(
-			false
-		);
+		expect(
+			coverageOccurrenceReport({ occurrences: 1, coveredOccurrences: on(0, 0) }).reportable
+		).toBe(false);
+		expect(
+			coverageOccurrenceReport({ occurrences: 1, coveredOccurrences: on(1, 0) }).reportable
+		).toBe(false);
 	});
 
 	it('clamps a count that could not be true', () => {
 		// Coverage and the occurrence count are read separately; a copy removed between
 		// the two reads must not produce "3 of 2 copies covered".
-		expect(coverageOccurrenceReport({ occurrences: 2, coveredOccurrences: 3 }).covered).toBe(2);
-		expect(coverageOccurrenceReport({ occurrences: -1, coveredOccurrences: -4 })).toMatchObject({
-			covered: 0,
-			total: 0
-		});
+		const clamped = coverageOccurrenceReport({ occurrences: 2, coveredOccurrences: on(3, 9) });
+		expect(clamped.destinations.every((entry) => entry.covered === 2)).toBe(true);
+		const negative = coverageOccurrenceReport({ occurrences: -1, coveredOccurrences: on(-4, -1) });
+		expect(negative.total).toBe(0);
+		expect(negative.destinations.every((entry) => entry.covered === 0)).toBe(true);
 	});
 });

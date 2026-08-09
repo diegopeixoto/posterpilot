@@ -3,6 +3,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from '$lib/server/db/schema';
 import { reviewViews } from '$lib/server/db/schema';
+import { isCoverageFilterValue, type CoverageFilterValue } from '$lib/coverage-filter';
 import { REVIEW_STATES, type ReviewState } from './state';
 import type { ReviewAvailability, ReviewSort } from './query';
 
@@ -28,6 +29,7 @@ export interface SavedReviewFilters {
 	availability?: ReviewAvailability;
 	q?: string;
 	changedSince?: string;
+	coverage?: CoverageFilterValue;
 }
 
 export interface SavedReviewSort {
@@ -68,6 +70,9 @@ export function normalizeReviewViewDefinition(input: {
 	const type = optionalString(raw.type, 10);
 	const availability = optionalString(raw.availability, 20);
 	const changedSince = optionalString(raw.changedSince, 40);
+	// Saved alongside the other filters: a view that silently dropped it would
+	// reopen showing a different result set than the one the user saved.
+	const coverage = optionalString(raw.coverage, 40);
 	if (state && !REVIEW_STATES.includes(state as ReviewState)) {
 		throw new ReviewViewError('invalid_request');
 	}
@@ -78,6 +83,7 @@ export function normalizeReviewViewDefinition(input: {
 	if (changedSince && Number.isNaN(Date.parse(changedSince))) {
 		throw new ReviewViewError('invalid_request');
 	}
+	if (coverage && !isCoverageFilterValue(coverage)) throw new ReviewViewError('invalid_request');
 	const sortInput =
 		typeof input.sort === 'object' && input.sort !== null && !Array.isArray(input.sort)
 			? (input.sort as Record<string, unknown>).by
@@ -94,7 +100,8 @@ export function normalizeReviewViewDefinition(input: {
 			...(type ? { type: type as 'movie' | 'show' } : {}),
 			...(availability ? { availability: availability as ReviewAvailability } : {}),
 			...(optionalString(raw.q, 200) ? { q: optionalString(raw.q, 200) } : {}),
-			...(changedSince ? { changedSince } : {})
+			...(changedSince ? { changedSince } : {}),
+			...(coverage ? { coverage: coverage as CoverageFilterValue } : {})
 		} satisfies SavedReviewFilters,
 		sort: { by: sort as ReviewSort } satisfies SavedReviewSort
 	};

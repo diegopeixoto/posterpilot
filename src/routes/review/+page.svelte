@@ -143,7 +143,10 @@
 				q: data.filter.q,
 				changedSince: data.filter.changedSince
 					? new Date(data.filter.changedSince).toISOString()
-					: undefined
+					: undefined,
+				// Saved with the rest: a view that dropped it would reopen showing a
+				// different set of titles than the one the user chose to save.
+				coverage: data.coverage
 			},
 			sort: { by: data.filter.sort }
 		};

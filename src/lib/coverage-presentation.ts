@@ -244,11 +244,21 @@ export function coverageBreakdown(
 	});
 }
 
-export interface CoverageOccurrenceReport {
+/** One destination's share of the copies, never merged with the other's. */
+export interface CoverageOccurrenceDestinationReport {
+	destination: CoverageDestination;
+	/** Localized destination name, so the count is never a bare number. */
+	destinationLabel: string;
 	covered: number;
 	total: number;
 	/** Localized `{covered} of {total} copies covered`. */
 	label: string;
+}
+
+export interface CoverageOccurrenceReport {
+	total: number;
+	/** One entry per destination, in the shared destination order. */
+	destinations: CoverageOccurrenceDestinationReport[];
 	/**
 	 * Whether the count says anything the destination breakdown does not.
 	 *
@@ -260,21 +270,38 @@ export interface CoverageOccurrenceReport {
 }
 
 /**
- * How many copies of this title exist, and how many of them are covered anywhere.
+ * How many copies of this title exist, and how many are covered *at each
+ * destination*.
  *
- * Both numbers are clamped: a stale count claiming three covered copies out of two
- * is not a rounding error to render, it is a sentence that cannot be true.
+ * Reported per destination rather than as one total on purpose. A copy exported
+ * to a Kometa file and a copy applied to a media server are not interchangeable,
+ * so one of each summed to "2 of 2 copies covered" would claim artwork reached
+ * two servers when it reached one — and the slot panels below describe only the
+ * copy being viewed, so nothing else on the page would correct it.
+ *
+ * Counts are clamped: a stale count claiming three covered copies out of two is
+ * not a rounding error to render, it is a sentence that cannot be true.
  */
 export function coverageOccurrenceReport(counts: {
 	occurrences: number;
-	coveredOccurrences: number;
+	coveredOccurrences: Record<CoverageDestination, number>;
 }): CoverageOccurrenceReport {
 	const total = Math.max(0, Math.trunc(counts.occurrences));
-	const covered = Math.min(total, Math.max(0, Math.trunc(counts.coveredOccurrences)));
 	return {
-		covered,
 		total,
-		label: m.coverage_occurrences({ covered, total }),
+		destinations: COVERAGE_DESTINATIONS.map((destination) => {
+			const covered = Math.min(
+				total,
+				Math.max(0, Math.trunc(counts.coveredOccurrences[destination] ?? 0))
+			);
+			return {
+				destination,
+				destinationLabel: coverageDestinationLabel(destination),
+				covered,
+				total,
+				label: m.coverage_occurrences({ covered, total })
+			};
+		}),
 		reportable: total > 1
 	};
 }

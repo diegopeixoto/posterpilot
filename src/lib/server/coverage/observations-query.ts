@@ -231,8 +231,23 @@ export interface CoverageOccurrenceCounts {
 	occurrences: number;
 	servers: number;
 	libraries: number;
-	/** Occurrences with at least one covered slot at any destination. */
-	coveredOccurrences: number;
+	/**
+	 * Occurrences with at least one covered slot, **per destination**.
+	 *
+	 * Never summed into one number: a copy exported to a Kometa file and a copy
+	 * applied to a media server are not interchangeable, and "2 of 2 covered"
+	 * built from one of each would claim artwork reached two servers when it
+	 * reached one.
+	 */
+	coveredOccurrences: Record<CoverageDestination, number>;
+}
+
+/** Zero per destination, so an absent destination reads as zero rather than as a gap. */
+function emptyCoveredCounts(): Record<CoverageDestination, number> {
+	return Object.fromEntries(COVERAGE_DESTINATIONS.map((destination) => [destination, 0])) as Record<
+		CoverageDestination,
+		number
+	>;
 }
 
 /** SQL twin of `canonicalIdentityKey`. Only rows already matched by a validated key are read. */
@@ -262,7 +277,7 @@ export async function loadCoverageOccurrenceCounts(
 				occurrences: 1,
 				servers: 1,
 				libraries: 1,
-				coveredOccurrences: 0
+				coveredOccurrences: emptyCoveredCounts()
 			}
 		])
 	);
@@ -271,14 +286,12 @@ export async function loadCoverageOccurrenceCounts(
 	];
 	if (wanted.length === 0) return counts;
 
-	const coveredAnywhere = sql`exists (
+	/** Covered at one named destination — deliberately not "covered anywhere". */
+	const coveredAt = (destination: CoverageDestination) => sql`exists (
 		select 1 from ${artworkCoverage} covered
 		where covered.media_item_id = ${mediaItems.id}
 			and covered.server_instance_id = ${mediaItems.serverInstanceId}
-			and (${sql.join(
-				COVERAGE_DESTINATIONS.map((destination) => sql`(${coveredAtCondition(destination)})`),
-				sql` or `
-			)})
+			and (${coveredAtCondition(destination)})
 	)`;
 	const rows = await database
 		.select({
@@ -286,7 +299,8 @@ export async function loadCoverageOccurrenceCounts(
 			occurrences: sql<number>`count(*)`,
 			servers: sql<number>`count(distinct ${mediaItems.serverInstanceId})`,
 			libraries: sql<number>`count(distinct ${mediaItems.serverInstanceId} || ':' || ${mediaItems.sectionKey})`,
-			coveredOccurrences: sql<number>`sum(case when ${coveredAnywhere} then 1 else 0 end)`
+			coveredOnServer: sql<number>`sum(case when ${coveredAt('server')} then 1 else 0 end)`,
+			coveredInKometa: sql<number>`sum(case when ${coveredAt('kometa')} then 1 else 0 end)`
 		})
 		.from(mediaItems)
 		.where(
@@ -307,7 +321,10 @@ export async function loadCoverageOccurrenceCounts(
 		entry.occurrences = Number(group.occurrences);
 		entry.servers = Number(group.servers);
 		entry.libraries = Number(group.libraries);
-		entry.coveredOccurrences = Number(group.coveredOccurrences ?? 0);
+		entry.coveredOccurrences = {
+			server: Number(group.coveredOnServer ?? 0),
+			kometa: Number(group.coveredInKometa ?? 0)
+		};
 	}
 	return counts;
 }

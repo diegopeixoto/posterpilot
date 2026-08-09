@@ -31,6 +31,7 @@ function withSavedView(params: URLSearchParams, view: Awaited<ReturnType<typeof 
 	setMissing('availability', filters.availability);
 	setMissing('changedSince', filters.changedSince);
 	setMissing('q', filters.q);
+	setMissing('coverage', filters.coverage);
 	setMissing('sort', sort.by);
 	return merged;
 }
@@ -98,7 +99,11 @@ export const load: PageServerLoad = async ({ url }) => {
 		scopes,
 		views,
 		activeView,
-		reviewContextId: createReviewContext(filter, orderedIds),
+		// `query`, not `filter`: item detail recomputes its match count and its
+		// next/previous set from this context, so handing it the uncovered filter
+		// would report the entire inbox as the match count and let navigation walk
+		// into titles the coverage filter excluded.
+		reviewContextId: createReviewContext(query, orderedIds),
 		pageSize: REVIEW_PAGE_SIZE
 	};
 };

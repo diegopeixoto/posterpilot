@@ -55,7 +55,7 @@ async function loadCoverage(
 			occurrences: 1,
 			servers: 1,
 			libraries: 1,
-			coveredOccurrences: 0
+			coveredOccurrences: { server: 0, kometa: 0 }
 		}
 	};
 }
