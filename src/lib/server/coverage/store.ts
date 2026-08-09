@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { serializeWrite } from '$lib/server/db/write-queue';
 import { artworkCoverage, mediaItems } from '$lib/server/db/schema';
@@ -123,6 +123,32 @@ export function coveredStatusesFor(destination: CoverageDestination): CoverageSt
 /** Every status a destination may hold, for zero-filling counts and validating input. */
 export function statusesFor(destination: CoverageDestination): CoverageStatus[] {
 	return COVERAGE_STATUSES.filter((status) => isStatusValidForDestination(destination, status));
+}
+
+/**
+ * Whether a staleness-driven sweep can actually advance this row's evidence.
+ *
+ * Re-observation reaches two sources: the media server's root poster and
+ * background — the only slots `readArtwork` can address without per-episode
+ * rating keys — and the Kometa files, which every kometa row is restamped from
+ * on each rebuild. A server-destination season, episode, or title-card row
+ * keeps the `observedAt` its claim pinned, so treating it as repairable would
+ * make every sweep and every stale-read check chase evidence that cannot move.
+ * `listStale` applies the same predicate in SQL; keep the two in step.
+ */
+export function isReobservableCoverage(row: {
+	destination: string;
+	kind: string;
+	season: number | null;
+	episode: number | null;
+}): boolean {
+	if (row.destination === 'kometa') return true;
+	return (
+		row.destination === 'server' &&
+		(row.kind === 'poster' || row.kind === 'background') &&
+		row.season === null &&
+		row.episode === null
+	);
 }
 
 /**
@@ -378,16 +404,49 @@ export function createCoverageStore(
 			}
 		}
 
+		const rebuiltIdsByDestination = new Map<CoverageDestination, Set<number>>();
+		for (const row of rows) {
+			let ids = rebuiltIdsByDestination.get(row.destination);
+			if (!ids) {
+				ids = new Set();
+				rebuiltIdsByDestination.set(row.destination, ids);
+			}
+			ids.add(row.mediaItemId);
+		}
+
 		return serializeWrite(() =>
 			database.transaction(async (tx) => {
+				let deleted = 0;
 				const removed = await tx
 					.delete(artworkCoverage)
 					.where(scopeCondition(scope))
 					.returning({ id: artworkCoverage.id });
+				deleted += removed.length;
+				// An occurrence that changed libraries since its rows were written is
+				// invisible to a section-scoped delete — the old rows carry the previous
+				// section key — but the slot unique indexes ignore the section, so the
+				// insert below would collide with them. Deleting by the rebuilt
+				// occurrences' ids reaches those orphans wherever their section key says
+				// they live; their evidence is superseded by the rows being written.
+				for (const [destination, ids] of rebuiltIdsByDestination) {
+					for (const batch of chunk([...ids], insertChunkSize)) {
+						const orphaned = await tx
+							.delete(artworkCoverage)
+							.where(
+								and(
+									eq(artworkCoverage.serverInstanceId, scope.serverInstanceId),
+									eq(artworkCoverage.destination, destination),
+									inArray(artworkCoverage.mediaItemId, batch)
+								)
+							)
+							.returning({ id: artworkCoverage.id });
+						deleted += orphaned.length;
+					}
+				}
 				for (const batch of chunk(rows, insertChunkSize)) {
 					await tx.insert(artworkCoverage).values(batch);
 				}
-				return { deleted: removed.length, written: rows.length };
+				return { deleted, written: rows.length };
 			})
 		);
 	}
@@ -469,7 +528,20 @@ export function createCoverageStore(
 			.where(
 				and(
 					eq(artworkCoverage.serverInstanceId, options.serverInstanceId),
-					lt(artworkCoverage.observedAt, options.observedBefore)
+					lt(artworkCoverage.observedAt, options.observedBefore),
+					// SQL twin of `isReobservableCoverage`; keep the two in step. A row the
+					// sweep cannot advance would sit at the head of this oldest-first queue
+					// forever, re-selected on every bounded pass while the rows behind it
+					// are never reached.
+					or(
+						eq(artworkCoverage.destination, 'kometa'),
+						and(
+							eq(artworkCoverage.destination, 'server'),
+							inArray(artworkCoverage.kind, ['poster', 'background']),
+							isNull(artworkCoverage.season),
+							isNull(artworkCoverage.episode)
+						)
+					)
 				)
 			)
 			.orderBy(asc(artworkCoverage.observedAt))

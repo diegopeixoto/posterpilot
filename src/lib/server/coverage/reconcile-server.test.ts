@@ -153,6 +153,21 @@ describe('direct server coverage reconciliation', () => {
 		).toEqual(['externally_changed']);
 	});
 
+	it('does not call a change recorded in the claim\u2019s own second an external change', () => {
+		// Timestamps are whole seconds: a tie cannot prove the change landed after
+		// our write, and an apply made moments after a rescan recorded a change
+		// must not be reported as overwritten.
+		expect(
+			statuses({
+				requests: [request()],
+				revisions: [revision()],
+				observations: [
+					observation({ currentFingerprint: `url:${'c'.repeat(64)}`, externalChangedAt: AT })
+				]
+			})
+		).toEqual(['recorded_unverified']);
+	});
+
 	it('reports missing when the complete ledger holds no successful apply', () => {
 		expect(statuses({ requests: [request()], revisions: [], observations: [] })).toEqual([
 			'missing'

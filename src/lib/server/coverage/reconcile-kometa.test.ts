@@ -318,6 +318,25 @@ describe('legacy Kometa metadata', () => {
 		expect(unassignedLegacyEntries).toEqual([{ mappingKey: '105', reason: 'multiple_claimants' }]);
 	});
 
+	it('honors server-wide claimant counts over what the batch alone can see', () => {
+		// A scoped refresh — an apply, an undo, a stale read — carries one copy of a
+		// title whose twin in another library retained the same legacy key. Counted
+		// from the batch alone the key looks uncontested; the caller-supplied
+		// server-wide count is what keeps the badge from flip-flopping with scope.
+		const { coverage, unassignedLegacyEntries } = reconcileKometaCoverage({
+			requests: [request({ legacyDestination: legacyDestination('105') })],
+			files: [{ filename: MOVIE_FILENAME, state: 'parsed', entries: [] }],
+			legacyFile: {
+				state: 'parsed',
+				entries: [{ mappingKey: 105, slots: [{ slot: POSTER, url: POSTER_URL }] }]
+			},
+			legacyClaimantCounts: new Map([['105', 2]])
+		});
+
+		expect(coverage.map((evidence) => evidence.status)).toEqual(['unknown']);
+		expect(unassignedLegacyEntries).toEqual([{ mappingKey: '105', reason: 'multiple_claimants' }]);
+	});
+
 	it('leaves a duplicated legacy key unknown', () => {
 		const { coverage, unassignedLegacyEntries } = reconcileKometaCoverage({
 			requests: [request({ legacyDestination: legacyDestination('105') })],

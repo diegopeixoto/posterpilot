@@ -1077,7 +1077,7 @@ export async function confirmKometaMigration(
 			classified: completed.payload.display.classified.length,
 			ambiguous: completed.payload.display.ambiguous.length
 		});
-		await refreshMigratedKometaCoverage(completed.payload.serverInstanceId);
+		refreshMigratedKometaCoverage(completed.payload.serverInstanceId);
 		return publicKometaMigrationState(completed, { scopeMatches: true })!;
 	});
 }
@@ -1096,8 +1096,13 @@ export async function confirmKometaMigration(
  * artwork. A failure never fails the migration: the files are already committed
  * and the journal is already terminal, so a stale cache is the only cost.
  */
-async function refreshMigratedKometaCoverage(serverInstanceId: string): Promise<void> {
-	await refreshCoverageAfter('kometa_migration', { serverInstanceId });
+function refreshMigratedKometaCoverage(serverInstanceId: string): void {
+	// Fire-and-forget on purpose. Every caller sits inside `withConfigLocks`, and
+	// a whole-server projection rebuild must not hold filesystem locks or the
+	// user's confirm request open — the files are committed and the journal is
+	// terminal before this runs. `refreshCoverageAfter` never throws, so nothing
+	// is left unhandled.
+	void refreshCoverageAfter('kometa_migration', { serverInstanceId });
 }
 
 async function loadScopedJournal(migrationId: string) {
@@ -1203,7 +1208,7 @@ export async function resumeKometaMigration(
 				current.journal
 			);
 		});
-		await refreshMigratedKometaCoverage(resumed.payload.serverInstanceId);
+		refreshMigratedKometaCoverage(resumed.payload.serverInstanceId);
 		return publicKometaMigrationState(resumed, { scopeMatches: true })!;
 	});
 }
@@ -1233,7 +1238,7 @@ export async function acknowledgeKometaMigration(
 			serverInstanceId: completed.payload.serverInstanceId,
 			migrationId: completed.migrationId
 		});
-		await refreshMigratedKometaCoverage(completed.payload.serverInstanceId);
+		refreshMigratedKometaCoverage(completed.payload.serverInstanceId);
 		return publicKometaMigrationState(completed, { scopeMatches: true })!;
 	});
 }
@@ -1558,7 +1563,7 @@ export async function confirmKometaMigrationRollback(request: {
 			serverInstanceId: rolledBack.payload.serverInstanceId,
 			migrationId: rolledBack.migrationId
 		});
-		await refreshMigratedKometaCoverage(rolledBack.payload.serverInstanceId);
+		refreshMigratedKometaCoverage(rolledBack.payload.serverInstanceId);
 		return publicKometaMigrationState(rolledBack, { scopeMatches: true })!;
 	});
 }
