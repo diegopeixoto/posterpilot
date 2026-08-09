@@ -54,10 +54,36 @@ contraseña, que borra el secreto al guardar.
 
 ![Ajustes de proveedores de PosterPilot con ThePosterDB habilitado y sus campos opcionales de usuario y contraseña](/posterpilot/screenshots/settings-providers.webp)
 
-En **Metadatos y proveedores** puedes ordenar la prioridad y ajustar pesos de
-proveedor, resolución y proporción. La misma configuración determinista se usa en
-vista previa y ejecución. `SUGGEST_PRESELECT` muestra la mejor sugerencia, pero
-aceptarla/prepararla siempre es explícito.
+En **Metadatos y proveedores** puedes ajustar los pesos de proveedor, resolución y
+proporción. La misma configuración determinista se usa en vista previa y ejecución.
+`SUGGEST_PRESELECT` muestra la mejor sugerencia, pero aceptarla/prepararla siempre
+es explícito.
+
+## Orden de proveedores
+
+**Metadatos y proveedores** también permite **reordenar** los cuatro proveedores,
+arrastrando un asa o con los botones de mover; **Restablecer el orden predeterminado**
+devuelve MediUX, ThePosterDB, Fanart.tv, TMDB. Como los pesos, el orden vive en la
+base de datos y no tiene variable de entorno.
+
+El control existe porque el descubrimiento corre todos los proveedores en paralelo y
+cada uno confirma sus propios resultados, así que el orden en que acabaron guardadas
+las candidatas no registra nada más que quién respondió primero; presentar ese
+accidente de reloj como un ranking sería engañoso, y por eso la vista del elemento
+sigue el orden que hayas configurado. Lo que el orden hace —y, no menos importante, lo
+que no hace:
+
+- Decide **qué tarjeta de proveedor muestra primero la página del elemento**. Solo
+  presentación; las candidatas dentro de una tarjeta conservan su propio orden.
+- Desempata entre candidatas con puntuación **exactamente igual**, y se aplica
+  estrictamente después de la puntuación numérica.
+- Nunca revierte una puntuación desigual. Una imagen más nítida o mejor proporcionada
+  de un proveedor que pusiste el último se lleva igualmente la sugerencia: el proveedor
+  desempata, no manda. Para cambiar qué proveedor suele ganar, ajusta sus pesos.
+- Un **proveedor deshabilitado conserva su posición**, así que rehabilitarlo no lo
+  manda al final. Un proveedor que tu orden guardado no menciona —una fuente nueva, o
+  una fila que dejó otra retirada— se muestra el último en vez de recolocarlo todo a su
+  alrededor.
 
 ## Idioma de las ilustraciones de TMDB
 
@@ -65,33 +91,81 @@ aceptarla/prepararla siempre es explícito.
 seleccionas automáticamente las ilustraciones de TMDB, con independencia de
 `APP_LANGUAGE`: `any` mantiene todos los idiomas que devolvió TMDB, `ui` sigue el
 idioma de la interfaz normalizado a su código base (una interfaz `pt-BR` prefiere
-`pt`) y un código ISO 639-1 explícito (`en`, `de`…) no se limita a los seis
-locales traducidos. Un valor no reconocido se trata como ausente y vuelve a `any`
-en lugar de aplicar un filtro roto. Como el resto, el entorno tiene prioridad y
-el campo aparece como gestionado por el entorno.
+`pt`; si no hay ninguna interfaz que resolver —un trabajo desatendido en una
+instalación que nunca persistió una— degrada a `any` en vez de inventarse un idioma)
+y un código ISO 639-1 explícito (`en`, `de`…) no se limita a los seis locales
+traducidos: el desplegable de Ajustes ofrece diez seleccionados (alemán, inglés,
+español, francés, italiano, japonés, coreano, portugués, ruso, chino) y un código
+puesto por el entorno que no esté en esa lista se añade al desplegable en lugar de
+descartarse, así que guardar Ajustes nunca lo reescribe en silencio. Un valor no
+reconocido se trata como ausente y vuelve a `any` en lugar de aplicar un filtro roto.
+Como el resto, el entorno tiene prioridad y el campo aparece como gestionado por el
+entorno.
 
-Las ilustraciones que TMDB no etiqueta cuentan como neutras y siguen disponibles
-con cualquier preferencia, así que una preferencia nunca vacía un panel que solo
-contiene arte neutro. El descubrimiento conserva siempre todos los idiomas —la
-preferencia rige la exploración y la selección automática, no lo que se
+**Rige TMDB y nada más.** La ilustración de los demás proveedores sigue siendo
+elegible con cualquier preferencia, y eso es la regla, no un atajo: MediUX y
+ThePosterDB nunca declaran idioma, así que tratar «sin idioma» como no elegible
+vaciaría sus cuadrículas en cuanto se fijara una preferencia, y una búsqueda nueva
+jamás podría recuperarlas porque volvería a no declarar idioma; Fanart.tv _sí_
+etiqueta idiomas y aun así se deja en paz, porque filtrarlo descartaría en silencio un
+archivo mejor puntuado por una señal que este ajuste nunca pretendió gobernar.
+
+Las ilustraciones que TMDB marca explícitamente como sin idioma cuentan como neutras
+y siguen disponibles con cualquier preferencia, así que una preferencia nunca vacía un
+panel que solo contiene arte neutro. El descubrimiento conserva siempre todos los
+idiomas —la preferencia rige la exploración y la selección automática, no lo que se
 descarga—, de modo que cambiarla vuelve a filtrar lo que ya tienes y nunca obliga
 a repetir la búsqueda. La selección automática solo recurre a un póster en otro
 idioma cuando no queda ninguna opción preferida ni sin etiquetar, y lo indica
-cuando ocurre. La página del elemento añade un conmutador temporal
-**Preferido / Todos** que no modifica el ajuste global.
+cuando ocurre; un recurso ya preparado sigue visible en la página en lugar de que lo
+oculte la propia preferencia que lo produjo, porque una elección que debes poder ver
+es una elección que debes poder revocar.
+
+Hay un caso que la app no puede resolver sola: las candidatas de TMDB descubiertas
+antes de que PosterPilot registrara _cómo_ había averiguado un idioma se marcan
+**Sin verificar**, porque ahí un campo de idioma vacío significa «nunca lo
+registramos», no «TMDB dijo que no lleva texto». Se conservan en lugar de ocultarse
+—degradar todo el inventario de TMDB anterior a la actualización en cuanto se fija una
+preferencia sería peor— y el grupo del proveedor ofrece **Volver a buscar** para que
+una ejecución nueva registre las etiquetas reales.
+
+La página del elemento lleva un conmutador **Mostrar todos los idiomas** (y **Mostrar
+solo _idioma_** para volver) que no modifica el ajuste global. Cuando la preferencia no
+coincide con nada para un título, la página dice cuántas carátulas existen en otros
+idiomas y ofrece la misma salida en vez de mostrar una cuadrícula vacía.
 
 ## Inventario de candidatos y «cargar más»
 
 La ingesta de TMDB se detenía antes en 20 imágenes **por tipo de ilustración**
 —pósteres y fondos se contaban por separado, de ahí los avisos de «limitado a 40
-carátulas»—. Ahora se conservan muchas más, sin duplicados por la identidad de
-archivo de TMDB y en el orden en que TMDB las clasificó, y cada panel de proveedor
-y tipo muestra un lote acotado con un control **cargar más** que indica cuántos
-candidatos siguen ocultos. Los paneles de pósteres y de fondos se despliegan de
-forma independiente. El descubrimiento mantiene un tope defensivo de **200
-candidatos por tipo de ilustración** —un límite de almacenamiento y renderizado,
-no un filtro de calidad—: cuando un panel lo alcanza, avisa de que el inventario
-está **truncado** en lugar de dar a entender que está completo.
+carátulas»—. Ahora se conservan muchas más: primero validadas, luego deduplicadas por
+la identidad de archivo del propio TMDB y luego acotadas, estrictamente en ese orden,
+de manera que una entrada malformada ya no cuesta una candidata en silencio, y se
+mantiene el orden en que TMDB las clasificó.
+
+La página del elemento muestra cada panel en lotes de **24 miniaturas**, con un
+control **cargar más** que nombra cuántas siguen ocultas. 24 divide exacto en todas
+las cuadrículas que dibuja la página (dos columnas para fondos, cuatro para title
+cards, ocho para pósteres de temporada), así que ninguna revelación deja media fila
+coja. Cada panel se despliega por separado —proveedor a proveedor, set a set, pósteres
+aparte de fondos y los pósteres de cada temporada aparte de sus title cards—, así que
+abrir uno nunca abre otro. Revelar más no cuesta tráfico de red: el inventario
+conservado ya viaja con la página, de modo que esto acota el coste de renderizado, no
+el ancho de banda.
+
+La ingesta mantiene un tope defensivo de **200 candidatos por tipo de ilustración**
+—un límite de almacenamiento y renderizado, no un filtro de calidad—, y alcanzarlo se
+avisa en vez de pasarlo por alto: el panel dice que el proveedor devolvió más carátulas
+de las que PosterPilot conserva, en lugar de dar a entender que ves todo lo que tiene
+TMDB. Solo cuenta para ese tope una candidata que se habría conservado; los duplicados
+descartados y las entradas malformadas no, porque ni unos ni otras fueron nunca algo
+que pudieras elegir.
+
+La caché de miniaturas (`THUMB_CACHE_TTL_DAYS`, `THUMB_CACHE_MAX_MB`) guarda **solo
+vistas previas de navegación**: la vista ampliada a tamaño completo y el archivo que se
+aplica de verdad vienen directos del proveedor, a propósito, para que los originales no
+expulsen las miniaturas a las que esa caché sirve. Ver
+[Uso → Descubrir y preparar ilustración](../usage/).
 
 ## Kometa y método de aplicación
 

@@ -205,6 +205,34 @@ configured, discovery skips it and surfaces the missing-credential condition
 rather than failing the whole run. A failure, timeout, or unparseable response
 from one provider never prevents the others from returning candidates.
 
+### Provider order
+
+**Settings → Metadata & providers** also lets you **reorder** the four providers,
+by dragging a handle or using the move buttons; **Reset to default order**
+restores MediUX, ThePosterDB, Fanart.tv, TMDB. Like the scoring weights, the
+order lives in the database and has no environment variable.
+
+The control exists because discovery runs every provider in parallel and each
+commits its own results, so the order candidates ended up stored in records
+nothing except which provider answered first. Presenting that accident of timing
+as a ranking would be misleading, so the item view follows your configured order
+instead.
+
+What the order does — and, just as importantly, what it does not:
+
+- It decides **which provider's card the item page shows first**. Presentation
+  only; the candidates inside a card keep their own order.
+- It breaks a tie between candidates whose scores are **exactly equal**, applied
+  strictly after the numeric score.
+- It never overturns an unequal score. A sharper or better-shaped image from a
+  provider you placed last still wins the suggestion — provider is a tie-breaker,
+  not an override. To change which provider usually wins, adjust the per-provider
+  scoring weights (see [Performance and tuning](#performance-and-tuning)).
+- A **disabled provider keeps its position**, so re-enabling it does not send it
+  to the bottom. A provider your saved order does not mention — a newly added
+  source, or a row left by a removed one — is shown last rather than reshuffling
+  everything around it.
+
 ### ThePosterDB account (optional)
 
 ThePosterDB works without an account — anonymous scraping stays the default and
@@ -246,46 +274,85 @@ Three shapes of value are accepted:
   returned. This is exactly the behavior that predates the setting, so upgrading
   changes nothing until you opt in.
 - **`ui`** — follow the application's UI language, normalized to its base code: a
-  `pt-BR` interface prefers `pt`-tagged artwork.
+  `pt-BR` interface prefers `pt`-tagged artwork. If no UI locale can be resolved —
+  an unattended job on an install that has never persisted one — it degrades to
+  `any` rather than inventing a language.
 - **An explicit ISO 639-1 base code** — `en`, `de`, `it`, … These are _not_
   limited to the six translated UI locales: TMDB tags artwork in far more
-  languages than PosterPilot is translated into.
+  languages than PosterPilot is translated into. The Settings dropdown offers a
+  curated ten (German, English, Spanish, French, Italian, Japanese, Korean,
+  Portuguese, Russian, Chinese); a code set through the environment that is not on
+  that list is added to the dropdown rather than dropped, so saving Settings can
+  never silently rewrite it.
 
 A value that is none of those is treated as unset and falls back to `any` rather
 than applying a broken filter — a typo never empties your candidate grid. Like
 every other environment-backed setting, `TMDB_ARTWORK_LANGUAGE` overrides the
 persisted value and the Settings field shows as environment-managed.
 
-Three behaviors are worth knowing before you set it:
+Four behaviors are worth knowing before you set it:
 
-- **Textless artwork always stays.** Artwork that TMDB does not tag with a
-  language counts as language-neutral and remains available under every
-  preference, so a preference can never empty a pane that only holds neutral art.
+- **It governs TMDB and nothing else.** Every other provider's artwork stays
+  eligible under every preference. That is the rule, not a shortcut. MediUX and
+  ThePosterDB never report a language at all, so treating "no language" as
+  ineligible would empty their grids the moment any preference was set, and a
+  fresh search could never bring them back because it would report no language
+  again. Fanart.tv _does_ tag languages — it is still left alone, because
+  filtering it would quietly discard a higher-scoring asset on a signal this
+  setting was never meant to govern.
+- **Textless artwork always stays.** Artwork that TMDB explicitly marks as
+  carrying no language counts as language-neutral and remains available under
+  every preference, so a preference can never empty a pane that only holds
+  neutral art.
 - **Discovery keeps everything.** The preference controls browsing and automatic
   selection, not what gets downloaded — every language TMDB returned is stored.
   Changing it re-filters what you already have and never requires a re-search.
 - **Automatic selection stays honest.** A suggestion falls back to a
   foreign-language poster only when no preferred or untagged option exists, and
-  labels it when it does.
+  labels it when it does. A staged fallback stays visible on the page rather than
+  being filtered away by the preference that produced it — a choice you have to be
+  able to see is a choice you have to be able to revoke.
 
-Item pages also carry a temporary **Preferred / All** switch, so you can look
-past the preference for one title without changing the global setting.
+There is one case the app cannot answer on its own. TMDB candidates discovered
+before PosterPilot recorded _how_ it learned a language are marked **Unverified**:
+a blank language field there means "we never recorded this", not "TMDB said it is
+textless". Those candidates are kept rather than hidden — demoting a library's
+entire pre-upgrade TMDB inventory the moment a preference is set would be worse —
+and the provider group offers a **re-search** so a fresh run can record the real
+tags.
+
+Item pages carry a **Show all languages** toggle (and **Show only _language_** to
+go back), so you can look past the preference for one title without changing the
+global setting. When the preference matches nothing for a title, the page says how
+many covers exist in other languages and offers the same escape hatch instead of
+showing an empty grid.
 
 ### Candidate inventory and load more
 
 TMDB ingestion used to stop at 20 images **per artwork kind** — posters and
 backdrops counted separately, which is where the "capped at 40 covers" reports
-came from. Discovery now retains far more than that — deduplicated on TMDB's own
-file identity, in the order TMDB ranked them — and each provider/artwork-kind
-pane shows a bounded batch with a **load more** control that reports how many
-candidates are still hidden. Poster and backdrop panes disclose independently, so
-expanding one does not expand the other.
+came from. Discovery now retains far more than that — validated, then
+deduplicated on TMDB's own file identity, then bounded, strictly in that order,
+so a malformed entry no longer silently costs a candidate — and keeps the order
+TMDB ranked them in.
 
-Discovery still applies a defensive ceiling of **200 candidates per artwork
-kind**, so that one pathological title cannot pull in an unbounded number of
-images. That is a storage and render bound, not a quality filter — and when a
-pane reaches it, the pane says the inventory was **truncated** rather than
-implying you are looking at everything TMDB has.
+The item page then shows each pane in batches of **24 tiles**, with a **load
+more** control that names how many are still hidden. 24 divides evenly into every
+grid the page renders (two columns for backdrops, four for title cards, eight for
+season posters), so a reveal never leaves a ragged half-row. Every pane discloses
+independently — provider by provider, set by set, poster separately from backdrop,
+and each season's posters separately from its title cards — so expanding one never
+expands another. Revealing more costs no network traffic: the retained inventory
+already ships with the page, so this bounds render cost, not bandwidth.
+
+Ingestion still applies a defensive ceiling of **200 candidates per artwork
+kind**, so one pathological title cannot pull in an unbounded number of images.
+That is a storage and render bound, not a quality filter — and reaching it is
+reported rather than passed over in silence: the pane says the provider returned
+more artwork than PosterPilot keeps, instead of implying you are looking at
+everything TMDB has. Only a candidate that would otherwise have been kept counts
+toward that ceiling; dropped duplicates and malformed entries do not, because
+neither was ever something you could have picked.
 
 ## Performance and tuning
 
@@ -314,7 +381,11 @@ and locks the control in the UI.
   default `512`). Provider preview images are cached on disk under `/data` to speed
   up the grid and cut provider bandwidth. Entries are reused until the TTL (in days)
   expires, and the cache is bounded by a maximum size (in MB) — once it is exceeded,
-  the least-recently-used entries are evicted.
+  the least-recently-used entries are evicted. It holds **browsing previews only**:
+  the enlarged full-size preview and the asset actually applied come straight from
+  the provider, deliberately, so originals cannot evict the thumbnails this cache
+  exists to serve. See
+  [Usage → What browsing actually downloads](/posterpilot/usage/#what-browsing-actually-downloads).
 - **Library default sort** (`LIBRARY_DEFAULT_SORT`, default `title`). Which sort
   the library wall opens with when the URL doesn't name one: `title`, `year`,
   `rating`, `runtime`, `recent` (recently changed), or `added` (date added on the

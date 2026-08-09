@@ -42,6 +42,43 @@ const only = flag('only', '')
  */
 const shots = [
 	{
+		name: 'dashboard',
+		path: '/',
+		docs: 'usage',
+		viewport: { width: 1280, height: 800 }
+	},
+	{
+		name: 'library',
+		path: '/library',
+		docs: 'usage',
+		viewport: { width: 1280, height: 900 }
+	},
+	{
+		name: 'item-detail',
+		path: '/item/{{itemId}}',
+		docs: 'usage',
+		viewport: { width: 1280, height: 900 },
+		requiresItemId: true
+	},
+	{
+		name: 'settings-providers',
+		path: '/settings?tab=providers',
+		docs: 'configuration',
+		viewport: { width: 1280, height: 900 }
+	},
+	{
+		name: 'settings-security',
+		path: '/settings?tab=security',
+		docs: 'safety',
+		viewport: { width: 1280, height: 620 }
+	},
+	{
+		name: 'kometa-manager',
+		path: '/kometa',
+		docs: 'kometa-config-sync',
+		viewport: { width: 1280, height: 900 }
+	},
+	{
 		name: 'settings-servers',
 		path: '/settings?tab=server',
 		docs: 'multi-server-migration',
@@ -83,6 +120,40 @@ const shots = [
 			await page.getByRole('button', { name: 'Apply', exact: true }).first().click();
 			await page.waitForTimeout(1500);
 		}
+	},
+	{
+		name: 'item-coverage',
+		path: '/item/{{itemId}}',
+		docs: 'usage',
+		viewport: { width: 1280, height: 900 },
+		// The coverage panels: one per destination, never merged. Needs an item that
+		// has been reconciled at least once, so open it and let the read settle.
+		requiresItemId: true,
+		async prepare(page) {
+			await page.waitForTimeout(1200);
+		}
+	},
+	{
+		name: 'artwork-preview',
+		path: '/item/{{itemId}}',
+		docs: 'usage',
+		viewport: { width: 1280, height: 900 },
+		// The enlarged preview. Opening it stages nothing — that is the guarantee the
+		// dialog is built around, and the capture relies on it.
+		requiresItemId: true,
+		async prepare(page) {
+			const trigger = page.locator('[data-artwork-preview]').first();
+			await trigger.scrollIntoViewIfNeeded();
+			await trigger.click();
+			await page.waitForSelector('#artwork-preview-image', { timeout: 15_000 });
+			await page.waitForTimeout(1500);
+		}
+	},
+	{
+		name: 'library-coverage-filter',
+		path: '/library?coverage=needs_artwork',
+		docs: 'usage',
+		viewport: { width: 1280, height: 900 }
 	},
 	{
 		name: 'item-artwork-history',
