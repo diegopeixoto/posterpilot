@@ -47,6 +47,7 @@
 	"review_sort_title": "Titre",
 	"review_sort_year": "Année",
 	"review_search": "Rechercher des titres",
+	"review_clear_search": "Effacer la recherche",
 	"review_search_action": "Rechercher",
 	"review_empty": "Rien ne requiert votre attention dans cette vue.",
 	"review_empty_hint": "Choisissez un autre état, un autre serveur, une autre médiathèque ou un autre terme de recherche.",

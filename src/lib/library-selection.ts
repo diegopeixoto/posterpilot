@@ -25,7 +25,12 @@ export function fingerprintLibrarySelection(input: LibrarySelectionFingerprintIn
 			genre: input.filter.genre ?? null,
 			sort: input.effectiveSort,
 			dir: input.filter.dir ?? null,
-			q: input.filter.q ?? null
+			q: input.filter.q ?? null,
+			// Every dimension of the parsed filter must be bound, or a drifted or
+			// replayed query could swap the one unbound filter without tripping the
+			// result_set_changed guard — two "select all matching" selections that
+			// differ only in coverage would otherwise hash identically.
+			coverage: input.filter.coverage ?? null
 		},
 		orderedItemIds: input.orderedItemIds
 	});

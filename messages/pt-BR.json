@@ -47,6 +47,7 @@
 	"review_sort_title": "Título",
 	"review_sort_year": "Ano",
 	"review_search": "Buscar títulos",
+	"review_clear_search": "Limpar busca",
 	"review_search_action": "Buscar",
 	"review_empty": "Nada precisa de atenção nesta visualização.",
 	"review_empty_hint": "Escolha outro estado, servidor, biblioteca ou termo de busca.",

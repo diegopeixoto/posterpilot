@@ -300,7 +300,7 @@ describe('occurrence counts', () => {
 		expect(counts.get(ITEMS.movieA)).toMatchObject({
 			occurrences: 2,
 			servers: 2,
-			coveredOccurrences: 1
+			coveredOccurrences: { server: 1, kometa: 0 }
 		});
 	});
 });

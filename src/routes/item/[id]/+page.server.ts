@@ -36,10 +36,13 @@ async function loadCoverage(
 	// canonical key is the only thing keeping TMDB movie 105 and show 105 from
 	// sharing a count of covered copies.
 	const canonicalKey = canonicalIdentityKey(identity.mediaType, identity.tmdbId);
-	const [rows, occurrences] = await Promise.all([
-		readItemCoverage(serverInstanceId, mediaItemId),
-		loadCoverageOccurrenceCounts(db, [{ mediaItemId, canonicalKey }])
-	]);
+	// Sequential on purpose: `readItemCoverage` may re-observe stale evidence and
+	// rewrite this item's rows, and the occurrence counts must be read from what
+	// it wrote. Run concurrently, the header could report "1 of 1 copies covered"
+	// on the same render whose slot pane just flipped to externally changed —
+	// the page contradicting itself about the same evidence.
+	const rows = await readItemCoverage(serverInstanceId, mediaItemId);
+	const occurrences = await loadCoverageOccurrenceCounts(db, [{ mediaItemId, canonicalKey }]);
 	return {
 		slots: rows.map((row) => ({
 			destination: row.destination,

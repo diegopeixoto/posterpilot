@@ -7,11 +7,8 @@ import {
 	posterCandidates,
 	serverInstances
 } from '$lib/server/db/schema';
-import { canonicalIdentityKey } from '$lib/artwork-coverage';
 import {
 	coverageSelectionCondition,
-	loadCoverageOccurrenceCounts,
-	loadItemCoverageSummaries,
 	type CoverageSelection
 } from '$lib/server/coverage/observations-query';
 import { REVIEW_STATES, type ReviewState } from './state';
@@ -258,21 +255,6 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 			])
 		: [[], []];
 
-	// Bounded by the same page cap as the candidate and failed-slot lookups above:
-	// two grouped reads for the whole page rather than two per row. Both are reads —
-	// rendering coverage must never advance `reviewedAt`, because a destination
-	// being reconciled is not the user finishing their review of the title.
-	const scopedIdentities = rows.map((row) => ({
-		mediaItemId: row.id,
-		canonicalKey: canonicalIdentityKey(row.mediaType, row.tmdbId)
-	}));
-	const [coverageSummaries, occurrenceCounts] = ids.length
-		? await Promise.all([
-				loadItemCoverageSummaries(db, filter.serverInstanceId, ids),
-				loadCoverageOccurrenceCounts(db, scopedIdentities)
-			])
-		: [new Map(), new Map()];
-
 	const items = rows.map((item) => {
 		const own = candidates.filter((candidate) => candidate.mediaItemId === item.id);
 		const previewCandidates = own.filter(
@@ -319,9 +301,7 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 				hasCurrentBackground: item.hasCurrentBackground === 1
 			},
 			suggestion: { poster: first('poster'), background: first('background') },
-			failedSlots: failedSlots.filter((slot) => slot.mediaItemId === item.id),
-			coverage: coverageSummaries.get(item.id) ?? null,
-			occurrences: occurrenceCounts.get(item.id) ?? null
+			failedSlots: failedSlots.filter((slot) => slot.mediaItemId === item.id)
 		};
 	});
 

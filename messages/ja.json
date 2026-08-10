@@ -47,6 +47,7 @@
 	"review_sort_title": "タイトル",
 	"review_sort_year": "年",
 	"review_search": "タイトルを検索",
+	"review_clear_search": "検索をクリア",
 	"review_search_action": "検索",
 	"review_empty": "この表示で確認が必要な項目はありません。",
 	"review_empty_hint": "別の状態、サーバー、ライブラリ、検索語を選んでください。",
