@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 // Swappable task implementation so each test controls what the worker runs.
 const h = vi.hoisted(() => ({
@@ -79,6 +79,30 @@ const SERVER_ID = 'legacy-default';
 
 async function getJob(id: number) {
 	return (await db.select().from(jobs).where(eq(jobs.id, id)).limit(1))[0];
+}
+
+/**
+ * Wait for a *stable* condition on the job row.
+ *
+ * Prefer this over polling for a status the runner passes straight through. The
+ * local libsql client executes synchronously, so a busy runner blocks the event
+ * loop and this poller does not get to run — a state that exists for under a
+ * second can therefore be missed entirely, and is missed more often on a loaded
+ * CI machine than on a developer's laptop.
+ */
+async function waitUntil(
+	id: number,
+	predicate: (job: Awaited<ReturnType<typeof getJob>>) => boolean,
+	timeout = 3000,
+	describe = 'condition'
+) {
+	const start = Date.now();
+	while (Date.now() - start < timeout) {
+		const j = await getJob(id);
+		if (j && predicate(j)) return j;
+		await sleep(10);
+	}
+	throw new Error(`timed out waiting for job ${id} to satisfy ${describe}`);
 }
 
 async function waitFor(id: number, statuses: string[], timeout = 3000) {
@@ -358,14 +382,32 @@ describe('job runner', () => {
 			{ kind: 'sync', serverInstanceId: SERVER_ID },
 			{ maxAttempts: 2 }
 		);
-		const scheduled = await waitFor(id, ['retry_scheduled'], 5_000);
-		expect(scheduled.error).toContain('network unreachable');
 
 		// The retry claim must not carry the old failure: `running` plus a stale
 		// error reads as a wedged worker.
-		const running = await waitFor(id, ['running'], 10_000);
+		//
+		// Waited on by attempt number rather than by catching `retry_scheduled` in
+		// passing. The second attempt blocks on `gate`, so `running && attempt === 2`
+		// holds until this test releases it — whereas `retry_scheduled` lasts only as
+		// long as the retry backoff and is missed whenever the runner's synchronous
+		// database work keeps the poller from running.
+		const running = await waitUntil(
+			id,
+			(job) => job.status === 'running' && job.attempt === 2,
+			10_000,
+			'running on attempt 2'
+		);
 		expect(running.error).toBeNull();
 		expect(running.errorCode).toBeNull();
+
+		// The failure is asserted on the attempt row that owns it, which is terminal
+		// and therefore always observable, rather than on the job row in passing.
+		const [first] = await db
+			.select()
+			.from(jobAttempts)
+			.where(and(eq(jobAttempts.jobId, id), eq(jobAttempts.attemptNumber, 1)));
+		expect(first.status).toBe('failed');
+		expect(first.error).toContain('network unreachable');
 
 		release();
 		await waitFor(id, ['completed'], 5_000);
