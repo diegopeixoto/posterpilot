@@ -113,24 +113,31 @@ function normalizeBase(baseUrl: string): string {
 }
 
 /**
- * Per-attempt timeout for library reads.
+ * Per-attempt timeout for whole-library scans only.
  *
  * `/library/sections/{id}/all` scans the whole section server-side and takes
  * ~30s+ on libraries of a few thousand items — real deployments have verified
  * ~30-34s with plain curl. The shared HTTP default of 20s sits *below* that,
  * which made every sync against such a section abort, retry into the same
- * wall, and fail without ever being able to succeed (#91). Generous on
- * purpose: these calls run inside background jobs, never request handlers.
+ * wall, and fail without ever being able to succeed (#91). Deliberately not
+ * the default for `getContainer`: single-item metadata reads also flow through
+ * it from interactive paths (apply previews via `readArtwork`), and those must
+ * keep failing fast rather than pinning a request for minutes.
  */
 const LIBRARY_READ_TIMEOUT_MS = 120_000;
 
 /** Read-only GET against the Plex API. Caching is disabled (dynamic data). */
-async function getContainer<T>(baseUrl: string, token: string, path: string): Promise<T> {
+async function getContainer<T>(
+	baseUrl: string,
+	token: string,
+	path: string,
+	timeoutMs?: number
+): Promise<T> {
 	const res = await fetchJson<PlexResponse<T>>(`${normalizeBase(baseUrl)}${path}`, {
 		headers: plexHeaders(token),
 		cacheTtlDays: 0,
 		retries: 1,
-		timeoutMs: LIBRARY_READ_TIMEOUT_MS
+		...(timeoutMs !== undefined ? { timeoutMs } : {})
 	});
 	return res.MediaContainer;
 }
@@ -246,7 +253,8 @@ export async function listItems(
 	const container = await getContainer<MetadataContainer>(
 		baseUrl,
 		token,
-		`/library/sections/${encodeURIComponent(sectionKey)}/all?includeGuids=1`
+		`/library/sections/${encodeURIComponent(sectionKey)}/all?includeGuids=1`,
+		LIBRARY_READ_TIMEOUT_MS
 	);
 	const metadata = container.Metadata ?? [];
 	return metadata.map((entry) => {
@@ -281,7 +289,8 @@ export async function listCollections(
 		const container = await getContainer<MetadataContainer>(
 			baseUrl,
 			token,
-			`/library/sections/${encodeURIComponent(sectionKey)}/collections`
+			`/library/sections/${encodeURIComponent(sectionKey)}/collections`,
+			LIBRARY_READ_TIMEOUT_MS
 		);
 		for (const entry of container.Metadata ?? []) {
 			if (!entry.ratingKey || entry.type !== 'collection') continue;

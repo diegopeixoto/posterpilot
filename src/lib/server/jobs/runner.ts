@@ -385,7 +385,13 @@ async function claimNextJob(): Promise<{ job: JobRow; attempt: AttemptRow } | nu
 	return { job, attempt };
 }
 
-async function heartbeat(jobId: number): Promise<void> {
+/**
+ * Renew the lease for one specific attempt. `WORKER_ID` alone is not a fence:
+ * it is process-wide, so a retry in the same process reuses it, and a write
+ * from an abandoned (stalled) earlier attempt would otherwise land on the
+ * retry's row. Binding the attempt number makes every late write a no-op.
+ */
+async function heartbeat(jobId: number, attemptNumber: number): Promise<void> {
 	const heartbeatAt = now();
 	const [row] = await db
 		.update(jobs)
@@ -393,7 +399,14 @@ async function heartbeat(jobId: number): Promise<void> {
 			leaseExpiresAt: new Date(heartbeatAt.getTime() + LEASE_MS),
 			updatedAt: heartbeatAt
 		})
-		.where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.leaseOwner, WORKER_ID)))
+		.where(
+			and(
+				eq(jobs.id, jobId),
+				eq(jobs.status, 'running'),
+				eq(jobs.leaseOwner, WORKER_ID),
+				eq(jobs.attempt, attemptNumber)
+			)
+		)
 		.returning({ cancelRequestedAt: jobs.cancelRequestedAt, attempt: jobs.attempt });
 	if (row?.cancelRequestedAt) cancelled.add(jobId);
 	if (row) {
@@ -515,7 +528,7 @@ async function finish(
 			finishedAt
 		})
 		.where(and(eq(jobAttempts.id, attempt.id), eq(jobAttempts.status, 'running')));
-	await db
+	const [finished] = await db
 		.update(jobs)
 		.set({
 			status,
@@ -527,7 +540,11 @@ async function finish(
 			finishedAt,
 			updatedAt: finishedAt
 		})
-		.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID)));
+		.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID), eq(jobs.attempt, job.attempt)))
+		.returning({ id: jobs.id });
+	// A missed CAS means another attempt owns the job now; a late finish from an
+	// abandoned stalled attempt must not fire completion side effects either.
+	if (!finished) return;
 	const payload = job.payload as unknown as JobPayload;
 	if (payload.kind === 'automation') {
 		try {
@@ -591,7 +608,7 @@ async function scheduleRetry(
 			finishedAt: failedAt
 		})
 		.where(eq(jobAttempts.id, attempt.id));
-	await db
+	const [scheduled] = await db
 		.update(jobs)
 		.set({
 			status: 'retry_scheduled',
@@ -603,7 +620,11 @@ async function scheduleRetry(
 			leaseExpiresAt: null,
 			updatedAt: failedAt
 		})
-		.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID)));
+		.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID), eq(jobs.attempt, job.attempt)))
+		.returning({ id: jobs.id });
+	// A missed CAS means another attempt owns the job now (an abandoned stalled
+	// attempt waking up late); it must not seed further retries.
+	if (!scheduled) return;
 	await db
 		.insert(jobAttempts)
 		.values({
@@ -633,7 +654,7 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 	const heartbeatTimer = setInterval(() => {
 		if (heartbeatBusy) return;
 		heartbeatBusy = true;
-		void heartbeat(job.id)
+		void heartbeat(job.id, job.attempt)
 			.catch(() => undefined)
 			.finally(() => {
 				heartbeatBusy = false;
@@ -656,8 +677,10 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 			await db
 				.update(jobs)
 				.set({ phase: normalized, updatedAt: now() })
-				.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID)));
-			await heartbeat(job.id);
+				.where(
+					and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID), eq(jobs.attempt, job.attempt))
+				);
+			await heartbeat(job.id, job.attempt);
 			await emit(job.id);
 		},
 		setTotal: async (total) => {
@@ -666,8 +689,10 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 			await db
 				.update(jobs)
 				.set({ total, updatedAt: now() })
-				.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID)));
-			await heartbeat(job.id);
+				.where(
+					and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID), eq(jobs.attempt, job.attempt))
+				);
+			await heartbeat(job.id, job.attempt);
 			await emit(job.id);
 		},
 		progress: async (processed, currentItem) => {
@@ -682,8 +707,10 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 					currentItem: currentItem?.slice(0, 250) ?? null,
 					updatedAt: now()
 				})
-				.where(and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID)));
-			await heartbeat(job.id);
+				.where(
+					and(eq(jobs.id, job.id), eq(jobs.leaseOwner, WORKER_ID), eq(jobs.attempt, job.attempt))
+				);
+			await heartbeat(job.id, job.attempt);
 			await emit(job.id);
 		},
 		recordOutcome: (outcome) => {

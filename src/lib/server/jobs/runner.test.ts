@@ -303,6 +303,46 @@ describe('job runner', () => {
 		}
 	});
 
+	it('ignores writes from an abandoned stalled attempt after the retry claims', async () => {
+		setJobStallTimeoutForTests(120);
+		try {
+			let call = 0;
+			let zombieCtx: (Ctx & { setPhase(phase: string | null): Promise<void> }) | null = null;
+			let releaseZombie!: () => void;
+			const zombieGate = new Promise<void>((resolve) => (releaseZombie = resolve));
+			h.syncImpl = async (ctx) => {
+				call += 1;
+				if (call === 1) {
+					zombieCtx = ctx as typeof zombieCtx & object;
+					await zombieGate;
+					return;
+				}
+				await (ctx as Ctx).setTotal(7);
+				await (ctx as Ctx).progress(5, 'real');
+			};
+			const { jobId: id } = await enqueueJobDetailed(
+				{ kind: 'sync', serverInstanceId: SERVER_ID },
+				{ maxAttempts: 2 }
+			);
+			const j = await waitFor(id, ['completed'], 10_000);
+			expect(j.processed).toBe(5);
+
+			// The abandoned first attempt wakes up and tries to write. WORKER_ID is
+			// process-wide and the retry reused it, so only the attempt fence keeps
+			// these from landing on the completed row.
+			releaseZombie();
+			await zombieCtx!.progress(99, 'zombie').catch(() => undefined);
+			await zombieCtx!.setTotal(42).catch(() => undefined);
+			await zombieCtx!.setPhase('zombie_phase').catch(() => undefined);
+			const after = await getJob(id);
+			expect(after.processed).toBe(5);
+			expect(after.total).toBe(7);
+			expect(after.phase).not.toBe('zombie_phase');
+		} finally {
+			setJobStallTimeoutForTests(null);
+		}
+	});
+
 	it('clears the previous attempt error from the job row while a retry runs', async () => {
 		let call = 0;
 		let release!: () => void;
