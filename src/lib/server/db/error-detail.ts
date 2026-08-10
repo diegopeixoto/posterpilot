@@ -60,3 +60,21 @@ export function describeErrorChain(error: unknown): string {
 	}
 	return parts.join(' <- ');
 }
+
+/**
+ * Format one request failure for the server log: a summary line, then the stack.
+ *
+ * Both halves are needed, for opposite reasons. The chain carries the codes and
+ * messages that a database failure hides on its `cause`; the stack carries the
+ * file and line, which is the only useful thing about an ordinary `TypeError`.
+ * Printing the chain alone would fix diagnosis for one class of error by breaking
+ * it for every other.
+ *
+ * The summary comes first and stays on one line so it can be grepped, matching
+ * how the stack already reads underneath it.
+ */
+export function formatRequestError(error: unknown, method: string, path: string): string {
+	const summary = `[error] ${method} ${path} — ${describeErrorChain(error)}`;
+	const stack = error instanceof Error ? error.stack : undefined;
+	return stack ? `${summary}\n${stack}` : summary;
+}

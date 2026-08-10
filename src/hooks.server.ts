@@ -22,7 +22,7 @@ import { pruneOperationPlans } from '$lib/server/plans/operation-plan-store';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { maintenanceBlocksRequest } from '$lib/server/maintenance-http';
 import { reconcileThumbCacheDisk } from '$lib/server/posters/thumb-cache';
-import { describeErrorChain } from '$lib/server/db/error-detail';
+import { formatRequestError } from '$lib/server/db/error-detail';
 
 // Run database migrations once at server startup, before any request is handled.
 await migrateDb();
@@ -206,9 +206,7 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 export const handleError: HandleServerError = ({ error, event, status }) => {
 	// 404s are routine and would drown the log; everything else is a real fault.
 	if (status !== 404) {
-		console.error(
-			`[error] ${event.request.method} ${event.url.pathname} — ${describeErrorChain(error)}`
-		);
+		console.error(formatRequestError(error, event.request.method, event.url.pathname));
 	}
 	return { message: 'Internal Error' };
 };

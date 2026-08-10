@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeErrorChain } from './error-detail';
+import { describeErrorChain, formatRequestError } from './error-detail';
 
 /** The shape drizzle produces: a wrapper whose `cause` carries the real reason. */
 function drizzleError(cause: unknown): Error {
@@ -54,5 +54,32 @@ describe('describeErrorChain', () => {
 
 	it('describes a non-Error rejection', () => {
 		expect(describeErrorChain('plain string')).toBe('plain string');
+	});
+});
+
+describe('formatRequestError', () => {
+	it('keeps the stack, so an ordinary runtime error still points at its line', () => {
+		// The whole reason this module exists is diagnosability; dropping the stack
+		// would fix it for database errors and break it for every other kind.
+		const error = new TypeError('x is not a function');
+		const output = formatRequestError(error, 'GET', '/api/health');
+		expect(output).toContain('[error] GET /api/health');
+		expect(output).toContain('TypeError');
+		expect(output).toContain('error-detail.test.ts');
+	});
+
+	it('carries both the buried cause and the stack for a wrapped query failure', () => {
+		const output = formatRequestError(
+			drizzleError(libsqlError('database is locked', 'SQLITE_BUSY', 5)),
+			'GET',
+			'/'
+		);
+		expect(output).toContain('code=SQLITE_BUSY');
+		expect(output.split('\n')[0]).toContain('[error] GET /');
+		expect(output.split('\n').length).toBeGreaterThan(1);
+	});
+
+	it('degrades to the summary alone when what was thrown has no stack', () => {
+		expect(formatRequestError('nope', 'POST', '/api/apply')).toBe('[error] POST /api/apply — nope');
 	});
 });
