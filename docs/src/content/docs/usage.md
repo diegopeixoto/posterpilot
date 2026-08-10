@@ -263,6 +263,17 @@ cannot be expressed as a Kometa YAML URL, so it is omitted from the Kometa expor
 and the limitation is made visible rather than writing an invalid entry.
 :::
 
+:::note[Custom URLs are fetched by PosterPilot, not by the media server]
+Before any apply, PosterPilot downloads the staged URL itself so the exact bytes
+being written can be verified, fingerprinted, and snapshotted for undo. The URL
+therefore has to be reachable from the PosterPilot container: a host only your
+media server can see — split DNS, a LAN-scoped asset host, an isolated Docker
+network — fails the apply's preflight. Give the container a route to that host
+(a shared Docker network, `extra_hosts`, or your internal DNS) rather than
+expecting the media server to fetch the URL itself; unverifiable writes are
+deliberately not supported.
+:::
+
 ## Bulk actions
 
 Select the current page or **all matching results**, clear the selection, and run

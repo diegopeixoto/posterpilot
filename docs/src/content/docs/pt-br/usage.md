@@ -76,7 +76,10 @@ abre expandido por padrão.
 
 O builder fixo resume pôster, background, temporadas e episódios. URL personalizada
 entra como slot normal. Upload de arquivo faz prévia/confirmacão e só pode ir ao
-servidor direto, porque binário não vira URL YAML do Kometa.
+servidor direto, porque binário não vira URL YAML do Kometa. URLs personalizadas são
+baixadas pelo próprio PosterPilot para verificar os bytes exatos, então precisam ser
+alcançáveis a partir do contêiner (não basta o servidor de mídia enxergá-las);
+escritas não verificáveis não são suportadas de propósito.
 
 ## Pré-visualizar e aplicar
 

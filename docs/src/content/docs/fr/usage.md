@@ -318,6 +318,17 @@ sous forme d'URL dans le YAML Kometa ; il est donc omis de l'export Kometa et la
 limitation est rendue visible au lieu d'écrire une entrée invalide.
 :::
 
+:::note[Les URL personnalisées sont téléchargées par PosterPilot, pas par le serveur multimédia]
+Avant toute application, PosterPilot télécharge lui-même l'URL préparée afin de
+vérifier, d'empreinter et de sauvegarder les octets exacts qui seront écrits.
+L'URL doit donc être joignable depuis le conteneur PosterPilot : un hôte que
+seul votre serveur multimédia peut voir (DNS scindé, hôte d'assets limité au
+LAN, réseau Docker isolé) fait échouer le contrôle préalable. Donnez au
+conteneur une route vers cet hôte (réseau Docker partagé, `extra_hosts`, DNS
+interne) plutôt que d'attendre que le serveur multimédia télécharge l'URL ; les
+écritures invérifiables ne sont volontairement pas prises en charge.
+:::
+
 ## Actions groupées
 
 Sélectionnez la page courante ou **tous les résultats correspondants**, effacez

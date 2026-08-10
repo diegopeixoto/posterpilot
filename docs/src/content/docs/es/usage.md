@@ -77,7 +77,10 @@ expandido por defecto.
 
 El constructor fijo resume póster, fondo, temporadas y episodios. Una URL personalizada
 es una ranura normal. Una carga de archivo tiene vista previa/confirmación y solo puede
-ir al servidor directo, pues un binario no es una URL YAML de Kometa.
+ir al servidor directo, pues un binario no es una URL YAML de Kometa. Las URL
+personalizadas las descarga el propio PosterPilot para verificar los bytes exactos, así
+que deben ser alcanzables desde su contenedor (no basta con que el servidor multimedia
+las vea); las escrituras no verificables no están soportadas a propósito.
 
 ## Previsualizar y aplicar
 
