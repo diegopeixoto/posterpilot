@@ -742,21 +742,46 @@ describe('ArtworkApplyCoordinator', () => {
 		const planned = operation({ id: 'prepare-read-blip' });
 		const current = artwork('planned current', 'planned-current');
 		planned.current.fingerprint = sha256Bytes(current.data);
-		const queue = [new Error('read blip'), current];
-		const applyPosterBytes = vi.fn(async () => undefined);
+		let readError: Error | null = new Error('read blip');
+		let live = current;
+		const applyPosterBytes = vi.fn(
+			async (_targetId: string, data: ArrayBuffer, contentType?: string) => {
+				live = {
+					kind: 'poster',
+					url: 'https://plex.invalid/uploaded-poster',
+					identity: 'uploaded-poster',
+					data,
+					contentType: contentType ?? 'image/jpeg'
+				};
+			}
+		);
 		const server = {
 			readArtwork: vi.fn(async () => {
-				const next = queue.shift();
-				if (next instanceof Error) throw next;
-				return next;
+				if (readError) {
+					const error = readError;
+					readError = null;
+					throw error;
+				}
+				return live;
 			}),
 			applyPosterBytes
 		} as unknown as MediaServer;
 
 		await subject.prepareOperation(planned, { server });
 		await subject.executeServerOperation(planned, { server });
+		const result = await subject.recordOutcome(planned, successfulWrite(planned), { server });
 
 		expect(applyPosterBytes).toHaveBeenCalledOnce();
+		// The recovered execute-time read stands in as the before state: the
+		// outcome verifies exactly and undo gets real prior bytes, not an
+		// unavailable placeholder.
+		expect(result).toMatchObject({ status: 'success', verification: 'exact' });
+		const [revision] = await database.select().from(artworkRevisions);
+		expect(revision).toMatchObject({ outcome: 'success', verification: 'exact' });
+		expect(revision.beforeSnapshotId).not.toBeNull();
+		const snapshots = await database.select().from(artworkSnapshots);
+		const before = snapshots.find((row) => row.id === revision.beforeSnapshotId);
+		expect(before).toMatchObject({ state: 'present', sha256: sha256Bytes(current.data) });
 	});
 
 	it('still blocks a drifted destination when only the execute-time read could see it', async () => {

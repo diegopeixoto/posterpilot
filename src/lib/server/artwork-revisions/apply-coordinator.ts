@@ -319,6 +319,22 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 					? artworkFingerprint(captured.beforeArtwork)
 					: operation.current.fingerprint
 			);
+			if (captured.beforeArtwork === undefined) {
+				// Prepare could not read the destination; this read just recovered it.
+				// Persist it as the operation's before state, or the outcome recorder
+				// would classify the verification unavailable and fail the apply —
+				// and undo would keep an unavailable snapshot — even though the prior
+				// bytes were in hand immediately before the mutation.
+				const before = await options.snapshots.captureServer({
+					serverInstanceId: operation.target.serverInstanceId,
+					mediaItemId: operation.target.mediaItemId,
+					destination: 'server',
+					slot: operation.slot,
+					artwork: liveArtwork
+				});
+				captured.beforeArtwork = liveArtwork;
+				captured.beforeSnapshotId = before.id;
+			}
 		} else if (captured.beforeArtwork === undefined) {
 			throw new Error('Current server artwork could not be verified before the artwork write');
 		}
