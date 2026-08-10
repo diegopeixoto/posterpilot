@@ -80,6 +80,46 @@ function safeRasterArtworkContentType(value: string | null): string | null {
 	return RASTER_CONTENT_TYPES.has(normalized) ? normalized : null;
 }
 
+/**
+ * Identify a supported raster format from its magic bytes.
+ *
+ * Used when the declared Content-Type is missing or non-standard — a home
+ * server sending no header, S3 sending `application/octet-stream`, the common
+ * `image/jpg` typo. The bytes, not the header, are the security boundary this
+ * module cares about: a JPEG served as octet-stream is still a JPEG, while an
+ * SVG or HTML document declared `image/png` still fails this sniff.
+ */
+function sniffRasterArtworkContentType(bytes: ArrayBuffer): string | null {
+	const view = new Uint8Array(bytes);
+	const ascii = (start: number, end: number) => String.fromCharCode(...view.subarray(start, end));
+	if (view.length >= 3 && view[0] === 0xff && view[1] === 0xd8 && view[2] === 0xff) {
+		return 'image/jpeg';
+	}
+	if (
+		view.length >= 8 &&
+		view[0] === 0x89 &&
+		view[1] === 0x50 &&
+		view[2] === 0x4e &&
+		view[3] === 0x47 &&
+		view[4] === 0x0d &&
+		view[5] === 0x0a &&
+		view[6] === 0x1a &&
+		view[7] === 0x0a
+	) {
+		return 'image/png';
+	}
+	if (view.length >= 6 && (ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a')) {
+		return 'image/gif';
+	}
+	if (view.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') {
+		return 'image/webp';
+	}
+	if (view.length >= 12 && ascii(4, 8) === 'ftyp' && ['avif', 'avis'].includes(ascii(8, 12))) {
+		return 'image/avif';
+	}
+	return null;
+}
+
 /** HTTP(S), without embedded credentials; suitable for a user-supplied initial URL. */
 function safeCustomArtworkTarget(target: URL): boolean {
 	return (
@@ -340,13 +380,18 @@ export async function downloadRemoteArtwork(
 				cancelBody(response);
 				throw new RemoteArtworkDownloadError('remote_artwork_response_failed');
 			}
-			const contentType = safeRasterArtworkContentType(response.headers.get('content-type'));
-			if (!contentType) {
-				cancelBody(response);
-				throw new RemoteArtworkDownloadError('remote_artwork_content_type_invalid');
-			}
+			// A declared raster type is taken at its word. Anything else — a missing
+			// header, `image/jpg`, `application/octet-stream` — is resolved from the
+			// downloaded bytes themselves, so a mislabeled JPEG on a home server
+			// still applies while an SVG declared `image/png` still fails. The body
+			// read stays bounded either way.
+			const declaredType = safeRasterArtworkContentType(response.headers.get('content-type'));
 			try {
 				const bytes = await readBoundedArtworkBody(response, options.maxBytes, controller.signal);
+				const contentType = declaredType ?? sniffRasterArtworkContentType(bytes);
+				if (!contentType) {
+					throw new RemoteArtworkDownloadError('remote_artwork_content_type_invalid');
+				}
 				return { bytes, contentType, finalUrl: currentUrl.href };
 			} catch (error) {
 				if (controller.signal.aborted) {
