@@ -38,6 +38,8 @@ import { logEvent } from '$lib/server/events';
 import { resolveConfig } from '$lib/server/config';
 import { readConfig } from '$lib/server/kometa/config-io';
 import {
+	isCanonicalKometaNumericId,
+	isKometaLegacyDestinationV1,
 	kometaYamlMappingKey,
 	resolveKometaDestination,
 	LEGACY_FILENAME,
@@ -66,7 +68,12 @@ import {
 	type ServerRevisionEvidence,
 	type ServerSlotObservation
 } from './reconcile-server';
-import { coverageStore, type CoverageRow, type CoverageStore } from './store';
+import {
+	coverageStore,
+	isReobservableCoverage,
+	type CoverageRow,
+	type CoverageStore
+} from './store';
 
 /** The slice of the projection one refresh pass rebuilds. */
 export interface CoverageRefreshScope {
@@ -279,11 +286,67 @@ function agreedLegacyDestination(
  * recorded — so it is built from the id directly rather than through
  * `kometaYamlMappingKey`, which exists to render destinations that were actually
  * resolved or retained.
+ *
+ * Canonical-strict on purpose: the reconciler decides whether an entry under
+ * this key is ambiguous by testing the same id with
+ * `isCanonicalKometaNumericId`, so drafting under a coerced key the decide side
+ * rejects (`'0105'` → 105, `'0x10'` → 16) would read an entry the reconciler
+ * then reports as never drafted — `missing` for a title whose entry exists.
  */
 function legacyCandidateKey(tmdbId: string | number | null | undefined): number | null {
 	if (tmdbId === null || tmdbId === undefined) return null;
-	const id = Number(String(tmdbId).trim());
-	return Number.isInteger(id) && id > 0 ? id : null;
+	const id = String(tmdbId).trim();
+	return isCanonicalKometaNumericId(id) ? Number(id) : null;
+}
+
+/**
+ * Count, per legacy mapping id, the occurrences whose own revisions retain it.
+ *
+ * "Exactly one claimant" is a server-wide invariant — the shared file predates
+ * typed destinations, so two copies of a title in different libraries contest
+ * the same YAML line. The accumulation mirrors `refreshKometaScope`'s
+ * per-occurrence one (one recorded destination per newly seen slot, then
+ * `agreedLegacyDestination` across them) so the server-wide count and the
+ * scoped requests cannot classify the same revisions differently.
+ */
+function countLegacyClaimants(
+	rows: readonly {
+		mediaItemId: number;
+		kind: string;
+		season: number | null;
+		episode: number | null;
+		provenance: Record<string, unknown> | null;
+		snapshotMetadata: Record<string, unknown> | null;
+	}[]
+): Map<string, number> {
+	const seenSlots = new Map<number, Set<string>>();
+	const records = new Map<number, (KometaLegacyDestinationV1 | null)[]>();
+	for (const row of rows) {
+		const slot = coverageSlot(row);
+		if (!slot) continue;
+		let seen = seenSlots.get(row.mediaItemId);
+		if (!seen) {
+			seen = new Set();
+			seenSlots.set(row.mediaItemId, seen);
+		}
+		const slotKey = applySlotKey(slot);
+		if (seen.has(slotKey)) continue;
+		seen.add(slotKey);
+		const recorded = recordedKometaDestination(row.provenance, row.snapshotMetadata);
+		let bucket = records.get(row.mediaItemId);
+		if (!bucket) {
+			bucket = [];
+			records.set(row.mediaItemId, bucket);
+		}
+		bucket.push(recorded?.version === 1 ? recorded : null);
+	}
+	const counts = new Map<string, number>();
+	for (const bucket of records.values()) {
+		const agreed = agreedLegacyDestination(bucket);
+		if (!agreed || !isKometaLegacyDestinationV1(agreed)) continue;
+		counts.set(agreed.mappingId, (counts.get(agreed.mappingId) ?? 0) + 1);
+	}
+	return counts;
 }
 
 /** Entries are keyed by mapping id, not by occurrence: two copies of one title share a YAML line. */
@@ -430,6 +493,12 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 
 		const observations: ServerSlotObservation[] = [];
 		for (const row of slotStateRows) {
+			// An observation alone never creates a request. A full rescan writes slot
+			// states for every item on the server, and turning each one into a
+			// `missing` row would materialize the whole library — the projection's
+			// contract is that an untouched item has no coverage rows and is reported
+			// by the anti-join, so only items our ledger has touched are asked about.
+			if (!occurrences.has(row.mediaItemId)) continue;
 			const slot = slotsFor(row).add(row);
 			if (!slot) continue;
 			observations.push({
@@ -570,6 +639,38 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 			}
 		}
 
+		// "Exactly one claimant" is a server-wide question, but this pass only
+		// loaded its own scope's revisions. Whenever a scoped occurrence retains a
+		// legacy destination, count claimants across the whole server, or an apply
+		// or stale read of one copy would confidently attribute a key its twin in
+		// another library still contests. Skipped entirely when nothing in scope
+		// retains a legacy id — the normal post-migration state.
+		let legacyClaimantCounts: ReadonlyMap<string, number> | undefined;
+		const scoped = Boolean(scope.librarySectionKey || scope.mediaItemIds);
+		if (scoped && requests.some((request) => request.legacyDestination)) {
+			const claimantRows = await database
+				.select({
+					mediaItemId: mediaItems.id,
+					kind: artworkRevisions.kind,
+					season: artworkRevisions.season,
+					episode: artworkRevisions.episode,
+					provenance: artworkRevisions.provenance,
+					snapshotMetadata: artworkSnapshots.metadata
+				})
+				.from(artworkRevisions)
+				.innerJoin(mediaItems, eq(mediaItems.id, artworkRevisions.mediaItemId))
+				.leftJoin(artworkSnapshots, eq(artworkSnapshots.id, artworkRevisions.afterSnapshotId))
+				.where(
+					and(
+						eq(artworkRevisions.serverInstanceId, scope.serverInstanceId),
+						eq(artworkRevisions.destination, 'kometa'),
+						isNull(artworkRevisions.mediaCollectionId),
+						...scopeConditions({ serverInstanceId: scope.serverInstanceId })
+					)
+				);
+			legacyClaimantCounts = countLegacyClaimants(claimantRows);
+		}
+
 		const observedAt = clock();
 		const files: KometaFileEvidence[] = [];
 		for (const [filename, drafts] of typedDrafts) {
@@ -581,6 +682,7 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 			requests,
 			files,
 			legacyFile,
+			legacyClaimantCounts,
 			observedAt
 		});
 		await reportUnassignedLegacyEntries(scope.serverInstanceId, unassignedLegacyEntries);
@@ -717,7 +819,17 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 	): Promise<CoverageRow[]> {
 		const rows = await store.getItemCoverage(serverInstanceId, mediaItemId);
 		const staleBefore = new Date(clock().getTime() - (options.maxAgeMs ?? COVERAGE_MAX_AGE_MS));
-		if (!rows.some((row) => row.observedAt.getTime() < staleBefore.getTime())) return rows;
+		// Only rows a refresh can actually advance count as stale here. A
+		// server-destination episode row keeps the `observedAt` its claim pinned, so
+		// treating it as stale would re-run observation, file parsing, and a replace
+		// on every page load of that title, forever, without changing anything.
+		if (
+			!rows.some(
+				(row) => isReobservableCoverage(row) && row.observedAt.getTime() < staleBefore.getTime()
+			)
+		) {
+			return rows;
+		}
 		// Observe before reconciling, exactly as the sweep does. Reconciling alone
 		// rereads the fingerprints already stored while advancing `observedAt`, so
 		// opening the detail page on a poster someone swapped in Plex would keep
@@ -850,4 +962,27 @@ export function refreshStaleCoverageAfter(
 	input: { serverInstanceId: string; staleBefore?: Date; limit?: number }
 ): Promise<boolean> {
 	return coverageRefresher.refreshStaleCoverageAfter(trigger, input);
+}
+
+const inFlightStaleSweeps = new Map<string, Promise<boolean>>();
+
+/**
+ * Kick a bounded stale sweep without making the caller wait for it.
+ *
+ * A sweep re-downloads artwork bytes from the media server — background-job
+ * work a page load must never block on. One sweep per server at a time: a
+ * second page load while one is running would re-select the same oldest rows
+ * and duplicate the downloads rather than repair more.
+ */
+export function refreshStaleCoverageInBackground(
+	trigger: CoverageRefreshTrigger,
+	input: { serverInstanceId: string; staleBefore?: Date; limit?: number }
+): void {
+	if (inFlightStaleSweeps.has(input.serverInstanceId)) return;
+	// `refreshStaleCoverageAfter` never rejects, so the chain below cannot leave
+	// an unhandled rejection behind.
+	const sweep = coverageRefresher
+		.refreshStaleCoverageAfter(trigger, input)
+		.finally(() => inFlightStaleSweeps.delete(input.serverInstanceId));
+	inFlightStaleSweeps.set(input.serverInstanceId, sweep);
 }

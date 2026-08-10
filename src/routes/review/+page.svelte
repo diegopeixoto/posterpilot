@@ -499,13 +499,22 @@
 			<!-- The generic hint sends people to sync or discovery, which is the wrong
 			     advice when the inbox is full and only this filter is empty. -->
 			<p class="text-sm text-neutral-300">{m.coverage_empty_filtered()}</p>
-			<button
-				type="button"
-				class="btn btn-ghost mt-4 min-h-11 px-3"
-				onclick={() => setFilter('coverage')}
-			>
-				{m.coverage_filter_all()}
-			</button>
+			<div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+				<button
+					type="button"
+					class="btn btn-ghost min-h-11 px-3"
+					onclick={() => setFilter('coverage')}
+				>
+					{m.coverage_filter_all()}
+				</button>
+				{#if data.filter.q}
+					<!-- The search may be the real reason nothing matched; clearing only
+					     the coverage param would blame the wrong filter. -->
+					<button type="button" class="btn btn-ghost min-h-11 px-3" onclick={() => setFilter('q')}>
+						{m.review_clear_search()}
+					</button>
+				{/if}
+			</div>
 		{:else}
 			<p class="text-sm text-neutral-300">{m.review_empty()}</p>
 			<p class="mt-1 text-xs text-neutral-500">{m.review_empty_hint()}</p>

@@ -192,8 +192,12 @@ function reconcileSlot(
 		latestTimestamp(observation?.lastVerifiedAt, observation?.lastObservedAt) ??
 		claim.completedAt ??
 		claim.createdAt;
+	// Strictly after: timestamps are whole seconds, so a change recorded in the
+	// same second as the claim cannot prove it happened after our write. The tie
+	// stays `recorded_unverified` — "we cannot say" — rather than accusing the
+	// apply the user just made of having been overwritten.
 	const changedAfterClaim =
-		observation?.externalChangedAt != null && observation.externalChangedAt.getTime() >= claimTime;
+		observation?.externalChangedAt != null && observation.externalChangedAt.getTime() > claimTime;
 
 	// History exists but there is nothing to compare it against. Somebody else may
 	// well have replaced the artwork; we simply cannot say, so this is `unverified`

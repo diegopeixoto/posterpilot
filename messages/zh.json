@@ -47,6 +47,7 @@
 	"review_sort_title": "标题",
 	"review_sort_year": "年份",
 	"review_search": "搜索标题",
+	"review_clear_search": "清除搜索",
 	"review_search_action": "搜索",
 	"review_empty": "此视图中没有需要处理的项目。",
 	"review_empty_hint": "请选择其他状态、服务器、媒体库或搜索词。",

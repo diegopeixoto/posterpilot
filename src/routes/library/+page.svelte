@@ -609,9 +609,22 @@
 	-->
 	<div role="status" class="surface mt-10 p-10 text-center">
 		<p class="text-sm text-neutral-300">{m.coverage_empty_filtered()}</p>
-		<button type="button" onclick={() => setCoverage('')} class="btn btn-ghost mt-4 min-h-11 px-3">
-			{m.coverage_filter_all()}
-		</button>
+		<div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+			<button type="button" onclick={() => setCoverage('')} class="btn btn-ghost min-h-11 px-3">
+				{m.coverage_filter_all()}
+			</button>
+			{#if ignoreView !== 'all'}
+				<!-- The ignored-only view may be the real reason nothing matched, so its
+				     one-click way out stays available alongside the coverage reset. -->
+				<button
+					type="button"
+					onclick={() => setIgnoreView('all')}
+					class="btn btn-ghost min-h-11 px-3"
+				>
+					{m.library_ignore_all()}
+				</button>
+			{/if}
+		</div>
 	</div>
 {:else}
 	<LibraryGrid

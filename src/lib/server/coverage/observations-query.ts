@@ -250,8 +250,20 @@ function emptyCoveredCounts(): Record<CoverageDestination, number> {
 	>;
 }
 
+/**
+ * Every character `String.prototype.trim` strips, spelled out for SQLite.
+ *
+ * SQLite's one-argument `trim()` removes only U+0020, while the JS side of
+ * `canonicalIdentityKey` strips all Unicode whitespace — a tmdb_id carrying a
+ * tab or a no-break space would produce a JS key the SQL expression can never
+ * match, and the query below would silently fall back to "one uncovered copy".
+ */
+const JS_TRIM_CHARACTERS =
+	' \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007' +
+	'\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+
 /** SQL twin of `canonicalIdentityKey`. Only rows already matched by a validated key are read. */
-const canonicalKeyExpression = sql<string>`${mediaItems.mediaType} || ':' || trim(${mediaItems.tmdbId})`;
+const canonicalKeyExpression = sql<string>`${mediaItems.mediaType} || ':' || trim(${mediaItems.tmdbId}, ${JS_TRIM_CHARACTERS})`;
 
 /**
  * Occurrence counts for a bounded page of items.

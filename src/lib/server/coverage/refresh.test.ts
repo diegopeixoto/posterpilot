@@ -223,6 +223,18 @@ describe('server coverage refresh', () => {
 		expect(await coverageRows()).toHaveLength(0);
 	});
 
+	it('does not turn a rescan observation alone into a missing row', async () => {
+		// A full rescan writes slot states for every item on the server. An item the
+		// ledger never touched must stay row-free — the anti-join already reports it
+		// — or one rescan would materialize the entire library as `missing` and the
+		// stale sweep would spend every pass re-observing items nobody ever touched.
+		await seedSlotState(ITEMS.untouched, 'sha-a');
+
+		await refresher().refreshServerCoverage({ serverInstanceId: 'server-a' });
+
+		expect(await coverageRows()).toHaveLength(0);
+	});
+
 	it('withdraws a claim after an undo instead of reporting artwork we removed', async () => {
 		await seedRevision({
 			id: 'revision-1',

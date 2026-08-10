@@ -28,6 +28,13 @@ const observe = createDatabaseFullRescanArtworkObserver(db);
  * failures are skipped rather than thrown. An unreachable *server*, on the other
  * hand, throws: that is the case where nothing was observed at all, and the
  * caller must not go on to stamp fresh evidence onto rows it never re-checked.
+ *
+ * Enforced, not assumed: `resolveMediaServerInstance` only reads the database,
+ * and a failed `readArtwork` inside the observer degrades to a `url_identity`
+ * fallback rather than throwing. Observations run with `fallbackPolicy: 'skip'`
+ * so a fallback — which here compares the stored URL with itself — records
+ * nothing, and a sweep in which *no* slot produced real evidence is reported as
+ * the unreachable-server case it is.
  */
 export async function observeServerArtworkForCoverage(input: {
 	serverInstanceId: string;
@@ -38,7 +45,13 @@ export async function observeServerArtworkForCoverage(input: {
 	const { server } = await resolveMediaServerInstance(input.serverInstanceId, {
 		requireEnabled: true
 	});
-	if (!server.readArtwork) return;
+	if (!server.readArtwork) {
+		// Nothing can be observed on this server at all, and returning quietly
+		// would send the caller on to restamp rows it never re-checked.
+		throw new Error(
+			`Media server ${input.serverInstanceId} does not support reading artwork; coverage cannot be re-observed`
+		);
+	}
 
 	const items = await db
 		.select({
@@ -59,9 +72,10 @@ export async function observeServerArtworkForCoverage(input: {
 			)
 		);
 
+	let observedSlots = 0;
 	for (const item of items) {
 		try {
-			await observe({
+			const result = await observe({
 				server,
 				serverInstanceId: input.serverInstanceId,
 				mediaItemId: item.id,
@@ -78,11 +92,23 @@ export async function observeServerArtworkForCoverage(input: {
 					currentBackgroundFingerprint: item.currentBackgroundFingerprint,
 					lastVerifiedAt: item.lastVerifiedAt,
 					externalArtworkChangedAt: item.externalArtworkChangedAt
-				}
+				},
+				// A fallback read here would compare the stored URL against itself and
+				// stamp a fresh `lastObservedAt` onto evidence nobody re-checked.
+				fallbackPolicy: 'skip'
 			});
+			observedSlots += result.observedSlots - result.fallbackReads;
 		} catch {
 			// Skipped, not fatal: this item keeps its old evidence and stays stale, so
 			// the next sweep tries again.
 		}
+	}
+	if (items.length > 0 && observedSlots === 0) {
+		// Every read failed or fell back, so nothing was observed at all. Throwing
+		// keeps the swept rows stale for the next pass instead of letting the
+		// reconciler present replayed evidence as freshly gathered.
+		throw new Error(
+			`Media server ${input.serverInstanceId} is unreachable: no artwork slot could be re-observed`
+		);
 	}
 }
