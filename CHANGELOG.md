@@ -2,71 +2,55 @@
 
 ## [0.11.0](https://github.com/diegopeixoto/posterpilot/compare/v0.10.0...v0.11.0) (2026-08-10)
 
+Every feature and fix below started as an issue from one person. This release is the answer to all eight of them.
 
 ### Features
 
-* add recoverable Kometa split migration ([f809bfe](https://github.com/diegopeixoto/posterpilot/commit/f809bfe3987a5c7f4e08c686acda9bdc1ab969b6))
-* add recoverable Kometa split migration ([3a7da77](https://github.com/diegopeixoto/posterpilot/commit/3a7da776c2382230509cbcab889868ea0b266511))
-* derive truthful artwork coverage from evidence ([#82](https://github.com/diegopeixoto/posterpilot/issues/82)) ([afb4b97](https://github.com/diegopeixoto/posterpilot/commit/afb4b97cbc66b1f07c933ede2fe70bb3d2d31a31))
-* enlarge any artwork candidate without staging it ([#81](https://github.com/diegopeixoto/posterpilot/issues/81)) ([aab39b5](https://github.com/diegopeixoto/posterpilot/commit/aab39b58690d66a1638fef69fb749e2d5bf6dd05))
-* order artwork providers canonically and reorder them from Provider settings ([#80](https://github.com/diegopeixoto/posterpilot/issues/80)) ([aaf0bf0](https://github.com/diegopeixoto/posterpilot/commit/aaf0bf0dc4c3ab0da573fa75ab484ca172ed1db7))
-* prefer an artwork language and load more TMDB results ([#79](https://github.com/diegopeixoto/posterpilot/issues/79)) ([286054b](https://github.com/diegopeixoto/posterpilot/commit/286054b5b5626da922707f3766ff3d64efce38be))
-* show artwork coverage without overstating it ([#83](https://github.com/diegopeixoto/posterpilot/issues/83)) ([7f8ada3](https://github.com/diegopeixoto/posterpilot/commit/7f8ada3e77bbfb2c6d50836bd48d836a382bc96a))
-
+* **Kometa files split by media type** — generated metadata is now `posterpilot-movies.yml` and `posterpilot-shows.yml`, each destination resolved from the media server's authoritative kind (TMDB for movies, TVDB for shows, canonical IMDb as fallback), with numeric mappings emitted as YAML integers the way Kometa 2.x expects. A movie and a show sharing a number can no longer collide. A guided migration moves your existing `posterpilot.yml` across: it previews what it found, classifies entries from real evidence rather than guessing, backs up every target plus `config.yml`, activates the configuration last, and can be resumed, cancelled or rolled back at any point — the legacy file is never deleted. ([#73](https://github.com/diegopeixoto/posterpilot/pull/73), [#74](https://github.com/diegopeixoto/posterpilot/pull/74))
+* **Preferred artwork language** — pick a TMDB artwork language in Settings → Providers, independent of the interface language, or let it follow the UI. Artwork TMDB marks as textless always stays available, so a preference never empties a pane of perfectly good posters, and a foreign-language poster is used only when nothing preferred exists — labelled when it happens. Each item also has an on-the-fly Preferred/All switch that leaves your global setting alone. Discovery keeps every language regardless, so changing the preference re-filters instantly instead of re-searching. ([#79](https://github.com/diegopeixoto/posterpilot/pull/79))
+* **The whole poster inventory, not the first twenty** — TMDB results were capped at 20 per artwork kind, posters and backdrops counted separately, which is where "capped at 40" came from. Ingestion now validates, de-duplicates and keeps far more, and each pane has a **load more** control reporting how many remain. Posters and backdrops load independently, and candidates you have not revealed do not download their images. ([#79](https://github.com/diegopeixoto/posterpilot/pull/79))
+* **Enlarge any candidate** — every tile has its own ⤢ control that opens the full-size artwork uncropped, with its provider, dimensions and language, and previous/next through the candidates currently on screen. It never stages anything: opening, browsing and closing leaves your staged artwork exactly as it was. Works with mouse, keyboard and touch, and returns focus to the button you opened it from. ([#81](https://github.com/diegopeixoto/posterpilot/pull/81))
+* **Artwork coverage** — the library, review and item views now report what is actually in place, per destination and per artwork slot, and both lists can be filtered by it — including **needs artwork**. Crucially, a Kometa export says exactly that and never claims artwork was applied: writing a YAML entry proves nothing about what your media server is serving. Artwork replaced outside PosterPilot gets its own state instead of looking like it was never applied, and evidence we could not verify is never reported as absence. ([#82](https://github.com/diegopeixoto/posterpilot/pull/82), [#83](https://github.com/diegopeixoto/posterpilot/pull/83))
+* **Provider order you control** — the order providers appear in was really the order their searches happened to finish. It is now the order you set in Settings → Providers, by drag handle or move buttons, and it decides which provider is presented first and breaks ties between equal scores — never overriding a better-scoring cover from further down the list. Disabled providers keep their place. ([#80](https://github.com/diegopeixoto/posterpilot/pull/80))
 
 ### Bug Fixes
 
-* accept reverse legacy TMDB variants ([eeca36d](https://github.com/diegopeixoto/posterpilot/commit/eeca36dc6d96a78aad8181458dd42cd8e6669b7d))
-* allow empty Kometa library stanzas ([525aae8](https://github.com/diegopeixoto/posterpilot/commit/525aae8384ccca257acae0e33def73cf4ee06531))
-* apply canonical original artwork safely ([37b1b99](https://github.com/diegopeixoto/posterpilot/commit/37b1b99171cafd0543c61bbd4a3052439c99fd53))
-* apply preflighted artwork bytes ([b47a060](https://github.com/diegopeixoto/posterpilot/commit/b47a0600b30b13a81e57b436c512cdb50d528011))
-* bound media item scope queries ([c261d79](https://github.com/diegopeixoto/posterpilot/commit/c261d795ab1e13a8d75d248f22a0c32cf1137309))
-* bound TMDB repair refresh and queries ([e1069db](https://github.com/diegopeixoto/posterpilot/commit/e1069db733ea37f4bb521e2668346d9740b871d4))
-* bound TMDB repair refresh and queries ([9fa5066](https://github.com/diegopeixoto/posterpilot/commit/9fa5066ceaa274221a2f3c715fd6d80aef7d9e7f))
-* canonicalize TMDB artwork in apply plans ([58f294b](https://github.com/diegopeixoto/posterpilot/commit/58f294b1e5a2ec7c89d9483c7b28d00f120c5fe1))
-* guard apply-and-next selection races ([c57dad7](https://github.com/diegopeixoto/posterpilot/commit/c57dad747c970dfc8fff8729e5f5917e96bfc8a6))
-* guard legacy apply completion by timestamp ([0ed7409](https://github.com/diegopeixoto/posterpilot/commit/0ed7409f15a225b0f634c606ae2eab76a1e3f930))
-* harden artwork redirect handling ([735a70e](https://github.com/diegopeixoto/posterpilot/commit/735a70ec2b110b09f6812eed97842baaaafb11ae))
-* harden Kometa apply safety ([a95d0ef](https://github.com/diegopeixoto/posterpilot/commit/a95d0ef200c83cdb8c23d009982f20032b65b60a))
-* harden Kometa apply safety ([7faf8df](https://github.com/diegopeixoto/posterpilot/commit/7faf8dfb47b4f646be15f61a0dfb76f5fed312fa))
-* harden Kometa migration workflow ([21efd76](https://github.com/diegopeixoto/posterpilot/commit/21efd76cad1ab8e05ca0a60f51d5508438787fd1))
-* harden legacy apply plan compatibility ([4d9f4d0](https://github.com/diegopeixoto/posterpilot/commit/4d9f4d06deb65363c4ffa6513a3c8f5c6c5240c8))
-* harden remote artwork downloads ([9166082](https://github.com/diegopeixoto/posterpilot/commit/9166082bcb352b0a6abdca7092a7519a94a0cf41))
-* harden TMDB repair and collection discovery ([799c7ed](https://github.com/diegopeixoto/posterpilot/commit/799c7edc20bbbc770248eec4ebfed6f813396ee3))
-* harden TMDB repair polling and batching ([a375115](https://github.com/diegopeixoto/posterpilot/commit/a37511591ed1feafe7a57a58d5ccab9d4af96d88))
-* keep release curation off the release branch ([#78](https://github.com/diegopeixoto/posterpilot/issues/78)) ([01f9295](https://github.com/diegopeixoto/posterpilot/commit/01f9295d4f3d627171004193d990c9a91f9d4124))
-* keep staged artwork previews consistent ([cac4fbe](https://github.com/diegopeixoto/posterpilot/commit/cac4fbe826ce873b917a6c179249ed3b078eb737))
-* keep staged artwork previews efficient ([c711311](https://github.com/diegopeixoto/posterpilot/commit/c711311f35858051ba0f1f748f91216cc542de10))
-* make TMDB resolution type-safe ([4ab8eb2](https://github.com/diegopeixoto/posterpilot/commit/4ab8eb2ea15c3f6f4648cb8047877efe86f36c8e))
-* make TMDB resolution type-safe ([8f91dde](https://github.com/diegopeixoto/posterpilot/commit/8f91dde7bcb23cd60dff5dae196d81e068e9b926))
-* match staged artwork after rediscovery ([6dc4016](https://github.com/diegopeixoto/posterpilot/commit/6dc4016b0fff6e7c8188285d091be33ae4e7e938))
-* migrate canonical artwork provenance ([0ab5702](https://github.com/diegopeixoto/posterpilot/commit/0ab5702f7800d1429656f6b12fddc86c1a685c4f))
-* preserve Emby backdrops on upload failure ([51a776d](https://github.com/diegopeixoto/posterpilot/commit/51a776d60f0007294c71dce316b3a83215f1c5d5))
-* preserve legacy v1 apply plans ([9fd2713](https://github.com/diegopeixoto/posterpilot/commit/9fd2713f962866d1ee5e67ed32883cd9905d0aa0))
-* preserve optimized staged previews ([2dd146f](https://github.com/diegopeixoto/posterpilot/commit/2dd146f55871f311192fc331dbfe66992559c19d))
-* preserve original artwork candidate assets ([f6bda22](https://github.com/diegopeixoto/posterpilot/commit/f6bda220a3688193407abcc4fc5e5dd73b69a53b))
-* preserve staged artwork provenance ([6869ce0](https://github.com/diegopeixoto/posterpilot/commit/6869ce0f647469b0e5e8d6d3d3b592f63faba758))
-* recover TMDB items and signals the strict rewrite dropped ([#86](https://github.com/diegopeixoto/posterpilot/issues/86)) ([44db159](https://github.com/diegopeixoto/posterpilot/commit/44db1599f4d72a6b4ab2f129bb3de279d4ae8980))
-* refresh TMDB repair state on visibility ([8306bdf](https://github.com/diegopeixoto/posterpilot/commit/8306bdf8289919be6f3799de44e63436f45590aa))
-* release prepared artwork after outcomes ([7ad4113](https://github.com/diegopeixoto/posterpilot/commit/7ad41132752af968211c6fecd3252b4d50740483))
-* require artwork preflight before apply ([0091133](https://github.com/diegopeixoto/posterpilot/commit/0091133fd232e1366baf0f1c83f2b1cda9756a41))
-* resolve rediscovered collection artwork ([52321c8](https://github.com/diegopeixoto/posterpilot/commit/52321c844807fc5482b3d2ba2c18b63b8c509044))
-* retain TMDB repair focus refresh ([53091b3](https://github.com/diegopeixoto/posterpilot/commit/53091b308eda34f79ed714172ae46a1f9c89112f))
-* split Kometa destinations by media type ([c41ac12](https://github.com/diegopeixoto/posterpilot/commit/c41ac122e98fcd29b9f701a3632ba78f6c6bb4eb))
-* split Kometa destinations by media type ([abe21be](https://github.com/diegopeixoto/posterpilot/commit/abe21befc1c295fe96d7a3032ffaa37e49825ef0))
-* stop artwork writes after cancellation ([6fb47a0](https://github.com/diegopeixoto/posterpilot/commit/6fb47a05362085d3c58abf9661a0873712bef438))
-* tolerate transient reads and mislabeled bytes when applying artwork ([#85](https://github.com/diegopeixoto/posterpilot/issues/85)) ([7e5676b](https://github.com/diegopeixoto/posterpilot/commit/7e5676b660a9015052edd9db07d71bb6c71c809a))
-* unblock Kometa and server-management edges the hardening left sharp ([#87](https://github.com/diegopeixoto/posterpilot/issues/87)) ([bbfc9a7](https://github.com/diegopeixoto/posterpilot/commit/bbfc9a76bd2402af043d39c8a62ec5086ceb2435))
-* use partial TMDB repair index ([a19bce3](https://github.com/diegopeixoto/posterpilot/commit/a19bce39f5ec7d09176c7da1a53a9fbfaa7d5722))
-* use revisions for apply-and-next CAS ([7fef02c](https://github.com/diegopeixoto/posterpilot/commit/7fef02c4e20d713de0748f1488b3f85bb21deacd))
-
+* TV libraries were matched against TMDB as movies on first sync, so shows resolved to whatever film shared their id — and the wrong artwork followed. Automatic matching now resolves only inside the media server's authoritative movie or TV namespace. Existing installs get a banner offering a targeted repair of just the affected titles, rather than requiring a full rescan. ([#69](https://github.com/diegopeixoto/posterpilot/pull/69))
+* Manual TMDB search stopped working after editing the year field, because a partially typed year left the form in an unrecoverable state. Year handling is numeric-or-empty now, and search failures are recoverable instead of terminal. ([#69](https://github.com/diegopeixoto/posterpilot/pull/69))
+* Downscaled preview images were written into Kometa metadata instead of the full-resolution asset. Grids browse optimized previews, but what gets applied to your server and written to Kometa is now the canonical original, verified byte-for-byte. ([#72](https://github.com/diegopeixoto/posterpilot/pull/72))
+* Staged selections could be lost when discovery re-ran underneath them, and an apply could write over artwork it had not actually verified. Selections now survive rediscovery, and a write refuses when the destination could not be read at all. ([#72](https://github.com/diegopeixoto/posterpilot/pull/72), [#85](https://github.com/diegopeixoto/posterpilot/pull/85))
+* Images served with a missing or unusual `Content-Type` — common on home servers and S3-compatible storage — were rejected outright. The declared type is still trusted when it is a known image type; anything else is identified from the file's own bytes. ([#85](https://github.com/diegopeixoto/posterpilot/pull/85))
 
 ### Under the hood
 
-* capture TMDB repair hardening ([1dffddb](https://github.com/diegopeixoto/posterpilot/commit/1dffddbf35e9700f7174738e8b7e4b31666fe560))
-* complete TMDB repair hardening ([62a4173](https://github.com/diegopeixoto/posterpilot/commit/62a41733c1f1b45721e26061bb130eb3c0a8bedb))
-* document the artwork workflow and refresh the screenshots ([#84](https://github.com/diegopeixoto/posterpilot/issues/84)) ([9345e83](https://github.com/diegopeixoto/posterpilot/commit/9345e832c119bd234cbeeae510cf788ce26ee613))
-* plan artwork workflow issue resolution ([87cd64a](https://github.com/diegopeixoto/posterpilot/commit/87cd64acd6b150eee4b4dace4f27241495097154))
+* A component test layer running in a real browser, alongside the existing unit and end-to-end suites, because focus handling, live regions and pointer capture are exactly what an emulated DOM models least faithfully. It has already caught two focus bugs that unit tests could not see. ([#80](https://github.com/diegopeixoto/posterpilot/pull/80), [#83](https://github.com/diegopeixoto/posterpilot/pull/83))
+* Documentation for everything above in all six languages, and every documentation screenshot is now reproducible from one command instead of being captured by hand. ([#84](https://github.com/diegopeixoto/posterpilot/pull/84))
+* Kometa metadata with a hand-edited typo in a slot value no longer fails every export and apply for that entry, collection discovery survives a member deleted mid-request, and TMDB ids filed under the other namespace resolve again. ([#86](https://github.com/diegopeixoto/posterpilot/pull/86), [#87](https://github.com/diegopeixoto/posterpilot/pull/87))
+
+### Upgrading
+
+* **Back up your `data/` directory before upgrading.** Four database migrations run on first start. They are additive — nothing is rewritten or deleted — but there is no downgrade path.
+* **Kometa users: your metadata moves to two files.** `posterpilot.yml` is replaced by `posterpilot-movies.yml` and `posterpilot-shows.yml`. The migration is guided and reversible, it backs up your existing files and `config.yml` first, and it never deletes the legacy file. Nothing changes until you run it.
+* Artwork coverage starts empty and fills in as titles are synced, applied, or opened — the upgrade deliberately does not guess coverage for artwork applied before it existed.
+* No configuration is required. The new artwork-language preference defaults to every language, which is exactly how browsing behaved before.
+
+### Contributors
+
+This release exists because of [@lishremix](https://github.com/lishremix), who filed all eight issues it closes — and did both halves of the work that makes an issue useful.
+
+**Found the bugs**, with enough detail to reproduce them:
+
+* TV libraries resolving against TMDB as movies on first sync, which quietly attached the wrong artwork to entire show libraries ([#64](https://github.com/diegopeixoto/posterpilot/issues/64))
+* manual TMDB search dying after the year field was edited ([#61](https://github.com/diegopeixoto/posterpilot/issues/61))
+* downscaled preview images being written into Kometa metadata instead of the full-size asset ([#63](https://github.com/diegopeixoto/posterpilot/issues/63))
+
+**Asked for the features**, and framed them well enough to shape how they were built:
+
+* a preferred TMDB artwork language, including the "unless there is no poster in my language" exception that became the labelled fallback ([#62](https://github.com/diegopeixoto/posterpilot/issues/62))
+* more than the first page of TMDB results — and the observation that the cap hurt *because* language could not be filtered, which is why both shipped together ([#68](https://github.com/diegopeixoto/posterpilot/issues/68))
+* splitting Kometa metadata by media type ([#66](https://github.com/diegopeixoto/posterpilot/issues/66))
+* a quick way to enlarge a poster before choosing it ([#65](https://github.com/diegopeixoto/posterpilot/issues/65))
+* somewhere to see what artwork has actually been set across servers and libraries ([#67](https://github.com/diegopeixoto/posterpilot/issues/67))
 
 ## [0.10.0](https://github.com/diegopeixoto/posterpilot/compare/v0.9.0...v0.10.0) (2026-07-26)
 
