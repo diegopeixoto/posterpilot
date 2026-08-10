@@ -47,6 +47,32 @@ const LEASE_MS = 30_000;
 const HEARTBEAT_MS = 10_000;
 const MAX_ATTEMPTS_LIMIT = 10;
 
+/**
+ * How long an attempt may go without any observable progress — no phase, total,
+ * progress, or outcome write — before it is treated as stuck.
+ *
+ * The lease only proves the *process* is alive: the heartbeat renews it on a
+ * timer whether or not the task advances, so a live-but-hung task would hold
+ * the single worker and stay `running` forever (#91). Every legitimate silent
+ * stretch (a whole-library read, one artwork transfer) is bounded well below
+ * this by its own request timeout; fifteen minutes of total silence is a hang.
+ */
+const STALL_TIMEOUT_MS = 15 * 60_000;
+let stallTimeoutMs = STALL_TIMEOUT_MS;
+
+/** Test-only override; pass null to restore the production window. */
+export function setJobStallTimeoutForTests(ms: number | null): void {
+	stallTimeoutMs = ms ?? STALL_TIMEOUT_MS;
+}
+
+class JobStallError extends Error {
+	readonly code = 'job_attempt_stalled';
+	constructor() {
+		super('Job attempt made no observable progress within the stall window');
+		this.name = 'JobStallError';
+	}
+}
+
 const cancelled = new Set<number>();
 const drainWaiters = new Set<() => void>();
 let working = false;
@@ -303,6 +329,12 @@ async function claimNextJob(): Promise<{ job: JobRow; attempt: AttemptRow } | nu
 			attempt: sql`${jobs.attempt} + 1`,
 			startedAt: candidate.startedAt ?? claimedAt,
 			finishedAt: null,
+			// The previous attempt's failure is its attempt row's record, not this
+			// one's: leaving it here renders as "running, with an error" and reads
+			// as a wedged worker (#91).
+			error: null,
+			errorCode: null,
+			result: null,
 			leaseOwner: WORKER_ID,
 			leaseExpiresAt,
 			updatedAt: claimedAt
@@ -589,6 +621,14 @@ async function scheduleRetry(
 async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<void> {
 	const { job, attempt } = entry;
 	const payload = job.payload as unknown as JobPayload;
+	// Stall watchdog state. `touch()` marks observable progress; the watchdog
+	// below turns a long silence into a normal retryable failure, and `stalled`
+	// tells the abandoned task to stop at its next cancellation checkpoint.
+	let lastActivityAt = Date.now();
+	let stalled = false;
+	const touch = () => {
+		lastActivityAt = Date.now();
+	};
 	let heartbeatBusy = false;
 	const heartbeatTimer = setInterval(() => {
 		if (heartbeatBusy) return;
@@ -604,8 +644,9 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 
 	const ctx: JobContext = {
 		jobId: job.id,
-		isCancelled: () => cancelled.has(job.id),
+		isCancelled: () => stalled || cancelled.has(job.id),
 		setPhase: async (phase) => {
+			touch();
 			const normalized = phase
 				? phase
 						.toLowerCase()
@@ -620,6 +661,7 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 			await emit(job.id);
 		},
 		setTotal: async (total) => {
+			touch();
 			if (!Number.isSafeInteger(total) || total < 0) throw new RangeError('job_total_invalid');
 			await db
 				.update(jobs)
@@ -629,6 +671,7 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 			await emit(job.id);
 		},
 		progress: async (processed, currentItem) => {
+			touch();
 			if (!Number.isSafeInteger(processed) || processed < 0) {
 				throw new RangeError('job_progress_invalid');
 			}
@@ -643,23 +686,48 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 			await heartbeat(job.id);
 			await emit(job.id);
 		},
-		recordOutcome: (outcome) => insertOutcome(job, attempt, outcome)
+		recordOutcome: (outcome) => {
+			touch();
+			return insertOutcome(job, attempt, outcome);
+		}
 	};
+
+	// The watchdog settles the attempt when the task itself never will: a task
+	// hung on an await that never resolves keeps the heartbeat (and therefore
+	// the lease) alive forever, so without this the job would sit `running`
+	// until the next restart. Losing the race abandons the task promise; the
+	// `stalled` flag stops it at its next cancellation checkpoint, and the
+	// lease-owner guards on every context write make its late writes no-ops.
+	let stallReject: ((error: Error) => void) | undefined;
+	const stallPromise = new Promise<never>((_resolve, reject) => {
+		stallReject = reject;
+	});
+	// Pre-observed so a stall firing after the race already settled cannot
+	// become an unhandled rejection.
+	stallPromise.catch(() => undefined);
+	const stallTimer = setInterval(
+		() => {
+			if (stalled || Date.now() - lastActivityAt <= stallTimeoutMs) return;
+			stalled = true;
+			stallReject?.(new JobStallError());
+		},
+		Math.min(HEARTBEAT_MS, Math.max(25, Math.floor(stallTimeoutMs / 4)))
+	);
+	(stallTimer as unknown as { unref?: () => void }).unref?.();
 
 	try {
 		validatePayload(payload);
-		let taskResult: WorkerTaskResult | undefined;
-		if (payload.kind === 'sync') taskResult = await runSyncJob(ctx, payload);
-		else if (payload.kind === 'tmdb_repair') taskResult = await runTmdbRepairJob(ctx, payload);
-		else if (payload.kind === 'discover') taskResult = await runDiscoverJob(ctx, payload);
-		else if (payload.kind === 'automation') {
-			taskResult = await runAutomationJob(ctx, payload);
-		} else if (payload.kind === 'undo') {
-			taskResult = await runUndoJob(ctx, payload);
-		} else {
-			taskResult = await runApplyJob(ctx, payload);
-			await persistApplyOutcomes(job, attempt, taskResult);
-		}
+		const execute = async (): Promise<WorkerTaskResult | undefined> => {
+			if (payload.kind === 'sync') return runSyncJob(ctx, payload);
+			if (payload.kind === 'tmdb_repair') return runTmdbRepairJob(ctx, payload);
+			if (payload.kind === 'discover') return runDiscoverJob(ctx, payload);
+			if (payload.kind === 'automation') return runAutomationJob(ctx, payload);
+			if (payload.kind === 'undo') return runUndoJob(ctx, payload);
+			const applied = await runApplyJob(ctx, payload);
+			await persistApplyOutcomes(job, attempt, applied);
+			return applied;
+		};
+		const taskResult: WorkerTaskResult | undefined = await Promise.race([execute(), stallPromise]);
 
 		if (payload.kind === 'sync' && !cancelled.has(job.id)) {
 			const events = (taskResult as JobTaskResult | undefined)?.automationEvents;
@@ -737,6 +805,7 @@ async function runClaimed(entry: { job: JobRow; attempt: AttemptRow }): Promise<
 			);
 		}
 	} finally {
+		clearInterval(stallTimer);
 		clearInterval(heartbeatTimer);
 		cancelled.delete(job.id);
 	}

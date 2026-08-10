@@ -112,12 +112,25 @@ function normalizeBase(baseUrl: string): string {
 	return baseUrl.replace(/\/+$/, '');
 }
 
+/**
+ * Per-attempt timeout for library reads.
+ *
+ * `/library/sections/{id}/all` scans the whole section server-side and takes
+ * ~30s+ on libraries of a few thousand items — real deployments have verified
+ * ~30-34s with plain curl. The shared HTTP default of 20s sits *below* that,
+ * which made every sync against such a section abort, retry into the same
+ * wall, and fail without ever being able to succeed (#91). Generous on
+ * purpose: these calls run inside background jobs, never request handlers.
+ */
+const LIBRARY_READ_TIMEOUT_MS = 120_000;
+
 /** Read-only GET against the Plex API. Caching is disabled (dynamic data). */
 async function getContainer<T>(baseUrl: string, token: string, path: string): Promise<T> {
 	const res = await fetchJson<PlexResponse<T>>(`${normalizeBase(baseUrl)}${path}`, {
 		headers: plexHeaders(token),
 		cacheTtlDays: 0,
-		retries: 1
+		retries: 1,
+		timeoutMs: LIBRARY_READ_TIMEOUT_MS
 	});
 	return res.MediaContainer;
 }

@@ -173,9 +173,13 @@ export function embyLikeProvider(
 	let cachedLibraryUserId: string | null | undefined;
 
 	// Every request aborts instead of hanging a worker when the server stalls
-	// mid-connection: metadata reads get the readCurrentArtwork budget, image
-	// transfers get a larger one for big files on slow links.
-	const JSON_TIMEOUT_MS = 15_000;
+	// mid-connection: image transfers get a budget sized for big files on slow
+	// links, and JSON reads a generous one because a whole-library item listing
+	// legitimately takes 30s+ on sections of a few thousand items (#91) — a
+	// timeout below the server's real response time makes sync permanently
+	// unable to succeed, not merely slow. These calls run inside background
+	// jobs, never request handlers.
+	const JSON_TIMEOUT_MS = 120_000;
 	const IMAGE_TIMEOUT_MS = 30_000;
 	const MAX_REMOTE_ARTWORK_BYTES = 50 * 1024 * 1024;
 
