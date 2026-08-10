@@ -48,7 +48,8 @@ import {
 import {
 	planKometaMigrationConfig,
 	type AuthoritativeKometaLibrary,
-	type KometaMigrationConfigPlan
+	type KometaMigrationConfigPlan,
+	type KometaMigrationIncompatibilityDetail
 } from './migration-config';
 import {
 	loadKometaMigrationEvidence,
@@ -130,7 +131,11 @@ export type KometaMigrationServiceErrorCode =
 	| 'kometa_server_binding_unavailable';
 
 export class KometaMigrationServiceError extends Error {
-	constructor(readonly code: KometaMigrationServiceErrorCode) {
+	constructor(
+		readonly code: KometaMigrationServiceErrorCode,
+		/** Library-attributed obstacles, so the UI can say which and why. */
+		readonly incompatibilities?: readonly KometaMigrationIncompatibilityDetail[]
+	) {
 		super(code);
 		this.name = 'KometaMigrationServiceError';
 	}
@@ -640,8 +645,33 @@ function configTarget(
 
 function assertMigrationConfigActionable(configPlan: KometaMigrationConfigPlan): void {
 	if (!configPlan.manualWiringActionable) {
-		throw new KometaMigrationServiceError('kometa_migration_config_incompatible');
+		throw new KometaMigrationServiceError(
+			'kometa_migration_config_incompatible',
+			migrationIncompatibilityDetails(configPlan)
+		);
 	}
+}
+
+/**
+ * Collapse the plan's library-attributed obstacles into one bounded list. The
+ * plan already knows exactly which library failed and why; without this the
+ * banner can only show a generic paragraph about causes the user may not have.
+ */
+function migrationIncompatibilityDetails(
+	configPlan: KometaMigrationConfigPlan
+): KometaMigrationIncompatibilityDetail[] {
+	const details: KometaMigrationIncompatibilityDetail[] = configPlan.incompatibleLibraries.map(
+		(entry) => ({ library: entry.library, reason: entry.reason, suggestion: entry.suggestion })
+	);
+	const seen = new Set(details.map((detail) => `${detail.library}\u0000${detail.reason}`));
+	for (const reason of configPlan.reasons) {
+		if (!reason.library) continue;
+		const key = `${reason.library}\u0000${reason.code}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		details.push({ library: reason.library, reason: reason.code });
+	}
+	return details.slice(0, 20);
 }
 
 function conflictDisplays(

@@ -54,7 +54,6 @@ export interface PlanKometaMigrationConfigInput {
 export type KometaMigrationConfigReasonCode =
 	| 'conflicting_authoritative_types'
 	| 'config_limit_exceeded'
-	| 'duplicate_legacy_reference'
 	| 'invalid_yaml'
 	| 'missing_typed_reference'
 	| 'no_authoritative_libraries'
@@ -81,6 +80,18 @@ export type KometaMigrationConfigIncompatibilityReason =
 export interface KometaMigrationConfigIncompatibility {
 	library: string;
 	reason: KometaMigrationConfigIncompatibilityReason;
+	/** Synced section titles that differ only by accents/case, for `unknown_library`. */
+	suggestion?: string;
+}
+
+/**
+ * One library-attributed obstacle, surfaced verbatim to the UI so the banner
+ * can say *which* library and *why* instead of a generic paragraph.
+ */
+export interface KometaMigrationIncompatibilityDetail {
+	library: string;
+	reason: KometaMigrationConfigReasonCode;
+	suggestion?: string;
 }
 
 /** Public preview entry. The legacy path is reduced to its non-sensitive basename. */
@@ -119,8 +130,13 @@ interface LegacyReference {
 	library: string;
 	reference: string;
 	node: Scalar;
+	/** The metadata_files sequence and this reference's entry, for removing duplicates. */
+	container: YAMLSeq;
+	entry: YAMLMap;
 	type: KometaMediaKind | null;
 	targetReference: string | null;
+	/** Another reference in the same library is the rewrite target; this one is removed. */
+	duplicate: boolean;
 }
 
 interface LibraryScan {
@@ -196,6 +212,33 @@ function hasRelevantIndirection(root: YAMLMap, librariesNode: unknown): boolean 
 		}
 	}
 	return false;
+}
+
+/** Accent- and case-insensitive fold, for suggesting near-miss section names. */
+function foldTitle(value: string): string {
+	return value
+		.normalize('NFD')
+		.replace(/\p{M}+/gu, '')
+		.toLowerCase()
+		.trim();
+}
+
+/**
+ * Synced section titles that plausibly correspond to an unmatched config
+ * library name: equal after folding, or containing/contained by it. Matching is
+ * deliberately loose — this is a hint for a human, never used to migrate.
+ */
+function suggestSections(library: string, titles: Iterable<string>): string | undefined {
+	const folded = foldTitle(library);
+	if (!folded) return undefined;
+	const matches: string[] = [];
+	for (const title of titles) {
+		const candidate = foldTitle(title);
+		if (candidate === folded || candidate.includes(folded) || folded.includes(candidate)) {
+			matches.push(title);
+		}
+	}
+	return matches.length > 0 && matches.length <= 3 ? matches.join(', ') : undefined;
 }
 
 function resolveAuthoritativeLibraries(libraries: readonly AuthoritativeKometaLibrary[]): {
@@ -404,7 +447,16 @@ function scanMetadataFiles(
 		}
 		const reference = fileNode.value;
 		if (isLegacyKometaMetadataReference(reference)) {
-			legacy.push({ library, reference, node: fileNode, type, targetReference });
+			legacy.push({
+				library,
+				reference,
+				node: fileNode,
+				container: node,
+				entry: item,
+				type,
+				targetReference,
+				duplicate: false
+			});
 		} else if (typedBasename(reference)) {
 			typedReferences.push(reference);
 		}
@@ -563,7 +615,11 @@ export function planKometaMigrationConfig(
 		const authoritativeType = authoritative.byTitle.get(library);
 		if (authoritativeType === undefined) {
 			reasons.push({ code: 'unknown_library', library });
-			incompatible.push({ library, reason: 'unknown_library' });
+			incompatible.push({
+				library,
+				reason: 'unknown_library',
+				suggestion: suggestSections(library, authoritative.byTitle.keys())
+			});
 		} else if (authoritativeType === null) {
 			const conflict = authoritative.incompatible.find((entry) => entry.library === library);
 			reasons.push({
@@ -574,20 +630,31 @@ export function planKometaMigrationConfig(
 				library
 			});
 		}
-		if (referencesForLibrary.length !== 1) {
-			reasons.push({ code: 'duplicate_legacy_reference', library });
-		}
 		if ((typedReferencesByLibrary.get(library)?.length ?? 0) > 0) {
 			reasons.push({ code: 'typed_reference_conflict', library });
 		}
+		// Multiple references in one library all name the same legacy file (the
+		// match is by basename), so instead of blocking, the rewrite keeps one —
+		// the owned entry under merge, else the one already at the configured
+		// prefix, else the first — and removes the rest. The preview diff shows
+		// every removal before anything is written.
+		const owned = input.mode === 'merge' ? ownedMetadataReference(input.snapshot, library) : null;
 		if (input.mode === 'merge') {
-			const owned = ownedMetadataReference(input.snapshot, library);
-			if (
-				referencesForLibrary.length !== 1 ||
-				!isLegacyKometaMetadataReference(owned) ||
-				owned !== referencesForLibrary[0].reference
-			) {
+			const ownedMatches =
+				isLegacyKometaMetadataReference(owned) &&
+				referencesForLibrary.some((reference) => reference.reference === owned);
+			if (!ownedMatches) {
 				reasons.push({ code: 'unowned_legacy_reference', library });
+			}
+		}
+		if (referencesForLibrary.length > 1) {
+			const expectedLegacy = kometaMetadataReference(metadataPathPrefix, LEGACY_FILENAME);
+			const primary =
+				(owned ? referencesForLibrary.find((entry) => entry.reference === owned) : undefined) ??
+				referencesForLibrary.find((entry) => entry.reference === expectedLegacy) ??
+				referencesForLibrary[0];
+			for (const entry of referencesForLibrary) {
+				if (entry !== primary) entry.duplicate = true;
 			}
 		}
 	}
@@ -639,6 +706,13 @@ export function planKometaMigrationConfig(
 	for (const reference of legacy) {
 		if (!reference.type || !reference.targetReference) {
 			throw new TypeError('Validated Kometa migration reference lost its authoritative type');
+		}
+		if (reference.duplicate) {
+			// A second entry for the same legacy file: rewriting it too would leave
+			// two identical typed entries, so it is removed outright.
+			const index = reference.container.items.indexOf(reference.entry);
+			if (index >= 0) reference.container.items.splice(index, 1);
+			continue;
 		}
 		reference.node.value = reference.targetReference;
 		changes.push({

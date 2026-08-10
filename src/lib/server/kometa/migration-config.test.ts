@@ -42,6 +42,60 @@ function input(
 }
 
 describe('planKometaMigrationConfig — managed activation', () => {
+	it('collapses duplicate legacy references into one typed entry', () => {
+		// Both entries name the same file (matching is by basename); blocking on
+		// the duplicate used to force manual wiring for a config Kometa itself
+		// tolerates. The rewrite keeps the owned entry and removes the extra.
+		const rawConfig = `libraries:
+  Movies:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+      - file: ${LEGACY_FILENAME}
+`;
+		const result = planKometaMigrationConfig(input({ rawConfig }));
+
+		expect(result.activation).toBe('managed');
+		expect(result.reasons).toEqual([]);
+		const proposed = parse(result.proposedContent ?? '') as {
+			libraries: { Movies: { metadata_files: unknown } };
+		};
+		expect(proposed.libraries.Movies.metadata_files).toEqual([{ file: REFERENCES.movie }]);
+		expect(result.changes).toEqual([
+			{
+				library: 'Movies',
+				mediaKind: 'movie',
+				before: [LEGACY_FILENAME],
+				after: REFERENCES.movie
+			}
+		]);
+		expect(result.legacyReferenceCount).toBe(2);
+	});
+
+	it('suggests near-miss synced sections for an unknown library', () => {
+		const rawConfig = `libraries:
+  Documentarios:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+`;
+		const result = planKometaMigrationConfig(
+			input({
+				rawConfig,
+				snapshot: null,
+				libraries: [
+					{ title: 'Documentários Filmes', type: 'movie' },
+					{ title: 'Documentarios Seriados', type: 'show' }
+				]
+			})
+		);
+
+		expect(result.manualWiringActionable).toBe(false);
+		expect(result.incompatibleLibraries).toContainEqual({
+			library: 'Documentarios',
+			reason: 'unknown_library',
+			suggestion: 'Documentários Filmes, Documentarios Seriados'
+		});
+	});
+
 	it('rewires exact merge-owned movie and show references by authoritative type', () => {
 		const rawConfig = `# keep root comment
 libraries:
@@ -363,7 +417,8 @@ libraries:
 		expect(result.reasons).toContainEqual({ code: 'unknown_library', library: 'Movies 4K' });
 		expect(result.incompatibleLibraries).toContainEqual({
 			library: 'Movies 4K',
-			reason: 'unknown_library'
+			reason: 'unknown_library',
+			suggestion: 'Movies'
 		});
 		expect(result.manualWiringActionable).toBe(false);
 	});

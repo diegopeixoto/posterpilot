@@ -167,7 +167,15 @@ export function kometaMigrationApiError(error: unknown): Response {
 				: error.code === 'kometa_server_binding_unavailable'
 					? 503
 					: 409;
-		return migrationJson({ error: { code: error.code } }, status);
+		return migrationJson(
+			{
+				error: {
+					code: error.code,
+					...(error.incompatibilities?.length ? { incompatibilities: error.incompatibilities } : {})
+				}
+			},
+			status
+		);
 	}
 	if (
 		error instanceof LegacyMetadataParseError ||
