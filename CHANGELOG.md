@@ -2,21 +2,30 @@
 
 ## [0.12.0](https://github.com/diegopeixoto/posterpilot/compare/v0.11.0...v0.12.0) (2026-08-10)
 
+Two things that stopped people cold: a first sync that never finished on a large library, and a migration banner that told you to fix something your config never had.
 
 ### Features
 
-* name each obstacle in the Kometa migration banner and absorb duplicates ([#93](https://github.com/diegopeixoto/posterpilot/issues/93)) ([e66cd89](https://github.com/diegopeixoto/posterpilot/commit/e66cd8995b36e56edcc012a388c9bfb5ac8e6485))
-
+* **The Kometa migration banner now names what is actually blocking it.** It used to print one generic error suggesting you remove YAML aliases and merge keys — often from a config containing neither — while the real obstacles were computed and then discarded. Every obstacle is now listed against the library it belongs to: a `libraries:` key matching no synced section comes with a suggestion drawn from your actual section titles (`"Documentarios" does not match any synced section. Similar synced sections: Documentários Filmes, Documentarios Seriados.`), and conflicting types, unsupported types, unowned references and unclassifiable entries each say what they are, in all six languages. The same legacy file listed twice under `metadata_files` is now a fix rather than a dead end: repeats that are provably the same file are collapsed to one entry, while two *different* paths are never merged silently — they are proposed for removal, listed exactly as written, behind their own confirmation checkbox. ([#93](https://github.com/diegopeixoto/posterpilot/pull/93))
 
 ### Bug Fixes
 
-* survive slow library reads and stalled job attempts ([#92](https://github.com/diegopeixoto/posterpilot/issues/92)) ([473fc9c](https://github.com/diegopeixoto/posterpilot/commit/473fc9cd247b90eb9e97f6d3d3801754033329a1))
-
+* **A large library no longer makes the first sync impossible.** On a Plex section big enough that reading it takes ~30 seconds, every read was abandoned at 20 seconds and retried, three attempts stacking into a 125-second failure that could never have succeeded — no attempt was ever allowed to outlive the server's real response. Library reads now get a 120-second budget per attempt on Plex, Jellyfin and Emby, so a section that answers in half a minute succeeds on the first try. ([#92](https://github.com/diegopeixoto/posterpilot/pull/92))
+* **A sync can no longer sit in `running` forever.** A task that hung stayed alive: the heartbeat renewed its lease on a timer whether or not the work advanced, so the lease never expired, recovery never fired, and the only cure was restarting the container. Fifteen minutes with no observable progress now fails the attempt through the normal retry path and stops the abandoned task at its next checkpoint. ([#92](https://github.com/diegopeixoto/posterpilot/pull/92))
+* **A retried job no longer shows the previous attempt's error.** A job that was re-claimed kept the old failure text in its row, so a healthy retry looked like a wedged worker. The failure now stays on the attempt it belongs to. ([#92](https://github.com/diegopeixoto/posterpilot/pull/92))
 
 ### Under the hood
 
-* refresh README screenshots and cover 0.11.0 features ([#94](https://github.com/diegopeixoto/posterpilot/issues/94)) ([9ad786b](https://github.com/diegopeixoto/posterpilot/commit/9ad786ba09c3b347232bce2d6fa533f3dbef7260))
-* write 0.11.0 release notes ([#89](https://github.com/diegopeixoto/posterpilot/issues/89)) ([8816455](https://github.com/diegopeixoto/posterpilot/commit/88164553bf1ce73ef7b7b339ab3bf624b2c7d67c))
+* The README now shows what the app actually does — four screenshots taken from a populated library instead of two, covering the enlarged preview and artwork coverage — and its screenshots are refreshed by the same one command as the documentation images rather than by hand. The 0.11.0 release notes were also written into `CHANGELOG.md`. ([#89](https://github.com/diegopeixoto/posterpilot/pull/89), [#94](https://github.com/diegopeixoto/posterpilot/pull/94))
+
+### Upgrading
+
+* No database migrations and no configuration changes.
+* Library reads now wait up to 120 seconds per attempt instead of 20. A genuinely unreachable server therefore takes longer to report failure than it did before — that is the trade for large libraries being able to sync at all. These reads only happen inside background jobs, never while you are waiting on a page.
+
+### Contributors
+
+* [@ThibaultTourailles](https://github.com/ThibaultTourailles) reported [#91](https://github.com/diegopeixoto/posterpilot/issues/91) with the kind of detail that made it fixable rather than guessable: `curl` timings taken independently of the app, the same failure isolated to a single 3,054-item section, and the observation that the 125-second failures landed on the second every time. Both halves of that report — the stacked retries and the job stuck in `running` — are fixed here.
 
 ## [0.11.0](https://github.com/diegopeixoto/posterpilot/compare/v0.10.0...v0.11.0) (2026-08-10)
 
