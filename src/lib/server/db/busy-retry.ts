@@ -16,30 +16,57 @@ import type { Client, InArgs, InStatement, ResultSet, TransactionMode } from '@l
  * would replay statements chosen against state that may no longer hold.
  */
 
-const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = 8;
 const INITIAL_DELAY_MS = 40;
+const MAX_DELAY_MS = 500;
 
 // libsql's LibsqlError carries a machine-readable `code` — "SQLITE_BUSY", or an extended
-// variant such as "SQLITE_BUSY_SNAPSHOT" — so prefer that, and fall back to the canonical
-// "database is locked" message for errors that arrive without a code.
-function isBusyError(error: unknown): boolean {
+// variant such as "SQLITE_BUSY_SNAPSHOT" — so prefer that when it says something.
+//
+// It is not always populated: a connection that cannot be opened arrives as `code: ''`
+// with the reason only in the message (`ConnectionFailed("Unable to open connection to
+// local database …: 14")`, 14 being SQLITE_CANTOPEN). An empty code therefore has to fall
+// through to the message rather than be trusted as "not contention" — reading it as a
+// code is how such a failure bypassed this retry entirely and surfaced as an HTTP 500.
+//
+// SQLITE_CANTOPEN is treated as retryable for the same reason SQLITE_BUSY is: under a
+// write burst it is transient, driven by descriptor pressure or a database momentarily
+// locked against opening, and a retry costs a few hundred milliseconds against a request
+// that would otherwise fail outright.
+const TRANSIENT_MESSAGE_PATTERNS = [
+	'database is locked',
+	'database table is locked',
+	'unable to open connection',
+	'unable to open database'
+];
+
+function isTransientError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
 	const code = (error as { code?: unknown }).code;
-	if (typeof code === 'string') return code.startsWith('SQLITE_BUSY');
-	return error.message.includes('database is locked');
+	if (typeof code === 'string' && code !== '') {
+		return (
+			code.startsWith('SQLITE_BUSY') ||
+			code.startsWith('SQLITE_LOCKED') ||
+			code === 'SQLITE_CANTOPEN'
+		);
+	}
+	const message = error.message.toLowerCase();
+	return TRANSIENT_MESSAGE_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
-// Deterministic exponential backoff: 40, 80, 160, 320ms — 600ms worst case before the
-// final busy error is rethrown. Non-busy errors rethrow immediately.
+// Deterministic exponential backoff capped at 500ms: 40, 80, 160, 320, 500, 500, 500 —
+// about 2.1s worst case before the final error is rethrown. The cap keeps a request from
+// hanging on a long backoff while still spanning a sync's write burst, which the previous
+// 600ms budget did not. Non-transient errors rethrow immediately.
 async function retryOnBusy<T>(run: () => Promise<T>): Promise<T> {
 	let delay = INITIAL_DELAY_MS;
 	for (let attempt = 1; ; attempt++) {
 		try {
 			return await run();
 		} catch (error) {
-			if (attempt >= MAX_ATTEMPTS || !isBusyError(error)) throw error;
+			if (attempt >= MAX_ATTEMPTS || !isTransientError(error)) throw error;
 			await new Promise((resolve) => setTimeout(resolve, delay));
-			delay *= 2;
+			delay = Math.min(delay * 2, MAX_DELAY_MS);
 		}
 	}
 }
