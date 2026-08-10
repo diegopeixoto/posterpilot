@@ -1,6 +1,6 @@
 ---
 title: Utilisation
-description: Lancez l'assistant de configuration, synchronisez une médiathèque, trouvez des visuels chez plusieurs fournisseurs, appliquez-les via l'API du serveur multimédia ou l'export Kometa, composez des sets personnalisés, filtrez et triez la médiathèque, et consultez le journal d'activité.
+description: Lancez l'assistant de configuration, synchronisez une médiathèque, réparez les correspondances TMDB, trouvez des visuels chez plusieurs fournisseurs, appliquez-les via l'API du serveur multimédia ou l'export Kometa, lisez la couverture des visuels, composez des sets personnalisés, filtrez et triez la médiathèque, et consultez le journal d'activité.
 ---
 
 Cette page décrit le flux de travail quotidien une fois PosterPilot
@@ -71,8 +71,14 @@ Les synchronisations suivantes sont **incrémentales** par défaut : PosterPilot
 compare chaque élément à l'horodatage de dernière modification du serveur
 multimédia et ne re-résout et n'enrichit à nouveau que ceux qui ont changé depuis
 la synchronisation précédente ; une réanalyse de routine est donc bien plus
-rapide que la première. Une **réanalyse complète**, qui retraite tout, reste
-disponible, et vous pouvez désactiver entièrement la synchronisation incrémentale
+rapide que la première. Une catégorie d'éléments est délibérément exemptée de ce
+saut : un élément dont l'identité TMDB stockée contredit le type film/série que
+le serveur multimédia attribue lui-même à cet élément est toujours retraité, si
+bien qu'une incohérence ancienne ne peut pas survivre indéfiniment aux
+synchronisations incrémentales (voir
+[Corriger une correspondance TMDB](#corriger-une-correspondance-tmdb)). Une
+**Réanalyse complète**, qui retraite tout, reste disponible depuis le tableau de
+bord, et vous pouvez désactiver entièrement la synchronisation incrémentale
 (voir
 [Configuration → Performances et réglages](/posterpilot/fr/configuration/)).
 
@@ -83,7 +89,10 @@ actionnables pour les éléments nouveaux, non résolus, sans candidat, avec
 suggestion prête, préparés, en échec partiel, modifiés en externe, ignorés et
 terminés. Filtrez par serveur/médiathèque/type/état/fournisseur, recherchez,
 choisissez un tri déterministe, ou enregistrez le filtre courant comme vue
-nommée.
+nommée. Un filtre de [couverture des visuels](#couverture-des-visuels) distinct
+est placé à côté du filtre d'état et répond à une autre question : l'_état_ dit
+où vous en êtes dans votre flux de travail, la _couverture_ dit ce qui s'est
+réellement passé à une destination.
 
 Ouvrir un élément préserve le contexte de la révision et propose une navigation
 précédent, suivant et retour. Comparez les visuels actuels, suggérés et préparés
@@ -100,12 +109,121 @@ de la tâche et l'action de nouvelle tentative.
 
 ## Corriger une correspondance TMDB
 
+Tout ce qui suit — quels visuels sont seulement recherchés, quelle entrée Kometa
+est écrite, comment deux copies d'un même titre sont reconnues comme le même
+titre — dépend de l'identité TMDB que PosterPilot a résolue pour un élément.
+Cette section explique comment obtenir la bonne identité, et comment la réparer
+lorsqu'elle est fausse.
+
+### La résolution automatique reste dans le bon espace de noms
+
+TMDB numérote les films et les séries indépendamment : le film `105` et la série
+`105` sont deux titres sans aucun rapport. Le serveur multimédia sait déjà lequel
+des deux est un élément donné ; PosterPilot considère cette information comme
+faisant autorité et ne résout **qu'à l'intérieur de cet espace de noms**.
+
+- Les GUID portés par un élément sont essayés selon une précédence fixe : d'abord
+  un identifiant TMDB direct, puis IMDb, puis TVDB.
+- Un identifiant TMDB direct est validé en le relisant depuis le point de
+  terminaison attendu — une série est cherchée comme série, un film comme film.
+  Un identifiant qui n'existe que dans l'autre espace de noms ne résout pas.
+- Un identifiant IMDb ou TVDB passe par le point de terminaison `find` de TMDB,
+  et seul le lot de résultats correspondant est accepté : les résultats séries
+  pour une série, les résultats films pour un film. Une correspondance trouvée
+  dans l'autre lot est écartée plutôt qu'empruntée.
+
+Concrètement, une médiathèque de séries ne peut plus être résolue vers des films.
+Une réponse « pas dans cet espace de noms » de la part de TMDB laisse l'élément
+**non résolu**, ce qui n'est pas le même résultat qu'un échec réseau ou
+d'identifiants : ce dernier laisse l'élément non résolu _et_ non synchronisé, si
+bien que la synchronisation suivante le retente au lieu d'accepter une mauvaise
+réponse.
+
+### La bannière de normalisation
+
+Les versions antérieures à cette protection pouvaient stocker une identité TMDB
+du mauvais type, et corriger le résolveur ne corrige pas rétroactivement les
+lignes déjà présentes en base. Après une mise à jour, PosterPilot les compte donc
+et le dit dans une bannière en haut de chaque page — _« … anciennes
+correspondances TMDB doivent être normalisées. »_ — avec une action **Normaliser
+les correspondances** et une note précisant que la réparation corrige l'identité
+des films et séries sans analyse complète ni application d'illustrations.
+
+Ce que ce compte inclut est étroit et délibéré :
+
+- Uniquement les éléments du **serveur actif** dont le type de média TMDB stocké
+  contredit le type que le serveur multimédia attribue lui-même à cet élément.
+- **Pas** les éléments épinglés à la main — un épinglage est votre affirmation
+  sur l'identité, et il prime sur toute réparation automatique.
+- **Pas** les copies qui ont depuis quitté leur médiathèque.
+
+Le nombre est recompté depuis la base de données à chaque affichage : restaurer
+une sauvegarde ou modifier des lignes à la main ne demande donc aucune réparation
+de drapeau séparée, et la bannière disparaît d'elle-même dès qu'il n'y a plus
+rien en attente.
+
+**Normaliser les correspondances** met en file une tâche de réparation limitée
+exactement à ces éléments. Elle re-résout chacun d'eux dans le bon espace de noms
+et réenrichit ses métadonnées, et c'est tout : elle n'applique aucun visuel, ne
+touche pas aux sélections préparées et ne parcourt pas le reste de la
+médiathèque. Pendant l'exécution, la bannière indique la progression et renvoie
+vers la tâche sur le tableau de bord ; une tâche terminée en échec, partielle,
+annulée ou interrompue transforme la commande en **Relancer la normalisation**.
+Une seule tâche de réparation par serveur peut s'exécuter à la fois — en lancer
+une seconde nomme la tâche qui détient déjà cette portée.
+
+### Pourquoi la réanalyse complète est le repli, pas la réparation
+
+La **Réanalyse complète** du tableau de bord relit l'intégralité de la
+médiathèque du serveur : chaque élément est réconcilié, re-résolu, réenrichi, et
+ses visuels actuels sont réobservés (tout ce qui a changé sur le serveur est
+signalé pour révision). Elle préserve les originaux et l'historique, et
+n'applique jamais de visuels automatiquement. C'est le bon outil quand vous
+soupçonnez que le cache local a dérivé dans son ensemble — après la restauration
+d'une sauvegarde, ou après des modifications massives faites directement sur le
+serveur multimédia.
+
+C'est le mauvais outil pour des identités erronées, et ce pour deux raisons :
+
+1. **PosterPilot sait déjà nommer les éléments concernés.** La réparation ciblée
+   ne touche que ces lignes ; une réanalyse complète paie un passage entier sur
+   la médiathèque et une salve complète de requêtes vers le serveur multimédia et
+   TMDB pour aboutir au même résultat.
+2. **Attendre fonctionne aussi.** Une incohérence de type en attente est exemptée
+   du saut incrémental : une synchronisation ordinaire retraite donc ces éléments
+   dès qu'elle les atteint. La tâche de réparation sert à les corriger
+   _maintenant_, ce n'est pas le seul moyen de les voir corrigés un jour.
+
+Réservez la réanalyse complète à la question « ma copie locale est-elle encore
+fidèle dans son ensemble ? » — et pas au cas où la réponse tient déjà dans une
+liste.
+
+### Épingler une correspondance à la main
+
 Un élément non résolu ou mal apparié peut faire l'objet d'une recherche manuelle
 par titre, année et type film/série. Les résultats incluent l'identité TMDB et
-des métadonnées de désambiguïsation. Confirmer épingle cette identité, invalide
-les candidats issus de l'ancienne identité et enregistre un événement d'audit.
-Remplacer ou effacer un épinglage manuel est tout aussi explicite ; l'effacement
-rend l'élément de nouveau éligible à la résolution automatique par GUID.
+des métadonnées de désambiguïsation.
+
+Confirmer relit cette identité exacte depuis TMDB juste avant toute écriture : un
+candidat disparu entre la recherche et la confirmation est donc refusé plutôt
+qu'épinglé, et un TMDB injoignable laisse votre correspondance actuelle intacte.
+Une confirmation réussie épingle l'identité, invalide les candidats découverts
+sous l'ancienne et enregistre un événement d'audit. **Aucun visuel n'est
+appliqué** — relancez **Trouver des visuels** pour découvrir les visuels de la
+nouvelle identité.
+
+Un épinglage fait autorité : les synchronisations ne l'écrasent pas et la passe
+de normalisation l'ignore. Le remplacer ou l'effacer est tout aussi explicite.
+L'effacer relance immédiatement la résolution automatique à partir des seuls
+identifiants IMDb/TVDB stockés de l'élément — la colonne d'identifiant TMDB
+appartenait à l'épinglage, seuls ces identifiants indépendants peuvent donc être
+réutilisés sans risque — et indique ce qui s'est produit : une correspondance
+automatique a été rétablie, aucune correspondance n'a été trouvée, ou la
+résolution n'a pas pu s'exécuter. Un élément qui ne porte ni l'un ni l'autre
+redevient simplement éligible, et une synchronisation ultérieure pourra fournir
+un nouveau GUID TMDB. Chaque transition (épinglée, remplacée, effacée, résolue,
+non résolue) est conservée dans la piste d'audit des correspondances de
+l'élément.
 
 Les pannes de fournisseurs sont isolées. Lors d'une indisponibilité passagère,
 les derniers candidats connus de ce fournisseur peuvent être conservés,
@@ -123,6 +241,13 @@ barre d'outils de style Notion. Vous pouvez :
   fournisseurs confondus, disponibilité MediUX réelle, état de changement
   (inchangé / encore sur l'affiche par défaut) et état ignoré. Le bouton Filtre
   affiche un badge avec le nombre de facettes actives.
+- **Filtrer par couverture des visuels** — _Appliqué sur ce serveur_, _Exporté
+  vers Kometa_, _Non appliqué par PosterPilot_ ou _Couverture inconnue_. La révision propose
+  exactement le même contrôle, et les valeurs y ont le même sens : un lien reste
+  donc transposable d'une vue à l'autre. Lisez
+  [Couverture des visuels](#couverture-des-visuels) avant de vous y fier — ce
+  sont des affirmations sur ce que PosterPilot a fait, pas sur le fait qu'un
+  titre possède ou non une affiche.
 - **Trier** depuis le menu contextuel **Tri** par titre, année de sortie, note,
   durée, changement le plus récent ou date d'ajout au serveur multimédia, avec un
   basculement croissant/décroissant indépendant. Le mur s'ouvre avec le tri
@@ -168,6 +293,14 @@ synopsis, ainsi que les têtes d'affiche.
   set affiche l'attribution de son auteur, avec l'affiche et l'arrière-plan
   présentés ensemble. Pour les séries, la vue présente aussi les sets d'affiches
   de saisons et les sets de cartes-titres.
+- **Les cartes de fournisseurs apparaissent dans l'ordre que vous avez
+  configuré** dans Paramètres → Métadonnées et fournisseurs — et non dans l'ordre
+  où la découverte s'est trouvée terminer, qui n'enregistre rien d'autre que le
+  fournisseur ayant répondu en premier. Cet ordre relève de la présentation, plus
+  d'un départage entre candidats à score _exactement_ égal ; il ne renverse
+  jamais un score inégal, si bien qu'une image plus nette venue d'un fournisseur
+  que vous avez placé en dernier remporte quand même la suggestion. Voir
+  [Configuration → Ordre des fournisseurs](/posterpilot/fr/configuration/).
 - Les sections de fournisseurs, les cartes de sets individuelles et (pour les
   séries) les groupes de saisons sont **repliables**. Au premier chargement, le
   premier fournisseur et son premier set sont dépliés — tout comme le groupe
@@ -194,7 +327,109 @@ Vous pouvez préparer un set entier (« utiliser ce set »), ou prendre une affi
 dans un set et un arrière-plan dans un autre — les deux emplacements sont
 indépendants.
 
-![Vue détaillée d'un élément PosterPilot avec métadonnées sur arrière-plan, distribution, nombre de visuels découverts, affiche et arrière-plan préparés, et bouton Appliquer](/posterpilot/screenshots/item-detail.webp)
+### Afficher plus sans tout charger
+
+Un blockbuster peut porter des centaines de visuels, et les afficher tous d'un
+coup coûte cher, que vous descendiez jusque-là ou non. Chaque grille s'ouvre donc
+sur **24 vignettes**, et une commande **charger plus** en révèle 24 de plus (ou
+ce qu'il reste) tout en indiquant combien resteraient masqués après cela. 24
+parce que ce nombre se divise exactement dans chacune des grilles utilisées par
+la page — deux colonnes pour les arrière-plans, quatre pour les cartes-titres,
+huit pour les affiches de saisons — de sorte qu'une révélation ne laisse jamais
+une demi-ligne bancale. La ligne placée à côté de la commande énonce toujours
+l'arithmétique : combien sont affichés, sur combien, et combien sont masqués.
+
+Chaque grille se déploie **indépendamment** : révéler d'autres affiches ne révèle
+pas d'arrière-plans, deux sets du même fournisseur se déploient séparément, et
+les affiches comme les cartes-titres de chaque saison gardent leur propre compte.
+Les vignettes non révélées ne sont pas affichées du tout plutôt que chargées
+paresseusement, car une image en chargement différé coûte quand même un élément.
+
+En révéler davantage ne coûte rien sur le réseau : tout l'inventaire conservé
+pour l'élément est déjà dans la page. Ce que la grille ne sait pas faire, c'est
+aller au-delà de ce que PosterPilot a **conservé**. TMDB renvoie toutes les
+images qu'il détient, et l'ingestion applique un plafond défensif de 200
+candidats par type de visuel ; quand une grille est à ce plafond, elle le dit —
+_« … a renvoyé plus de visuels que PosterPilot n'en conserve ; cette grille n'est
+pas la liste complète. »_ — au lieu de laisser croire que vous voyez tout ce qui
+existe. Voir
+[Configuration → Inventaire des candidats et bouton « charger plus »](/posterpilot/fr/configuration/).
+
+### Agrandir un candidat
+
+Chaque vignette porte sa propre commande **⤢ agrandir** sous l'image, distincte
+de celle qui la prépare. Agrandir, c'est regarder, jamais choisir : cela ne
+prépare rien, ne persiste rien et ne modifie aucun emplacement.
+
+![L'aperçu agrandi montrant une affiche en entier, avec son fournisseur, ses dimensions et sa langue, et les commandes précédent/suivant](/posterpilot/screenshots/artwork-preview.webp)
+
+La fenêtre affiche le **fichier canonique** — exactement celui qui serait
+téléversé vers votre serveur ou écrit dans le YAML Kometa — complet et non
+recadré, avec la provenance qu'une simple image ne peut pas porter : fournisseur,
+dimensions en pixels, et langue lorsque le fournisseur en indique une. Les
+fournisseurs qui n'étiquettent jamais de langue (MediUX, ThePosterDB) n'ont
+aucune ligne de langue, car « aucune langue indiquée » décrirait la source plutôt
+que le visuel.
+
+- **← / →** ou les touches fléchées parcourent la séquence ; **Échap** ou le ✕ la
+  ferment et rendent le focus à la vignette d'où vous l'avez ouverte.
+- Votre position dans la séquence est affichée entre les commandes et annoncée à
+  chaque changement, et les commandes **s'arrêtent aux extrémités** au lieu de
+  boucler — un Suivant qui reviendrait au premier contredirait la position que
+  vous êtes en train de lire.
+- La séquence est exactement ce qui est à l'écran : le même ordre de
+  fournisseurs, les mêmes sets dépliés, le même filtre de langue, les mêmes
+  vignettes révélées. Suivant ne peut jamais atteindre un visuel que la page
+  elle-même masque.
+- Si la grille change sous un aperçu ouvert — vous avez révélé un lot
+  supplémentaire, une tâche de fond s'est terminée — la fenêtre suit le visuel
+  que vous étiez en train de regarder. Elle ne se ferme que s'il n'y a plus rien
+  à montrer.
+- Un fichier qui ne peut pas être chargé en pleine taille le dit, au lieu
+  d'afficher l'image du candidat précédent sous la légende du nouveau.
+
+### Ce que la navigation télécharge réellement
+
+Chaque candidat a un fichier **canonique** — celui qui serait réellement
+appliqué — et certains fournisseurs publient à côté une version réduite.
+PosterPilot choisit délibérément lequel il récupère, et à quel moment :
+
+- **Les grilles** demandent la version optimisée partout où un fournisseur en
+  propose une — TMDB fournit une affiche en `w500` et un arrière-plan en `w1280`
+  plutôt que l'original — et la font passer par le cache de miniatures de
+  PosterPilot : ces octets sont donc récupérés une seule fois chez le fournisseur
+  puis réutilisés d'un chargement de page à l'autre, d'un élément à l'autre, et
+  entre tous les utilisateurs de cette instance. MediUX, Fanart.tv et
+  ThePosterDB ne publient pas d'aperçu séparé ; leurs vignettes affichent donc
+  l'URL canonique — toujours à travers ce cache, si bien que les parcourir
+  plusieurs fois ne sollicite pas le fournisseur à chaque fois.
+- **L'aperçu agrandi et le chemin d'application** utilisent le fichier canonique,
+  récupéré directement chez le fournisseur. L'aperçu contourne délibérément le
+  cache de miniatures : ce cache existe pour stocker des images de la taille des
+  grilles, et le remplir d'originaux évincerait justement les miniatures qu'il
+  est là pour servir.
+
+L'image agrandie n'existe que tant que la fenêtre est ouverte : une grille de
+cent vignettes TMDB télécharge donc cent miniatures et zéro original tant que
+vous n'en demandez pas un. Pour les fournisseurs qui ne publient aucune version
+réduite, l'unique récupération mise en cache par la grille reste la seule, quel
+que soit le nombre de fois où vous revenez sur l'élément. La durée de vie et la
+taille du cache sont à vous de régler — voir
+[Configuration → Performance et réglages](/posterpilot/fr/configuration/).
+
+### Langue des visuels
+
+Lorsqu'une langue de visuels TMDB est configurée, la page de l'élément filtre les
+grilles sur cette langue et le dit au-dessus d'elles — en nommant la langue, et
+en indiquant combien de visuels elle masque dans d'autres langues — avec un
+basculement **Afficher toutes les langues** local à la page, qui ne modifie
+jamais votre préférence enregistrée. Si rien ne correspond pour ce titre, la page
+indique combien de visuels existent dans d'autres langues et propose la même
+échappatoire, au lieu de vous montrer une grille vide.
+
+La préférence gouverne **uniquement les visuels TMDB**, et le raisonnement vaut
+d'être connu avant de la définir : voir
+[Configuration → Langue des visuels TMDB](/posterpilot/fr/configuration/).
 
 ## Visuels de saisons et d'épisodes
 
@@ -279,6 +514,146 @@ comme solution de repli ; les séries, TVDB avec le même repli vers IMDb. Ajout
 [gestionnaire Kometa](../kometa-config-sync/) peut maintenir ces références et
 explique la différence entre le chemin physique et le préfixe `file:` visible par
 le runtime Kometa.
+
+## Couverture des visuels
+
+La chronologie des visuels répond à la question _qu'a fait PosterPilot_. La
+couverture répond à une autre question — _qu'est-ce qui est vrai en ce moment_ —
+et les deux peuvent être en désaccord, ce qui est précisément la raison pour
+laquelle elles sont séparées. Chaque page d'élément porte un panneau **Couverture
+des visuels** sous le bandeau, et le mur de la médiathèque comme la révision
+peuvent être filtrés dessus.
+
+![Le panneau de couverture des visuels sur un élément, avec le serveur multimédia et les métadonnées Kometa signalés séparément](/posterpilot/screenshots/item-coverage.webp)
+
+### Deux destinations, jamais fusionnées
+
+La couverture est toujours signalée **par destination**, dans deux panneaux côte
+à côte :
+
+- **Serveur multimédia** — les visuels que PosterPilot a téléversés vers Plex,
+  Jellyfin ou Emby.
+- **Métadonnées Kometa** — les entrées que PosterPilot a écrites dans ses
+  fichiers YAML Kometa.
+
+Les deux panneaux ne sont jamais repliés en un verdict unique, et leurs comptes
+ne sont jamais additionnés. C'est la distinction que tout ce panneau existe pour
+protéger :
+
+:::caution[Exporter vers Kometa n'est pas appliquer un visuel]
+Un export est une ligne dans un fichier YAML sur disque. Écrire cette ligne
+prouve que le fichier a été écrit. Cela ne prouve pas que Kometa se soit exécuté,
+ni que Kometa ait lu le fichier, ni que votre serveur multimédia ait accepté le
+résultat, ni que l'URL réponde encore. PosterPilot le dit dans le panneau —
+_« Exporté vers un fichier Kometa. PosterPilot ne peut pas confirmer que Kometa
+l'a appliqué. »_ — et il ne promeut jamais un export en affirmation côté serveur.
+Si vous appliquez avec la seule méthode Kometa, le panneau Serveur multimédia
+continuera d'indiquer que rien n'y a été appliqué : c'est un énoncé correct, pas
+un bug.
+:::
+
+La même règle gouverne les copies d'un titre. Un film présent sur deux serveurs,
+ou deux fois sur un même serveur parce qu'il figure à la fois dans `Films` et
+`Films 4K`, constitue plusieurs copies aux preuves indépendantes — une affiche
+appliquée à l'une ne prouve rien pour l'autre. Lorsqu'un titre a plusieurs
+copies, l'en-tête indique le compte **par destination** (« 1 sur 2 copies
+couvertes »), jamais un chiffre combiné unique : une copie appliquée à un serveur plus
+une autre copie exportée vers Kometa, cela ne fait pas « 2 sur 2 ».
+
+Chaque emplacement à l'intérieur d'un panneau — l'affiche, l'arrière-plan, chaque
+saison, chaque épisode — conserve lui aussi son propre statut. Une série dont
+l'affiche est vérifiée sur le serveur et dont les cartes-titres d'épisodes ne le
+sont pas dit exactement cela, au lieu de se résoudre en un badge unique.
+
+### Ce que signifie chaque état
+
+| État                                 | Signification                                                                                                                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Appliqué sur ce serveur**          | Nous l'avons écrit, et l'empreinte que nous attendions correspond encore à ce que le serveur sert en ce moment. C'est le seul état qui soit une preuve positive et vérifiée sur un serveur multimédia. |
+| **Exporté vers Kometa**              | Le fichier de métadonnées actuel porte l'URL de cet emplacement. Un fichier sur disque — voir l'avertissement ci-dessus.                                                                               |
+| **Appliqué, non vérifié**            | Nous l'avons écrit, et l'état actuel du serveur n'a pas pu être vérifié. L'historique existe ; la preuve, non.                                                                                         |
+| **Modifié en dehors de PosterPilot** | Nous l'avons écrit, et quelque chose l'a remplacé depuis. C'est un état à part entière, pas un synonyme d'autre chose.                                                                                 |
+| **Non appliqué par PosterPilot**     | Une observation fiable n'a trouvé aucune trace indiquant que nous ayons posé un visuel ici.                                                                                                            |
+| **Couverture inconnue**              | Nous n'avons pas pu observer de façon fiable — un fichier Kometa illisible, un serveur multimédia injoignable, un historique incomplet.                                                                |
+
+Trois de ces formulations portent tout le sens, et les lire à peu près vous
+induira en erreur :
+
+**« Non appliqué par PosterPilot » ne veut pas dire « n'a pas de visuel ».** C'est
+un énoncé sur ce que _nous_ avons fait, jamais sur ce que votre serveur détient.
+Un titre dont vous avez choisi l'affiche à la main dans Plex il y a des années
+s'affiche ici comme non appliqué par PosterPilot — et il a une affiche
+parfaitement valable. Il n'existe délibérément aucun état de couverture, et
+aucune valeur de filtre, qui affirme qu'un titre n'a pas de visuel : PosterPilot
+ne peut pas le savoir.
+
+**« Modifié en dehors de PosterPilot » est une réponse en soi.** Quelque chose a
+remplacé notre visuel — l'agent de Plex lui-même, un autre outil, une personne.
+Lire cela comme « manquant » et réappliquer, c'est ne jamais découvrir ce qui
+écrase sans cesse votre médiathèque.
+
+**Une lecture qui échoue donne « inconnue », jamais « non appliqué ».** « Nous
+n'avons pas pu vérifier » et « nous avons vérifié et ce n'est pas là » sont deux
+faits différents, et les confondre est la façon dont une médiathèque entièrement
+couverte se retrouve signalée comme vide, avec une invitation à tout réexporter.
+Un fichier Kometa illisible, un répertoire que PosterPilot ne parvient pas à
+résoudre, ou un historique qu'il n'a pas pu lire en entier produisent donc
+_inconnue_ — un fichier absent, lui, est une observation fiable et ne la produit
+pas.
+
+### Filtrer par couverture
+
+![Le mur de la médiathèque filtré sur les titres qui n'ont pas reçu de visuel](/posterpilot/screenshots/library-coverage-filter.webp)
+
+Le mur de la médiathèque et la révision partagent un unique contrôle **Couverture
+des visuels** :
+
+- **Appliqué sur ce serveur** — au moins un emplacement est vérifié sur le
+  serveur actif.
+- **Exporté vers Kometa** — au moins un emplacement figure dans le fichier de
+  métadonnées actuel.
+- **Non appliqué par PosterPilot** — couvert à _aucune_ des deux destinations.
+  Les titres auxquels PosterPilot n'a jamais touché correspondent à ce filtre,
+  ce qu'une simple consultation de statut ne saurait obtenir. Le nom dit bien ce
+  qu'il affirme : _nous_ n'avons rien posé, ni sur le serveur ni dans Kometa —
+  une affiche posée à la main dans Plex reste une affiche, et ce filtre ne
+  prétend pas le contraire.
+- **Couverture inconnue** — au moins un emplacement dont la preuve est
+  indéterminée : _Couverture inconnue_ à l'une ou l'autre destination, ou
+  _Appliqué, non vérifié_ sur le serveur.
+
+Notez le « au moins un emplacement » : une série dont l'affiche est appliquée et
+qui n'a aucune carte-titre correspond à _Appliqué sur ce serveur_. Le filtre
+trouve les titres qui méritent d'être ouverts ; c'est dans le panneau de la page
+de l'élément que vit la vérité emplacement par emplacement. La couverture est
+rattachée au serveur auquel appartient la copie : changer de serveur actif change
+donc les réponses. Quand un filtre ne correspond à rien, l'état vide le dit et
+propose un retour en un clic vers _N'importe quelle couverture_, plutôt que de
+vous laisser devant une grille blanche à chercher quel contrôle l'a vidée.
+
+### Comment la couverture reste à jour
+
+La couverture est une projection reconstruite à partir de trois sources qui ne
+lui appartiennent pas : le registre de révisions en ajout seul, l'observation
+actuelle de votre serveur emplacement par emplacement, et les fichiers Kometa sur
+disque. Elle est redérivée après une application, une annulation, une
+synchronisation, ainsi qu'après une migration ou une écriture de configuration
+Kometa — et, comme rien ne prévient PosterPilot quand quelqu'un change l'affiche
+d'un titre directement dans Plex, une page d'élément dont les preuves ont plus de
+**15 minutes** réobserve le serveur au moment où vous l'ouvrez.
+
+Deux conséquences découlent de cette conception, et toutes deux sont
+intentionnelles :
+
+- **Un rafraîchissement ne fait jamais échouer ce qui l'a déclenché.** Une
+  application qui a réussi puis n'a pas pu mettre la projection à jour reste une
+  application réussie. Le prix à payer est une donnée un peu périmée, que le
+  déclencheur suivant répare.
+- **Réconcilier la couverture ne change rien d'autre.** Cela n'écrit aucun
+  visuel, aucun YAML, aucune correspondance, et cela ne marque jamais quoi que ce
+  soit comme révisé. Où vous en êtes dans votre file d'attente est votre
+  affirmation ; ce qui est vrai à une destination est celle de PosterPilot — et
+  l'une ne doit pas modifier l'autre.
 
 ## Historique des visuels et annulation
 

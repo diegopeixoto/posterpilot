@@ -53,9 +53,35 @@ senha guardada** sob o campo de senha, que apaga o segredo ao salvar.
 
 ![Configurações de provedores do PosterPilot com o ThePosterDB habilitado e seus campos opcionais de usuário e senha](/posterpilot/screenshots/settings-providers.webp)
 
-Em **Metadados e provedores**, ordene a prioridade e ajuste pesos de provedor,
-resolução e proporção. A mesma configuração determinística vale na prévia e execução.
-`SUGGEST_PRESELECT` mostra a melhor sugestão, mas aceitar/preparar é sempre explícito.
+Em **Metadados e provedores**, ajuste os pesos de provedor, resolução e proporção. A
+mesma configuração determinística vale na prévia e execução. `SUGGEST_PRESELECT`
+mostra a melhor sugestão, mas aceitar/preparar é sempre explícito.
+
+## Ordem dos provedores
+
+**Metadados e provedores** também permite **reordenar** os quatro provedores,
+arrastando uma alça ou usando os botões de mover; **Restaurar a ordem padrão** devolve
+MediUX, ThePosterDB, Fanart.tv, TMDB. Como os pesos, a ordem fica no banco e não tem
+variável de ambiente.
+
+O controle existe porque a descoberta roda todos os provedores em paralelo e cada um
+confirma os próprios resultados, então a ordem em que os candidatos acabaram
+armazenados não registra nada além de quem respondeu primeiro; apresentar esse acidente
+de relógio como ranking seria enganoso, e por isso a tela do item segue a ordem que
+você configurou. O que a ordem faz — e, igualmente importante, o que ela não faz:
+
+- Decide **qual card de provedor a página do item mostra primeiro**. Só apresentação;
+  os candidatos dentro de um card mantêm a ordem própria.
+- Desempata candidatos com scores **exatamente iguais**, aplicada estritamente depois
+  do score numérico.
+- Nunca reverte um score desigual. Uma imagem mais nítida ou mais bem proporcionada de
+  um provedor que você pôs por último ainda leva a sugestão: provedor é critério de
+  desempate, não substituição. Para mudar quem costuma ganhar, ajuste os pesos por
+  provedor.
+- Um **provedor desativado mantém a posição**, então reativá-lo não o joga para o fim.
+  Um provedor que a sua ordem salva não menciona — uma fonte recém-adicionada, ou uma
+  linha deixada por outra removida — aparece por último em vez de rearranjar tudo em
+  volta dele.
 
 ## Idioma das artes do TMDB
 
@@ -63,32 +89,81 @@ resolução e proporção. A mesma configuração determinística vale na prévi
 seleção automática pode escolher entre as artes do TMDB, independentemente de
 `APP_LANGUAGE`: `any` mantém todos os idiomas que o TMDB devolveu, `ui` segue o
 idioma da interface normalizado para o código base (uma interface `pt-BR` prefere
-`pt`) e um código ISO 639-1 explícito (`en`, `de`…) não se limita aos seis locales
-traduzidos. Um valor não reconhecido é tratado como ausente e volta para `any` em
-vez de aplicar um filtro quebrado. Como nos demais, o ambiente prevalece e o campo
-aparece como gerenciado pelo ambiente.
+`pt`; se nenhum idioma de interface puder ser resolvido — um job desassistido numa
+instalação que nunca persistiu um — o valor cai para `any` em vez de inventar um
+idioma) e um código ISO 639-1 explícito (`en`, `de`…) não se limita aos seis locales
+traduzidos: o menu suspenso das Configurações oferece dez selecionados (alemão,
+inglês, espanhol, francês, italiano, japonês, coreano, português, russo, chinês) e um
+código definido pelo ambiente que não esteja nessa lista é adicionado ao menu em vez
+de descartado, então salvar as Configurações nunca o reescreve em silêncio. Um valor
+não reconhecido é tratado como ausente e volta para `any` em vez de aplicar um filtro
+quebrado. Como nos demais, o ambiente prevalece e o campo aparece como gerenciado pelo
+ambiente.
 
-Artes que o TMDB não etiqueta contam como neutras e continuam disponíveis em
-qualquer preferência, então uma preferência nunca esvazia um painel que só tem
-arte neutra. A descoberta sempre guarda todos os idiomas — a preferência rege a
+**Rege o TMDB e nada mais.** As artes de todos os outros provedores continuam
+elegíveis sob qualquer preferência, e isso é a regra, não um atalho: MediUX e
+ThePosterDB nunca informam idioma algum, então tratar «sem idioma» como inelegível
+esvaziaria as grades deles assim que qualquer preferência fosse definida, e uma busca
+nova jamais os traria de volta, porque voltaria a não informar idioma; o Fanart.tv _de
+fato_ etiqueta idiomas e ainda assim é deixado em paz, porque filtrá-lo descartaria em
+silêncio um arquivo mais bem pontuado por causa de um sinal que esta configuração nunca
+teve a função de reger.
+
+Artes que o TMDB marca explicitamente como sem idioma contam como neutras e continuam
+disponíveis em qualquer preferência, então uma preferência nunca esvazia um painel que
+só tem arte neutra. A descoberta sempre guarda todos os idiomas — a preferência rege a
 navegação e a seleção automática, não o que é baixado —, de modo que alterá-la
 refiltra o que você já tem e nunca exige refazer a busca. A seleção automática só
 recorre a um pôster em outro idioma quando não resta nenhuma opção preferida nem
-sem etiqueta, e sinaliza quando isso acontece. A página do item traz ainda um
-alternador temporário **Preferido / Todos** que não muda a configuração global.
+sem etiqueta, e sinaliza quando isso acontece; um recurso já preparado continua visível
+na página em vez de ser escondido pela própria preferência que o produziu, porque uma
+escolha que você precisa poder ver é uma escolha que você precisa poder revogar.
+
+Há um caso que a aplicação não resolve sozinha: candidatos do TMDB descobertos antes de
+o PosterPilot registrar _como_ aprendeu um idioma são marcados como **Não verificada**,
+porque ali um campo de idioma vazio significa «nunca registramos isso», não «o TMDB
+disse que é sem texto». Esses candidatos são mantidos em vez de escondidos — rebaixar
+todo o inventário TMDB anterior à atualização assim que uma preferência fosse definida
+seria pior — e o grupo do provedor oferece **Pesquisar novamente**, para que uma
+execução nova registre as etiquetas reais.
+
+A página do item traz um alternador **Mostrar todos os idiomas** (e **Mostrar apenas
+_idioma_** para voltar), que não muda a configuração global. Quando a preferência não
+corresponde a nada para um título, a página diz quantas capas existem em outros idiomas
+e oferece a mesma saída em vez de exibir uma grade vazia.
 
 ## Inventário de candidatos e «carregar mais»
 
 A ingestão do TMDB parava antes em 20 imagens **por tipo de arte** — pôsteres e
 fundos eram contados separadamente, daí os relatos de «limitado a 40 capas».
-Agora muitas mais são mantidas, sem duplicatas pela identidade de arquivo do
-próprio TMDB e na ordem em que o TMDB as classificou, e cada painel de provedor e
-tipo mostra um lote limitado com um controle **carregar mais** que informa quantos
-candidatos continuam ocultos. Os painéis de pôsteres e de fundos se expandem de
-forma independente. A descoberta mantém um teto defensivo de **200 candidatos por
-tipo de arte** — um limite de armazenamento e renderização, não um filtro de
-qualidade: quando um painel o atinge, ele avisa que o inventário está **truncado**
-em vez de sugerir que está completo.
+Agora muitas mais são mantidas: primeiro validadas, depois deduplicadas pela
+identidade de arquivo do próprio TMDB e depois limitadas, estritamente nessa ordem, de
+modo que uma entrada malformada não custa mais um candidato em silêncio, e a ordem em
+que o TMDB as classificou é preservada.
+
+A página do item então mostra cada painel em lotes de **24 miniaturas**, com um
+controle **carregar mais** que nomeia quantas continuam ocultas. 24 divide exato em
+todas as grades que a página desenha (duas colunas para fundos, quatro para title
+cards, oito para pôsteres de temporada), então nenhuma revelação deixa meia fileira
+torta. Cada painel se abre de forma independente — provedor a provedor, set a set,
+pôsteres separados de fundos, e os pôsteres de cada temporada separados dos title cards
+dela —, então abrir um nunca abre outro. Revelar mais não custa tráfego de rede: o
+inventário mantido já vem junto com a página, então isso limita o custo de
+renderização, não a banda.
+
+A ingestão mantém um teto defensivo de **200 candidatos por tipo de arte** — um limite
+de armazenamento e renderização, não um filtro de qualidade —, e encostar nele é
+avisado em vez de passar batido: o painel diz que o provedor retornou mais capas do que
+o PosterPilot mantém, em vez de sugerir que você está vendo tudo o que o TMDB tem. Só
+conta para esse teto um candidato que de outro modo teria sido mantido; duplicatas
+descartadas e entradas malformadas não, porque nem umas nem outras chegaram a ser algo
+que você pudesse escolher.
+
+O cache de miniaturas (`THUMB_CACHE_TTL_DAYS`, `THUMB_CACHE_MAX_MB`) guarda **apenas
+prévias de navegação**: a prévia ampliada em tamanho cheio e o arquivo de fato aplicado
+vêm direto do provedor, de propósito, para que originais não expulsem as miniaturas que
+esse cache existe para servir. Veja
+[Uso → Descobrir e preparar artwork](../usage/).
 
 ## Kometa e método de aplicação
 

@@ -234,6 +234,40 @@ d'identifiant au lieu de faire échouer toute l'exécution. Une panne, un délai
 dépassé ou une réponse inexploitable chez un fournisseur n'empêche jamais les
 autres de renvoyer des candidats.
 
+### Ordre des fournisseurs
+
+**Paramètres → Métadonnées et fournisseurs** permet aussi de **réordonner** les
+quatre fournisseurs, en faisant glisser une poignée ou avec les boutons de
+déplacement ; **Rétablir l'ordre par défaut** restaure MediUX, ThePosterDB,
+Fanart.tv, TMDB. Comme les poids de notation, cet ordre vit dans la base de
+données et n'a pas de variable d'environnement.
+
+Ce contrôle existe parce que la découverte exécute tous les fournisseurs en
+parallèle et que chacun valide ses propres résultats : l'ordre dans lequel les
+candidats se sont retrouvés stockés n'enregistre donc rien d'autre que le
+fournisseur ayant répondu en premier. Présenter cet accident de calendrier comme
+un classement serait trompeur ; la vue d'élément suit donc l'ordre que vous avez
+configuré.
+
+Ce que cet ordre fait — et, tout aussi important, ce qu'il ne fait pas :
+
+- Il décide **quelle carte de fournisseur la page d'élément affiche en premier**.
+  De la présentation, rien de plus ; les candidats à l'intérieur d'une carte
+  conservent leur propre ordre.
+- Il départage des candidats dont les scores sont **exactement égaux**, et il est
+  appliqué strictement après le score numérique.
+- Il ne renverse jamais un score inégal. Une image plus nette ou mieux
+  proportionnée venue d'un fournisseur que vous avez placé en dernier remporte
+  quand même la suggestion — le fournisseur est un critère de départage, pas une
+  surcharge. Pour changer quel fournisseur l'emporte habituellement, ajustez les
+  poids de notation par fournisseur (voir
+  [Performance et réglages](#performance-et-réglages)).
+- Un **fournisseur désactivé conserve sa position** : le réactiver ne le renvoie
+  donc pas en bas de liste. Un fournisseur que votre ordre enregistré ne mentionne
+  pas — une source nouvellement ajoutée, ou une ligne laissée par une source
+  supprimée — est affiché en dernier plutôt que de tout redistribuer autour de
+  lui.
+
 ### Compte ThePosterDB (facultatif)
 
 ThePosterDB fonctionne sans compte — la collecte anonyme reste le comportement
@@ -279,11 +313,18 @@ Trois formes de valeur sont acceptées :
   les langues renvoyées par TMDB. C'est exactement le comportement qui précédait
   ce réglage : la mise à jour ne change rien tant que vous ne l'activez pas.
 - **`ui`** — suivre la langue de l'interface, normalisée vers son code de base :
-  une interface en `pt-BR` préfère les visuels étiquetés `pt`.
+  une interface en `pt-BR` préfère les visuels étiquetés `pt`. Si aucune langue
+  d'interface ne peut être déterminée — une tâche sans surveillance sur une
+  installation qui n'en a jamais persisté — le réglage retombe sur `any` au lieu
+  d'inventer une langue.
 - **Un code de base ISO 639-1 explicite** — `en`, `de`, `it`, … Ces codes ne sont
   _pas_ limités aux six locales d'interface traduites : TMDB étiquette des
   visuels dans bien plus de langues que celles dans lesquelles PosterPilot est
-  traduit.
+  traduit. La liste déroulante des paramètres en propose dix, choisies
+  (allemand, anglais, espagnol, français, italien, japonais, coréen, portugais,
+  russe, chinois) ; un code défini par l'environnement qui ne figure pas dans
+  cette liste y est ajouté au lieu d'être écarté, si bien qu'enregistrer les
+  paramètres ne peut jamais le réécrire en silence.
 
 Une valeur qui n'entre dans aucun de ces cas est traitée comme absente et
 retombe sur `any` au lieu d'appliquer un filtre cassé — une faute de frappe ne
@@ -291,40 +332,79 @@ vide jamais votre grille de candidats. Comme tout autre paramètre adossé à
 l'environnement, `TMDB_ARTWORK_LANGUAGE` écrase la valeur persistée et le champ
 correspondant s'affiche comme géré par l'environnement dans les paramètres.
 
-Trois comportements méritent d'être connus avant de le définir :
+Quatre comportements méritent d'être connus avant de le définir :
 
-- **Les visuels sans texte restent toujours là.** Un visuel que TMDB n'étiquette
-  dans aucune langue compte comme neutre et reste disponible quelle que soit la
-  préférence ; une préférence ne peut donc jamais vider un volet qui ne contient
-  que des visuels neutres.
+- **Il gouverne TMDB et rien d'autre.** Les visuels de tous les autres
+  fournisseurs restent éligibles quelle que soit la préférence. C'est la règle,
+  pas un raccourci. MediUX et ThePosterDB n'indiquent jamais la moindre langue :
+  traiter « aucune langue » comme inéligible viderait leurs grilles dès qu'une
+  préférence serait définie, et une nouvelle recherche ne pourrait jamais les
+  ramener, puisqu'elle n'indiquerait de nouveau aucune langue. Fanart.tv, lui,
+  _étiquette bien_ les langues — et il est quand même laissé tranquille, car le
+  filtrer écarterait discrètement un fichier mieux noté sur la foi d'un signal
+  que ce réglage n'a jamais eu vocation à gouverner.
+- **Les visuels sans texte restent toujours là.** Un visuel que TMDB marque
+  explicitement comme ne portant aucune langue compte comme neutre et reste
+  disponible quelle que soit la préférence ; une préférence ne peut donc jamais
+  vider un volet qui ne contient que des visuels neutres.
 - **La découverte conserve tout.** La préférence gouverne la navigation et la
   sélection automatique, pas ce qui est téléchargé — toutes les langues renvoyées
   par TMDB sont stockées. La modifier refiltre ce que vous avez déjà et n'oblige
   jamais à relancer une recherche.
 - **La sélection automatique reste honnête.** Une suggestion ne se rabat sur une
   affiche en langue étrangère que lorsqu'il n'existe aucune option préférée ni
-  non étiquetée, et elle le signale lorsque cela arrive.
+  non étiquetée, et elle le signale lorsque cela arrive. Un repli préparé reste
+  visible sur la page au lieu d'être masqué par la préférence qui l'a produit —
+  un choix que vous devez pouvoir voir est un choix que vous devez pouvoir
+  révoquer.
 
-Les pages d'élément portent en plus un sélecteur temporaire **Préférée / Toutes**,
-qui permet de regarder au-delà de la préférence pour un titre donné sans modifier
-le réglage global.
+Il reste un cas auquel l'application ne peut pas répondre seule. Les candidats
+TMDB découverts avant que PosterPilot n'enregistre _comment_ il avait appris une
+langue sont marqués **Non vérifié** : un champ de langue vide y signifie « nous
+ne l'avons jamais enregistré », pas « TMDB a dit que le visuel est sans texte ».
+Ces candidats sont conservés plutôt que masqués — déclasser tout l'inventaire
+TMDB d'une médiathèque antérieur à la mise à jour dès qu'une préférence est
+définie serait pire — et le groupe du fournisseur propose une **relance de la
+recherche**, pour qu'une nouvelle exécution enregistre les véritables étiquettes.
+
+Les pages d'élément portent un basculement **Afficher toutes les langues** (et
+**Afficher uniquement _langue_** pour revenir en arrière), qui permet de regarder
+au-delà de la préférence pour un titre donné sans modifier le réglage global.
+Lorsque la préférence ne correspond à rien pour un titre, la page indique combien
+de visuels existent dans d'autres langues et propose la même échappatoire, au
+lieu d'afficher une grille vide.
 
 ### Inventaire des candidats et bouton « charger plus »
 
 L'ingestion TMDB s'arrêtait auparavant à 20 images **par type de visuel** — les
 affiches et les arrière-plans étant comptés séparément, d'où les signalements de
 « plafonné à 40 couvertures ». La découverte en conserve désormais bien
-davantage — dédoublonnées sur l'identité de fichier propre à TMDB, dans l'ordre
-de classement de TMDB — et chaque volet fournisseur/type de visuel affiche un lot
-borné avec une commande **charger plus** qui indique combien de candidats restent
-masqués. Les volets d'affiches et d'arrière-plans se déploient indépendamment :
-ouvrir l'un ne déploie pas l'autre.
+davantage — d'abord validées, puis dédoublonnées sur l'identité de fichier propre
+à TMDB, puis bornées, strictement dans cet ordre, si bien qu'une entrée malformée
+ne coûte plus un candidat en silence — et elle conserve l'ordre de classement de
+TMDB.
 
-La découverte applique toujours un plafond défensif de **200 candidats par type
-de visuel**, afin qu'un titre pathologique ne puisse pas ramener un nombre
-illimité d'images. C'est une borne de stockage et d'affichage, pas un filtre de
-qualité — et quand un volet l'atteint, il indique que l'inventaire est **tronqué**
-au lieu de laisser croire que vous voyez tout ce que TMDB possède.
+La page d'élément affiche ensuite chaque volet par lots de **24 vignettes**, avec
+une commande **charger plus** qui nomme combien restent masquées. 24 se divise
+exactement dans chacune des grilles que la page dessine (deux colonnes pour les
+arrière-plans, quatre pour les cartes-titres, huit pour les affiches de saisons),
+de sorte qu'une révélation ne laisse jamais une demi-ligne bancale. Chaque volet
+se déploie indépendamment — fournisseur par fournisseur, set par set, les
+affiches séparément des arrière-plans, et les affiches de chaque saison
+séparément de ses cartes-titres — si bien qu'en ouvrir un n'en ouvre jamais un
+autre. En révéler davantage ne coûte aucun trafic réseau : l'inventaire conservé
+est déjà livré avec la page ; ce mécanisme borne donc le coût d'affichage, pas la
+bande passante.
+
+L'ingestion applique toujours un plafond défensif de **200 candidats par type de
+visuel**, afin qu'un titre pathologique ne puisse pas ramener un nombre illimité
+d'images. C'est une borne de stockage et d'affichage, pas un filtre de qualité —
+et l'atteindre est signalé plutôt que passé sous silence : le volet indique que
+le fournisseur a renvoyé plus de visuels que PosterPilot n'en conserve, au lieu
+de laisser croire que vous voyez tout ce que TMDB possède. Seul un candidat qui
+aurait autrement été conservé compte dans ce plafond ; les doublons écartés et
+les entrées malformées, non, puisque ni les uns ni les autres n'ont jamais été
+quelque chose que vous auriez pu choisir.
 
 ## Performance et réglages
 
@@ -362,7 +442,12 @@ contrôle dans l'interface.
   réduire la bande passante consommée chez les fournisseurs. Les entrées sont
   réutilisées jusqu'à l'expiration du TTL (en jours), et le cache est borné par
   une taille maximale (en Mo) — une fois celle-ci dépassée, les entrées les
-  moins récemment utilisées sont évincées.
+  moins récemment utilisées sont évincées. Il ne contient **que des aperçus de
+  navigation** : l'aperçu agrandi en pleine taille et le fichier réellement
+  appliqué viennent directement du fournisseur, délibérément, pour que des
+  originaux ne puissent pas évincer les miniatures que ce cache existe pour
+  servir. Voir
+  [Utilisation → Ce que la navigation télécharge réellement](/posterpilot/fr/usage/).
 - **Tri par défaut de la médiathèque** (`LIBRARY_DEFAULT_SORT`, `title` par
   défaut). Le tri avec lequel s'ouvre le mur de la médiathèque quand l'URL n'en
   précise pas un : `title`, `year`, `rating`, `runtime`, `recent` (modifiés

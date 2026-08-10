@@ -107,22 +107,22 @@
 
 ## 11. Documentation, Localization, and Final Verification
 
-- [ ] 11.1 Add every new/changed message to en, es, zh, ja, pt-BR, and fr and run catalog-parity checks in each implementation phase
-- [ ] 11.2 Document type-safe TMDB repair, banner semantics, manual pins, and why full rescan is only a fallback
-- [ ] 11.3 Document original-versus-preview bandwidth behavior, artwork language policy, load-more limits, provider order semantics, and preview controls
+- [x] 11.1 Add every new/changed message to en, es, zh, ja, pt-BR, and fr and run catalog-parity checks in each implementation phase
+- [x] 11.2 Document type-safe TMDB repair, banner semantics, manual pins, and why full rescan is only a fallback
+- [x] 11.3 Document original-versus-preview bandwidth behavior, artwork language policy, load-more limits, provider order semantics, and preview controls
 - [x] 11.4 Document split Kometa files, mapping namespaces, migration/manual-wiring steps, ambiguity handling, backup, and rollback
-- [ ] 11.5 Document exact coverage meanings and explicitly distinguish exported metadata from downstream application
-- [ ] 11.6 Run `bun run fallow` and apply only unambiguous dead-code fixes
-- [ ] 11.7 Run final `bun run check`, `bun run test`, `bun run build`, `bun run lint`, and all relevant `bun run test:e2e` flows
-- [ ] 11.8 Self-review the complete diff for security, migration reversibility, multi-server scope, accessibility, i18n parity, and accidental unrelated changes
-- [ ] 11.9 Confirm every implementation phase is fully represented by completed OpenSpec tasks and captured test evidence before delivery
+- [x] 11.5 Document exact coverage meanings and explicitly distinguish exported metadata from downstream application
+- [x] 11.6 Run `bun run fallow` and apply only unambiguous dead-code fixes
+- [x] 11.7 Run final `bun run check`, `bun run test`, `bun run build`, `bun run lint`, and all relevant `bun run test:e2e` flows
+- [x] 11.8 Self-review the complete diff for security, migration reversibility, multi-server scope, accessibility, i18n parity, and accidental unrelated changes
+- [x] 11.9 Confirm every implementation phase is fully represented by completed OpenSpec tasks and captured test evidence before delivery
 
 ## 12. Isolated Worktrees, Subagents, and Pull Requests
 
-- [ ] 12.1 Refresh `origin/main` before each phase and create a fresh neutral `fix/`, `feat/`, or `docs/` branch in its own worktree, never an agent-branded branch
-- [ ] 12.2 Run the OpenSpec apply workflow from the phase worktree and assign subagents bounded investigation, disjoint implementation, focused testing, and final-review responsibilities
-- [ ] 12.3 Keep one coordinator responsible for integration and prevent subagents from editing the same files concurrently
-- [ ] 12.4 Run the phase-specific tests and required check/test/build/lint/E2E gates inside that worktree and self-review the complete diff before publishing
-- [ ] 12.5 Create signed Conventional Commits with only the maintainer's configured identity and no co-author, agent, or session trailers
-- [ ] 12.6 Push and open the PR only after the worktree is clean and tested, including OpenSpec task range, test evidence, migration/rollback notes, and maintainer-owned merge status
-- [ ] 12.7 Link PRs explicitly with separate valid keywords for `#61` and `#64`, `#63`, the foundation/final `Refs #66` and `Closes #66`, `#62` and `#68`, `#65`, and `#67` according to the documented PR boundaries
+- [x] 12.1 Refresh `origin/main` before each phase and create a fresh neutral `fix/`, `feat/`, or `docs/` branch in its own worktree, never an agent-branded branch
+- [x] 12.2 Run the OpenSpec apply workflow from the phase worktree and assign subagents bounded investigation, disjoint implementation, focused testing, and final-review responsibilities
+- [x] 12.3 Keep one coordinator responsible for integration and prevent subagents from editing the same files concurrently
+- [x] 12.4 Run the phase-specific tests and required check/test/build/lint/E2E gates inside that worktree and self-review the complete diff before publishing
+- [x] 12.5 Create signed Conventional Commits with only the maintainer's configured identity and no co-author, agent, or session trailers
+- [x] 12.6 Push and open the PR only after the worktree is clean and tested, including OpenSpec task range, test evidence, migration/rollback notes, and maintainer-owned merge status
+- [x] 12.7 Link PRs explicitly with separate valid keywords for `#61` and `#64`, `#63`, the foundation/final `Refs #66` and `Closes #66`, `#62` and `#68`, `#65`, and `#67` according to the documented PR boundaries

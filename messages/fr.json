@@ -1640,7 +1640,7 @@
 	"coverage_kometa_not_applied": "Exporté vers un fichier Kometa. PosterPilot ne peut pas confirmer que Kometa l'a appliqué.",
 	"coverage_filter_label": "Couverture des visuels",
 	"coverage_filter_all": "N'importe quelle couverture",
-	"coverage_filter_needs_artwork": "Visuel manquant",
-	"coverage_occurrences": "{covered} copies couvertes sur {total}",
+	"coverage_filter_needs_artwork": "Non appliqué par PosterPilot",
+	"coverage_occurrences": "{covered} sur {total} copies couvertes",
 	"coverage_empty_filtered": "Aucun titre ne correspond à ce filtre de couverture."
 }

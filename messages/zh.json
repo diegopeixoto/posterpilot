@@ -430,7 +430,7 @@
 	"item_language_empty": "没有 {language} 封面 —— 其他语言中有 {count} 张。",
 	"item_language_provider_empty": "{provider} 没有该条目的 {language} 封面。",
 	"item_language_unverified_hint": "有 {count} 张 {provider} 封面是在启用语言标记之前找到的。请重新搜索该来源以确认它们的语言。",
-	"item_language_unverified": "未标注",
+	"item_language_unverified": "未验证",
 	"item_language_fallback": "语言回退：{language}",
 	"item_truncated_pane": "{provider} 返回的封面超过 PosterPilot 保留的数量；此网格并非完整列表。",
 	"jobs_title": "任务",
