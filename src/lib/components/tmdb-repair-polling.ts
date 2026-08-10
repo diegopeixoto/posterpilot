@@ -17,12 +17,19 @@ export function isActiveTmdbRepairJob(status: string | null | undefined): boolea
 	return status !== null && status !== undefined && ACTIVE_JOB_STATUSES.has(status);
 }
 
-/** Idle repair warnings must not create permanent root-layout polling. */
+/**
+ * Idle repair warnings must not create fast permanent root-layout polling —
+ * but they must still notice work done elsewhere. A focused, visible window
+ * fires no visibility or focus event, so with no timer at all a banner whose
+ * mismatches were fixed in another tab or device would claim pending work
+ * indefinitely. An active job polls near-live; an idle warning ticks slowly.
+ */
 export function tmdbRepairPollInterval(
 	pendingCount: number,
 	status: string | null | undefined
 ): number | null {
-	return pendingCount > 0 && isActiveTmdbRepairJob(status) ? 3_000 : null;
+	if (pendingCount <= 0) return null;
+	return isActiveTmdbRepairJob(status) ? 3_000 : 60_000;
 }
 
 /**

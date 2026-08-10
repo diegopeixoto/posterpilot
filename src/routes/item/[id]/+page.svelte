@@ -314,9 +314,17 @@
 			pinnedCandidateIds.has(candidate.id)
 		);
 	}
-	/** True for a rendered tile the preference would otherwise have filtered away. */
+	/**
+	 * True for a rendered tile the preference would otherwise have filtered away.
+	 *
+	 * Under the preferred policy the only such tiles are pinned picks, so the
+	 * check suffices alone. In show-all mode every foreign tile renders by the
+	 * user's own choice — flagging them all would bury the one pinned fallback
+	 * the badge exists to surface — so only pinned picks keep the chip there.
+	 */
 	function isLanguageFallback(candidate: PosterCandidate): boolean {
-		return isLanguageFallbackCandidate(candidate, preferredLanguagePolicy);
+		if (!isLanguageFallbackCandidate(candidate, preferredLanguagePolicy)) return false;
+		return !showAllLanguages || pinnedCandidateIds.has(candidate.id);
 	}
 	function candidateLanguageName(candidate: PosterCandidate): string {
 		return candidate.languageProvenance === 'tagged'

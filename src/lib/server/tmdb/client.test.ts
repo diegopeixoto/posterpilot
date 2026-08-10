@@ -80,11 +80,13 @@ describe('TMDB client', () => {
 			resolveTmdbStrict({ imdb: 'tt404' }, 'Bearer test-key', { expectedMediaType: 'movie' })
 		).resolves.toBeNull();
 
-		h.fetchJson.mockRejectedValueOnce(new Error('HTTP 404 not a TV show'));
+		h.fetchJson
+			.mockRejectedValueOnce(new Error('HTTP 404 not a TV show'))
+			.mockRejectedValueOnce(new Error('HTTP 404 not a movie either'));
 		await expect(
 			resolveTmdbStrict({ tmdb: '1399' }, 'Bearer test-key', { expectedMediaType: 'tv' })
 		).resolves.toBeNull();
-		expect(h.fetchJson).toHaveBeenCalledTimes(4);
+		expect(h.fetchJson).toHaveBeenCalledTimes(5);
 	});
 
 	it('validates a direct id only in the expected namespace, including equal numeric ids', async () => {
@@ -122,11 +124,27 @@ describe('TMDB client', () => {
 		expect(h.fetchJson.mock.calls[1][1]).toMatchObject({ cacheNamespace: 'tmdb-resolution:tv' });
 	});
 
-	it('returns unresolved when only the opposite /find bucket has a result', async () => {
+	it('accepts the opposite /find bucket when the expected one is empty', async () => {
+		// A miniseries filed in a movie library — or the reverse — must not become
+		// a permanent no-match: the id is accepted only where TMDB actually has
+		// it, and the expected bucket still wins whenever it answers.
 		h.fetchJson.mockResolvedValue({ movie_results: [{ id: 603 }], tv_results: [] });
 
 		await expect(
 			resolveTmdbStrict({ tvdb: '12345' }, 'Bearer test-key', { expectedMediaType: 'tv' })
-		).resolves.toBeNull();
+		).resolves.toEqual({ tmdbId: '603', mediaType: 'movie' });
+	});
+
+	it('resolves a direct id through the other namespace when the expected one lacks it', async () => {
+		h.fetchJson
+			.mockRejectedValueOnce(new Error('HTTP 404 not a movie'))
+			.mockResolvedValueOnce({ id: 1399, name: 'Sherlock' });
+
+		await expect(
+			resolveTmdbStrict({ tmdb: '1399' }, 'Bearer test-key', { expectedMediaType: 'movie' })
+		).resolves.toEqual({ tmdbId: '1399', mediaType: 'tv' });
+		const [movieCall, tvCall] = h.fetchJson.mock.calls;
+		expect(new URL(movieCall[0]).pathname).toBe('/3/movie/1399');
+		expect(new URL(tvCall[0]).pathname).toBe('/3/tv/1399');
 	});
 });
