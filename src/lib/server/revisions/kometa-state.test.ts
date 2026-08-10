@@ -132,6 +132,34 @@ describe('Kometa managed slot state', () => {
 		);
 	});
 
+	it('replaces an explicitly tagged scalar with a clean string node', () => {
+		// Swapping only the value on a `!!int` scalar would keep the tag and
+		// serialize the URL under the wrong type; the node itself is replaced.
+		const raw = 'metadata:\n  101:\n    url_poster: !!int 123\n';
+		const restored = restoreKometaSlot(raw, 101, rootPoster, {
+			state: 'present',
+			url: 'https://images.invalid/replacement.jpg'
+		});
+		expect(restored).not.toContain('!!int');
+		expect(readKometaSlot(restored, 101, rootPoster)).toEqual({
+			state: 'present',
+			url: 'https://images.invalid/replacement.jpg'
+		});
+	});
+
+	it('treats a non-string scalar slot as absent and lets a managed write replace it', () => {
+		// An unquoted number or boolean at a managed slot is a typo, not
+		// structure; failing every export over it left the entry permanently
+		// unwritable while exporting nothing Kometa could use anyway.
+		const raw = 'metadata:\n  101:\n    url_poster: 12345\n';
+		expect(readKometaSlot(raw, 101, rootPoster)).toEqual({ state: 'absent', url: null });
+		const restored = restoreKometaSlot(raw, 101, rootPoster, {
+			state: 'present',
+			url: 'https://images.invalid/replacement.jpg'
+		});
+		expect(restored).toContain('url_poster: https://images.invalid/replacement.jpg');
+	});
+
 	it('removes a newly introduced nested slot and only empty managed containers', () => {
 		const raw = [
 			'metadata:',

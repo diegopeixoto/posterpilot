@@ -241,7 +241,11 @@ export async function executeDatabaseFrozenApplyJob(
 					);
 				}
 				const liveResolver = createApplyDestinationResolver({
-					serverRegistry: registry,
+					// The uncached registry on purpose: this resolver exists to compare
+					// the frozen plan against *current* state, and reading bindings
+					// through the job-start cache would let the freshness check agree
+					// with itself while the user rebinds the server mid-job.
+					serverRegistry: databaseServerRegistry,
 					loadConfig: () => Promise.resolve(liveConfig),
 					cacheKometaReads: true,
 					loadMigrationState: async (serverInstanceId) =>

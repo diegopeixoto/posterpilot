@@ -85,7 +85,8 @@ export const updateManagedServer = (
 	input: UpdateManagedServerInput,
 	controlLease?: KometaMigrationControlLease
 ) => liveManagementService().update(id, input, writeFenceForControlLease(controlLease));
-export const enableManagedServer = (id: string) => liveManagementService().enable(id);
+export const enableManagedServer = (id: string, controlLease?: KometaMigrationControlLease) =>
+	liveManagementService().enable(id, writeFenceForControlLease(controlLease));
 export const disableManagedServer = (id: string, controlLease?: KometaMigrationControlLease) =>
 	liveManagementService().disable(id, writeFenceForControlLease(controlLease));
 export const disconnectManagedServer = (

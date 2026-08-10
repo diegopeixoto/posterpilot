@@ -32,7 +32,9 @@ function assertUniqueLogicalKeys(map: YAMLMap): void {
 function assertStringSlot(map: YAMLMap, key: 'url_poster' | 'url_background'): void {
 	const pair = findLogicalPair(map, key);
 	if (!pair || isYamlNull(pair.value)) return;
-	if (!isScalar(pair.value) || typeof pair.value.value !== 'string') {
+	// Non-string scalars read as absent and are replaceable by a managed write;
+	// only a collection is a structural failure.
+	if (!isScalar(pair.value)) {
 		throw new Error('Existing Kometa YAML slot is not a string scalar');
 	}
 }

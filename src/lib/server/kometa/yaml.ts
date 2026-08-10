@@ -325,12 +325,22 @@ function setScalar(
 	value: string
 ): void {
 	const pair = findLogicalPair(parent, key);
-	if (
-		pair &&
-		isScalar(pair.value) &&
-		(typeof pair.value.value === 'string' || pair.value.value === null)
-	) {
-		pair.value.value = value;
+	// Any scalar is replaceable: the slot is managed, and an unquoted number or
+	// boolean here is a typo carrying no structure worth protecting. A map or
+	// sequence is hand-authored structure — destroying it silently would be
+	// worse than failing the export, so collections stay fatal. Plain string
+	// scalars update in place to keep their formatting; anything else — a
+	// non-string value or an explicit tag like `!!int` — gets a fresh string
+	// node, because an in-place value swap would keep the old tag and
+	// serialize the URL under the wrong type.
+	if (pair && isScalar(pair.value)) {
+		if (typeof pair.value.value === 'string' && !pair.value.tag) {
+			pair.value.value = value;
+		} else {
+			const scalar = document.createNode(value);
+			copyPresentation(pair.value, scalar);
+			pair.value = scalar;
+		}
 		return;
 	}
 	if (pair) throw new Error('Existing Kometa YAML slot is not a string scalar');

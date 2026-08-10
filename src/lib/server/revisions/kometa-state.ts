@@ -86,12 +86,19 @@ function ensureMap(document: Document<Node>, parent: YAMLMap, key: string | numb
 
 function setScalar(document: Document<Node>, parent: YAMLMap, key: string, value: string): void {
 	const pair = findLogicalPair(parent, key);
-	if (
-		pair &&
-		isScalar(pair.value) &&
-		(typeof pair.value.value === 'string' || pair.value.value === null)
-	) {
-		pair.value.value = value;
+	// Mirrors the export-side setScalar: any scalar is a replaceable managed
+	// value, only collections are protected hand-authored structure. A
+	// non-string or explicitly tagged scalar gets a fresh string node — an
+	// in-place value swap would keep the old tag (`!!int`) and serialize the
+	// URL under the wrong type.
+	if (pair && isScalar(pair.value)) {
+		if (typeof pair.value.value === 'string' && !pair.value.tag) {
+			pair.value.value = value;
+		} else {
+			const scalar = document.createNode(value);
+			copyPresentation(pair.value, scalar);
+			pair.value = scalar;
+		}
 		return;
 	}
 	if (pair) throw new Error('Existing Kometa YAML slot is not a string scalar');
@@ -169,10 +176,17 @@ function optionalString(
 	const pair = findLogicalPair(parent, key);
 	const pathKey = logicalPathKey(pair, key);
 	if (!pair || isYamlNull(pair.value)) return { key: pathKey, value: null };
-	if (!isScalar(pair.value) || typeof pair.value.value !== 'string') {
+	if (!isScalar(pair.value)) {
 		throw new Error('Existing Kometa YAML slot is not a string scalar');
 	}
-	return { key: pathKey, value: pair.value.value };
+	// A non-string scalar — an unquoted number or boolean typo — exports nothing
+	// Kometa can use, so it reads as absent rather than failing every managed
+	// operation on the entry. Collections above stay fatal: they are
+	// hand-authored structure a managed write must not destroy.
+	return {
+		key: pathKey,
+		value: typeof pair.value.value === 'string' ? pair.value.value : null
+	};
 }
 
 function resolvedKometaSlot(

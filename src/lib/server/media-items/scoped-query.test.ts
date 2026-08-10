@@ -4,7 +4,11 @@ import { drizzle, type LibSQLDatabase } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '$lib/server/db/schema';
 import { mediaItems, serverInstances } from '$lib/server/db/schema';
-import { MediaItemScopeMismatchError, requireScopedMediaItemsById } from './scoped-query';
+import {
+	loadScopedMediaItemsById,
+	MediaItemScopeMismatchError,
+	requireScopedMediaItemsById
+} from './scoped-query';
 
 let client: Client;
 let database: LibSQLDatabase<typeof schema>;
@@ -87,5 +91,20 @@ describe('requireScopedMediaItemsById', () => {
 	it('returns an empty scope without issuing a query', async () => {
 		await expect(requireScopedMediaItemsById(database, 'server-a', [])).resolves.toEqual([]);
 		expect(queries).toEqual([]);
+	});
+});
+
+describe('loadScopedMediaItemsById', () => {
+	it('skips absent and cross-server ids for a server-derived scope', async () => {
+		// Collection membership is read moments before the load, so an id that
+		// vanished in between is a skip, not a violated boundary.
+		const rows = await loadScopedMediaItemsById(database, 'server-a', [2, 9_999, 1, 1_101]);
+		expect(rows.map((row) => row.id)).toEqual([2, 1]);
+	});
+
+	it('still rejects ids that were never valid at all', async () => {
+		await expect(loadScopedMediaItemsById(database, 'server-a', [0])).rejects.toBeInstanceOf(
+			MediaItemScopeMismatchError
+		);
 	});
 });
