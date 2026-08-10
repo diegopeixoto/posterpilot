@@ -25,5 +25,11 @@ describe('library all-results fingerprint', () => {
 		);
 		expect(fingerprintLibrarySelection({ ...base, filter: { q: 'Alien' } })).not.toBe(fingerprint);
 		expect(fingerprintLibrarySelection({ ...base, orderedItemIds: [2, 1] })).not.toBe(fingerprint);
+		// Coverage narrows which question the frozen selection answered; two
+		// selections differing only here must never share a fingerprint even when
+		// their id lists happen to coincide.
+		expect(
+			fingerprintLibrarySelection({ ...base, filter: { coverage: 'needs_artwork' as const } })
+		).not.toBe(fingerprint);
 	});
 });

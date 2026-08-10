@@ -12,7 +12,14 @@ import { getActiveServerInstance } from '$lib/server/server-instances';
 
 export const load: PageServerLoad = async ({ url }) => {
 	const [config, activeServer] = await Promise.all([resolveConfig(), getActiveServerInstance()]);
+	// Coverage rides inside the parsed library filter so every consumer sees it —
+	// this load, the paging endpoint, and "select all matching" — and none can
+	// drop it. The review list parses the same parameter from the same module, so
+	// one coverage link means the same thing whichever list produced it. The value
+	// goes into the query filter untranslated: the query layer derives the SQL
+	// from the shared `isCovered` contract, and nothing is restated here.
 	const filter = parseLibraryFilter(url.searchParams);
+	const coverage = filter.coverage;
 	// The URL's sort always wins; the configured default only fills its absence.
 	// `filter` is returned with the URL-only sort so the UI can tell an explicit
 	// user choice (chip-worthy) from the configured default.
@@ -35,6 +42,9 @@ export const load: PageServerLoad = async ({ url }) => {
 		total,
 		pageSize: LIBRARY_PAGE_SIZE,
 		filter,
+		// Returned beside `filter` rather than inside it: `filter` is the shape the
+		// toolbar reads, and coverage is not one of its controls.
+		coverage,
 		genres,
 		spotlight,
 		defaultSort,

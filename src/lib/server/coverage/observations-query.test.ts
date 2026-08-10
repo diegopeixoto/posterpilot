@@ -247,7 +247,10 @@ describe('occurrence counts', () => {
 			occurrences: 2,
 			servers: 2,
 			libraries: 2,
-			coveredOccurrences: 1
+			// Per destination: the covered copy is applied on a server, and no copy
+			// has a Kometa export, so summing these would be the overstatement the
+			// split exists to prevent.
+			coveredOccurrences: { server: 1, kometa: 0 }
 		});
 	});
 
@@ -269,7 +272,7 @@ describe('occurrence counts', () => {
 			occurrences: 1,
 			servers: 1,
 			libraries: 1,
-			coveredOccurrences: 0
+			coveredOccurrences: { server: 0, kometa: 0 }
 		});
 	});
 
@@ -297,7 +300,7 @@ describe('occurrence counts', () => {
 		expect(counts.get(ITEMS.movieA)).toMatchObject({
 			occurrences: 2,
 			servers: 2,
-			coveredOccurrences: 1
+			coveredOccurrences: { server: 1, kometa: 0 }
 		});
 	});
 });

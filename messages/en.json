@@ -47,6 +47,7 @@
 	"review_sort_title": "Title",
 	"review_sort_year": "Year",
 	"review_search": "Search titles",
+	"review_clear_search": "Clear search",
 	"review_search_action": "Search",
 	"review_empty": "Nothing needs attention in this view.",
 	"review_empty_hint": "Choose another state, server, library, or search term.",
@@ -1627,5 +1628,19 @@
 	"library_load_more": "Load more",
 	"library_loading_more": "Loading…",
 	"library_load_error": "Couldn't load more items.",
-	"toast_dismiss": "Dismiss"
+	"toast_dismiss": "Dismiss",
+	"coverage_status_applied_server": "Applied on this server",
+	"coverage_status_exported_kometa": "Exported to Kometa",
+	"coverage_status_externally_changed": "Changed outside PosterPilot",
+	"coverage_status_unverified": "Applied, not verified",
+	"coverage_status_missing": "Not applied by PosterPilot",
+	"coverage_status_unknown": "Coverage unknown",
+	"coverage_destination_server": "Media server",
+	"coverage_destination_kometa": "Kometa metadata",
+	"coverage_kometa_not_applied": "Exported to a Kometa file. PosterPilot cannot confirm Kometa applied it.",
+	"coverage_filter_label": "Artwork coverage",
+	"coverage_filter_all": "Any coverage",
+	"coverage_filter_needs_artwork": "Needs artwork",
+	"coverage_occurrences": "{covered} of {total} copies covered",
+	"coverage_empty_filtered": "No titles match this coverage filter."
 }

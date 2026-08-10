@@ -830,10 +830,22 @@ export function createCoverageRefresher(dependencies: CoverageRefreshDependencie
 		) {
 			return rows;
 		}
-		const refreshed = await refreshSafely('stale_read', {
-			serverInstanceId,
-			mediaItemIds: [mediaItemId]
-		});
+		// Observe before reconciling, exactly as the sweep does. Reconciling alone
+		// rereads the fingerprints already stored while advancing `observedAt`, so
+		// opening the detail page on a poster someone swapped in Plex would keep
+		// reporting it applied *and* mark that evidence fresh — retiring the row
+		// from the stale sweep that would otherwise have caught the change.
+		const refreshed = await swallow(
+			'stale_read',
+			{ serverInstanceId, mediaItemIds: [mediaItemId] },
+			async () => {
+				await dependencies.observeServerArtwork?.({
+					serverInstanceId,
+					mediaItemIds: [mediaItemId]
+				});
+				return refreshCoverage({ serverInstanceId, mediaItemIds: [mediaItemId] });
+			}
+		);
 		// A failed refresh returns the evidence we already had. Stale coverage is
 		// still evidence; refusing to render the pane would be strictly worse.
 		return refreshed ? store.getItemCoverage(serverInstanceId, mediaItemId) : rows;

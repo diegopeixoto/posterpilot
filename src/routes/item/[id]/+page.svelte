@@ -23,7 +23,9 @@
 		stagedArtworkMatchesCandidate,
 		toggleStagedArtworkCandidate
 	} from '$lib/posters/selection-match';
+	import { coverageBreakdown, coverageOccurrenceReport } from '$lib/coverage-presentation';
 	import { m } from '$lib/paraglide/messages';
+	import CoverageBadge from '$lib/components/CoverageBadge.svelte';
 	import JobProgress from '$lib/components/JobProgress.svelte';
 	import ApplySkipReasons from '$lib/components/ApplySkipReasons.svelte';
 	import ManualTmdbMatch from '$lib/components/ManualTmdbMatch.svelte';
@@ -626,6 +628,12 @@
 	const enriched = $derived(
 		Boolean(data.item.backdropUrl || data.item.overview || (data.item.genres?.length ?? 0))
 	);
+
+	// One report per destination, always both, each keeping its own slots and counts.
+	// Never reduced to a single verdict here or in the markup below: a title verified
+	// on the server whose Kometa file carries only some of its slots has to say so.
+	const coverageReports = $derived(coverageBreakdown(data.coverage.slots));
+	const occurrenceReport = $derived(coverageOccurrenceReport(data.coverage.occurrences));
 
 	const PROVIDER_LABELS: Record<string, string> = {
 		mediux: 'MediUX',
@@ -1676,6 +1684,69 @@
 </section>
 
 <ManualTmdbMatch item={data.item} locale={data.locale} />
+
+<!-- Destination coverage.
+     Sits directly under the hero because "did my artwork actually land" is the
+     question this page exists to answer, and the artwork history further down
+     answers a different one: what we did, not what is true now.
+
+     Two panels, never one. The media server and the Kometa file are independent
+     destinations that never imply one another, so they are counted, badged and
+     explained separately — and each slot inside a panel keeps the status the
+     reconciler gave it rather than being folded into a panel-level verdict. -->
+<section class="mt-6" aria-labelledby="artwork-coverage-title">
+	<div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+		<h2 id="artwork-coverage-title" class="section-title mb-0">{m.coverage_filter_label()}</h2>
+		{#if occurrenceReport.reportable}
+			<!-- Only when the title exists more than once. With a single copy there is
+			     nothing "across servers and libraries" to report, and the panels below
+			     already say what happened to it.
+			     Split per destination and never summed: one copy applied to a server
+			     plus a different copy exported to Kometa is not "2 of 2 covered", and
+			     the slot panels below describe only the copy being viewed, so nothing
+			     else on this page would correct the overstatement. -->
+			<ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-300">
+				{#each occurrenceReport.destinations as entry (entry.destination)}
+					<li><span class="text-neutral-400">{entry.destinationLabel}:</span> {entry.label}</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+	<div class="grid gap-3 sm:grid-cols-2">
+		{#each coverageReports as report (report.destination)}
+			<div class="surface p-3">
+				<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+					{report.label}
+				</h3>
+				{#if report.empty}
+					<!-- Stated, not omitted. A destination that disappears when it holds no
+					     evidence is one the reader never learns to ask about, and its silence
+					     would read as coverage. `missing` is the honest wording for it: it says
+					     PosterPilot did not apply anything here, which is a claim about what we
+					     did — never a claim that the title has no artwork. -->
+					<div class="mt-2"><CoverageBadge status="missing" /></div>
+				{:else}
+					<!-- A show whose every episode was applied has a long slot list, so it
+					     scrolls in place rather than burying the rest of the page — the same
+					     bounded-list treatment the collection and migration panels use. -->
+					<ul class="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
+						{#each report.slots as slot (slot.key)}
+							<li class="flex flex-wrap items-center justify-between gap-2">
+								<span class="text-xs text-neutral-300">{slot.label}</span>
+								<CoverageBadge status={slot.status} />
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				{#if report.note}
+					<!-- The line the whole destination split exists for: a Kometa entry is a
+					     file on disk, and nothing about writing it proves Kometa ever ran. -->
+					<p class="mt-2 text-xs text-neutral-400">{report.note}</p>
+				{/if}
+			</div>
+		{/each}
+	</div>
+</section>
 
 {#if data.item.cast?.length}
 	<section class="mt-6">

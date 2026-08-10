@@ -47,6 +47,7 @@
 	"review_sort_title": "Título",
 	"review_sort_year": "Ano",
 	"review_search": "Buscar títulos",
+	"review_clear_search": "Limpar busca",
 	"review_search_action": "Buscar",
 	"review_empty": "Nada precisa de atenção nesta visualização.",
 	"review_empty_hint": "Escolha outro estado, servidor, biblioteca ou termo de busca.",
@@ -1627,5 +1628,19 @@
 	"library_load_more": "Carregar mais",
 	"library_loading_more": "Carregando…",
 	"library_load_error": "Não foi possível carregar mais itens.",
-	"toast_dismiss": "Dispensar"
+	"toast_dismiss": "Dispensar",
+	"coverage_status_applied_server": "Aplicado neste servidor",
+	"coverage_status_exported_kometa": "Exportado para o Kometa",
+	"coverage_status_externally_changed": "Alterado fora do PosterPilot",
+	"coverage_status_unverified": "Aplicado, sem verificação",
+	"coverage_status_missing": "Não aplicado pelo PosterPilot",
+	"coverage_status_unknown": "Cobertura desconhecida",
+	"coverage_destination_server": "Servidor de mídia",
+	"coverage_destination_kometa": "Metadados do Kometa",
+	"coverage_kometa_not_applied": "Exportado para um arquivo do Kometa. O PosterPilot não tem como confirmar se o Kometa aplicou.",
+	"coverage_filter_label": "Cobertura das artes",
+	"coverage_filter_all": "Qualquer cobertura",
+	"coverage_filter_needs_artwork": "Precisa de arte",
+	"coverage_occurrences": "{covered} de {total} cópias cobertas",
+	"coverage_empty_filtered": "Nenhum título corresponde a este filtro de cobertura."
 }

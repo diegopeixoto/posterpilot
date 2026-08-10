@@ -47,6 +47,7 @@
 	"review_sort_title": "标题",
 	"review_sort_year": "年份",
 	"review_search": "搜索标题",
+	"review_clear_search": "清除搜索",
 	"review_search_action": "搜索",
 	"review_empty": "此视图中没有需要处理的项目。",
 	"review_empty_hint": "请选择其他状态、服务器、媒体库或搜索词。",
@@ -1627,5 +1628,19 @@
 	"library_load_more": "加载更多",
 	"library_loading_more": "加载中…",
 	"library_load_error": "无法加载更多项目。",
-	"toast_dismiss": "关闭"
+	"toast_dismiss": "关闭",
+	"coverage_status_applied_server": "已应用到此服务器",
+	"coverage_status_exported_kometa": "已导出到 Kometa",
+	"coverage_status_externally_changed": "已在 PosterPilot 之外被更改",
+	"coverage_status_unverified": "已应用，未验证",
+	"coverage_status_missing": "PosterPilot 未应用",
+	"coverage_status_unknown": "覆盖状态未知",
+	"coverage_destination_server": "媒体服务器",
+	"coverage_destination_kometa": "Kometa 元数据",
+	"coverage_kometa_not_applied": "已导出到 Kometa 文件。PosterPilot 无法确认 Kometa 是否已应用。",
+	"coverage_filter_label": "图片覆盖",
+	"coverage_filter_all": "任意覆盖状态",
+	"coverage_filter_needs_artwork": "需要图片",
+	"coverage_occurrences": "{total} 个副本中有 {covered} 个已覆盖",
+	"coverage_empty_filtered": "没有标题符合此覆盖筛选。"
 }

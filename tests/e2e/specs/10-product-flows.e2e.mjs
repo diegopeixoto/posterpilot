@@ -2,6 +2,7 @@ import {
 	test,
 	expect,
 	gotoHydrated,
+	reloadHydrated,
 	triggerJob,
 	expectJobCompleted,
 	expectNoHorizontalOverflow
@@ -732,5 +733,129 @@ test.describe
 		expect(await stagedState()).toEqual(before);
 		expect(selectionWrites, 'preview must not persist a selection').toEqual([]);
 		await expectNoHorizontalOverflow(page);
+	});
+
+	test('narrows the library and the review inbox by derived artwork coverage', async ({
+		page,
+		runtime,
+		scenario
+	}) => {
+		// Two occurrences that differ only in whether destination evidence exists for
+		// them. Seeded here rather than reused from the scenario so the assertion does
+		// not depend on whatever the apply, undo, and collection flows above left in
+		// the projection. The covered one is also already reviewed: coverage and review
+		// state are independent facts, and a completed title must still answer
+		// "applied on this server".
+		const client = createClient({ url: `file:${runtime.databaseFile}` });
+		const now = Math.floor(Date.now() / 1000);
+		const reviewedAt = now - 500;
+		const applied = { title: 'Coverage Applied Fixture', ratingKey: 'e2e-coverage-applied' };
+		const absent = { title: 'Coverage Absent Fixture', ratingKey: 'e2e-coverage-absent' };
+		const insertedIds = [];
+		try {
+			const section = await client.execute({
+				sql: 'select section_key from media_items where id = ?',
+				args: [scenario.primaryItems.alpha]
+			});
+			const sectionKey = String(section.rows[0].section_key);
+			for (const [index, fixture] of [applied, absent].entries()) {
+				const inserted = await client.execute({
+					sql: `insert into media_items (
+					 server_instance_id, rating_key, section_key, type, title, year, tmdb_id, media_type,
+					 resolved, manual_match_pinned, reviewed_at, last_synced_at, updated_at
+					) values (?, ?, ?, 'movie', ?, 2024, ?, 'movie', 1, 0, ?, ?, ?)
+					returning id`,
+					args: [
+						scenario.primaryServerId,
+						fixture.ratingKey,
+						sectionKey,
+						fixture.title,
+						String(99_801 + index),
+						index === 0 ? reviewedAt : null,
+						now,
+						now
+					]
+				});
+				insertedIds.push(Number(inserted.rows[0].id));
+			}
+			const [appliedId] = insertedIds;
+			await client.execute({
+				sql: `insert into artwork_coverage (
+				 server_instance_id, media_item_id, library_section_key, canonical_key,
+				 destination, kind, status, evidence_source, observed_at, updated_at
+				) values (?, ?, ?, 'movie:99801', 'server', 'poster', 'applied_on_server',
+				 'e2e_fixture', ?, ?)`,
+				args: [scenario.primaryServerId, appliedId, sectionKey, now, now]
+			});
+
+			await gotoHydrated(page, '/library');
+			await expect(page.getByText(applied.title)).toBeVisible();
+			await expect(page.getByText(absent.title)).toBeVisible();
+
+			const libraryCoverage = page.getByLabel(t('coverage_filter_label'));
+			await libraryCoverage.selectOption({ label: t('coverage_status_applied_server') });
+			await expect(page).toHaveURL(/coverage=applied_on_this_server/u);
+			await expect(page.getByText(applied.title)).toBeVisible();
+			await expect(page.getByText(absent.title)).toHaveCount(0);
+
+			// The filter is state in the URL, not in the component: a reload restores
+			// both the narrowed list and the control that explains it.
+			await reloadHydrated(page);
+			await expect(page).toHaveURL(/coverage=applied_on_this_server/u);
+			await expect(libraryCoverage).toHaveValue('applied_on_this_server');
+			await expect(page.getByText(applied.title)).toBeVisible();
+			await expect(page.getByText(absent.title)).toHaveCount(0);
+
+			// "Needs artwork" is the complement, and it finds the occurrence that has no
+			// coverage rows at all — the case an equality test on a status could not.
+			await libraryCoverage.selectOption({ label: t('coverage_filter_needs_artwork') });
+			await expect(page).toHaveURL(/coverage=needs_artwork/u);
+			await expect(page.getByText(absent.title)).toBeVisible();
+			await expect(page.getByText(applied.title)).toHaveCount(0);
+
+			// An empty coverage result is a real answer, so it gets its own localized
+			// wording instead of the grid's generic "no match".
+			await gotoHydrated(
+				page,
+				`/library?q=${encodeURIComponent(absent.title)}&coverage=applied_on_this_server`
+			);
+			await expect(
+				page
+					.getByRole('status')
+					.filter({ hasText: t('coverage_empty_filtered') })
+					.first()
+			).toBeVisible();
+
+			await gotoHydrated(
+				page,
+				`/review?server=${encodeURIComponent(scenario.primaryServerId)}&coverage=needs_artwork`
+			);
+			await expect(page.getByLabel(t('coverage_filter_label'))).toHaveValue('needs_artwork');
+			await expect(page.getByRole('article', { name: new RegExp(absent.title) })).toBeVisible();
+			await expect(page.getByRole('article', { name: new RegExp(applied.title) })).toHaveCount(0);
+			await expectNoHorizontalOverflow(page);
+
+			// Browsing coverage is a read. Review completion is the user's statement
+			// about their queue, and no amount of looking at destination evidence may
+			// rewrite it.
+			const reviewed = await client.execute({
+				sql: 'select reviewed_at from media_items where id = ?',
+				args: [appliedId]
+			});
+			expect(Number(reviewed.rows[0].reviewed_at)).toBe(reviewedAt);
+		} finally {
+			if (insertedIds.length) {
+				const placeholders = insertedIds.map(() => '?').join(', ');
+				await client.execute({
+					sql: `delete from artwork_coverage where media_item_id in (${placeholders})`,
+					args: insertedIds
+				});
+				await client.execute({
+					sql: `delete from media_items where id in (${placeholders})`,
+					args: insertedIds
+				});
+			}
+			client.close();
+		}
 	});
 });
