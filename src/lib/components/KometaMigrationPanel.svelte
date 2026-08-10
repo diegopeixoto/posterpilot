@@ -121,6 +121,7 @@
 				before: string[];
 				after: string;
 			}>;
+			configRemovals?: Array<{ library: string; reference: string }>;
 			diffTruncated: boolean;
 		};
 		manualSnippet: string | null;
@@ -189,6 +190,7 @@
 	let errorIncompatibilities = $state<IncompatibilityDetail[]>([]);
 	let notice = $state<string | null>(null);
 	let acceptAmbiguous = $state(false);
+	let acceptConfigRemovals = $state(false);
 	let acknowledgeManual = $state(false);
 	let confirmRollback = $state(false);
 	let confirmAbandon = $state(false);
@@ -206,6 +208,7 @@
 	let disclosureAnnouncement = $state('');
 
 	const ambiguousCount = $derived(preview?.display.ambiguous.length ?? 0);
+	const configRemovals = $derived(preview?.display.configRemovals ?? []);
 	const isBusy = $derived(busyAction !== null);
 	const mutationDisabled = $derived(mutationDisabledMessage !== null);
 	const ambiguousDisclosure = $derived(
@@ -331,6 +334,7 @@
 		preview = null;
 		previewMigrationVersion = null;
 		acceptAmbiguous = false;
+		acceptConfigRemovals = false;
 		resetMigrationDisclosure();
 	}
 
@@ -512,7 +516,15 @@
 	}
 
 	async function confirmMigration(): Promise<void> {
-		if (isBusy || mutationDisabled || !preview || (ambiguousCount > 0 && !acceptAmbiguous)) return;
+		if (
+			isBusy ||
+			mutationDisabled ||
+			!preview ||
+			(ambiguousCount > 0 && !acceptAmbiguous) ||
+			(configRemovals.length > 0 && !acceptConfigRemovals)
+		) {
+			return;
+		}
 		busyAction = 'confirm';
 		clearFeedback();
 		const frozen = preview;
@@ -522,7 +534,8 @@
 				{
 					planId: frozen.planId,
 					digest: frozen.digest,
-					acceptAmbiguous: ambiguousCount > 0 ? acceptAmbiguous : undefined
+					acceptAmbiguous: ambiguousCount > 0 ? acceptAmbiguous : undefined,
+					acceptConfigRemovals: configRemovals.length > 0 ? acceptConfigRemovals : undefined
 				},
 				['migration', 'state']
 			);
@@ -770,6 +783,8 @@
 				return m.kometa_migration_error_scope_changed();
 			case 'kometa_migration_ambiguous_confirmation_required':
 				return m.kometa_migration_error_ambiguous_confirmation();
+			case 'kometa_migration_removal_confirmation_required':
+				return m.kometa_migration_error_removal_confirmation();
 			case 'kometa_migration_config_incompatible':
 				return m.kometa_migration_error_config_incompatible();
 			case 'kometa_migration_manual_ack_mismatch':
@@ -1387,6 +1402,36 @@
 					</div>
 				{/if}
 
+				{#if configRemovals.length > 0}
+					<!-- Same consent shape as the ambiguous list: these deletions are
+					     proposed, shown exactly, and applied only after their own
+					     explicit acknowledgment. -->
+					<div class="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
+						<p class="text-sm font-medium text-amber-200">
+							{m.kometa_migration_removals_title({ count: configRemovals.length })}
+						</p>
+						<p class="mt-1 text-xs text-amber-100/80">
+							{m.kometa_migration_removals_hint()}
+						</p>
+						<ul class="mt-2 space-y-1 text-xs text-amber-100">
+							{#each configRemovals as removal (removal.library + removal.reference)}
+								<li>
+									<span class="font-medium">{removal.library}</span>
+									<span class="text-amber-100/70"
+										>— {m.kometa_migration_removal_entry({
+											reference: removal.reference
+										})}</span
+									>
+								</li>
+							{/each}
+						</ul>
+						<label class="mt-4 flex items-start gap-2 text-xs font-medium text-amber-50">
+							<input type="checkbox" bind:checked={acceptConfigRemovals} class="mt-0.5" />
+							<span>{m.kometa_migration_accept_removals()}</span>
+						</label>
+					</div>
+				{/if}
+
 				<details class="mt-4 rounded-lg border border-neutral-800 p-3">
 					<summary class="cursor-pointer text-sm font-medium text-neutral-200">
 						{m.kometa_migration_classified_details()}
@@ -1574,7 +1619,10 @@
 					<button
 						type="button"
 						class="btn btn-accent min-h-11"
-						disabled={isBusy || mutationDisabled || (ambiguousCount > 0 && !acceptAmbiguous)}
+						disabled={isBusy ||
+							mutationDisabled ||
+							(ambiguousCount > 0 && !acceptAmbiguous) ||
+							(configRemovals.length > 0 && !acceptConfigRemovals)}
 						onclick={confirmMigration}
 					>
 						{busyAction === 'confirm'

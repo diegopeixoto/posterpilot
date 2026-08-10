@@ -558,6 +558,34 @@ describe('Kometa migration service', () => {
 		expect(readFileSync(join(directory, SHOW_FILENAME), 'utf8')).toBe('metadata: {}\n');
 	});
 
+	it('requires explicit acknowledgment before removing a distinct-path legacy repeat', async () => {
+		writeManagedFixture();
+		writeFileSync(
+			configPath,
+			`libraries:\n  Movies:\n    metadata_files:\n      - file: config/${LEGACY_FILENAME}\n      - file: ${LEGACY_FILENAME}\n`,
+			'utf8'
+		);
+
+		const preview = await previewKometaMigration();
+		expect(preview.display.configRemovals).toEqual([
+			{ library: 'Movies', reference: LEGACY_FILENAME }
+		]);
+
+		await expect(
+			confirmKometaMigration({ planId: preview.planId, digest: preview.digest })
+		).rejects.toMatchObject({ code: 'kometa_migration_removal_confirmation_required' });
+		expect(readFileSync(configPath, 'utf8')).toContain(`- file: ${LEGACY_FILENAME}`);
+
+		await confirmKometaMigration({
+			planId: preview.planId,
+			digest: preview.digest,
+			acceptConfigRemovals: true
+		});
+		const rewritten = readFileSync(configPath, 'utf8');
+		expect(rewritten).not.toContain(`- file: ${LEGACY_FILENAME}`);
+		expect(rewritten).toContain(MOVIE_FILENAME);
+	});
+
 	it('keeps an identical-content entry classified when only the other source index conflicts', async () => {
 		const identicalEntries = `metadata:\n  101:\n    url_poster: https://images.invalid/shared.jpg\n  202:\n    url_poster: https://images.invalid/shared.jpg\n`;
 		writeFileSync(legacyPath, identicalEntries, 'utf8');

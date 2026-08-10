@@ -56,7 +56,7 @@ export function parseMigrationConfirmation(
 		return { ok: false, code: 'preview_required' };
 	}
 	const allowed = options.allowAmbiguous
-		? (['planId', 'digest', 'acceptAmbiguous'] as const)
+		? (['planId', 'digest', 'acceptAmbiguous', 'acceptConfigRemovals'] as const)
 		: (['planId', 'digest'] as const);
 	if (
 		!hasOnlyKeys(body, allowed) ||
@@ -64,7 +64,10 @@ export function parseMigrationConfirmation(
 		!validSha256(body.digest) ||
 		(options.allowAmbiguous &&
 			Object.hasOwn(body, 'acceptAmbiguous') &&
-			typeof body.acceptAmbiguous !== 'boolean')
+			typeof body.acceptAmbiguous !== 'boolean') ||
+		(options.allowAmbiguous &&
+			Object.hasOwn(body, 'acceptConfigRemovals') &&
+			typeof body.acceptConfigRemovals !== 'boolean')
 	) {
 		return { ok: false, code: 'invalid_request' };
 	}
@@ -75,6 +78,9 @@ export function parseMigrationConfirmation(
 			digest: body.digest,
 			...(options.allowAmbiguous && Object.hasOwn(body, 'acceptAmbiguous')
 				? { acceptAmbiguous: body.acceptAmbiguous as boolean }
+				: {}),
+			...(options.allowAmbiguous && Object.hasOwn(body, 'acceptConfigRemovals')
+				? { acceptConfigRemovals: body.acceptConfigRemovals as boolean }
 				: {})
 		}
 	};

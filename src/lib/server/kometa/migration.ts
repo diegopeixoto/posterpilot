@@ -120,6 +120,7 @@ export type KometaMigrationServiceErrorCode =
 	| 'kometa_migration_not_found'
 	| 'kometa_migration_scope_changed'
 	| 'kometa_migration_ambiguous_confirmation_required'
+	| 'kometa_migration_removal_confirmation_required'
 	| 'kometa_migration_config_incompatible'
 	| 'kometa_migration_manual_ack_mismatch'
 	| 'kometa_migration_abandon_unavailable'
@@ -177,6 +178,7 @@ export interface ConfirmKometaMigrationRequest {
 	planId: string;
 	digest: string;
 	acceptAmbiguous?: boolean;
+	acceptConfigRemovals?: boolean;
 }
 
 export interface CancelKometaMigrationPreviewRequest {
@@ -759,6 +761,10 @@ function migrationDisplay(input: {
 			before: [...change.before],
 			after: change.after
 		})),
+		configRemovals: input.configPlan.entryRemovals.map((removal) => ({
+			library: removal.library,
+			reference: removal.reference
+		})),
 		diffTruncated: false
 	};
 }
@@ -1064,6 +1070,16 @@ export async function confirmKometaMigration(
 			assertExistingMigrationCanStartFreshPreview(existing, config, binding);
 			if (pending.payload.display.ambiguous.length > 0 && request.acceptAmbiguous !== true) {
 				throw new KometaMigrationServiceError('kometa_migration_ambiguous_confirmation_required');
+			}
+			// Config-entry removals are the same consent shape as ambiguous entries:
+			// shown in the frozen preview, and only applied after their own explicit
+			// acknowledgment — a basename match cannot prove two distinct paths are
+			// one file, so deleting them must never ride on the general confirm.
+			if (
+				(pending.payload.display.configRemovals?.length ?? 0) > 0 &&
+				request.acceptConfigRemovals !== true
+			) {
+				throw new KometaMigrationServiceError('kometa_migration_removal_confirmation_required');
 			}
 			await recoverMigrationQuarantines(pending.payload, assertControlLockOwned);
 			if (!currentFileMatchesSource(pending.payload)) {

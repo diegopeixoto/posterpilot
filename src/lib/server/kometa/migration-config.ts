@@ -54,7 +54,6 @@ export interface PlanKometaMigrationConfigInput {
 export type KometaMigrationConfigReasonCode =
 	| 'conflicting_authoritative_types'
 	| 'config_limit_exceeded'
-	| 'duplicate_legacy_reference'
 	| 'invalid_yaml'
 	| 'missing_typed_reference'
 	| 'no_authoritative_libraries'
@@ -104,6 +103,13 @@ export interface KometaMigrationConfigLibraryChange {
 	after: string;
 }
 
+/** One config entry the rewrite deletes and the user must explicitly accept. */
+export interface KometaMigrationConfigEntryRemoval {
+	library: string;
+	/** The reference exactly as written in config.yml. */
+	reference: string;
+}
+
 export interface KometaMigrationConfigPlan {
 	activation: 'managed' | 'manual';
 	sourceFingerprint: string;
@@ -115,6 +121,13 @@ export interface KometaMigrationConfigPlan {
 	warnings: KometaMigrationConfigWarning[];
 	reasons: KometaMigrationConfigReason[];
 	incompatibleLibraries: KometaMigrationConfigIncompatibility[];
+	/**
+	 * Distinct-path repeats of the legacy reference the managed rewrite removes.
+	 * A basename match cannot prove two paths are one file, so these removals
+	 * are shown in the preview and gated behind explicit acknowledgment at
+	 * confirmation instead of being absorbed silently.
+	 */
+	entryRemovals: KometaMigrationConfigEntryRemoval[];
 	legacyReferenceCount: number;
 	/** False when the shown manual wiring cannot cover every active/possible legacy reference. */
 	manualWiringActionable: boolean;
@@ -136,8 +149,12 @@ interface LegacyReference {
 	entry: YAMLMap;
 	type: KometaMediaKind | null;
 	targetReference: string | null;
-	/** Another reference in the same library is the rewrite target; this one is removed. */
-	duplicate: boolean;
+	/**
+	 * Another reference in the same library is the rewrite target; this one is
+	 * removed. Identical repeats collapse quietly into the surviving change's
+	 * before-list; distinct paths additionally require explicit acknowledgment.
+	 */
+	duplicate: false | 'identical' | 'distinct';
 }
 
 interface LibraryScan {
@@ -501,6 +518,7 @@ function manualPlan(input: {
 		warnings: ['manual_wiring_required'],
 		reasons: dedupeBy(input.reasons, reasonIdentity),
 		incompatibleLibraries: dedupeBy(input.incompatible, incompatibilityIdentity),
+		entryRemovals: [],
 		legacyReferenceCount: input.legacyReferenceCount,
 		manualWiringActionable: input.manualWiringActionable,
 		manualSnippet: buildManualSnippet(input.resolvedLibraries, input.references)
@@ -648,25 +666,26 @@ export function planKometaMigrationConfig(
 				reasons.push({ code: 'unowned_legacy_reference', library });
 			}
 		}
-		// Repeated entries collapse only when they are provably the same reference
-		// (equal after path normalization): the basename match that classifies a
-		// reference as legacy cannot prove that `first/posterpilot.yml` and
-		// `second/posterpilot.yml` are one file, and deleting a distinct
-		// user-managed entry would be data loss. Identical repeats keep one entry
-		// — the rewrite target — and remove the rest, visible in the preview diff.
+		// Every repeat is removed by the rewrite, but consent differs by proof.
+		// Identical repeats (equal after path normalization) are provably one
+		// file and collapse quietly into the surviving change's before-list. A
+		// basename match cannot prove that `first/posterpilot.yml` and
+		// `second/posterpilot.yml` are one file, so distinct paths are marked as
+		// explicit removals: shown in the preview and gated behind their own
+		// acknowledgment at confirmation, never absorbed silently.
 		if (referencesForLibrary.length > 1) {
-			const normalized = new Set(
-				referencesForLibrary.map((entry) => normalizedLegacyReference(entry.reference))
-			);
-			if (normalized.size > 1) {
-				reasons.push({ code: 'duplicate_legacy_reference', library });
-			} else {
-				const primary =
-					(owned ? referencesForLibrary.find((entry) => entry.reference === owned) : undefined) ??
-					referencesForLibrary[0];
-				for (const entry of referencesForLibrary) {
-					if (entry !== primary) entry.duplicate = true;
-				}
+			const expectedLegacy = kometaMetadataReference(metadataPathPrefix, LEGACY_FILENAME);
+			const primary =
+				(owned ? referencesForLibrary.find((entry) => entry.reference === owned) : undefined) ??
+				referencesForLibrary.find(
+					(entry) => normalizedLegacyReference(entry.reference) === expectedLegacy
+				) ??
+				referencesForLibrary[0];
+			const primaryIdentity = normalizedLegacyReference(primary.reference);
+			for (const entry of referencesForLibrary) {
+				if (entry === primary) continue;
+				entry.duplicate =
+					normalizedLegacyReference(entry.reference) === primaryIdentity ? 'identical' : 'distinct';
 			}
 		}
 	}
@@ -715,10 +734,14 @@ export function planKometaMigrationConfig(
 	}
 
 	const changes: KometaMigrationConfigLibraryChange[] = [];
-	const absorbedByLibrary = new Map<string, number>();
+	const entryRemovals: KometaMigrationConfigEntryRemoval[] = [];
+	const identicalRepeatsByLibrary = new Map<string, number>();
 	for (const reference of legacy) {
-		if (reference.duplicate) {
-			absorbedByLibrary.set(reference.library, (absorbedByLibrary.get(reference.library) ?? 0) + 1);
+		if (reference.duplicate === 'identical') {
+			identicalRepeatsByLibrary.set(
+				reference.library,
+				(identicalRepeatsByLibrary.get(reference.library) ?? 0) + 1
+			);
 		}
 	}
 	for (const reference of legacy) {
@@ -726,21 +749,24 @@ export function planKometaMigrationConfig(
 			throw new TypeError('Validated Kometa migration reference lost its authoritative type');
 		}
 		if (reference.duplicate) {
-			// A repeat of the same legacy entry: rewriting it too would leave two
-			// identical typed entries, so it is removed outright. Its removal is
-			// recorded on the surviving change entry below.
+			// Rewriting a repeat too would leave two identical typed entries, so it
+			// is removed. Identical repeats surface on the surviving change's
+			// before-list; distinct paths surface as acknowledged removals.
 			const index = reference.container.items.indexOf(reference.entry);
 			if (index >= 0) reference.container.items.splice(index, 1);
+			if (reference.duplicate === 'distinct') {
+				entryRemovals.push({ library: reference.library, reference: reference.reference });
+			}
 			continue;
 		}
 		reference.node.value = reference.targetReference;
 		changes.push({
 			library: reference.library,
 			mediaKind: reference.type,
-			// One entry per consumed reference, so the frozen preview shows the
-			// absorbed repeats being collapsed, not just the surviving rewrite.
+			// One entry per identical repeat consumed, so the frozen preview shows
+			// the collapse, not just the surviving rewrite.
 			before: Array.from(
-				{ length: 1 + (absorbedByLibrary.get(reference.library) ?? 0) },
+				{ length: 1 + (identicalRepeatsByLibrary.get(reference.library) ?? 0) },
 				() => LEGACY_FILENAME
 			),
 			after: reference.targetReference
@@ -763,6 +789,7 @@ export function planKometaMigrationConfig(
 		warnings: legacy.length === 0 ? ['no_legacy_references'] : [],
 		reasons: [],
 		incompatibleLibraries: dedupeBy(incompatible, incompatibilityIdentity),
+		entryRemovals,
 		legacyReferenceCount: legacy.length,
 		manualWiringActionable: true,
 		manualSnippet: null

@@ -69,12 +69,13 @@ describe('planKometaMigrationConfig — managed activation', () => {
 			}
 		]);
 		expect(result.legacyReferenceCount).toBe(2);
+		expect(result.entryRemovals).toEqual([]);
 	});
 
-	it('keeps distinct-path legacy references manual: a basename match proves nothing', () => {
+	it('proposes distinct-path repeats as acknowledged removals, never silent ones', () => {
 		// `legacy/posterpilot.yml` and `posterpilot.yml` may be two different
-		// files; deleting either would be data loss, so the plan names the
-		// library instead of guessing.
+		// files; the plan still rewires the owned entry, but records the other
+		// as an explicit removal that confirmation must acknowledge separately.
 		const rawConfig = `libraries:
   Movies:
     metadata_files:
@@ -83,11 +84,23 @@ describe('planKometaMigrationConfig — managed activation', () => {
 `;
 		const result = planKometaMigrationConfig(input({ rawConfig }));
 
-		expect(result.activation).toBe('manual');
-		expect(result.reasons).toContainEqual({
-			code: 'duplicate_legacy_reference',
-			library: 'Movies'
-		});
+		expect(result.activation).toBe('managed');
+		expect(result.reasons).toEqual([]);
+		expect(result.entryRemovals).toEqual([{ library: 'Movies', reference: LEGACY_FILENAME }]);
+		const proposed = parse(result.proposedContent ?? '') as {
+			libraries: { Movies: { metadata_files: unknown } };
+		};
+		expect(proposed.libraries.Movies.metadata_files).toEqual([{ file: REFERENCES.movie }]);
+		// The surviving change lists only its own reference; the distinct-path
+		// removal is consented to separately rather than folded into the rewrite.
+		expect(result.changes).toEqual([
+			{
+				library: 'Movies',
+				mediaKind: 'movie',
+				before: [LEGACY_FILENAME],
+				after: REFERENCES.movie
+			}
+		]);
 	});
 
 	it('suggests near-miss synced sections for an unknown library', () => {
