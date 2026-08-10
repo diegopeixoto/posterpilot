@@ -173,16 +173,21 @@ export function embyLikeProvider(
 	let cachedLibraryUserId: string | null | undefined;
 
 	// Every request aborts instead of hanging a worker when the server stalls
-	// mid-connection: metadata reads get the readCurrentArtwork budget, image
-	// transfers get a larger one for big files on slow links.
+	// mid-connection: metadata reads fail fast, image transfers get a budget
+	// sized for big files on slow links, and whole-library scans a generous one
+	// because listing a section of a few thousand items legitimately takes 30s+
+	// (#91) — a timeout below the server's real response time makes sync
+	// permanently unable to succeed, not merely slow. The scan budget is only
+	// for background-job listings, never interactive single-item reads.
 	const JSON_TIMEOUT_MS = 15_000;
+	const LIBRARY_READ_TIMEOUT_MS = 120_000;
 	const IMAGE_TIMEOUT_MS = 30_000;
 	const MAX_REMOTE_ARTWORK_BYTES = 50 * 1024 * 1024;
 
-	async function getJson<T>(path: string): Promise<T> {
+	async function getJson<T>(path: string, timeoutMs = JSON_TIMEOUT_MS): Promise<T> {
 		const res = await fetch(`${base}${path}`, {
 			headers,
-			signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
+			signal: AbortSignal.timeout(timeoutMs)
 		});
 		if (!res.ok) {
 			throw new Error(`${label} returned HTTP ${res.status} ${res.statusText} for ${path}`);
@@ -400,7 +405,10 @@ export function embyLikeProvider(
 				EnableUserData: 'true',
 				EnableImageTypes: 'Primary,Backdrop'
 			});
-			const res = await getJson<RawEmbyItemsResponse>(await itemsListPath(params.toString()));
+			const res = await getJson<RawEmbyItemsResponse>(
+				await itemsListPath(params.toString()),
+				LIBRARY_READ_TIMEOUT_MS
+			);
 			return mapItems(res, base, apiKey);
 		},
 
@@ -428,7 +436,8 @@ export function embyLikeProvider(
 					return {
 						libraryKey,
 						response: await getJson<RawEmbyItemsResponse>(
-							itemsListPathFor(libraryUserId, libraryParams.toString())
+							itemsListPathFor(libraryUserId, libraryParams.toString()),
+							LIBRARY_READ_TIMEOUT_MS
 						)
 					};
 				})
@@ -442,7 +451,8 @@ export function embyLikeProvider(
 				EnableImageTypes: 'Primary,Backdrop'
 			});
 			const boxSets = await getJson<RawEmbyItemsResponse>(
-				itemsListPathFor(libraryUserId, params.toString())
+				itemsListPathFor(libraryUserId, params.toString()),
+				LIBRARY_READ_TIMEOUT_MS
 			);
 			const collections: ServerNativeCollection[] = [];
 			for (const boxSet of boxSets.Items ?? []) {
@@ -455,7 +465,8 @@ export function embyLikeProvider(
 					GroupItemsIntoCollections: 'false'
 				});
 				const members = await getJson<RawEmbyItemsResponse>(
-					itemsListPathFor(libraryUserId, memberParams.toString())
+					itemsListPathFor(libraryUserId, memberParams.toString()),
+					LIBRARY_READ_TIMEOUT_MS
 				);
 				const scopedMembers = scopeEmbyCollectionMembers(members, libraryMembership);
 				if (scopedMembers.libraryKeys.length === 0) continue;

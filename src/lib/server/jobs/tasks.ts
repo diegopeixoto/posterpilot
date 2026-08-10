@@ -127,6 +127,9 @@ export async function runSyncJob(
 	const work: { sectionKey: string; item: SyncItem }[] = [];
 	await ctx.setPhase('server_read');
 	for (const section of sections) {
+		// One touch per section: a whole-library read may legitimately take
+		// minutes, and the stall watchdog must see progress between them.
+		await ctx.setPhase('server_read');
 		const items = await server.listItems(section.key);
 		for (const item of items) work.push({ sectionKey: section.key, item });
 	}
@@ -539,16 +542,32 @@ export async function runSyncJob(
 		server.capabilities.nativeCollectionDiscovery !== 'unsupported'
 	) {
 		await ctx.setPhase('collections');
-		const nativeResult = await reconcileOptionalNativeCollections({
-			server,
-			libraryKeys: sections.map((section) => section.key),
-			reconcile: (collections) =>
-				collectionRepository.reconcileNativeCollections({
-					serverInstanceId,
-					provider: server.type,
-					collections
-				})
-		});
+		// The adapter performs many sequential per-section reads inside this one
+		// call, each bounded by its own request timeout but with no access to the
+		// job context. A bounded keepalive keeps the stall watchdog from firing on
+		// a slow-but-healthy pass; after 30 ticks it stops, so a genuine hang in
+		// here is still eventually stalled rather than kept alive forever.
+		let collectionTicks = 0;
+		const collectionsKeepalive = setInterval(() => {
+			collectionTicks += 1;
+			if (collectionTicks <= 30) void ctx.setPhase('collections').catch(() => undefined);
+		}, 60_000);
+		(collectionsKeepalive as unknown as { unref?: () => void }).unref?.();
+		let nativeResult: Awaited<ReturnType<typeof reconcileOptionalNativeCollections>>;
+		try {
+			nativeResult = await reconcileOptionalNativeCollections({
+				server,
+				libraryKeys: sections.map((section) => section.key),
+				reconcile: (collections) =>
+					collectionRepository.reconcileNativeCollections({
+						serverInstanceId,
+						provider: server.type,
+						collections
+					})
+			});
+		} finally {
+			clearInterval(collectionsKeepalive);
+		}
 		if (nativeResult.status === 'failed') {
 			await logEvent('warn', 'sync', 'Native collection discovery unavailable', {
 				serverInstanceId,

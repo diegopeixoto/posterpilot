@@ -57,7 +57,8 @@ import {
 	enqueueJob,
 	enqueueJobDetailed,
 	markInterruptedJobs,
-	recoverExpiredLeases
+	recoverExpiredLeases,
+	setJobStallTimeoutForTests
 } from './runner';
 import { enterMaintenanceMode, resetMaintenanceModeForTests } from '$lib/server/maintenance';
 import { canonicalJsonDigest, hashCanonicalJson } from '$lib/server/plans/canonical-json';
@@ -267,6 +268,107 @@ describe('job runner', () => {
 		const id = await enqueueJob({ kind: 'sync', serverInstanceId: SERVER_ID });
 		const j = await waitFor(id, ['failed']);
 		expect(j.errorCode).toBe('invalid_request');
+	});
+
+	it('fails a stalled attempt instead of holding the worker forever', async () => {
+		// The heartbeat renews the lease whether or not the task advances, so a
+		// live-but-hung task would otherwise stay `running` until a restart.
+		setJobStallTimeoutForTests(150);
+		try {
+			let sawCancel = false;
+			h.syncImpl = async (ctx) => {
+				const c = ctx as Ctx & { isCancelled(): boolean };
+				await c.setTotal(1);
+				await new Promise<void>((resolve) => {
+					const poll = setInterval(() => {
+						if (c.isCancelled()) {
+							sawCancel = true;
+							clearInterval(poll);
+							resolve();
+						}
+					}, 20);
+				});
+			};
+			const { jobId: id } = await enqueueJobDetailed(
+				{ kind: 'sync', serverInstanceId: SERVER_ID },
+				{ maxAttempts: 1 }
+			);
+			const j = await waitFor(id, ['failed'], 5_000);
+			expect(j.errorCode).toBe('job_attempt_stalled');
+			// The abandoned task observed the stall through its cancellation checkpoint.
+			await sleep(200);
+			expect(sawCancel).toBe(true);
+		} finally {
+			setJobStallTimeoutForTests(null);
+		}
+	});
+
+	it('ignores writes from an abandoned stalled attempt after the retry claims', async () => {
+		setJobStallTimeoutForTests(120);
+		try {
+			let call = 0;
+			let zombieCtx: (Ctx & { setPhase(phase: string | null): Promise<void> }) | null = null;
+			let releaseZombie!: () => void;
+			const zombieGate = new Promise<void>((resolve) => (releaseZombie = resolve));
+			h.syncImpl = async (ctx) => {
+				call += 1;
+				if (call === 1) {
+					zombieCtx = ctx as typeof zombieCtx & object;
+					await zombieGate;
+					return;
+				}
+				await (ctx as Ctx).setTotal(7);
+				await (ctx as Ctx).progress(5, 'real');
+			};
+			const { jobId: id } = await enqueueJobDetailed(
+				{ kind: 'sync', serverInstanceId: SERVER_ID },
+				{ maxAttempts: 2 }
+			);
+			const j = await waitFor(id, ['completed'], 10_000);
+			expect(j.processed).toBe(5);
+
+			// The abandoned first attempt wakes up and tries to write. WORKER_ID is
+			// process-wide and the retry reused it, so only the attempt fence keeps
+			// these from landing on the completed row.
+			releaseZombie();
+			await zombieCtx!.progress(99, 'zombie').catch(() => undefined);
+			await zombieCtx!.setTotal(42).catch(() => undefined);
+			await zombieCtx!.setPhase('zombie_phase').catch(() => undefined);
+			const after = await getJob(id);
+			expect(after.processed).toBe(5);
+			expect(after.total).toBe(7);
+			expect(after.phase).not.toBe('zombie_phase');
+		} finally {
+			setJobStallTimeoutForTests(null);
+		}
+	});
+
+	it('clears the previous attempt error from the job row while a retry runs', async () => {
+		let call = 0;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		h.syncImpl = async () => {
+			call += 1;
+			if (call === 1) {
+				throw Object.assign(new Error('network unreachable'), { code: 'network' });
+			}
+			await gate;
+		};
+		const { jobId: id } = await enqueueJobDetailed(
+			{ kind: 'sync', serverInstanceId: SERVER_ID },
+			{ maxAttempts: 2 }
+		);
+		const scheduled = await waitFor(id, ['retry_scheduled'], 5_000);
+		expect(scheduled.error).toContain('network unreachable');
+
+		// The retry claim must not carry the old failure: `running` plus a stale
+		// error reads as a wedged worker.
+		const running = await waitFor(id, ['running'], 10_000);
+		expect(running.error).toBeNull();
+		expect(running.errorCode).toBeNull();
+
+		release();
+		await waitFor(id, ['completed'], 5_000);
 	});
 
 	it('cancels a running job', async () => {
