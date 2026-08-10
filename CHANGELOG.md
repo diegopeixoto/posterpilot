@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/diegopeixoto/posterpilot/compare/v0.11.0...v0.11.1) (2026-08-10)
+
+
+### Under the hood
+
+* write 0.11.0 release notes ([#89](https://github.com/diegopeixoto/posterpilot/issues/89)) ([8816455](https://github.com/diegopeixoto/posterpilot/commit/88164553bf1ce73ef7b7b339ab3bf624b2c7d67c))
+
 ## [0.11.0](https://github.com/diegopeixoto/posterpilot/compare/v0.10.0...v0.11.0) (2026-08-10)
 
 Every feature and fix below started as an issue from one person. This release is the answer to all eight of them.
