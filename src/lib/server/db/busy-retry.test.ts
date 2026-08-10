@@ -68,7 +68,66 @@ describe('withBusyRetry', () => {
 			})
 		);
 		await expect(client.execute('select 1')).rejects.toThrow('database is locked');
-		expect(calls).toBe(5);
+		expect(calls).toBe(8);
+	});
+
+	it('retries a connection that could not be opened, which reports an empty code', async () => {
+		// The shape observed on a real failure: libsql sets `code` to the empty string and
+		// puts the reason in the message. Reading that as a code classified it as
+		// non-transient, so it bypassed this retry and surfaced as an HTTP 500.
+		let calls = 0;
+		const client = withBusyRetry(
+			fakeClient({
+				execute: async () => {
+					calls++;
+					if (calls < 3) {
+						const error = new Error(
+							'ConnectionFailed("Unable to open connection to local database /data/posterpilot.db: 14")'
+						);
+						(error as Error & { code: string }).code = '';
+						throw error;
+					}
+					return {} as ResultSet;
+				}
+			})
+		);
+		await expect(client.execute('select 1')).resolves.toEqual({});
+		expect(calls).toBe(3);
+	});
+
+	it('retries SQLITE_LOCKED, which is contention on a shared cache rather than the file', async () => {
+		let calls = 0;
+		const client = withBusyRetry(
+			fakeClient({
+				execute: async () => {
+					calls++;
+					if (calls < 2) {
+						const error = new Error('database table is locked');
+						(error as Error & { code: string }).code = 'SQLITE_LOCKED';
+						throw error;
+					}
+					return {} as ResultSet;
+				}
+			})
+		);
+		await expect(client.execute('select 1')).resolves.toEqual({});
+		expect(calls).toBe(2);
+	});
+
+	it('still rethrows a genuine error that carries an empty code', async () => {
+		let calls = 0;
+		const client = withBusyRetry(
+			fakeClient({
+				execute: async () => {
+					calls++;
+					const error = new Error('no such column: bogus');
+					(error as Error & { code: string }).code = '';
+					throw error;
+				}
+			})
+		);
+		await expect(client.execute('select 1')).rejects.toThrow('no such column');
+		expect(calls).toBe(1);
 	});
 
 	it('retries a busy batch too', async () => {

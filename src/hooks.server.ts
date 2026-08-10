@@ -1,4 +1,4 @@
-import { type Handle, json, redirect } from '@sveltejs/kit';
+import { type Handle, type HandleServerError, json, redirect } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { env } from '$env/dynamic/private';
 import { db, migrateDb, restoreBootResult } from '$lib/server/db';
@@ -22,6 +22,7 @@ import { pruneOperationPlans } from '$lib/server/plans/operation-plan-store';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { maintenanceBlocksRequest } from '$lib/server/maintenance-http';
 import { reconcileThumbCacheDisk } from '$lib/server/posters/thumb-cache';
+import { formatRequestError } from '$lib/server/db/error-detail';
 
 // Run database migrations once at server startup, before any request is handled.
 await migrateDb();
@@ -189,6 +190,26 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 			}
 		);
 	});
+
+/**
+ * Log the whole cause chain for an unhandled request error.
+ *
+ * SvelteKit's default prints the thrown error alone, which for a database failure
+ * is drizzle's `Failed query: <sql>` wrapper — the SQLite code saying *why* sits
+ * on `cause` and never reaches the log. Issue #91 arrived as 815 of those with no
+ * recoverable code, leaving lock contention and a connection that could not be
+ * opened impossible to tell apart from the container's stdout.
+ *
+ * The returned shape is unchanged, so nothing new is exposed to the client: the
+ * detail is written to the server log only.
+ */
+export const handleError: HandleServerError = ({ error, event, status }) => {
+	// 404s are routine and would drown the log; everything else is a real fault.
+	if (status !== 404) {
+		console.error(formatRequestError(error, event.request.method, event.url.pathname));
+	}
+	return { message: 'Internal Error' };
+};
 
 export const handle: Handle = sequence(
 	handleSecurityHeaders,
