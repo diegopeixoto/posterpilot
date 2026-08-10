@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.1](https://github.com/diegopeixoto/posterpilot/compare/v0.12.0...v0.12.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* log the cause chain on request errors and retry transient open failures ([#98](https://github.com/diegopeixoto/posterpilot/issues/98)) ([dd28466](https://github.com/diegopeixoto/posterpilot/commit/dd284663a379d387772d24600e068e3afe863cfe))
+
+
+### Under the hood
+
+* write 0.12.0 release notes ([#96](https://github.com/diegopeixoto/posterpilot/issues/96)) ([3d712b4](https://github.com/diegopeixoto/posterpilot/commit/3d712b40f06440d8e292863daf93bbba702f6a16))
+
 ## [0.12.0](https://github.com/diegopeixoto/posterpilot/compare/v0.11.0...v0.12.0) (2026-08-10)
 
 Two things that stopped people cold: a first sync that never finished on a large library, and a migration banner that told you to fix something your config never had.
