@@ -320,21 +320,31 @@ export function createServerManagementService(
 		return updateStore(id, updates, assertWriteAuthorized);
 	}
 
-	async function enable(id: string): Promise<ServerInstanceSummary> {
+	async function enable(
+		id: string,
+		assertWriteAuthorized?: ManagementWriteFence
+	): Promise<ServerInstanceSummary> {
 		const current = await store.getConnection(id);
 		if (current.disconnectedAt) throw new ServerInstanceError('server_instance_disconnected');
 		const candidate = await resolveCandidate({}, current);
 		const outcome = await runConnectionTest(candidate);
 		if (!outcome.result.ok) {
-			await recordOutcome(id, outcome);
+			await recordOutcome(id, outcome, assertWriteAuthorized);
 			requireSuccessful(outcome);
 		}
-		return store.update(id, {
-			enabled: true,
-			connectionStatus: 'healthy',
-			lastTestedAt: outcome.testedAt,
-			capabilities: outcome.capabilities
-		});
+		// Threaded through the same write fence as update/disable/disconnect: an
+		// unfenced re-enable would mutate binding state under a mid-flight Kometa
+		// migration whose scope assertions froze it.
+		return updateStore(
+			id,
+			{
+				enabled: true,
+				connectionStatus: 'healthy',
+				lastTestedAt: outcome.testedAt,
+				capabilities: outcome.capabilities
+			},
+			assertWriteAuthorized
+		);
 	}
 
 	async function disable(

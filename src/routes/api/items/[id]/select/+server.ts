@@ -101,7 +101,12 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	const hasPosterCandidate = Object.hasOwn(body, 'posterCandidateId');
 	const hasBackgroundUrl = Object.hasOwn(body, 'backgroundUrl');
 	const hasBackgroundCandidate = Object.hasOwn(body, 'backgroundCandidateId');
-	if (hasPosterUrl !== hasPosterCandidate || hasBackgroundUrl !== hasBackgroundCandidate) {
+	// A URL without its candidate key is the pre-provenance body shape older
+	// clients still send; the absent key means what an explicit null does — a
+	// selection with no candidate provenance — so it is defaulted rather than
+	// rejected. A candidate id without its URL stays an error: nothing says
+	// what the id is supposed to point at.
+	if ((hasPosterCandidate && !hasPosterUrl) || (hasBackgroundCandidate && !hasBackgroundUrl)) {
 		throw error(400, 'selection URL and candidate id must be supplied together');
 	}
 	const selection = {
@@ -109,7 +114,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			? {
 					poster: {
 						url: body.posterUrl as string | null,
-						candidateId: body.posterCandidateId as number | null
+						candidateId: (body.posterCandidateId ?? null) as number | null
 					}
 				}
 			: {}),
@@ -117,7 +122,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			? {
 					background: {
 						url: body.backgroundUrl as string | null,
-						candidateId: body.backgroundCandidateId as number | null
+						candidateId: (body.backgroundCandidateId ?? null) as number | null
 					}
 				}
 			: {})

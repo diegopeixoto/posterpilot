@@ -325,11 +325,11 @@ function setScalar(
 	value: string
 ): void {
 	const pair = findLogicalPair(parent, key);
-	if (
-		pair &&
-		isScalar(pair.value) &&
-		(typeof pair.value.value === 'string' || pair.value.value === null)
-	) {
+	// Any scalar is replaceable in place: the slot is managed, and an unquoted
+	// number or boolean here is a typo carrying no structure worth protecting.
+	// A map or sequence is hand-authored structure — destroying it silently
+	// would be worse than failing the export, so collections stay fatal.
+	if (pair && isScalar(pair.value)) {
 		pair.value.value = value;
 		return;
 	}

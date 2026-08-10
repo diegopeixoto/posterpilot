@@ -14,16 +14,11 @@ export class MediaItemScopeMismatchError extends Error {
 	}
 }
 
-/**
- * Load an exact item-id scope without exceeding SQLite's parameter budget. Missing,
- * invalid, or cross-server ids reject the whole boundary instead of widening execution.
- * Rows follow the caller's first-seen id order after deterministic deduplication.
- */
-export async function requireScopedMediaItemsById(
+async function scopedMediaItemsById(
 	database: ReadExecutor,
 	serverInstanceId: string,
 	itemIds: readonly number[]
-): Promise<MediaItem[]> {
+): Promise<{ ids: number[]; byId: Map<number, MediaItem> }> {
 	const ids = [...new Set(itemIds)];
 	if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
 		throw new MediaItemScopeMismatchError();
@@ -37,7 +32,36 @@ export async function requireScopedMediaItemsById(
 			.where(and(eq(mediaItems.serverInstanceId, serverInstanceId), inArray(mediaItems.id, batch)));
 		for (const row of rows) byId.set(row.id, row);
 	}
+	return { ids, byId };
+}
 
+/**
+ * Load an exact item-id scope without exceeding SQLite's parameter budget. Missing,
+ * invalid, or cross-server ids reject the whole boundary instead of widening execution.
+ * Rows follow the caller's first-seen id order after deterministic deduplication.
+ */
+export async function requireScopedMediaItemsById(
+	database: ReadExecutor,
+	serverInstanceId: string,
+	itemIds: readonly number[]
+): Promise<MediaItem[]> {
+	const { ids, byId } = await scopedMediaItemsById(database, serverInstanceId, itemIds);
 	if (byId.size !== ids.length) throw new MediaItemScopeMismatchError();
 	return ids.map((id) => byId.get(id)!);
+}
+
+/**
+ * Load whichever of the named ids still exist on the server, preserving
+ * first-seen order. For server-derived scopes — collection membership read
+ * moments earlier — an id that vanished in between is a skip, not a boundary
+ * violation; a user-frozen scope must use `requireScopedMediaItemsById`, where
+ * a missing id invalidates the whole selection.
+ */
+export async function loadScopedMediaItemsById(
+	database: ReadExecutor,
+	serverInstanceId: string,
+	itemIds: readonly number[]
+): Promise<MediaItem[]> {
+	const { ids, byId } = await scopedMediaItemsById(database, serverInstanceId, itemIds);
+	return ids.flatMap((id) => byId.get(id) ?? []);
 }

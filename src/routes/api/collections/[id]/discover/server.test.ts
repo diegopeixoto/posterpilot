@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
 	getActiveServerInstance: vi.fn(),
 	resolveConfig: vi.fn(),
 	logEvent: vi.fn(),
-	requireScopedMediaItemsById: vi.fn()
+	loadScopedMediaItemsById: vi.fn()
 }));
 
 vi.mock('$lib/server/posters/service', () => ({ discoverForItem: h.discoverForItem }));
@@ -20,7 +20,7 @@ vi.mock('$lib/server/server-instances', () => ({
 vi.mock('$lib/server/config', () => ({ resolveConfig: h.resolveConfig }));
 vi.mock('$lib/server/events', () => ({ logEvent: h.logEvent }));
 vi.mock('$lib/server/media-items/scoped-query', () => ({
-	requireScopedMediaItemsById: h.requireScopedMediaItemsById
+	loadScopedMediaItemsById: h.loadScopedMediaItemsById
 }));
 vi.mock('$lib/server/db/schema', () => ({ posterCandidates: {}, settings: {} }));
 vi.mock('$lib/server/db', () => ({ db: {} }));
@@ -46,7 +46,7 @@ describe('POST /api/collections/[id]/discover', () => {
 			localMembers: [{ id: 1 }, { id: 2 }]
 		});
 		h.resolveConfig.mockResolvedValue({});
-		h.requireScopedMediaItemsById.mockResolvedValue([
+		h.loadScopedMediaItemsById.mockResolvedValue([
 			{ id: 1, title: 'Batman Begins' },
 			{ id: 2, title: 'The Dark Knight' }
 		]);
@@ -71,14 +71,14 @@ describe('POST /api/collections/[id]/discover', () => {
 		h.getCollection.mockResolvedValue({
 			localMembers: memberIds.map((id) => ({ id }))
 		});
-		h.requireScopedMediaItemsById.mockResolvedValue(
+		h.loadScopedMediaItemsById.mockResolvedValue(
 			memberIds.map((id) => ({ id, title: `Member ${id}` }))
 		);
 
 		const response = await POST(request({ providers: ['mediux'] }));
 
-		expect(h.requireScopedMediaItemsById).toHaveBeenCalledOnce();
-		expect(h.requireScopedMediaItemsById).toHaveBeenCalledWith(
+		expect(h.loadScopedMediaItemsById).toHaveBeenCalledOnce();
+		expect(h.loadScopedMediaItemsById).toHaveBeenCalledWith(
 			expect.anything(),
 			'server-a',
 			memberIds
@@ -121,7 +121,7 @@ describe('POST /api/collections/[id]/discover', () => {
 	it('skips the discovery loop when there are no local members', async () => {
 		h.getCollection.mockResolvedValue({ localMembers: [] });
 		const response = await POST(request({}));
-		expect(h.requireScopedMediaItemsById).not.toHaveBeenCalled();
+		expect(h.loadScopedMediaItemsById).not.toHaveBeenCalled();
 		expect(h.discoverForItem).not.toHaveBeenCalled();
 		expect(await response.json()).toEqual({ total: 0, succeeded: 0, failed: 0 });
 	});

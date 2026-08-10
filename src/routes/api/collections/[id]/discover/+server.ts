@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { serializeWrite } from '$lib/server/db/write-queue';
 import { posterCandidates } from '$lib/server/db/schema';
-import { requireScopedMediaItemsById } from '$lib/server/media-items/scoped-query';
+import { loadScopedMediaItemsById } from '$lib/server/media-items/scoped-query';
 import { resolveConfig } from '$lib/server/config';
 import { discoverForItem } from '$lib/server/posters/service';
 import { PROVIDERS } from '$lib/server/posters/providers';
@@ -38,7 +38,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		: undefined;
 
 	const memberIds = collection.localMembers.map((member) => member.id);
-	const items = memberIds.length ? await requireScopedMediaItemsById(db, active.id, memberIds) : [];
+	// Tolerant on purpose: membership was read from the database moments ago, so
+	// a member deleted in between is a skip for this run, not a scope violation
+	// worth failing the whole collection over.
+	const items = memberIds.length ? await loadScopedMediaItemsById(db, active.id, memberIds) : [];
 
 	const config = await resolveConfig();
 	let succeeded = 0;

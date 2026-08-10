@@ -322,7 +322,7 @@ describe('server-management API routes', () => {
 	it('enables and disables only the addressed instance', async () => {
 		let res = await response(ENABLE, event());
 		expect(res.status).toBe(200);
-		expect(h.enable).toHaveBeenCalledWith('server-1');
+		expect(h.enable).toHaveBeenCalledWith('server-1', 'lease');
 
 		res = await response(DISABLE, event());
 		expect(res.status).toBe(200);
