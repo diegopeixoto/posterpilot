@@ -32,9 +32,10 @@
 			['partial_failed', 'failed', 'cancelled', 'interrupted'].includes(repair.job.status)
 	);
 
-	// Durable database state remains authoritative. Poll only while a repair job is active;
-	// an idle warning can otherwise live for days and must not keep invalidating every root
-	// load in every open tab. Visibility and focus refreshes still pick up work done elsewhere.
+	// Durable database state remains authoritative. An active repair job polls
+	// near-live; an idle warning ticks slowly, because a focused, visible window
+	// fires no wake event and would otherwise present resolved mismatches as
+	// outstanding forever. Visibility and focus refreshes cover tab switches.
 	$effect(() => {
 		if (
 			repair.pendingCount === 0 ||

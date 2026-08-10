@@ -6,6 +6,7 @@ import { asc } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { mediaItems, serverInstances } from '$lib/server/db/schema';
 import {
+	CROSS_NAMESPACE_RESOLUTION_REASON,
 	isPendingTmdbTypeMismatch,
 	pendingTmdbTypeMismatchCondition,
 	type TmdbTypeMismatchItem
@@ -102,6 +103,15 @@ describe('pending TMDB type mismatch predicate', () => {
 				type: 'show',
 				title: 'Other server mismatch',
 				mediaType: 'movie'
+			},
+			{
+				serverInstanceId: 'server-a',
+				ratingKey: 'verified-cross-namespace',
+				sectionKey: 'movies',
+				type: 'movie',
+				title: 'Miniseries filed in a movie library',
+				mediaType: 'tv',
+				resolutionReason: CROSS_NAMESPACE_RESOLUTION_REASON
 			}
 		]);
 	});
@@ -145,7 +155,18 @@ describe('pending TMDB type mismatch predicate', () => {
 		['unresolved item', mismatchItem({ mediaType: null }), false],
 		['manual pin', mismatchItem({ manualMatchPinned: true }), false],
 		['removed source', mismatchItem({ sourceRemovedAt: new Date('2026-08-01') }), false],
-		['different server', mismatchItem({ serverInstanceId: 'server-b' }), false]
+		['different server', mismatchItem({ serverInstanceId: 'server-b' }), false],
+		// Verified in the opposite namespace: cross-typed by construction, and
+		// re-resolving it would return the same answer forever.
+		[
+			'verified cross-namespace resolution',
+			mismatchItem({
+				type: 'movie',
+				mediaType: 'tv',
+				resolutionReason: CROSS_NAMESPACE_RESOLUTION_REASON
+			}),
+			false
+		]
 	] as const)('%s => %s', (_label, item, expected) => {
 		expect(isPendingTmdbTypeMismatch(item, 'server-a')).toBe(expected);
 	});

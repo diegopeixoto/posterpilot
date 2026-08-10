@@ -23,7 +23,10 @@ import { createCollectionRepository } from '$lib/server/collections/repository';
 import { reconcileOptionalNativeCollections } from '$lib/server/collections/native-sync';
 import { createDatabaseFullRescanArtworkObserver } from './full-rescan-artwork';
 import { sanitizeServerArtworkUrl } from '$lib/server/media-server/artwork-url';
-import { isPendingTmdbTypeMismatch } from '$lib/server/tmdb/repair-predicate';
+import {
+	CROSS_NAMESPACE_RESOLUTION_REASON,
+	isPendingTmdbTypeMismatch
+} from '$lib/server/tmdb/repair-predicate';
 import {
 	clearTmdbSyncWatermarkIfCurrent,
 	countPendingTmdbRepairs,
@@ -302,7 +305,8 @@ export async function runSyncJob(
 						type: item.type,
 						mediaType: existing.mediaType,
 						manualMatchPinned: existing.manualMatchPinned,
-						sourceRemovedAt: null
+						sourceRemovedAt: null,
+						resolutionReason: existing.resolutionReason
 					},
 					serverInstanceId
 				)
@@ -340,19 +344,30 @@ export async function runSyncJob(
 						: null;
 				if (!existing?.manualMatchPinned) {
 					const selected = pickExternalId(item.guids);
+					const expectedMediaType = item.type === 'show' ? 'tv' : 'movie';
 					const automatic = await resolveTmdbStrict(item.guids, config.tmdbKey!, {
-						expectedMediaType: item.type === 'show' ? 'tv' : 'movie',
+						expectedMediaType,
 						cacheTtlDays: config.httpCacheTtlDays,
 						forceRefresh: full
 					});
 					if (automatic && selected) {
 						const source = selected.source;
+						// A resolution verified in the opposite namespace conflicts with the
+						// library type by construction. Recording the dedicated reason is
+						// what exempts the row from the repair predicate — without it the
+						// repair job would re-resolve the same answer forever and the
+						// mismatch banner would never clear.
 						const persisted = await manualMatchRepository.applyAutomaticResolution(
 							serverInstanceId,
 							itemId,
 							{
 								resolution: automatic,
-								reason: source === 'tmdb' ? 'direct_tmdb_guid' : source,
+								reason:
+									automatic.mediaType !== expectedMediaType
+										? CROSS_NAMESPACE_RESOLUTION_REASON
+										: source === 'tmdb'
+											? 'direct_tmdb_guid'
+											: source,
 								source,
 								attemptedSources: [source],
 								resolvedAt: new Date()

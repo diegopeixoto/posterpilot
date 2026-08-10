@@ -67,9 +67,9 @@ describe('TMDB repair banner polling', () => {
 	});
 
 	it.each([null, 'completed', 'partial_failed', 'failed', 'cancelled', 'interrupted'])(
-		'does not poll an idle or terminal warning (%s)',
+		'ticks an idle or terminal warning slowly (%s), so a focused tab still converges',
 		(status) => {
-			expect(tmdbRepairPollInterval(4, status)).toBeNull();
+			expect(tmdbRepairPollInterval(4, status)).toBe(60_000);
 		}
 	);
 

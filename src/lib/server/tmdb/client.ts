@@ -91,7 +91,22 @@ export async function resolveTmdbStrict(
 			cacheTtlDays,
 			forceRefresh
 		);
-		return matched ? { tmdbId: selected.id, mediaType: expectedMediaType } : null;
+		if (matched) return { tmdbId: selected.id, mediaType: expectedMediaType };
+		// The authoritative namespace wins, but an id absent from it can still be
+		// real: a miniseries filed in a movie library carries a TV id. Probing the
+		// other namespace stays type-safe — the id is accepted only where TMDB
+		// actually has it, and an id present in both namespaces already returned
+		// above — while items whose library type disagrees with their TMDB
+		// namespace keep resolving instead of becoming permanent no-matches.
+		const fallbackMediaType = otherTmdbMediaType(expectedMediaType);
+		const crossMatched = await validateTmdbIdStrict(
+			selected.id,
+			fallbackMediaType,
+			auth,
+			cacheTtlDays,
+			forceRefresh
+		);
+		return crossMatched ? { tmdbId: selected.id, mediaType: fallbackMediaType } : null;
 	}
 
 	const url = withAuthQuery(
@@ -105,11 +120,20 @@ export async function resolveTmdbStrict(
 			cacheNamespace: `tmdb-resolution:${expectedMediaType}`,
 			forceRefresh
 		});
-		return parseFindResult(json, expectedMediaType);
+		// Same cross-namespace tolerance as the direct-id path: only the other
+		// bucket of the same authoritative `find` response, never a guess.
+		return (
+			parseFindResult(json, expectedMediaType) ??
+			parseFindResult(json, otherTmdbMediaType(expectedMediaType))
+		);
 	} catch (error) {
 		if (isTmdbNotFound(error)) return null;
 		throw error;
 	}
+}
+
+function otherTmdbMediaType(mediaType: TmdbMediaType): TmdbMediaType {
+	return mediaType === 'movie' ? 'tv' : 'movie';
 }
 
 /** Compatibility resolver: transient failures degrade to null for legacy callers. */
