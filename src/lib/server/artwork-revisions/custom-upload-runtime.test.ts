@@ -133,6 +133,8 @@ interface Fixture {
 	finalizeGroup: ReturnType<typeof vi.fn>;
 	applyPosterBytes: ReturnType<typeof vi.fn>;
 	active: { value: string | null };
+	/** Every coverage refresh this runtime asked for, in order. */
+	coverageRefreshes: { trigger: string; scope: { mediaItemIds: number[] } }[];
 }
 
 function fixture(reads: Array<ServerArtwork | null | Error>): Fixture {
@@ -180,6 +182,7 @@ function fixture(reads: Array<ServerArtwork | null | Error>): Fixture {
 		applyPosterBytes
 	} as unknown as MediaServer;
 	const active = { value: 'server-a' as string | null };
+	const coverageRefreshes: { trigger: string; scope: { mediaItemIds: number[] } }[] = [];
 	const dependencies: CustomUploadRuntimeDependencies = {
 		store,
 		snapshots: { captureServer } as unknown as ArtworkSnapshotRepository,
@@ -198,10 +201,14 @@ function fixture(reads: Array<ServerArtwork | null | Error>): Fixture {
 					}
 				: null,
 		resolveServer: async () => server,
+		refreshCoverageAfter: async (trigger, scope) => {
+			coverageRefreshes.push({ trigger, scope });
+		},
 		clock: () => NOW
 	};
 	return {
 		runtime: createCustomUploadRuntime(dependencies),
+		coverageRefreshes,
 		store,
 		events,
 		captureServer,
@@ -410,6 +417,21 @@ describe('custom upload runtime', () => {
 			code: 'item_not_found'
 		});
 		expect(subject.store.plan).toBeNull();
+	});
+
+	it('tells coverage about the upload, so it stops reading as needing artwork', async () => {
+		// This runtime is reached straight from the upload route, not through the
+		// frozen apply job, so nothing else would refresh it — and the on-demand read
+		// deliberately skips an item that has no coverage rows yet.
+		const upload = jpeg(9);
+		const before = artwork(jpeg(1), 'before');
+		const subject = fixture([before, before, artwork(upload, 'after')]);
+		const plan = await preview(subject, upload);
+		await subject.runtime.confirm(confirmation(plan, upload));
+
+		expect(subject.coverageRefreshes).toHaveLength(1);
+		expect(subject.coverageRefreshes[0].trigger).toBe('apply');
+		expect(subject.coverageRefreshes[0].scope.mediaItemIds).toEqual([7]);
 	});
 
 	it('uses the custom upload plan kind in the durable store', async () => {

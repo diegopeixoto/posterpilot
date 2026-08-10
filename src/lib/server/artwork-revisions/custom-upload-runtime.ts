@@ -19,6 +19,7 @@ import {
 	type CustomUploadOperationPlanStore,
 	type CustomUploadPlanPreview
 } from './custom-upload-plan';
+import { refreshCoverageAfter } from '$lib/server/coverage/refresh';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore, resolveArtworkSnapshotDirectory } from './snapshot-store';
 import { createArtworkSnapshotRepository, type ArtworkSnapshotRepository } from './snapshots';
@@ -52,6 +53,17 @@ export interface CustomUploadRuntimeDependencies {
 	getActiveServerInstanceId(): Promise<string | null>;
 	getItem(mediaItemId: number, serverInstanceId: string): Promise<CustomUploadRuntimeItem | null>;
 	resolveServer(serverInstanceId: string): Promise<MediaServer>;
+	/**
+	 * Told about a finished upload so coverage learns about it.
+	 *
+	 * Injected rather than imported so this runtime stays testable without a
+	 * database, and defaulted to a no-op for the same reason: only the live
+	 * runtime wires the real refresher.
+	 */
+	refreshCoverageAfter?: (
+		trigger: 'apply',
+		scope: { serverInstanceId: string; mediaItemIds: number[] }
+	) => Promise<unknown>;
 	clock?: () => Date;
 }
 
@@ -299,6 +311,15 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 				customUpload: true
 			}
 		});
+		// A custom upload is an apply, and it reaches this runtime straight from the
+		// upload route rather than through the frozen apply job — so the job's own
+		// refresh never sees it. Without this an item with no coverage rows keeps
+		// matching "needs artwork" after a successful upload, because the on-demand
+		// read deliberately does not re-observe an item that has no rows yet.
+		await dependencies.refreshCoverageAfter?.('apply', {
+			serverInstanceId: scope.serverInstanceId,
+			mediaItemIds: [scope.item.id]
+		});
 
 		return {
 			ok: verified,
@@ -340,7 +361,8 @@ function runtime() {
 				: null;
 		},
 		resolveServer: async (serverInstanceId) =>
-			(await resolveMediaServerInstance(serverInstanceId, { requireEnabled: true })).server
+			(await resolveMediaServerInstance(serverInstanceId, { requireEnabled: true })).server,
+		refreshCoverageAfter
 	});
 	return liveRuntime;
 }

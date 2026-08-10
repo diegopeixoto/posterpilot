@@ -7,6 +7,13 @@ import {
 	posterCandidates,
 	serverInstances
 } from '$lib/server/db/schema';
+import { canonicalIdentityKey } from '$lib/artwork-coverage';
+import {
+	coverageSelectionCondition,
+	loadCoverageOccurrenceCounts,
+	loadItemCoverageSummaries,
+	type CoverageSelection
+} from '$lib/server/coverage/observations-query';
 import { REVIEW_STATES, type ReviewState } from './state';
 import { reviewStateExpression } from './state-sql';
 import { buildReviewDashboardSummary } from './dashboard-summary';
@@ -23,6 +30,12 @@ export interface ReviewFilter {
 	type?: 'movie' | 'show';
 	availability?: ReviewAvailability;
 	changedSince?: Date;
+	/**
+	 * Derived destination coverage, independent of `state`. A user can be looking
+	 * for titles they have completed that are nonetheless uncovered, or the reverse
+	 * — review state is workflow, coverage is evidence, and neither implies the other.
+	 */
+	coverage?: CoverageSelection;
 	jobId?: number;
 	q?: string;
 	sort?: ReviewSort;
@@ -62,6 +75,7 @@ function reviewConditions(filter: ReviewFilter): SQL[] {
 	if (filter.availability === 'mediux') conditions.push(eq(mediaItems.hasMediux, true));
 	if (filter.availability === 'none') conditions.push(eq(mediaItems.hasCandidates, false));
 	if (filter.changedSince) conditions.push(gte(mediaItems.updatedAt, filter.changedSince));
+	if (filter.coverage) conditions.push(coverageSelectionCondition(filter.coverage));
 	if (filter.jobId) {
 		conditions.push(sql`exists (
 			select 1 from job_item_outcomes automation_scope
@@ -244,6 +258,21 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 			])
 		: [[], []];
 
+	// Bounded by the same page cap as the candidate and failed-slot lookups above:
+	// two grouped reads for the whole page rather than two per row. Both are reads —
+	// rendering coverage must never advance `reviewedAt`, because a destination
+	// being reconciled is not the user finishing their review of the title.
+	const scopedIdentities = rows.map((row) => ({
+		mediaItemId: row.id,
+		canonicalKey: canonicalIdentityKey(row.mediaType, row.tmdbId)
+	}));
+	const [coverageSummaries, occurrenceCounts] = ids.length
+		? await Promise.all([
+				loadItemCoverageSummaries(db, filter.serverInstanceId, ids),
+				loadCoverageOccurrenceCounts(db, scopedIdentities)
+			])
+		: [new Map(), new Map()];
+
 	const items = rows.map((item) => {
 		const own = candidates.filter((candidate) => candidate.mediaItemId === item.id);
 		const previewCandidates = own.filter(
@@ -290,7 +319,9 @@ export async function queryReviewInbox(filter: ReviewFilter, page: ReviewPageOpt
 				hasCurrentBackground: item.hasCurrentBackground === 1
 			},
 			suggestion: { poster: first('poster'), background: first('background') },
-			failedSlots: failedSlots.filter((slot) => slot.mediaItemId === item.id)
+			failedSlots: failedSlots.filter((slot) => slot.mediaItemId === item.id),
+			coverage: coverageSummaries.get(item.id) ?? null,
+			occurrences: occurrenceCounts.get(item.id) ?? null
 		};
 	});
 

@@ -8,6 +8,7 @@ import {
 } from '$lib/server/artwork-revisions/snapshot-store';
 import { createArtworkSnapshotRepository } from '$lib/server/artwork-revisions/snapshots';
 import { db } from '$lib/server/db';
+import { refreshCoverageAfter } from '$lib/server/coverage/refresh';
 import { assertCollectionApplyContextFresh } from '$lib/server/collections/apply-scope';
 import { appliedPosters } from '$lib/server/db/schema';
 import { resolveDataPaths } from '$lib/server/data-paths';
@@ -33,7 +34,8 @@ import {
 import {
 	executeFrozenApplyPlan,
 	type ApplyOperationExecutionResult,
-	type ApplyPlanExecutionHooks
+	type ApplyPlanExecutionHooks,
+	type ApplyPlanExecutionResult
 } from './apply-executor';
 import { type ApplyPlanOperation, type FrozenApplyJobPayload } from './apply-plan';
 import { assertApplyPlanFresh } from './apply-plan-validation';
@@ -351,5 +353,36 @@ export async function executeDatabaseFrozenApplyJob(
 		hooks
 	);
 	await coordinator.finalize(result);
+	await refreshAppliedCoverage(result);
 	return result;
+}
+
+/**
+ * Re-derive coverage for exactly the occurrences this plan touched.
+ *
+ * After `finalize` rather than before: the revision group is closed by then, so
+ * reconciliation reads a ledger whose outcomes and verifications are final
+ * instead of a half-written one. Scoped to the plan's items because a plan is
+ * the unit the user just acted on — rebuilding the whole server here would make
+ * a five-item apply pay for a forty-thousand-item library.
+ *
+ * A refresh failure is swallowed: an apply that succeeded and then could not
+ * update a cache is still a successful apply, and the next sync, undo, or stale
+ * read rebuilds what this pass missed.
+ */
+async function refreshAppliedCoverage(result: ApplyPlanExecutionResult): Promise<void> {
+	const byServer = new Map<string, Set<number>>();
+	for (const item of result.items) {
+		let ids = byServer.get(item.serverInstanceId);
+		if (!ids) {
+			ids = new Set<number>();
+			byServer.set(item.serverInstanceId, ids);
+		}
+		ids.add(item.mediaItemId);
+	}
+	// Cross-server applies write to several servers in one plan, and coverage is
+	// per occurrence, so each server's copies are reconciled in their own scope.
+	for (const [serverInstanceId, mediaItemIds] of byServer) {
+		await refreshCoverageAfter('apply', { serverInstanceId, mediaItemIds: [...mediaItemIds] });
+	}
 }

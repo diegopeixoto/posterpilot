@@ -16,6 +16,7 @@ import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import * as schema from '$lib/server/db/schema';
 import {
 	appliedPosters,
+	artworkCoverage,
 	artworkRevisionGroups,
 	artworkRevisions,
 	artworkSlotStates,
@@ -394,7 +395,11 @@ function sortedIds(rows: Array<{ id: string | number }>): string[] {
 	return rows.map((row) => String(row.id)).sort((left, right) => left.localeCompare(right));
 }
 
-/** Exact identity of every row the purge transaction will delete, excluding purge plans themselves. */
+/**
+ * Exact identity of every row the purge transaction will delete, excluding purge plans
+ * themselves and the rebuildable `artwork_coverage` projection — coverage reconciles on
+ * reads and mutations, so fingerprinting it would make every purge plan go stale on its own.
+ */
 async function scopeFingerprintFor(
 	executor: ReadExecutor,
 	serverInstanceId: string
@@ -867,6 +872,15 @@ export function createServerPurgeService(
 			await tx
 				.delete(childSelections)
 				.where(eq(childSelections.serverInstanceId, input.serverInstanceId));
+			// Coverage is a rebuildable projection, not user data, so it is absent from
+			// the impact counts and the scope fingerprint above — a reconciliation pass
+			// between preview and confirm would otherwise invalidate the plan. It still
+			// has to be deleted explicitly: foreign keys are off at runtime, so the
+			// cascade from `media_items` never fires and the rows would outlive the
+			// server they describe.
+			await tx
+				.delete(artworkCoverage)
+				.where(eq(artworkCoverage.serverInstanceId, input.serverInstanceId));
 			await tx
 				.delete(artworkRevisions)
 				.where(eq(artworkRevisions.serverInstanceId, input.serverInstanceId));
