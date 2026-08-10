@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.12.0](https://github.com/diegopeixoto/posterpilot/compare/v0.11.0...v0.12.0) (2026-08-10)
+
+
+### Features
+
+* name each obstacle in the Kometa migration banner and absorb duplicates ([#93](https://github.com/diegopeixoto/posterpilot/issues/93)) ([e66cd89](https://github.com/diegopeixoto/posterpilot/commit/e66cd8995b36e56edcc012a388c9bfb5ac8e6485))
+
+
+### Bug Fixes
+
+* survive slow library reads and stalled job attempts ([#92](https://github.com/diegopeixoto/posterpilot/issues/92)) ([473fc9c](https://github.com/diegopeixoto/posterpilot/commit/473fc9cd247b90eb9e97f6d3d3801754033329a1))
+
+
+### Under the hood
+
+* refresh README screenshots and cover 0.11.0 features ([#94](https://github.com/diegopeixoto/posterpilot/issues/94)) ([9ad786b](https://github.com/diegopeixoto/posterpilot/commit/9ad786ba09c3b347232bce2d6fa533f3dbef7260))
+* write 0.11.0 release notes ([#89](https://github.com/diegopeixoto/posterpilot/issues/89)) ([8816455](https://github.com/diegopeixoto/posterpilot/commit/88164553bf1ce73ef7b7b339ab3bf624b2c7d67c))
+
 ## [0.11.0](https://github.com/diegopeixoto/posterpilot/compare/v0.10.0...v0.11.0) (2026-08-10)
 
 Every feature and fix below started as an issue from one person. This release is the answer to all eight of them.
