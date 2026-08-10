@@ -305,7 +305,23 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		} catch {
 			liveArtwork = undefined;
 		}
-		assertArtworkMatches(liveArtwork, artworkFingerprint(captured.beforeArtwork));
+		// One verified read is required before the write, but either read may be
+		// it. When prepare's read failed transiently, the live read is verified
+		// against the plan's frozen fingerprint — the same expectation prepare
+		// would have checked. When the live read failed but prepare verified,
+		// that verification stands. Only when the destination was never read at
+		// all does the write refuse to proceed: writing over artwork nobody could
+		// see is the blind overwrite this check exists to prevent.
+		if (liveArtwork !== undefined) {
+			assertArtworkMatches(
+				liveArtwork,
+				captured.beforeArtwork !== undefined
+					? artworkFingerprint(captured.beforeArtwork)
+					: operation.current.fingerprint
+			);
+		} else if (captured.beforeArtwork === undefined) {
+			throw new Error('Current server artwork could not be verified before the artwork write');
+		}
 		if (context.isCancelled?.()) throw new Error('cancelled');
 
 		if (operation.slot.kind === 'background') {

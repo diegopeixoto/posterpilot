@@ -737,6 +737,91 @@ describe('ArtworkApplyCoordinator', () => {
 		expect(await database.select().from(artworkRevisionGroups)).toHaveLength(1);
 	});
 
+	it('verifies against the frozen plan when the prepare-time read failed transiently', async () => {
+		const subject = coordinator();
+		const planned = operation({ id: 'prepare-read-blip' });
+		const current = artwork('planned current', 'planned-current');
+		planned.current.fingerprint = sha256Bytes(current.data);
+		const queue = [new Error('read blip'), current];
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => {
+				const next = queue.shift();
+				if (next instanceof Error) throw next;
+				return next;
+			}),
+			applyPosterBytes
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await subject.executeServerOperation(planned, { server });
+
+		expect(applyPosterBytes).toHaveBeenCalledOnce();
+	});
+
+	it('still blocks a drifted destination when only the execute-time read could see it', async () => {
+		const subject = coordinator();
+		const planned = operation({ id: 'prepare-blip-then-drift' });
+		planned.current.fingerprint = sha256Bytes(bytes('planned current'));
+		const queue = [new Error('read blip'), artwork('externally changed', 'external-id')];
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => {
+				const next = queue.shift();
+				if (next instanceof Error) throw next;
+				return next;
+			}),
+			applyPosterBytes
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+			/changed before/
+		);
+		expect(applyPosterBytes).not.toHaveBeenCalled();
+	});
+
+	it('proceeds on the prepare-time verification when the execute-time re-read fails', async () => {
+		const subject = coordinator();
+		const planned = operation({ id: 'execute-read-blip' });
+		const current = artwork('planned current', 'planned-current');
+		planned.current.fingerprint = sha256Bytes(current.data);
+		const queue = [current, new Error('read blip')];
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => {
+				const next = queue.shift();
+				if (next instanceof Error) throw next;
+				return next;
+			}),
+			applyPosterBytes
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await subject.executeServerOperation(planned, { server });
+
+		expect(applyPosterBytes).toHaveBeenCalledOnce();
+	});
+
+	it('refuses the write when the destination was never readable at all', async () => {
+		const subject = coordinator();
+		const planned = operation({ id: 'never-read' });
+		planned.current.fingerprint = sha256Bytes(bytes('planned current'));
+		const applyPosterBytes = vi.fn(async () => undefined);
+		const server = {
+			readArtwork: vi.fn(async () => {
+				throw new Error('read blip');
+			}),
+			applyPosterBytes
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+			/could not be verified/
+		);
+		expect(applyPosterBytes).not.toHaveBeenCalled();
+	});
+
 	it('blocks an external change during download before snapshots or writes are created', async () => {
 		const planned = operation({ id: 'changed-during-download' });
 		const beforeArtwork = artwork('planned current', 'planned-current');

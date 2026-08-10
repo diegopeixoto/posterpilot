@@ -92,19 +92,10 @@ describe('downloadRemoteArtwork', () => {
 	});
 
 	it.each(['text/html', 'image/svg+xml', 'application/octet-stream', null])(
-		'rejects unsupported content type %s before consuming the body',
+		'rejects content type %s when the bytes are not a raster image either',
 		async (contentType) => {
-			let cancelled = false;
-			const body = new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(new Uint8Array([1]));
-				},
-				cancel() {
-					cancelled = true;
-				}
-			});
 			const headers = contentType ? { 'content-type': contentType } : undefined;
-			const fetchImpl = vi.fn(async () => new Response(body, { headers }));
+			const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), { headers }));
 
 			await expect(
 				downloadRemoteArtwork('https://images.example/not-raster', {
@@ -116,7 +107,32 @@ describe('downloadRemoteArtwork', () => {
 			).rejects.toSatisfy(
 				(error: unknown) => code(error) === 'remote_artwork_content_type_invalid'
 			);
-			expect(cancelled).toBe(true);
+		}
+	);
+
+	const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+	const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+
+	// The bytes, not the header, are the boundary: a mislabeled JPEG on a home
+	// server or S3 still applies, while non-image bytes fail above regardless of
+	// what the header claims.
+	it.each([
+		['application/octet-stream', JPEG_BYTES, 'image/jpeg'],
+		['image/jpg', JPEG_BYTES, 'image/jpeg'],
+		[null, PNG_BYTES, 'image/png']
+	] as const)(
+		'sniffs the real raster type when the declared type is %s',
+		async (contentType, bytes, expected) => {
+			const headers = contentType ? { 'content-type': contentType } : undefined;
+			const fetchImpl = vi.fn(async () => new Response(bytes, { headers }));
+
+			const result = await downloadRemoteArtwork('https://images.example/mislabeled', {
+				maxBytes: 1024,
+				timeoutMs: 1_000,
+				validateUrl: allowHttps,
+				fetchImpl
+			});
+			expect(result.contentType).toBe(expected);
 		}
 	);
 
