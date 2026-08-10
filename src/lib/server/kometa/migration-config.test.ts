@@ -42,6 +42,92 @@ function input(
 }
 
 describe('planKometaMigrationConfig — managed activation', () => {
+	it('collapses an identical repeated legacy reference into one typed entry', () => {
+		// The same reference listed twice is provably one file, so the rewrite
+		// keeps the owned entry, removes the repeat, and records both consumed
+		// entries on the surviving change so the frozen preview shows the collapse.
+		const rawConfig = `libraries:
+  Movies:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+      - file: legacy/${LEGACY_FILENAME}
+`;
+		const result = planKometaMigrationConfig(input({ rawConfig }));
+
+		expect(result.activation).toBe('managed');
+		expect(result.reasons).toEqual([]);
+		const proposed = parse(result.proposedContent ?? '') as {
+			libraries: { Movies: { metadata_files: unknown } };
+		};
+		expect(proposed.libraries.Movies.metadata_files).toEqual([{ file: REFERENCES.movie }]);
+		expect(result.changes).toEqual([
+			{
+				library: 'Movies',
+				mediaKind: 'movie',
+				before: [LEGACY_FILENAME, LEGACY_FILENAME],
+				after: REFERENCES.movie
+			}
+		]);
+		expect(result.legacyReferenceCount).toBe(2);
+		expect(result.entryRemovals).toEqual([]);
+	});
+
+	it('proposes distinct-path repeats as acknowledged removals, never silent ones', () => {
+		// `legacy/posterpilot.yml` and `posterpilot.yml` may be two different
+		// files; the plan still rewires the owned entry, but records the other
+		// as an explicit removal that confirmation must acknowledge separately.
+		const rawConfig = `libraries:
+  Movies:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+      - file: ${LEGACY_FILENAME}
+`;
+		const result = planKometaMigrationConfig(input({ rawConfig }));
+
+		expect(result.activation).toBe('managed');
+		expect(result.reasons).toEqual([]);
+		expect(result.entryRemovals).toEqual([{ library: 'Movies', reference: LEGACY_FILENAME }]);
+		const proposed = parse(result.proposedContent ?? '') as {
+			libraries: { Movies: { metadata_files: unknown } };
+		};
+		expect(proposed.libraries.Movies.metadata_files).toEqual([{ file: REFERENCES.movie }]);
+		// The surviving change lists only its own reference; the distinct-path
+		// removal is consented to separately rather than folded into the rewrite.
+		expect(result.changes).toEqual([
+			{
+				library: 'Movies',
+				mediaKind: 'movie',
+				before: [LEGACY_FILENAME],
+				after: REFERENCES.movie
+			}
+		]);
+	});
+
+	it('suggests near-miss synced sections for an unknown library', () => {
+		const rawConfig = `libraries:
+  Documentarios:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+`;
+		const result = planKometaMigrationConfig(
+			input({
+				rawConfig,
+				snapshot: null,
+				libraries: [
+					{ title: 'Documentários Filmes', type: 'movie' },
+					{ title: 'Documentarios Seriados', type: 'show' }
+				]
+			})
+		);
+
+		expect(result.manualWiringActionable).toBe(false);
+		expect(result.incompatibleLibraries).toContainEqual({
+			library: 'Documentarios',
+			reason: 'unknown_library',
+			suggestion: 'Documentários Filmes, Documentarios Seriados'
+		});
+	});
+
 	it('rewires exact merge-owned movie and show references by authoritative type', () => {
 		const rawConfig = `# keep root comment
 libraries:
@@ -363,7 +449,8 @@ libraries:
 		expect(result.reasons).toContainEqual({ code: 'unknown_library', library: 'Movies 4K' });
 		expect(result.incompatibleLibraries).toContainEqual({
 			library: 'Movies 4K',
-			reason: 'unknown_library'
+			reason: 'unknown_library',
+			suggestion: 'Movies'
 		});
 		expect(result.manualWiringActionable).toBe(false);
 	});

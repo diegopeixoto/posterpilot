@@ -121,6 +121,7 @@
 				before: string[];
 				after: string;
 			}>;
+			configRemovals?: Array<{ library: string; reference: string }>;
 			diffTruncated: boolean;
 		};
 		manualSnippet: string | null;
@@ -186,8 +187,10 @@
 		| null
 	>(null);
 	let errorCode = $state<string | null>(null);
+	let errorIncompatibilities = $state<IncompatibilityDetail[]>([]);
 	let notice = $state<string | null>(null);
 	let acceptAmbiguous = $state(false);
+	let acceptConfigRemovals = $state(false);
 	let acknowledgeManual = $state(false);
 	let confirmRollback = $state(false);
 	let confirmAbandon = $state(false);
@@ -205,6 +208,7 @@
 	let disclosureAnnouncement = $state('');
 
 	const ambiguousCount = $derived(preview?.display.ambiguous.length ?? 0);
+	const configRemovals = $derived(preview?.display.configRemovals ?? []);
 	const isBusy = $derived(busyAction !== null);
 	const mutationDisabled = $derived(mutationDisabledMessage !== null);
 	const ambiguousDisclosure = $derived(
@@ -229,13 +233,44 @@
 		)
 	);
 
+	interface IncompatibilityDetail {
+		library: string;
+		reason: string;
+		suggestion?: string;
+	}
+
 	class MigrationRequestError extends Error {
 		readonly code: string;
+		readonly incompatibilities: IncompatibilityDetail[];
 
-		constructor(code: string) {
+		constructor(code: string, incompatibilities: IncompatibilityDetail[] = []) {
 			super(code);
 			this.code = code;
+			this.incompatibilities = incompatibilities;
 		}
+	}
+
+	/** Bounded, string-only view of the server's library-attributed obstacles. */
+	function responseIncompatibilities(value: unknown): IncompatibilityDetail[] {
+		if (!value || typeof value !== 'object') return [];
+		const error = (value as Record<string, unknown>).error;
+		if (!error || typeof error !== 'object') return [];
+		const raw = (error as Record<string, unknown>).incompatibilities;
+		if (!Array.isArray(raw)) return [];
+		const details: IncompatibilityDetail[] = [];
+		for (const entry of raw.slice(0, 20)) {
+			if (!entry || typeof entry !== 'object') continue;
+			const record = entry as Record<string, unknown>;
+			if (typeof record.library !== 'string' || typeof record.reason !== 'string') continue;
+			details.push({
+				library: record.library.slice(0, 120),
+				reason: record.reason.slice(0, 80),
+				...(typeof record.suggestion === 'string'
+					? { suggestion: record.suggestion.slice(0, 240) }
+					: {})
+			});
+		}
+		return details;
 	}
 
 	function responseCode(value: unknown): string {
@@ -268,12 +303,15 @@
 			body: JSON.stringify(body ?? {})
 		});
 		const result = await response.json().catch(() => ({}));
-		if (!response.ok) throw new MigrationRequestError(responseCode(result));
+		if (!response.ok) {
+			throw new MigrationRequestError(responseCode(result), responseIncompatibilities(result));
+		}
 		return unwrap<T>(result, keys);
 	}
 
 	function clearFeedback(): void {
 		errorCode = null;
+		errorIncompatibilities = [];
 		notice = null;
 	}
 
@@ -296,6 +334,7 @@
 		preview = null;
 		previewMigrationVersion = null;
 		acceptAmbiguous = false;
+		acceptConfigRemovals = false;
 		resetMigrationDisclosure();
 	}
 
@@ -331,6 +370,7 @@
 	});
 
 	function requestErrorCode(error: unknown): string {
+		errorIncompatibilities = error instanceof MigrationRequestError ? error.incompatibilities : [];
 		return error instanceof MigrationRequestError ? error.code : 'kometa_migration_request_failed';
 	}
 
@@ -476,7 +516,15 @@
 	}
 
 	async function confirmMigration(): Promise<void> {
-		if (isBusy || mutationDisabled || !preview || (ambiguousCount > 0 && !acceptAmbiguous)) return;
+		if (
+			isBusy ||
+			mutationDisabled ||
+			!preview ||
+			(ambiguousCount > 0 && !acceptAmbiguous) ||
+			(configRemovals.length > 0 && !acceptConfigRemovals)
+		) {
+			return;
+		}
 		busyAction = 'confirm';
 		clearFeedback();
 		const frozen = preview;
@@ -486,7 +534,8 @@
 				{
 					planId: frozen.planId,
 					digest: frozen.digest,
-					acceptAmbiguous: ambiguousCount > 0 ? acceptAmbiguous : undefined
+					acceptAmbiguous: ambiguousCount > 0 ? acceptAmbiguous : undefined,
+					acceptConfigRemovals: configRemovals.length > 0 ? acceptConfigRemovals : undefined
 				},
 				['migration', 'state']
 			);
@@ -734,6 +783,8 @@
 				return m.kometa_migration_error_scope_changed();
 			case 'kometa_migration_ambiguous_confirmation_required':
 				return m.kometa_migration_error_ambiguous_confirmation();
+			case 'kometa_migration_removal_confirmation_required':
+				return m.kometa_migration_error_removal_confirmation();
 			case 'kometa_migration_config_incompatible':
 				return m.kometa_migration_error_config_incompatible();
 			case 'kometa_migration_manual_ack_mismatch':
@@ -744,6 +795,30 @@
 				return m.kometa_migration_error_rollback_unavailable();
 			default:
 				return m.kometa_migration_error_generic();
+		}
+	}
+
+	function incompatibilityLabel(detail: IncompatibilityDetail): string {
+		const library = detail.library;
+		switch (detail.reason) {
+			case 'unknown_library':
+				return m.kometa_migration_incompat_unknown_library({ library });
+			case 'conflicting_authoritative_types':
+				return m.kometa_migration_incompat_conflicting_types({ library });
+			case 'unsupported_library_type':
+				return m.kometa_migration_incompat_unsupported_type({ library });
+			case 'unsupported_config_shape':
+				return m.kometa_migration_incompat_unsupported_shape({ library });
+			case 'unowned_legacy_reference':
+				return m.kometa_migration_incompat_unowned_reference({ library });
+			case 'typed_reference_conflict':
+				return m.kometa_migration_incompat_typed_conflict({ library });
+			case 'duplicate_legacy_reference':
+				return m.kometa_migration_incompat_duplicate_reference({ library });
+			case 'missing_typed_reference':
+				return m.kometa_migration_incompat_missing_typed({ library });
+			default:
+				return m.kometa_migration_incompat_generic({ library, code: detail.reason });
 		}
 	}
 
@@ -1212,9 +1287,23 @@
 			{busyAction ? m.kometa_migration_working() : ''}
 		</p>
 		<p class="sr-only" aria-live="polite" aria-atomic="true">{disclosureAnnouncement}</p>
-		{#if errorCode}<p class="mt-3 text-sm text-red-300" role="alert">
-				{errorMessage(errorCode)}
-			</p>{/if}
+		{#if errorCode}<div class="mt-3" role="alert">
+				<p class="text-sm text-red-300">{errorMessage(errorCode)}</p>
+				{#if errorIncompatibilities.length}
+					<!-- The plan knows exactly which library failed and why; a generic
+					     paragraph alone sends users hunting for causes they may not have. -->
+					<ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-red-200">
+						{#each errorIncompatibilities as detail (detail.library + detail.reason)}
+							<li>
+								{incompatibilityLabel(detail)}
+								{#if detail.suggestion}
+									{m.kometa_migration_incompat_suggestion({ sections: detail.suggestion })}
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>{/if}
 		{#if notice}<p class="mt-3 text-sm text-emerald-300" role="status">{notice}</p>{/if}
 
 		{#if preview}
@@ -1309,6 +1398,36 @@
 						<label class="mt-4 flex items-start gap-2 text-xs font-medium text-amber-50">
 							<input type="checkbox" bind:checked={acceptAmbiguous} class="mt-0.5" />
 							<span>{m.kometa_migration_accept_ambiguous()}</span>
+						</label>
+					</div>
+				{/if}
+
+				{#if configRemovals.length > 0}
+					<!-- Same consent shape as the ambiguous list: these deletions are
+					     proposed, shown exactly, and applied only after their own
+					     explicit acknowledgment. -->
+					<div class="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
+						<p class="text-sm font-medium text-amber-200">
+							{m.kometa_migration_removals_title({ count: configRemovals.length })}
+						</p>
+						<p class="mt-1 text-xs text-amber-100/80">
+							{m.kometa_migration_removals_hint()}
+						</p>
+						<ul class="mt-2 space-y-1 text-xs text-amber-100">
+							{#each configRemovals as removal (removal.library + removal.reference)}
+								<li>
+									<span class="font-medium">{removal.library}</span>
+									<span class="text-amber-100/70"
+										>— {m.kometa_migration_removal_entry({
+											reference: removal.reference
+										})}</span
+									>
+								</li>
+							{/each}
+						</ul>
+						<label class="mt-4 flex items-start gap-2 text-xs font-medium text-amber-50">
+							<input type="checkbox" bind:checked={acceptConfigRemovals} class="mt-0.5" />
+							<span>{m.kometa_migration_accept_removals()}</span>
 						</label>
 					</div>
 				{/if}
@@ -1500,7 +1619,10 @@
 					<button
 						type="button"
 						class="btn btn-accent min-h-11"
-						disabled={isBusy || mutationDisabled || (ambiguousCount > 0 && !acceptAmbiguous)}
+						disabled={isBusy ||
+							mutationDisabled ||
+							(ambiguousCount > 0 && !acceptAmbiguous) ||
+							(configRemovals.length > 0 && !acceptConfigRemovals)}
 						onclick={confirmMigration}
 					>
 						{busyAction === 'confirm'

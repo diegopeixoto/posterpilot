@@ -48,7 +48,8 @@ import {
 import {
 	planKometaMigrationConfig,
 	type AuthoritativeKometaLibrary,
-	type KometaMigrationConfigPlan
+	type KometaMigrationConfigPlan,
+	type KometaMigrationIncompatibilityDetail
 } from './migration-config';
 import {
 	loadKometaMigrationEvidence,
@@ -119,6 +120,7 @@ export type KometaMigrationServiceErrorCode =
 	| 'kometa_migration_not_found'
 	| 'kometa_migration_scope_changed'
 	| 'kometa_migration_ambiguous_confirmation_required'
+	| 'kometa_migration_removal_confirmation_required'
 	| 'kometa_migration_config_incompatible'
 	| 'kometa_migration_manual_ack_mismatch'
 	| 'kometa_migration_abandon_unavailable'
@@ -130,7 +132,11 @@ export type KometaMigrationServiceErrorCode =
 	| 'kometa_server_binding_unavailable';
 
 export class KometaMigrationServiceError extends Error {
-	constructor(readonly code: KometaMigrationServiceErrorCode) {
+	constructor(
+		readonly code: KometaMigrationServiceErrorCode,
+		/** Library-attributed obstacles, so the UI can say which and why. */
+		readonly incompatibilities?: readonly KometaMigrationIncompatibilityDetail[]
+	) {
 		super(code);
 		this.name = 'KometaMigrationServiceError';
 	}
@@ -172,6 +178,7 @@ export interface ConfirmKometaMigrationRequest {
 	planId: string;
 	digest: string;
 	acceptAmbiguous?: boolean;
+	acceptConfigRemovals?: boolean;
 }
 
 export interface CancelKometaMigrationPreviewRequest {
@@ -640,8 +647,33 @@ function configTarget(
 
 function assertMigrationConfigActionable(configPlan: KometaMigrationConfigPlan): void {
 	if (!configPlan.manualWiringActionable) {
-		throw new KometaMigrationServiceError('kometa_migration_config_incompatible');
+		throw new KometaMigrationServiceError(
+			'kometa_migration_config_incompatible',
+			migrationIncompatibilityDetails(configPlan)
+		);
 	}
+}
+
+/**
+ * Collapse the plan's library-attributed obstacles into one bounded list. The
+ * plan already knows exactly which library failed and why; without this the
+ * banner can only show a generic paragraph about causes the user may not have.
+ */
+function migrationIncompatibilityDetails(
+	configPlan: KometaMigrationConfigPlan
+): KometaMigrationIncompatibilityDetail[] {
+	const details: KometaMigrationIncompatibilityDetail[] = configPlan.incompatibleLibraries.map(
+		(entry) => ({ library: entry.library, reason: entry.reason, suggestion: entry.suggestion })
+	);
+	const seen = new Set(details.map((detail) => `${detail.library}\u0000${detail.reason}`));
+	for (const reason of configPlan.reasons) {
+		if (!reason.library) continue;
+		const key = `${reason.library}\u0000${reason.code}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		details.push({ library: reason.library, reason: reason.code });
+	}
+	return details.slice(0, 20);
 }
 
 function conflictDisplays(
@@ -728,6 +760,10 @@ function migrationDisplay(input: {
 			mediaKind: change.mediaKind,
 			before: [...change.before],
 			after: change.after
+		})),
+		configRemovals: input.configPlan.entryRemovals.map((removal) => ({
+			library: removal.library,
+			reference: removal.reference
 		})),
 		diffTruncated: false
 	};
@@ -1034,6 +1070,16 @@ export async function confirmKometaMigration(
 			assertExistingMigrationCanStartFreshPreview(existing, config, binding);
 			if (pending.payload.display.ambiguous.length > 0 && request.acceptAmbiguous !== true) {
 				throw new KometaMigrationServiceError('kometa_migration_ambiguous_confirmation_required');
+			}
+			// Config-entry removals are the same consent shape as ambiguous entries:
+			// shown in the frozen preview, and only applied after their own explicit
+			// acknowledgment — a basename match cannot prove two distinct paths are
+			// one file, so deleting them must never ride on the general confirm.
+			if (
+				(pending.payload.display.configRemovals?.length ?? 0) > 0 &&
+				request.acceptConfigRemovals !== true
+			) {
+				throw new KometaMigrationServiceError('kometa_migration_removal_confirmation_required');
 			}
 			await recoverMigrationQuarantines(pending.payload, assertControlLockOwned);
 			if (!currentFileMatchesSource(pending.payload)) {

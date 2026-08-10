@@ -75,6 +75,12 @@ export interface KometaMigrationLibraryChange {
 	after: string;
 }
 
+export interface KometaMigrationConfigRemovalDisplay {
+	library: string;
+	/** The reference exactly as written in config.yml. */
+	reference: string;
+}
+
 export interface KometaMigrationDisplay {
 	classified: KometaMigrationClassifiedDisplay[];
 	ambiguous: KometaMigrationAmbiguousDisplay[];
@@ -83,6 +89,12 @@ export interface KometaMigrationDisplay {
 		show: KometaMigrationFileDisplay;
 	};
 	libraries: KometaMigrationLibraryChange[];
+	/**
+	 * Config entries the rewrite deletes and confirmation must acknowledge.
+	 * Optional on the wire: frozen payloads persisted before this field exist
+	 * and must keep validating; absent means none.
+	 */
+	configRemovals?: KometaMigrationConfigRemovalDisplay[];
 	diffTruncated: boolean;
 }
 
@@ -289,6 +301,16 @@ function assertDisplay(value: unknown): asserts value is KometaMigrationDisplay 
 			throw new TypeError('Invalid ambiguous Kometa migration slots');
 		}
 		assertString(entry.reason, 'ambiguous.reason');
+	}
+	if (value.configRemovals !== undefined) {
+		if (!Array.isArray(value.configRemovals) || value.configRemovals.length > MAX_DISPLAY_ENTRIES) {
+			throw new TypeError('Invalid Kometa migration config removals');
+		}
+		for (const entry of value.configRemovals) {
+			if (!isRecord(entry)) throw new TypeError('Invalid Kometa migration config removal');
+			assertString(entry.library, 'configRemovals.library');
+			assertString(entry.reference, 'configRemovals.reference');
+		}
 	}
 	for (const file of [value.files.movie, value.files.show]) {
 		if (!Array.isArray(file.changes)) {
