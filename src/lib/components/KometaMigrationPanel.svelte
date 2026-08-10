@@ -798,6 +798,8 @@
 				return m.kometa_migration_incompat_unowned_reference({ library });
 			case 'typed_reference_conflict':
 				return m.kometa_migration_incompat_typed_conflict({ library });
+			case 'duplicate_legacy_reference':
+				return m.kometa_migration_incompat_duplicate_reference({ library });
 			case 'missing_typed_reference':
 				return m.kometa_migration_incompat_missing_typed({ library });
 			default:

@@ -42,15 +42,15 @@ function input(
 }
 
 describe('planKometaMigrationConfig — managed activation', () => {
-	it('collapses duplicate legacy references into one typed entry', () => {
-		// Both entries name the same file (matching is by basename); blocking on
-		// the duplicate used to force manual wiring for a config Kometa itself
-		// tolerates. The rewrite keeps the owned entry and removes the extra.
+	it('collapses an identical repeated legacy reference into one typed entry', () => {
+		// The same reference listed twice is provably one file, so the rewrite
+		// keeps the owned entry, removes the repeat, and records both consumed
+		// entries on the surviving change so the frozen preview shows the collapse.
 		const rawConfig = `libraries:
   Movies:
     metadata_files:
       - file: legacy/${LEGACY_FILENAME}
-      - file: ${LEGACY_FILENAME}
+      - file: legacy/${LEGACY_FILENAME}
 `;
 		const result = planKometaMigrationConfig(input({ rawConfig }));
 
@@ -64,11 +64,30 @@ describe('planKometaMigrationConfig — managed activation', () => {
 			{
 				library: 'Movies',
 				mediaKind: 'movie',
-				before: [LEGACY_FILENAME],
+				before: [LEGACY_FILENAME, LEGACY_FILENAME],
 				after: REFERENCES.movie
 			}
 		]);
 		expect(result.legacyReferenceCount).toBe(2);
+	});
+
+	it('keeps distinct-path legacy references manual: a basename match proves nothing', () => {
+		// `legacy/posterpilot.yml` and `posterpilot.yml` may be two different
+		// files; deleting either would be data loss, so the plan names the
+		// library instead of guessing.
+		const rawConfig = `libraries:
+  Movies:
+    metadata_files:
+      - file: legacy/${LEGACY_FILENAME}
+      - file: ${LEGACY_FILENAME}
+`;
+		const result = planKometaMigrationConfig(input({ rawConfig }));
+
+		expect(result.activation).toBe('manual');
+		expect(result.reasons).toContainEqual({
+			code: 'duplicate_legacy_reference',
+			library: 'Movies'
+		});
 	});
 
 	it('suggests near-miss synced sections for an unknown library', () => {

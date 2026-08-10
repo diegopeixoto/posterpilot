@@ -1067,6 +1067,7 @@
 	"kometa_migration_incompat_unsupported_shape": "\"{library}\" tiene una estructura que PosterPilot no puede clasificar con seguridad (aliases, claves de fusión o nodos inesperados).",
 	"kometa_migration_incompat_unowned_reference": "\"{library}\" referencia el archivo heredado de una forma que PosterPilot no gestiona; ajuste su entrada de metadata_files manualmente.",
 	"kometa_migration_incompat_typed_conflict": "\"{library}\" ya referencia un archivo de metadatos tipado en conflicto.",
+	"kometa_migration_incompat_duplicate_reference": "\"{library}\" referencia el archivo heredado bajo más de una ruta distinta; elimine las entradas extra de metadata_files hasta que quede exactamente una.",
 	"kometa_migration_incompat_missing_typed": "\"{library}\" no tiene la referencia a su archivo de metadatos tipado.",
 	"kometa_migration_incompat_generic": "\"{library}\": {code}",
 	"kometa_migration_incompat_suggestion": "Secciones sincronizadas similares: {sections}.",

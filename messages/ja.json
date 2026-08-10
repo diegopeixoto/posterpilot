@@ -1067,6 +1067,7 @@
 	"kometa_migration_incompat_unsupported_shape": "「{library}」には PosterPilot が安全に分類できない構造があります（エイリアス、マージキー、予期しないノード）。",
 	"kometa_migration_incompat_unowned_reference": "「{library}」はレガシーファイルを PosterPilot が管理していない形で参照しています。metadata_files の項目を手動で調整してください。",
 	"kometa_migration_incompat_typed_conflict": "「{library}」はすでに競合する型別メタデータファイルを参照しています。",
+	"kometa_migration_incompat_duplicate_reference": "「{library}」はレガシーファイルを複数の異なるパスで参照しています。metadata_files の余分な項目を削除し、1 つだけ残してください。",
 	"kometa_migration_incompat_missing_typed": "「{library}」に型別メタデータファイルへの参照がありません。",
 	"kometa_migration_incompat_generic": "「{library}」: {code}",
 	"kometa_migration_incompat_suggestion": "類似する同期済みセクション: {sections}",

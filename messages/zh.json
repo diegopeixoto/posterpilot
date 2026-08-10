@@ -1067,6 +1067,7 @@
 	"kometa_migration_incompat_unsupported_shape": "“{library}”的结构 PosterPilot 无法安全识别（别名、合并键或意外节点）。",
 	"kometa_migration_incompat_unowned_reference": "“{library}”以 PosterPilot 不管理的方式引用旧版文件，请手动调整其 metadata_files 条目。",
 	"kometa_migration_incompat_typed_conflict": "“{library}”已引用了一个冲突的分类型元数据文件。",
+	"kometa_migration_incompat_duplicate_reference": "“{library}”通过多个不同路径引用旧版文件；请删除多余的 metadata_files 条目，只保留一个。",
 	"kometa_migration_incompat_missing_typed": "“{library}”缺少对分类型元数据文件的引用。",
 	"kometa_migration_incompat_generic": "“{library}”：{code}",
 	"kometa_migration_incompat_suggestion": "相似的已同步分区：{sections}。",

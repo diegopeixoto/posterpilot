@@ -1067,6 +1067,7 @@
 	"kometa_migration_incompat_unsupported_shape": "\"{library}\" has a structure PosterPilot cannot classify safely (aliases, merge keys, or unexpected nodes).",
 	"kometa_migration_incompat_unowned_reference": "\"{library}\" references the legacy file in a way PosterPilot does not manage; adjust its metadata_files entry manually.",
 	"kometa_migration_incompat_typed_conflict": "\"{library}\" already references a conflicting typed metadata file.",
+	"kometa_migration_incompat_duplicate_reference": "\"{library}\" references the legacy file under more than one distinct path; remove the extra metadata_files entries so exactly one remains.",
 	"kometa_migration_incompat_missing_typed": "\"{library}\" is missing its typed metadata file reference.",
 	"kometa_migration_incompat_generic": "\"{library}\": {code}",
 	"kometa_migration_incompat_suggestion": "Similar synced sections: {sections}.",

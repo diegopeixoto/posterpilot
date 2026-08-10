@@ -54,6 +54,7 @@ export interface PlanKometaMigrationConfigInput {
 export type KometaMigrationConfigReasonCode =
 	| 'conflicting_authoritative_types'
 	| 'config_limit_exceeded'
+	| 'duplicate_legacy_reference'
 	| 'invalid_yaml'
 	| 'missing_typed_reference'
 	| 'no_authoritative_libraries'
@@ -414,6 +415,11 @@ function buildManualChanges(
 	}));
 }
 
+/** Path-normalized identity for comparing two legacy references for equality. */
+function normalizedLegacyReference(value: string): string {
+	return value.trim().replaceAll('\\', '/');
+}
+
 function scalarLibraryName(node: unknown): string | null {
 	return isScalar(node) && typeof node.value === 'string' && node.value.length > 0
 		? node.value
@@ -633,11 +639,6 @@ export function planKometaMigrationConfig(
 		if ((typedReferencesByLibrary.get(library)?.length ?? 0) > 0) {
 			reasons.push({ code: 'typed_reference_conflict', library });
 		}
-		// Multiple references in one library all name the same legacy file (the
-		// match is by basename), so instead of blocking, the rewrite keeps one —
-		// the owned entry under merge, else the one already at the configured
-		// prefix, else the first — and removes the rest. The preview diff shows
-		// every removal before anything is written.
 		const owned = input.mode === 'merge' ? ownedMetadataReference(input.snapshot, library) : null;
 		if (input.mode === 'merge') {
 			const ownedMatches =
@@ -647,14 +648,25 @@ export function planKometaMigrationConfig(
 				reasons.push({ code: 'unowned_legacy_reference', library });
 			}
 		}
+		// Repeated entries collapse only when they are provably the same reference
+		// (equal after path normalization): the basename match that classifies a
+		// reference as legacy cannot prove that `first/posterpilot.yml` and
+		// `second/posterpilot.yml` are one file, and deleting a distinct
+		// user-managed entry would be data loss. Identical repeats keep one entry
+		// — the rewrite target — and remove the rest, visible in the preview diff.
 		if (referencesForLibrary.length > 1) {
-			const expectedLegacy = kometaMetadataReference(metadataPathPrefix, LEGACY_FILENAME);
-			const primary =
-				(owned ? referencesForLibrary.find((entry) => entry.reference === owned) : undefined) ??
-				referencesForLibrary.find((entry) => entry.reference === expectedLegacy) ??
-				referencesForLibrary[0];
-			for (const entry of referencesForLibrary) {
-				if (entry !== primary) entry.duplicate = true;
+			const normalized = new Set(
+				referencesForLibrary.map((entry) => normalizedLegacyReference(entry.reference))
+			);
+			if (normalized.size > 1) {
+				reasons.push({ code: 'duplicate_legacy_reference', library });
+			} else {
+				const primary =
+					(owned ? referencesForLibrary.find((entry) => entry.reference === owned) : undefined) ??
+					referencesForLibrary[0];
+				for (const entry of referencesForLibrary) {
+					if (entry !== primary) entry.duplicate = true;
+				}
 			}
 		}
 	}
@@ -703,13 +715,20 @@ export function planKometaMigrationConfig(
 	}
 
 	const changes: KometaMigrationConfigLibraryChange[] = [];
+	const absorbedByLibrary = new Map<string, number>();
+	for (const reference of legacy) {
+		if (reference.duplicate) {
+			absorbedByLibrary.set(reference.library, (absorbedByLibrary.get(reference.library) ?? 0) + 1);
+		}
+	}
 	for (const reference of legacy) {
 		if (!reference.type || !reference.targetReference) {
 			throw new TypeError('Validated Kometa migration reference lost its authoritative type');
 		}
 		if (reference.duplicate) {
-			// A second entry for the same legacy file: rewriting it too would leave
-			// two identical typed entries, so it is removed outright.
+			// A repeat of the same legacy entry: rewriting it too would leave two
+			// identical typed entries, so it is removed outright. Its removal is
+			// recorded on the surviving change entry below.
 			const index = reference.container.items.indexOf(reference.entry);
 			if (index >= 0) reference.container.items.splice(index, 1);
 			continue;
@@ -718,7 +737,12 @@ export function planKometaMigrationConfig(
 		changes.push({
 			library: reference.library,
 			mediaKind: reference.type,
-			before: [LEGACY_FILENAME],
+			// One entry per consumed reference, so the frozen preview shows the
+			// absorbed repeats being collapsed, not just the surviving rewrite.
+			before: Array.from(
+				{ length: 1 + (absorbedByLibrary.get(reference.library) ?? 0) },
+				() => LEGACY_FILENAME
+			),
 			after: reference.targetReference
 		});
 	}
