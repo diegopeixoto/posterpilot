@@ -87,9 +87,18 @@ function ensureMap(document: Document<Node>, parent: YAMLMap, key: string | numb
 function setScalar(document: Document<Node>, parent: YAMLMap, key: string, value: string): void {
 	const pair = findLogicalPair(parent, key);
 	// Mirrors the export-side setScalar: any scalar is a replaceable managed
-	// value, only collections are protected hand-authored structure.
+	// value, only collections are protected hand-authored structure. A
+	// non-string or explicitly tagged scalar gets a fresh string node — an
+	// in-place value swap would keep the old tag (`!!int`) and serialize the
+	// URL under the wrong type.
 	if (pair && isScalar(pair.value)) {
-		pair.value.value = value;
+		if (typeof pair.value.value === 'string' && !pair.value.tag) {
+			pair.value.value = value;
+		} else {
+			const scalar = document.createNode(value);
+			copyPresentation(pair.value, scalar);
+			pair.value = scalar;
+		}
 		return;
 	}
 	if (pair) throw new Error('Existing Kometa YAML slot is not a string scalar');
