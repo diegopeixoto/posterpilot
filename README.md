@@ -51,7 +51,7 @@ translating guides live at
   <img src="artwork/screenshots/item-detail.jpg" alt="Item detail — artwork candidates grouped by provider, each with its own enlarge control" width="49%" />
 </p>
 <p align="center">
-  <img src="artwork/screenshots/artwork-preview.jpg" alt="Enlarged artwork preview — the full-size poster with its provider, dimensions, and language" width="49%" />
+  <img src="artwork/screenshots/artwork-preview.jpg" alt="Enlarged artwork preview — the full-size poster, its provider, and its place in the set" width="49%" />
   <img src="artwork/screenshots/item-coverage.jpg" alt="Artwork coverage — media server and Kometa metadata reported separately per slot" width="49%" />
 </p>
 
