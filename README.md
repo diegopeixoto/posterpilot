@@ -48,7 +48,11 @@ translating guides live at
 
 <p align="center">
   <img src="artwork/screenshots/library.jpg" alt="Library — filter and sort controls above the poster wall" width="49%" />
-  <img src="artwork/screenshots/item-detail.jpg" alt="Item detail — metadata hero, cast, discovered artwork, and apply bar" width="49%" />
+  <img src="artwork/screenshots/item-detail.jpg" alt="Item detail — artwork candidates grouped by provider, each with its own enlarge control" width="49%" />
+</p>
+<p align="center">
+  <img src="artwork/screenshots/artwork-preview.jpg" alt="Enlarged artwork preview — the full-size poster, its provider, and its place in the set" width="49%" />
+  <img src="artwork/screenshots/item-coverage.jpg" alt="Artwork coverage — media server and Kometa metadata reported separately per slot" width="49%" />
 </p>
 
 ## What it does
@@ -56,16 +60,23 @@ translating guides live at
 1. **Sync** your Plex / Jellyfin / Emby movie & show libraries, resolving each
    title to a TMDB id with rich metadata (backdrop, logo, rating, genres, cast).
 2. **Find covers** across the enabled providers (MediUX, Fanart.tv, TMDB,
-   ThePosterDB), grouped into collapsible artwork **sets** per provider — pick a
-   whole set or assemble a custom poster + backdrop set from any provider, a pasted
-   URL, or an uploaded file. For shows you can stage **per-season posters and
-   per-episode title cards** independently of the show cover, and the best-scored
-   candidate is pre-selected per slot as an overridable **suggestion**.
+   ThePosterDB), grouped into collapsible artwork **sets** per provider, in the
+   **provider order you set** — pick a whole set or assemble a custom poster +
+   backdrop set from any provider, a pasted URL, or an uploaded file. For shows you
+   can stage **per-season posters and per-episode title cards** independently of the
+   show cover, and the best-scored candidate is pre-selected per slot as an
+   overridable **suggestion**. Every tile has an **enlarge** control that opens the
+   full-size artwork without staging anything, and **load more** pulls the rest of a
+   provider's inventory instead of stopping at the first page. A **preferred artwork
+   language** — set globally, or switched per item — narrows TMDB results while
+   keeping textless artwork available.
 3. **Apply** a chosen cover, two ways (selectable):
    - **Media server API** — uploads the poster (and backdrop) and, on Plex, locks
      the field so agents won't overwrite it.
    - **Kometa export** — writes `url_poster`/`url_background` YAML into a mounted
-     directory your existing Kometa instance consumes on its next run.
+     directory your existing Kometa instance consumes on its next run, split by
+     media type (`posterpilot-movies.yml` and `posterpilot-shows.yml`) so a movie
+     and a show sharing an id can't collide.
 
    One apply writes every staged slot — show, seasons, and episodes (direct upload
    resolves the season/episode children on the server; the Kometa export nests
@@ -81,10 +92,13 @@ Stored credentials and API keys are **encrypted at rest** (zero-setup with an
 auto-generated key, or your own `APP_SECRET`). A metadata-rich item page (backdrop
 hero, cast, artwork grouped into sets), a Notion-style filtered/sorted library wall
 with a per-item **ignore** list, an in-app **Activity** log, and a UI localized
-into six languages round it out. Library-wide work runs as background jobs with
-live progress (SSE) right on the Dashboard — repeat syncs are **incremental** and
-bulk apply runs **concurrently** — and an update checker plus **What's New** modal
-surface new releases.
+into six languages round it out. **Artwork coverage** reports what is actually in
+place per destination and per slot — a Kometa export says exactly that and never
+claims your media server is serving it — and both the library and review lists can
+be filtered by it, including **needs artwork**. Library-wide work runs as
+background jobs with live progress (SSE) right on the Dashboard — repeat syncs are
+**incremental** and bulk apply runs **concurrently** — and an update checker plus
+**What's New** modal surface new releases.
 
 ## Stack
 
@@ -110,7 +124,10 @@ Migrations are applied automatically on server startup. Useful scripts:
 | `bun run build`           | production build (adapter-node)        |
 | `bun run start`           | run the built server (`node build`)    |
 | `bun run check`           | svelte-check type checking             |
-| `bun run test`            | vitest unit tests                      |
+| `bun run test`            | unit + component suites                |
+| `bun run test:unit`       | vitest unit tests (node)               |
+| `bun run test:component`  | component tests in a real browser      |
+| `bun run test:e2e`        | Playwright end-to-end tests            |
 | `bun run format` / `lint` | prettier write / check                 |
 | `bun run fallow`          | Fallow code-intelligence health report |
 
