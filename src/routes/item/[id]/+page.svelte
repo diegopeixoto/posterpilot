@@ -2267,7 +2267,9 @@
 				<!-- Confirm the exact frozen destination operations. -->
 				<span class="hidden text-xs text-neutral-200 sm:inline"
 					>{advanceAfterApply
-						? m.review_apply_next_confirm({ target: confirmTarget })
+						? completesReviewRun(data.reviewNavigation)
+							? m.review_apply_finish_confirm({ target: confirmTarget })
+							: m.review_apply_next_confirm({ target: confirmTarget })
 						: m.item_apply_confirm({ target: confirmTarget })}
 					{#if applyPreview}
 						· {m.library_preview_summary({
@@ -2289,7 +2291,9 @@
 					{busy
 						? m.item_working()
 						: advanceAfterApply
-							? m.review_confirm_apply_next()
+							? completesReviewRun(data.reviewNavigation)
+								? m.review_confirm_apply_finish()
+								: m.review_confirm_apply_next()
 							: m.library_apply_confirm_yes()}
 				</button>
 				<button
