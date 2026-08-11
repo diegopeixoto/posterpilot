@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/diegopeixoto/posterpilot/compare/v0.12.1...v0.12.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* complete the review on the last item of a run ([#101](https://github.com/diegopeixoto/posterpilot/issues/101)) ([f541296](https://github.com/diegopeixoto/posterpilot/commit/f54129649920a2a9d08af274810122621c2ec059))
+* isolate a failing item instead of abandoning the sync ([#104](https://github.com/diegopeixoto/posterpilot/issues/104)) ([a94065a](https://github.com/diegopeixoto/posterpilot/commit/a94065a64ce57a0702bdbd0cbb660030f967d5d6))
+
 ## [0.12.1](https://github.com/diegopeixoto/posterpilot/compare/v0.12.0...v0.12.1) (2026-08-10)
 
 
