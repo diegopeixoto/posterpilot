@@ -271,6 +271,10 @@ export async function runSyncJob(
 			)[0];
 			let itemId: number;
 			if (existing) {
+				// Attributed before the write, not after: a known item whose update fails
+				// still has an id, and recording the failure against it is what leaves it
+				// eligible for the retry-failed-items flow.
+				attributedItemId = existing.id;
 				await db
 					.update(mediaItems)
 					.set(base)
@@ -278,7 +282,6 @@ export async function runSyncJob(
 						and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, existing.id))
 					);
 				itemId = existing.id;
-				attributedItemId = itemId;
 			} else {
 				const [inserted] = await db.insert(mediaItems).values(base).returning();
 				itemId = inserted.id;
@@ -548,8 +551,6 @@ export async function runSyncJob(
 				});
 			}
 
-			processed++;
-			await ctx.progress(processed, item.title);
 			consecutiveItemFailures = 0;
 		} catch (error) {
 			if (ctx.isCancelled()) break;
@@ -579,9 +580,16 @@ export async function runSyncJob(
 			// items would bury that behind a wall of identical outcomes. Rethrowing
 			// fails the attempt so the runner retries it as a whole.
 			if (consecutiveItemFailures >= CONSECUTIVE_ITEM_FAILURE_LIMIT) throw error;
-			processed++;
-			await ctx.progress(processed, item.title).catch(() => undefined);
 		}
+
+		// Outside both paths, so an item is counted once and only once. Inside the try
+		// this reclassified its own item: a progress write is several database calls,
+		// and one failing after the item had already been recorded as succeeded made it
+		// succeeded *and* failed, counted twice in `processed`, and given two
+		// contradictory outcomes. Progress is a display detail — its failure is
+		// swallowed rather than allowed to decide anything.
+		processed++;
+		await ctx.progress(processed, item.title).catch(() => undefined);
 	}
 
 	// Native collection discovery is optional and authoritative only for a complete
