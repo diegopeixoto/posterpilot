@@ -37,7 +37,9 @@
 	import {
 		canConfirmApplyAndNext,
 		canRetryApplyNextCompletion,
+		completesReviewRun,
 		isFullySuccessfulApply,
+		reviewAdvanceTarget,
 		shouldAutoConfirmApply
 	} from '$lib/review-apply-next';
 	import {
@@ -1179,7 +1181,7 @@
 		} else if (shortcut === 'compare') {
 			event.preventDefault();
 			focusArtworkComparison();
-		} else if (shortcut === 'apply_next' && data.reviewNavigation.next) {
+		} else if (shortcut === 'apply_next') {
 			event.preventDefault();
 			void requestApply(true);
 		}
@@ -1200,7 +1202,9 @@
 		}
 		if (busy || finishingAdvance) return;
 		advanceAfterApply = shouldAdvance;
-		advanceTargetHref = shouldAdvance ? (data.reviewNavigation?.next?.href ?? null) : null;
+		advanceTargetHref = shouldAdvance
+			? reviewAdvanceTarget(data.reviewNavigation, data.returnTo)
+			: null;
 		completionRetry = null;
 		busy = true;
 		setMessage('');
@@ -1312,7 +1316,11 @@
 			childSel = {};
 			childCandidateIds = {};
 			childProviders = {};
-			setMessage(m.review_apply_next_completed());
+			setMessage(
+				completesReviewRun(data.reviewNavigation)
+					? m.review_apply_finish_completed()
+					: m.review_apply_next_completed()
+			);
 			await invalidateAll();
 			historyRefresh += 1;
 			await goto(targetHref);
@@ -2128,7 +2136,9 @@
 				>
 					{finishingAdvance
 						? m.review_apply_next_finishing()
-						: m.review_apply_next_retry_completion()}
+						: completesReviewRun(data.reviewNavigation)
+							? m.review_apply_finish_retry_completion()
+							: m.review_apply_next_retry_completion()}
 				</button>
 			</div>
 		{/if}
@@ -2257,7 +2267,9 @@
 				<!-- Confirm the exact frozen destination operations. -->
 				<span class="hidden text-xs text-neutral-200 sm:inline"
 					>{advanceAfterApply
-						? m.review_apply_next_confirm({ target: confirmTarget })
+						? completesReviewRun(data.reviewNavigation)
+							? m.review_apply_finish_confirm({ target: confirmTarget })
+							: m.review_apply_next_confirm({ target: confirmTarget })
 						: m.item_apply_confirm({ target: confirmTarget })}
 					{#if applyPreview}
 						· {m.library_preview_summary({
@@ -2279,7 +2291,9 @@
 					{busy
 						? m.item_working()
 						: advanceAfterApply
-							? m.review_confirm_apply_next()
+							? completesReviewRun(data.reviewNavigation)
+								? m.review_confirm_apply_finish()
+								: m.review_confirm_apply_next()
 							: m.library_apply_confirm_yes()}
 				</button>
 				<button
@@ -2300,13 +2314,16 @@
 					disabled={busy || finishingAdvance || !hasStaged}
 					class="btn btn-accent">{busy ? m.item_working() : m.item_apply()}</button
 				>
-				{#if data.reviewNavigation?.next}
+				{#if data.reviewNavigation}
 					<button
 						type="button"
 						class="btn btn-subtle"
 						disabled={busy || finishingAdvance || !hasStaged}
 						aria-keyshortcuts="A"
-						onclick={() => requestApply(true)}>{m.review_apply_next()}</button
+						onclick={() => requestApply(true)}
+						>{completesReviewRun(data.reviewNavigation)
+							? m.review_apply_finish()
+							: m.review_apply_next()}</button
 					>
 				{/if}
 			{/if}
