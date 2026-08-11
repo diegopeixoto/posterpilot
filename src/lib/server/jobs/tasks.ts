@@ -54,6 +54,16 @@ interface JobTaskExecutionOptions {
 	repairItemIds?: number[];
 }
 
+/**
+ * How many items may fail in a row before the whole attempt is failed instead.
+ *
+ * Item-level isolation is what keeps one transient failure from discarding a
+ * whole library, but it must not turn an unreachable database or media server
+ * into thousands of identical failed outcomes with a "completed" job at the end.
+ * A run this long is the environment, and the runner's retry is the right answer.
+ */
+const CONSECUTIVE_ITEM_FAILURE_LIMIT = 25;
+
 /** Sync: pull the active server's libraries/items, upsert media_items, resolve TMDB ids. */
 export async function runSyncJob(
 	ctx: JobContext,
@@ -211,322 +221,375 @@ export async function runSyncJob(
 	let processed = 0;
 	let succeeded = 0;
 	let failed = 0;
+	let consecutiveItemFailures = 0;
 	const newItems: Array<{ id: number; librarySectionKey: string }> = [];
 	for (const { sectionKey, item } of executionWork) {
 		if (ctx.isCancelled()) break;
-		await ctx.progress(processed, item.title);
+		// Every item is isolated. A contended write, a dropped connection, or any
+		// other infrastructure failure used to escape this loop and abort the whole
+		// sync — one bad moment discarding every remaining title, with the run
+		// reported as a single failure rather than as the thousands of items it
+		// never reached. A failure here now costs one title.
+		let attributedItemId: number | null = null;
+		try {
+			await ctx.progress(processed, item.title);
 
-		const currentPosterUrl = sanitizeServerArtworkUrl(item.currentPosterUrl);
-		const currentBackgroundUrl = sanitizeServerArtworkUrl(item.currentBackgroundUrl);
-		const base = {
-			serverInstanceId,
-			ratingKey: item.id,
-			sectionKey,
-			type: item.type,
-			title: item.title,
-			year: item.year ?? null,
-			imdbId: item.guids.imdb ?? null,
-			tvdbId: item.guids.tvdb ?? null,
-			currentPosterUrl,
-			currentBackgroundUrl,
-			// Record the server's change time for incremental skips. lastSyncedAt is
-			// advanced separately, only once the item is actually processed (below), so a
-			// transient failure leaves the item eligible for retry on the next sync.
-			serverUpdatedAt: item.serverUpdatedAt,
-			addedAt: item.addedAt,
-			watched: item.watched,
-			sourceRemovedAt: null,
-			updatedAt: new Date()
-		};
+			const currentPosterUrl = sanitizeServerArtworkUrl(item.currentPosterUrl);
+			const currentBackgroundUrl = sanitizeServerArtworkUrl(item.currentBackgroundUrl);
+			const base = {
+				serverInstanceId,
+				ratingKey: item.id,
+				sectionKey,
+				type: item.type,
+				title: item.title,
+				year: item.year ?? null,
+				imdbId: item.guids.imdb ?? null,
+				tvdbId: item.guids.tvdb ?? null,
+				currentPosterUrl,
+				currentBackgroundUrl,
+				// Record the server's change time for incremental skips. lastSyncedAt is
+				// advanced separately, only once the item is actually processed (below), so a
+				// transient failure leaves the item eligible for retry on the next sync.
+				serverUpdatedAt: item.serverUpdatedAt,
+				addedAt: item.addedAt,
+				watched: item.watched,
+				sourceRemovedAt: null,
+				updatedAt: new Date()
+			};
 
-		const existing = (
-			await db
-				.select()
-				.from(mediaItems)
-				.where(
-					and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.ratingKey, item.id))
-				)
-				.limit(1)
-		)[0];
-		let itemId: number;
-		if (existing) {
-			await db
-				.update(mediaItems)
-				.set(base)
-				.where(
-					and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, existing.id))
-				);
-			itemId = existing.id;
-		} else {
-			const [inserted] = await db.insert(mediaItems).values(base).returning();
-			itemId = inserted.id;
-			newItems.push({ id: itemId, librarySectionKey: sectionKey });
-		}
-
-		let externalChanges = 0;
-		let observationFailure: unknown = null;
-		if (full) {
-			await ctx.setPhase('artwork_observation');
-			try {
-				const observation = await observeFullRescanArtwork({
-					server,
-					serverInstanceId,
-					mediaItemId: itemId,
-					sourceItemId: item.id,
-					currentPosterUrl,
-					currentBackgroundUrl,
-					previous: existing
-						? {
-								currentPosterUrl: existing.currentPosterUrl,
-								currentBackgroundUrl: existing.currentBackgroundUrl,
-								currentPosterFingerprint: existing.currentPosterFingerprint,
-								currentBackgroundFingerprint: existing.currentBackgroundFingerprint,
-								lastVerifiedAt: existing.lastVerifiedAt,
-								externalArtworkChangedAt: existing.externalArtworkChangedAt
-							}
-						: null,
-					jobId: ctx.jobId
-				});
-				externalChanges = observation.externalChanges;
-			} catch (error) {
-				observationFailure = error;
-				await logEvent('warn', 'sync', 'Full rescan artwork observation failed', {
-					serverInstanceId,
-					mediaItemId: itemId,
-					code: 'full_rescan_artwork_observation_failed'
-				});
+			const existing = (
+				await db
+					.select()
+					.from(mediaItems)
+					.where(
+						and(
+							eq(mediaItems.serverInstanceId, serverInstanceId),
+							eq(mediaItems.ratingKey, item.id)
+						)
+					)
+					.limit(1)
+			)[0];
+			let itemId: number;
+			if (existing) {
+				// Attributed before the write, not after: a known item whose update fails
+				// still has an id, and recording the failure against it is what leaves it
+				// eligible for the retry-failed-items flow.
+				attributedItemId = existing.id;
+				await db
+					.update(mediaItems)
+					.set(base)
+					.where(
+						and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, existing.id))
+					);
+				itemId = existing.id;
+			} else {
+				const [inserted] = await db.insert(mediaItems).values(base).returning();
+				itemId = inserted.id;
+				attributedItemId = itemId;
+				newItems.push({ id: itemId, librarySectionKey: sectionKey });
 			}
-		}
 
-		// Skip the expensive TMDB resolution + enrichment when the item is unchanged
-		// since the last sync. The row above is still upserted (kept/unpruned) with a
-		// refreshed serverUpdatedAt; we only avoid the network work.
-		const pendingTypeMismatch = existing
-			? isPendingTmdbTypeMismatch(
-					{
+			let externalChanges = 0;
+			let observationFailure: unknown = null;
+			if (full) {
+				await ctx.setPhase('artwork_observation');
+				try {
+					const observation = await observeFullRescanArtwork({
+						server,
 						serverInstanceId,
-						type: item.type,
-						mediaType: existing.mediaType,
-						manualMatchPinned: existing.manualMatchPinned,
-						sourceRemovedAt: null,
-						resolutionReason: existing.resolutionReason
-					},
-					serverInstanceId
-				)
-			: false;
-		const reprocess =
-			pendingTypeMismatch ||
-			Boolean(existing?.sourceRemovedAt) ||
-			shouldReprocessItem(
-				item.serverUpdatedAt,
-				existing?.serverUpdatedAt ?? null,
-				existing?.lastSyncedAt ?? null,
-				{ full, incremental: config.incrementalSync }
-			);
-		// Only advance lastSyncedAt once the item is fully processed this pass. An
-		// unchanged item is already considered synced; a transient resolve/enrich
-		// failure leaves it unsynced so the next sync retries it.
-		let synced = !reprocess && observationFailure === null;
-		let itemFailure: unknown = observationFailure;
-		let syncIdentityGuard: TmdbIdentityGuard | null = null;
-		let metadataDeferred = false;
-		if (reprocess) {
-			await ctx.setPhase('resolution');
-			try {
-				syncIdentityGuard = existing?.manualMatchPinned
-					? {
-							tmdbId: existing.tmdbId,
-							mediaType: existing.mediaType,
-							manualMatchPinned: true,
-							resolutionUpdatedAt: existing.resolutionUpdatedAt
-						}
-					: null;
-				let resolution =
-					existing?.manualMatchPinned && existing.tmdbId && existing.mediaType
-						? { tmdbId: existing.tmdbId, mediaType: existing.mediaType }
-						: null;
-				if (!existing?.manualMatchPinned) {
-					const selected = pickExternalId(item.guids);
-					const expectedMediaType = item.type === 'show' ? 'tv' : 'movie';
-					const automatic = await resolveTmdbStrict(item.guids, config.tmdbKey!, {
-						expectedMediaType,
-						cacheTtlDays: config.httpCacheTtlDays,
-						forceRefresh: full
+						mediaItemId: itemId,
+						sourceItemId: item.id,
+						currentPosterUrl,
+						currentBackgroundUrl,
+						previous: existing
+							? {
+									currentPosterUrl: existing.currentPosterUrl,
+									currentBackgroundUrl: existing.currentBackgroundUrl,
+									currentPosterFingerprint: existing.currentPosterFingerprint,
+									currentBackgroundFingerprint: existing.currentBackgroundFingerprint,
+									lastVerifiedAt: existing.lastVerifiedAt,
+									externalArtworkChangedAt: existing.externalArtworkChangedAt
+								}
+							: null,
+						jobId: ctx.jobId
 					});
-					if (automatic && selected) {
-						const source = selected.source;
-						// A resolution verified in the opposite namespace conflicts with the
-						// library type by construction. Recording the dedicated reason is
-						// what exempts the row from the repair predicate — without it the
-						// repair job would re-resolve the same answer forever and the
-						// mismatch banner would never clear.
-						const persisted = await manualMatchRepository.applyAutomaticResolution(
-							serverInstanceId,
-							itemId,
-							{
-								resolution: automatic,
-								reason:
-									automatic.mediaType !== expectedMediaType
-										? CROSS_NAMESPACE_RESOLUTION_REASON
-										: source === 'tmdb'
-											? 'direct_tmdb_guid'
-											: source,
-								source,
-								attemptedSources: [source],
-								resolvedAt: new Date()
-							}
-						);
-						syncIdentityGuard = {
-							tmdbId: persisted.tmdbId,
-							mediaType: persisted.mediaType,
-							manualMatchPinned: persisted.manualMatchPinned,
-							resolutionUpdatedAt: persisted.resolutionUpdatedAt
-						};
-						resolution =
-							persisted.resolved && persisted.tmdbId && persisted.mediaType
-								? { tmdbId: persisted.tmdbId, mediaType: persisted.mediaType }
-								: null;
-					} else {
-						const persisted = await manualMatchRepository.applyAutomaticUnresolved(
-							serverInstanceId,
-							itemId,
-							{
-								reason: selected ? 'no_match' : 'no_external_guid',
-								source: selected?.source ?? null,
-								attemptedSources: selected ? [selected.source] : [],
-								resolvedAt: new Date()
-							}
-						);
-						syncIdentityGuard = {
-							tmdbId: persisted.tmdbId,
-							mediaType: persisted.mediaType,
-							manualMatchPinned: persisted.manualMatchPinned,
-							resolutionUpdatedAt: persisted.resolutionUpdatedAt
-						};
-						resolution =
-							persisted.resolved && persisted.tmdbId && persisted.mediaType
-								? { tmdbId: persisted.tmdbId, mediaType: persisted.mediaType }
-								: null;
-					}
+					externalChanges = observation.externalChanges;
+				} catch (error) {
+					observationFailure = error;
+					await logEvent('warn', 'sync', 'Full rescan artwork observation failed', {
+						serverInstanceId,
+						mediaItemId: itemId,
+						code: 'full_rescan_artwork_observation_failed'
+					});
 				}
-				if (resolution) {
-					// Enrich with TMDB display metadata. A failure here leaves the item
-					// resolved but un-enriched and unsynced, so it is retried on a later sync.
-					try {
-						const identityChanged =
-							!existing ||
-							existing.tmdbId !== resolution.tmdbId ||
-							existing.mediaType !== resolution.mediaType;
-						const meta = await fetchMetadata(
-							resolution.tmdbId,
-							resolution.mediaType,
-							config.tmdbKey!,
-							{
-								cacheTtlDays: config.httpCacheTtlDays,
-								forceRefresh: full,
-								fetchLogo: full || identityChanged || !existing?.logoUrl
-							}
-						);
-						const expectedIdentity = syncIdentityGuard;
-						if (!expectedIdentity) throw new Error('tmdb_resolution_guard_missing');
-						const metadataWritten = await writeTmdbMetadataIfCurrent({
+			}
+
+			// Skip the expensive TMDB resolution + enrichment when the item is unchanged
+			// since the last sync. The row above is still upserted (kept/unpruned) with a
+			// refreshed serverUpdatedAt; we only avoid the network work.
+			const pendingTypeMismatch = existing
+				? isPendingTmdbTypeMismatch(
+						{
 							serverInstanceId,
-							itemId,
-							expected: expectedIdentity,
-							metadata: meta,
-							existingLogoUrl: identityChanged ? null : (existing?.logoUrl ?? null),
-							updatedAt: new Date()
+							type: item.type,
+							mediaType: existing.mediaType,
+							manualMatchPinned: existing.manualMatchPinned,
+							sourceRemovedAt: null,
+							resolutionReason: existing.resolutionReason
+						},
+						serverInstanceId
+					)
+				: false;
+			const reprocess =
+				pendingTypeMismatch ||
+				Boolean(existing?.sourceRemovedAt) ||
+				shouldReprocessItem(
+					item.serverUpdatedAt,
+					existing?.serverUpdatedAt ?? null,
+					existing?.lastSyncedAt ?? null,
+					{ full, incremental: config.incrementalSync }
+				);
+			// Only advance lastSyncedAt once the item is fully processed this pass. An
+			// unchanged item is already considered synced; a transient resolve/enrich
+			// failure leaves it unsynced so the next sync retries it.
+			let synced = !reprocess && observationFailure === null;
+			let itemFailure: unknown = observationFailure;
+			let syncIdentityGuard: TmdbIdentityGuard | null = null;
+			let metadataDeferred = false;
+			if (reprocess) {
+				await ctx.setPhase('resolution');
+				try {
+					syncIdentityGuard = existing?.manualMatchPinned
+						? {
+								tmdbId: existing.tmdbId,
+								mediaType: existing.mediaType,
+								manualMatchPinned: true,
+								resolutionUpdatedAt: existing.resolutionUpdatedAt
+							}
+						: null;
+					let resolution =
+						existing?.manualMatchPinned && existing.tmdbId && existing.mediaType
+							? { tmdbId: existing.tmdbId, mediaType: existing.mediaType }
+							: null;
+					if (!existing?.manualMatchPinned) {
+						const selected = pickExternalId(item.guids);
+						const expectedMediaType = item.type === 'show' ? 'tv' : 'movie';
+						const automatic = await resolveTmdbStrict(item.guids, config.tmdbKey!, {
+							expectedMediaType,
+							cacheTtlDays: config.httpCacheTtlDays,
+							forceRefresh: full
 						});
-						if (metadataWritten) {
-							await collectionRepository.reconcileTmdbItemCollection({
-								serverInstanceId,
-								mediaItemId: itemId,
-								collection: meta.collection,
-								expectedIdentity
-							});
-						}
-						synced = observationFailure === null;
-					} catch (error) {
-						if (repairItemIds && syncIdentityGuard) {
-							// The repair unit is the identity correction. If enrichment fails after
-							// that correction, keep the unit complete but clear its watermark so a
-							// normal sync retries metadata without resurrecting the mismatch banner.
-							await clearTmdbSyncWatermarkIfCurrent({
+						if (automatic && selected) {
+							const source = selected.source;
+							// A resolution verified in the opposite namespace conflicts with the
+							// library type by construction. Recording the dedicated reason is
+							// what exempts the row from the repair predicate — without it the
+							// repair job would re-resolve the same answer forever and the
+							// mismatch banner would never clear.
+							const persisted = await manualMatchRepository.applyAutomaticResolution(
 								serverInstanceId,
 								itemId,
-								expected: syncIdentityGuard
-							});
-							metadataDeferred = true;
-							synced = observationFailure === null;
-							await logEvent('warn', 'sync', 'TMDB repair metadata enrichment deferred', {
-								serverInstanceId,
-								mediaItemId: itemId,
-								code: 'tmdb_metadata_deferred'
-							});
+								{
+									resolution: automatic,
+									reason:
+										automatic.mediaType !== expectedMediaType
+											? CROSS_NAMESPACE_RESOLUTION_REASON
+											: source === 'tmdb'
+												? 'direct_tmdb_guid'
+												: source,
+									source,
+									attemptedSources: [source],
+									resolvedAt: new Date()
+								}
+							);
+							syncIdentityGuard = {
+								tmdbId: persisted.tmdbId,
+								mediaType: persisted.mediaType,
+								manualMatchPinned: persisted.manualMatchPinned,
+								resolutionUpdatedAt: persisted.resolutionUpdatedAt
+							};
+							resolution =
+								persisted.resolved && persisted.tmdbId && persisted.mediaType
+									? { tmdbId: persisted.tmdbId, mediaType: persisted.mediaType }
+									: null;
 						} else {
-							// Enrichment failed (network/parse); leave it for the next sync to retry.
-							itemFailure = error;
+							const persisted = await manualMatchRepository.applyAutomaticUnresolved(
+								serverInstanceId,
+								itemId,
+								{
+									reason: selected ? 'no_match' : 'no_external_guid',
+									source: selected?.source ?? null,
+									attemptedSources: selected ? [selected.source] : [],
+									resolvedAt: new Date()
+								}
+							);
+							syncIdentityGuard = {
+								tmdbId: persisted.tmdbId,
+								mediaType: persisted.mediaType,
+								manualMatchPinned: persisted.manualMatchPinned,
+								resolutionUpdatedAt: persisted.resolutionUpdatedAt
+							};
+							resolution =
+								persisted.resolved && persisted.tmdbId && persisted.mediaType
+									? { tmdbId: persisted.tmdbId, mediaType: persisted.mediaType }
+									: null;
 						}
 					}
-				} else if (!existing?.manualMatchPinned) {
-					// Deterministic no-match — retrying won't help until the server item changes.
-					synced = observationFailure === null;
-				} else {
-					// A malformed/incomplete pin remains authoritative until explicitly replaced/cleared.
-					synced = observationFailure === null;
+					if (resolution) {
+						// Enrich with TMDB display metadata. A failure here leaves the item
+						// resolved but un-enriched and unsynced, so it is retried on a later sync.
+						try {
+							const identityChanged =
+								!existing ||
+								existing.tmdbId !== resolution.tmdbId ||
+								existing.mediaType !== resolution.mediaType;
+							const meta = await fetchMetadata(
+								resolution.tmdbId,
+								resolution.mediaType,
+								config.tmdbKey!,
+								{
+									cacheTtlDays: config.httpCacheTtlDays,
+									forceRefresh: full,
+									fetchLogo: full || identityChanged || !existing?.logoUrl
+								}
+							);
+							const expectedIdentity = syncIdentityGuard;
+							if (!expectedIdentity) throw new Error('tmdb_resolution_guard_missing');
+							const metadataWritten = await writeTmdbMetadataIfCurrent({
+								serverInstanceId,
+								itemId,
+								expected: expectedIdentity,
+								metadata: meta,
+								existingLogoUrl: identityChanged ? null : (existing?.logoUrl ?? null),
+								updatedAt: new Date()
+							});
+							if (metadataWritten) {
+								await collectionRepository.reconcileTmdbItemCollection({
+									serverInstanceId,
+									mediaItemId: itemId,
+									collection: meta.collection,
+									expectedIdentity
+								});
+							}
+							synced = observationFailure === null;
+						} catch (error) {
+							if (repairItemIds && syncIdentityGuard) {
+								// The repair unit is the identity correction. If enrichment fails after
+								// that correction, keep the unit complete but clear its watermark so a
+								// normal sync retries metadata without resurrecting the mismatch banner.
+								await clearTmdbSyncWatermarkIfCurrent({
+									serverInstanceId,
+									itemId,
+									expected: syncIdentityGuard
+								});
+								metadataDeferred = true;
+								synced = observationFailure === null;
+								await logEvent('warn', 'sync', 'TMDB repair metadata enrichment deferred', {
+									serverInstanceId,
+									mediaItemId: itemId,
+									code: 'tmdb_metadata_deferred'
+								});
+							} else {
+								// Enrichment failed (network/parse); leave it for the next sync to retry.
+								itemFailure = error;
+							}
+						}
+					} else if (!existing?.manualMatchPinned) {
+						// Deterministic no-match — retrying won't help until the server item changes.
+						synced = observationFailure === null;
+					} else {
+						// A malformed/incomplete pin remains authoritative until explicitly replaced/cleared.
+						synced = observationFailure === null;
+					}
+				} catch (error) {
+					// Resolve failed (transient); leave unresolved + unsynced so a later sync retries.
+					itemFailure = error;
 				}
-			} catch (error) {
-				// Resolve failed (transient); leave unresolved + unsynced so a later sync retries.
-				itemFailure = error;
 			}
-		}
 
-		// Advance the sync watermark only for fully-processed items.
-		if (synced) {
-			if (!metadataDeferred) {
-				if (syncIdentityGuard) {
-					await markTmdbSyncedIfCurrent({
-						serverInstanceId,
-						itemId,
-						expected: syncIdentityGuard,
-						syncedAt: new Date()
-					});
-				} else {
-					await db
-						.update(mediaItems)
-						.set({ lastSyncedAt: new Date() })
-						.where(
-							and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId))
-						);
+			// Advance the sync watermark only for fully-processed items.
+			if (synced) {
+				if (!metadataDeferred) {
+					if (syncIdentityGuard) {
+						await markTmdbSyncedIfCurrent({
+							serverInstanceId,
+							itemId,
+							expected: syncIdentityGuard,
+							syncedAt: new Date()
+						});
+					} else {
+						await db
+							.update(mediaItems)
+							.set({ lastSyncedAt: new Date() })
+							.where(
+								and(eq(mediaItems.serverInstanceId, serverInstanceId), eq(mediaItems.id, itemId))
+							);
+					}
 				}
+				succeeded++;
+				await ctx.recordOutcome({
+					serverInstanceId,
+					mediaItemId: itemId,
+					status: 'success',
+					result: {
+						sourceId: item.id,
+						sectionKey,
+						mode: repairItemIds ? 'tmdb_repair' : full ? 'full_rescan' : 'incremental',
+						externalChanges,
+						metadataDeferred
+					}
+				});
+			} else {
+				failed++;
+				await ctx.recordOutcome({
+					serverInstanceId,
+					mediaItemId: itemId,
+					status: 'failed',
+					retryable: true,
+					errorCode: 'sync_item_transient',
+					error: itemFailure ?? 'sync_item_transient'
+				});
 			}
-			succeeded++;
-			await ctx.recordOutcome({
-				serverInstanceId,
-				mediaItemId: itemId,
-				status: 'success',
-				result: {
-					sourceId: item.id,
-					sectionKey,
-					mode: repairItemIds ? 'tmdb_repair' : full ? 'full_rescan' : 'incremental',
-					externalChanges,
-					metadataDeferred
-				}
-			});
-		} else {
+
+			consecutiveItemFailures = 0;
+		} catch (error) {
+			if (ctx.isCancelled()) break;
 			failed++;
-			await ctx.recordOutcome({
+			consecutiveItemFailures++;
+			// Recorded against the item when it is known. A failure before the upsert
+			// leaves nothing to attribute it to, and the event below is the record.
+			if (attributedItemId !== null) {
+				await ctx
+					.recordOutcome({
+						serverInstanceId,
+						mediaItemId: attributedItemId,
+						status: 'failed',
+						retryable: true,
+						errorCode: 'sync_item_unexpected',
+						error
+					})
+					.catch(() => undefined);
+			}
+			await logEvent('warn', 'sync', 'Item skipped after an unexpected failure', {
 				serverInstanceId,
-				mediaItemId: itemId,
-				status: 'failed',
-				retryable: true,
-				errorCode: 'sync_item_transient',
-				error: itemFailure ?? 'sync_item_transient'
-			});
+				sourceId: item.id,
+				code: 'sync_item_unexpected'
+			}).catch(() => undefined);
+			// A run of failures this long is the environment, not the titles: the
+			// database or the server is gone, and grinding through thousands more
+			// items would bury that behind a wall of identical outcomes. Rethrowing
+			// fails the attempt so the runner retries it as a whole.
+			if (consecutiveItemFailures >= CONSECUTIVE_ITEM_FAILURE_LIMIT) throw error;
 		}
 
+		// Outside both paths, so an item is counted once and only once. Inside the try
+		// this reclassified its own item: a progress write is several database calls,
+		// and one failing after the item had already been recorded as succeeded made it
+		// succeeded *and* failed, counted twice in `processed`, and given two
+		// contradictory outcomes. Progress is a display detail — its failure is
+		// swallowed rather than allowed to decide anything.
 		processed++;
-		await ctx.progress(processed, item.title);
+		await ctx.progress(processed, item.title).catch(() => undefined);
 	}
 
 	// Native collection discovery is optional and authoritative only for a complete
