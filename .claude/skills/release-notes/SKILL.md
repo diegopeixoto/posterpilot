@@ -97,6 +97,14 @@ subsystem are **one** bullet. Match [`CHANGELOG.md`'s v0.10.0 entry](../../../CH
 Never silently drop an entry release-please generated: every one is either folded into a
 bullet or deliberately cut as internal. State the cuts when reporting back.
 
+**Never write a closing keyword next to an issue reference, even negated.** The release PR
+body is a PR body: on merge, GitHub closes every issue matching `close[sd]?`, `fix(e[sd])?`,
+or `resolve[sd]?` followed by a reference. It does not parse negation, so
+`This does not fix #91` **closed #91** on v0.12.1 — a live user bug, silently, in the same
+second the release merged. To say an issue is still open, put the reference first and use no
+keyword at all: `#91 remains open.` Naming issues that a release does *not* fix is worth
+doing; it just cannot be phrased with those verbs.
+
 Keep release-please's sentinels exactly — it parses this text to build the GitHub Release,
 and a mangled body breaks the release. Keep its heading line byte-identical too; the tag,
 compare link, and date are its output, not yours:
