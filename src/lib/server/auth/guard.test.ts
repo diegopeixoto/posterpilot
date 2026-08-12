@@ -4,6 +4,7 @@ import { classifyPath, safeRedirectTarget } from './guard';
 describe('auth/guard · classifyPath', () => {
 	it('treats the health probe, login, logout, and assets as public', () => {
 		expect(classifyPath('/api/health')).toBe('public');
+		expect(classifyPath('/api/ready')).toBe('public');
 		expect(classifyPath('/login')).toBe('public');
 		expect(classifyPath('/api/auth/logout')).toBe('public');
 		expect(classifyPath('/api/automation-webhooks/automation-a')).toBe('public');

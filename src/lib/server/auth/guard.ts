@@ -9,7 +9,7 @@
 export type PathClass = 'public' | 'api' | 'page';
 
 // Exact paths reachable without a session.
-const PUBLIC_EXACT = new Set(['/api/health', '/login', '/api/auth/logout']);
+const PUBLIC_EXACT = new Set(['/api/health', '/api/ready', '/login', '/api/auth/logout']);
 // Static assets served from the app root that stay public.
 const STATIC_EXT =
 	/\.(?:ico|png|jpe?g|svg|webp|gif|css|js|mjs|woff2?|ttf|map|webmanifest|txt|xml)$/i;
