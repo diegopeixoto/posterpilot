@@ -2,11 +2,24 @@
 
 ## [0.12.2](https://github.com/diegopeixoto/posterpilot/compare/v0.12.1...v0.12.2) (2026-08-11)
 
+Two fixes for work that quietly did not finish: a review list that could never be emptied, and a sync that gave up on a whole library because of one title.
 
 ### Bug Fixes
 
-* complete the review on the last item of a run ([#101](https://github.com/diegopeixoto/posterpilot/issues/101)) ([f541296](https://github.com/diegopeixoto/posterpilot/commit/f54129649920a2a9d08af274810122621c2ec059))
-* isolate a failing item instead of abandoning the sync ([#104](https://github.com/diegopeixoto/posterpilot/issues/104)) ([a94065a](https://github.com/diegopeixoto/posterpilot/commit/a94065a64ce57a0702bdbd0cbb660030f967d5d6))
+* **The last title in a review run can finally be completed.** Working a library down with **Apply and next** left every library permanently reporting one outstanding title, because the last item had no next item and therefore no completing button — only a plain **Apply**, which writes the artwork but never records the review. There was no way to finish it, and no setting that would have helped. The last item now offers **Apply and finish**, which applies, records the review, and returns to the list you came from. ([#101](https://github.com/diegopeixoto/posterpilot/pull/101))
+* **One unwritable title no longer abandons the rest of the sync.** A failure while writing a single item — a contended write, a dropped connection, a row the database refused — escaped the loop and ended the entire run, discarding every title after it and reporting the whole sync as one failure. Each item is now isolated: the failure is recorded against that title and the sync carries on. On a ten-title library with one bad entry, that is the difference between two titles synced and nine. A long run of consecutive failures still fails the attempt, because that is the database or the media server rather than the titles, and the job's own retry is the right answer. ([#104](https://github.com/diegopeixoto/posterpilot/pull/104))
+
+### Upgrading
+
+* No database migrations, no configuration changes.
+
+### Still open
+
+* [#91](https://github.com/diegopeixoto/posterpilot/issues/91) remains open. A first sync on a large library can still fail to persist anything; the investigation is ongoing and this release does not address it.
+
+### Contributors
+
+* [@lishremix](https://github.com/lishremix) reported [#100](https://github.com/diegopeixoto/posterpilot/issues/100), noticing that a library always kept one actionable title no matter how much work was done, and saying plainly that they had looked for a way to finalize it and found none. There wasn't one — that was the bug.
 
 ## [0.12.1](https://github.com/diegopeixoto/posterpilot/compare/v0.12.0...v0.12.1) (2026-08-10)
 
