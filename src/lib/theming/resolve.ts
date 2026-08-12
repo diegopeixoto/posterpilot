@@ -106,14 +106,29 @@ interface ThemeLookup {
 	resolvedId: string;
 }
 
+/**
+ * Follow a built-in down to the theme that actually owns a `[data-theme]` block,
+ * collecting the palette of any variant passed through.
+ *
+ * Only non-variants have a block. Stopping at a variant would set `data-theme`
+ * to an id no CSS matches, which drops both its palette and the reskin it exists
+ * to inherit — the case a custom theme built on top of a variant walks straight
+ * into.
+ */
+function styledBase(theme: Theme): { base: Theme; inherited: CustomTheme['tokens'] } {
+	if (!theme.variantOf) return { base: theme, inherited: {} };
+	const parent = findBuiltinTheme(theme.variantOf);
+	return parent ? { base: parent, inherited: theme.tokens ?? {} } : { base: theme, inherited: {} };
+}
+
 function lookupTheme(themeId: string | null | undefined, customThemes: CustomTheme[]): ThemeLookup {
 	const id = themeId ?? DEFAULT_THEME_ID;
 	const builtin = findBuiltinTheme(id);
 	if (builtin) {
-		const base = builtin.variantOf ? (findBuiltinTheme(builtin.variantOf) ?? builtin) : builtin;
+		const { base, inherited } = styledBase(builtin);
 		return {
 			base,
-			deltas: builtin.variantOf ? (builtin.tokens ?? null) : null,
+			deltas: builtin.variantOf ? inherited : null,
 			css: null,
 			flags: builtin.customizable,
 			resolvedId: builtin.id
@@ -122,12 +137,15 @@ function lookupTheme(themeId: string | null | undefined, customThemes: CustomThe
 
 	const custom = customThemes.find((theme) => theme.id === id);
 	if (custom) {
-		const base = findBuiltinTheme(custom.base) ?? findBuiltinTheme(DEFAULT_THEME_ID)!;
+		const declared = findBuiltinTheme(custom.base) ?? findBuiltinTheme(DEFAULT_THEME_ID)!;
+		const { base, inherited } = styledBase(declared);
 		return {
 			base,
-			deltas: custom.tokens,
+			// The variant's palette sits under the custom theme's own deltas, so
+			// extending Terminal · Nord keeps Nord for everything it does not restate.
+			deltas: { ...inherited, ...custom.tokens },
 			css: custom.css ?? null,
-			flags: base.customizable,
+			flags: declared.customizable,
 			resolvedId: custom.id
 		};
 	}

@@ -480,7 +480,7 @@
 									<img
 										src={candidateImageUrl(selection.candidateId)}
 										alt=""
-										class="aspect-[2/3] w-full rounded border border-border object-cover"
+										class="aspect-[2/3] w-full rounded-control border border-border object-cover"
 										loading="lazy"
 									/>
 								{/each}

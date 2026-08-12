@@ -2141,7 +2141,7 @@
 		{/if}
 		<div class="flex items-center gap-2">
 			<div
-				class="h-[51px] w-[34px] flex-none overflow-hidden rounded border border-border-strong bg-surface"
+				class="h-[51px] w-[34px] flex-none overflow-hidden rounded-control border border-border-strong bg-surface"
 			>
 				{#if selectedPosterPreview}<img
 						src={selectedPosterPreview}
@@ -2150,7 +2150,7 @@
 					/>{/if}
 			</div>
 			<div
-				class="h-[45px] w-20 flex-none overflow-hidden rounded border border-border-strong bg-surface"
+				class="h-[45px] w-20 flex-none overflow-hidden rounded-control border border-border-strong bg-surface"
 			>
 				{#if selectedBackgroundPreview}<img
 						src={selectedBackgroundPreview}
@@ -2216,7 +2216,10 @@
 					>
 				</div>
 				{#if uploadPreview}
-					<div class="rounded border border-border-strong bg-background/70 p-2" role="status">
+					<div
+						class="rounded-control border border-border-strong bg-background/70 p-2"
+						role="status"
+					>
 						<p class="text-[11px] text-text-strong">
 							{m.item_upload_preview_summary({
 								size: (uploadPreview.image.sizeBytes / (1024 * 1024)).toFixed(1)

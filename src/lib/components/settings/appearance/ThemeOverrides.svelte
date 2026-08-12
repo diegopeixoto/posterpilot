@@ -79,7 +79,7 @@
 								onPreview();
 							}}
 							onchange={onAccentChange}
-							class="h-7 w-10 cursor-pointer rounded border border-border-strong bg-transparent"
+							class="h-7 w-10 cursor-pointer rounded-control border border-border-strong bg-transparent"
 						/>
 					{/if}
 					{#if accent}
@@ -111,7 +111,7 @@
 							onPreview();
 						}}
 						onchange={onBackgroundChange}
-						class="h-7 w-10 cursor-pointer rounded border border-border-strong bg-transparent"
+						class="h-7 w-10 cursor-pointer rounded-control border border-border-strong bg-transparent"
 					/>
 					{#if background}
 						<button

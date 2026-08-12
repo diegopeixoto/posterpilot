@@ -164,7 +164,7 @@
 		</div>
 	</div>
 	<div
-		class="h-2 w-full overflow-hidden rounded bg-surface-raised"
+		class="h-2 w-full overflow-hidden rounded-control bg-surface-raised"
 		role="progressbar"
 		aria-label={m.jobs_progress({ id: jobId, status: jobStatusLabel(progress.status) })}
 		aria-valuemin="0"
@@ -175,7 +175,7 @@
 			: phase}
 	>
 		<div
-			class="h-full rounded transition-all motion-reduce:transition-none {progress.status ===
+			class="h-full rounded-control transition-all motion-reduce:transition-none {progress.status ===
 				'failed' || progress.status === 'interrupted'
 				? 'bg-red-500'
 				: progress.status === 'partial_failed'

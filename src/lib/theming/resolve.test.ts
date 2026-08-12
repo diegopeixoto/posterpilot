@@ -205,6 +205,25 @@ describe('resolveAppearance', () => {
 		expect(resolved.vars['--pp-accent-600']).toBe('#00ff00');
 	});
 
+	it('carries a variant palette through a custom theme built on it', () => {
+		// Only non-variants own a `[data-theme]` block. Resolving a custom theme to
+		// its declared base verbatim pointed `data-theme` at an id no CSS matches,
+		// dropping both the variant's palette and the reskin it exists to inherit.
+		const custom: CustomTheme = {
+			id: 'custom:mine',
+			name: 'Mine',
+			base: 'terminal-nord',
+			tokens: { 'accent-base': '#ff0000' }
+		};
+		const resolved = resolveAppearance({ themeId: 'custom:mine' }, [custom]);
+		expect(resolved.dataTheme).toBe('terminal');
+		expect(resolved.vars['--pp-background']).toBe('#2e3440');
+		// The custom theme's own delta still wins over the palette underneath it.
+		expect(resolved.vars['--pp-accent-600']).toBe('#ff0000');
+		// And it inherits the variant's locks rather than widening them.
+		expect(resolved.flags.background).toBe(false);
+	});
+
 	it('falls back to the default theme when a custom theme base is unknown', () => {
 		const orphan: CustomTheme = { ...custom, base: 'nope' };
 		const resolved = resolveAppearance({ themeId: 'custom:nebula' }, [orphan]);

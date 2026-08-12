@@ -78,7 +78,7 @@
 			onclick={onToggle}
 			aria-label={selected ? m.poster_deselect() : m.poster_select()}
 			aria-pressed={selected}
-			class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded border text-sm font-bold transition {selected
+			class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-control border text-sm font-bold transition {selected
 				? 'border-accent-400 bg-accent-500 text-white'
 				: 'border-border-hover bg-surface/80 text-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-border-hover pointer-coarse:opacity-100'}"
 		>

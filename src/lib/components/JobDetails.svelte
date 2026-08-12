@@ -104,7 +104,7 @@
 								</p>
 							</div>
 							<span
-								class="rounded px-2 py-0.5 text-[11px] {failure.retryable
+								class="rounded-control px-2 py-0.5 text-[11px] {failure.retryable
 									? 'bg-amber-950/60 text-amber-200'
 									: 'bg-surface-raised text-text-secondary'}"
 							>

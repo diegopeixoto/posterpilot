@@ -378,7 +378,7 @@
 						</td>
 						<td class="px-4 py-2">
 							<span
-								class="rounded px-2 py-0.5 text-xs {job.status === 'completed'
+								class="rounded-control px-2 py-0.5 text-xs {job.status === 'completed'
 									? 'bg-emerald-900/50 text-emerald-300'
 									: job.status === 'failed' || job.status === 'interrupted'
 										? 'bg-red-900/50 text-red-300'

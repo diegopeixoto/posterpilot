@@ -231,7 +231,7 @@
 			>
 				{#if dropIndex === index && dragFromIndex >= 0 && dropIndex !== dragFromIndex}
 					<span
-						class="pointer-events-none absolute right-0 left-0 h-0.5 rounded bg-accent-500 {dropIndex <
+						class="pointer-events-none absolute right-0 left-0 h-0.5 rounded-control bg-accent-500 {dropIndex <
 						dragFromIndex
 							? '-top-1.5'
 							: '-bottom-1.5'}"

@@ -555,7 +555,7 @@
 						<div class="grid grid-cols-3 gap-2">
 							<div>
 								<p class="mb-1 text-[10px] text-text-faint">{m.review_current()}</p>
-								<div class="overflow-hidden rounded border border-border bg-background">
+								<div class="overflow-hidden rounded-control border border-border bg-background">
 									{#if entry.item.hasCurrentPoster}
 										<img
 											src={`/api/artwork/${entry.item.id}/poster?v=${entry.item.currentPosterFingerprint ?? entry.item.artworkVersion}`}
@@ -571,7 +571,9 @@
 							</div>
 							<div>
 								<p class="mb-1 text-[10px] text-text-faint">{m.review_suggested()}</p>
-								<div class="overflow-hidden rounded border border-accent-900/60 bg-background">
+								<div
+									class="overflow-hidden rounded-control border border-accent-900/60 bg-background"
+								>
 									{#if entry.suggestion.poster}
 										<img
 											src={proxied(
@@ -594,7 +596,9 @@
 							</div>
 							<div>
 								<p class="mb-1 text-[10px] text-text-faint">{m.review_staged()}</p>
-								<div class="overflow-hidden rounded border border-border-strong bg-background">
+								<div
+									class="overflow-hidden rounded-control border border-border-strong bg-background"
+								>
 									{#if entry.item.selectedPosterPreviewUrl}
 										<img
 											src={proxied(entry.item.selectedPosterPreviewUrl)}
@@ -620,7 +624,7 @@
 								{#each [{ label: m.review_current(), url: entry.item.hasCurrentBackground ? `/api/artwork/${entry.item.id}/background?v=${entry.item.currentBackgroundFingerprint ?? entry.item.artworkVersion}` : null }, { label: m.review_suggested(), url: proxied(entry.suggestion.background ? (entry.suggestion.background.previewUrl ?? entry.suggestion.background.url) : null) }, { label: m.review_staged(), url: proxied(entry.item.selectedBackgroundPreviewUrl) }] as image (image.label)}
 									<div>
 										<p class="mb-1 text-[10px] text-text-faint">{image.label}</p>
-										<div class="overflow-hidden rounded border border-border bg-background">
+										<div class="overflow-hidden rounded-control border border-border bg-background">
 											{#if image.url}<img
 													src={image.url}
 													alt=""

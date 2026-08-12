@@ -416,7 +416,7 @@
 				<ul class="mt-4 grid gap-3 lg:grid-cols-2" aria-label={m.manual_match_results()}>
 					{#each results as candidate (`${candidate.mediaType}:${candidate.tmdbId}`)}
 						<li class="flex gap-3 rounded-surface border border-border bg-background/50 p-3">
-							<div class="w-16 flex-none overflow-hidden rounded bg-surface">
+							<div class="w-16 flex-none overflow-hidden rounded-control bg-surface">
 								{#if candidate.posterUrl}
 									<img
 										src={thumb(candidate.posterUrl)}

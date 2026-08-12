@@ -189,10 +189,10 @@
 				{#if eventsLoading && events.length === 0}
 					{#each Array(5) as _, index (index)}
 						<tr class="border-b border-border/60" aria-hidden="true">
-							<td class="px-4 py-3"><Skeleton class="h-4 w-14 rounded" /></td>
-							<td class="px-4 py-3"><Skeleton class="h-4 w-20 rounded" /></td>
-							<td class="px-4 py-3"><Skeleton class="h-4 w-full rounded" /></td>
-							<td class="px-4 py-3"><Skeleton class="h-4 w-28 rounded" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-14 rounded-control" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-20 rounded-control" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-full rounded-control" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-28 rounded-control" /></td>
 						</tr>
 					{/each}
 				{:else if events.length === 0}
@@ -214,10 +214,10 @@
 					{/each}
 					{#if eventsLoading}
 						<tr aria-hidden="true">
-							<td class="px-4 py-3"><Skeleton class="h-4 w-14 rounded" /></td>
-							<td class="px-4 py-3"><Skeleton class="h-4 w-20 rounded" /></td>
-							<td class="px-4 py-3"><Skeleton class="h-4 w-full rounded" /></td>
-							<td class="px-4 py-3"><Skeleton class="h-4 w-28 rounded" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-14 rounded-control" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-20 rounded-control" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-full rounded-control" /></td>
+							<td class="px-4 py-3"><Skeleton class="h-4 w-28 rounded-control" /></td>
 						</tr>
 					{/if}
 				{/if}
