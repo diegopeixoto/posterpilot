@@ -412,6 +412,18 @@ once. See [Automation and recovery](../automation-recovery/).
 
 ## Backup, restore, and diagnostics
 
+The Diagnostics tab can export a bounded, sanitized support bundle. In addition
+to recent jobs, provider outcomes, events, schema state, and configuration shape,
+the bundle records recent job attempts and database operational metadata:
+journal/checkpoint PRAGMAs, a bounded SQLite quick check, a passive WAL checkpoint
+result, classified filesystem information, and database/WAL/SHM sizes. It never
+contains the database itself or its absolute path.
+
+Generating the bundle is explicit and does not upload anything. The passive
+checkpoint may copy already committed WAL frames into the main database, but it
+does not wait for readers or truncate the WAL. Credentials and credential-bearing
+URLs are redacted; media titles remain opt-in and are capped at 500.
+
 **Settings → Backup & restore** creates application-managed bundles under the
 directory derived from `DATABASE_URL` (normally `/data/backups`). Retention by
 maximum count and/or age is stored in the database; it is not currently configured
