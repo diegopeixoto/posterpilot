@@ -94,8 +94,8 @@
 		</div>
 	{:else if total === 0 && !hasAnyFilter && !hasSort && ignoreView === 'all'}
 		<div class="surface mt-10 p-10 text-center">
-			<p class="font-medium text-neutral-200">{m.library_empty_title()}</p>
-			<p class="mx-auto mt-1 max-w-md text-sm text-neutral-400">{m.library_empty()}</p>
+			<p class="font-medium text-text-strong">{m.library_empty_title()}</p>
+			<p class="mx-auto mt-1 max-w-md text-sm text-text-muted">{m.library_empty()}</p>
 			<div class="mt-5 flex flex-wrap items-center justify-center gap-2">
 				<a href="/settings" class="btn btn-subtle px-3 py-1.5">{m.nav_settings()}</a>
 				<a href="/" class="btn btn-ghost px-3 py-1.5">{m.nav_dashboard()}</a>
@@ -103,7 +103,7 @@
 		</div>
 	{:else if total === 0 || items.length === 0}
 		<div class="surface mt-10 p-10 text-center">
-			<p class="text-sm text-neutral-400">{m.library_no_match()}</p>
+			<p class="text-sm text-text-muted">{m.library_no_match()}</p>
 			{#if ignoreView !== 'all'}
 				<button
 					type="button"
@@ -167,7 +167,7 @@
 							title={ignored ? m.poster_unignore() : m.poster_ignore()}
 							class="absolute right-2 bottom-2 flex h-8 w-8 items-center justify-center rounded border transition {ignored
 								? 'border-accent-400 bg-accent-600 text-white'
-								: 'border-neutral-600 bg-neutral-900/80 text-neutral-300 opacity-0 group-focus-within/wrap:opacity-100 group-hover/wrap:opacity-100 hover:border-neutral-400 focus-visible:opacity-100 pointer-coarse:opacity-100'}"
+								: 'border-border-hover bg-surface/80 text-text-secondary opacity-0 group-focus-within/wrap:opacity-100 group-hover/wrap:opacity-100 hover:border-neutral-400 focus-visible:opacity-100 pointer-coarse:opacity-100'}"
 						>
 							<svg
 								class="size-4"

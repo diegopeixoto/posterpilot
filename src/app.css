@@ -1,23 +1,321 @@
 @import 'tailwindcss';
 
-/* MediUX-style palette: a single violet accent on a near-black base. Defining the
-   accent as theme tokens generates `accent` color utilities (bg-accent-600, etc.)
-   so every page shares one accent instead of the old indigo/violet mix. */
-@theme {
-	--color-accent-100: #ede9fe;
-	--color-accent-200: #ddd6fe;
-	--color-accent-300: #c4b5fd;
-	--color-accent-400: #a78bfa;
-	--color-accent-500: #8b5cf6;
-	--color-accent-600: #7c3aed;
-	--color-accent-700: #6d28d9;
-	--color-accent-800: #5b21b6;
-	--color-accent-900: #4c1d95;
-	--color-accent-950: #2e1065;
+/* Theme-kit engine: every color/radius/font a theme can change is a `--pp-*`
+   custom property. `:root` holds the default PosterPilot (dark violet) values;
+   other built-in themes are `[data-theme]` blocks below; user overrides are
+   inline `--pp-*` writes on `<html>`. The `@theme inline` block exposes these
+   as semantic utilities (bg-surface, text-text-muted, border-border, …) so
+   components never hard-code a palette.
+
+   Accent ramps are derivable from a single `--pp-accent-base`: themes (or a
+   user's accent override) can set just the base and get a full ramp via
+   color-mix. Themes that need exact stops (PosterPilot keeps its original
+   violet ramp pixel-exact) set the individual `--pp-accent-*` explicitly. */
+:root {
+	--pp-background: #0a0a0a;
+	--pp-surface: #171717;
+	--pp-surface-raised: #262626;
+	--pp-scrim: #000000;
+
+	--pp-text: #fafafa;
+	--pp-text-bright: #f5f5f5;
+	--pp-text-strong: #e5e5e5;
+	--pp-text-secondary: #d4d4d4;
+	--pp-text-muted: #a3a3a3;
+	--pp-text-faint: #737373;
+
+	--pp-border: #262626;
+	--pp-border-strong: #404040;
+	--pp-border-hover: #737373;
+
+	--pp-accent-base: #7c3aed;
+	/* Exact original violet ramp (kept pixel-exact for the default theme). */
+	--pp-accent-100: #ede9fe;
+	--pp-accent-200: #ddd6fe;
+	--pp-accent-300: #c4b5fd;
+	--pp-accent-400: #a78bfa;
+	--pp-accent-500: #8b5cf6;
+	--pp-accent-600: #7c3aed;
+	--pp-accent-700: #6d28d9;
+	--pp-accent-800: #5b21b6;
+	--pp-accent-900: #4c1d95;
+	--pp-accent-950: #2e1065;
+	--pp-accent-foreground: #ffffff;
+
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
 }
 
-:root {
+/* ---------------------------------------------------------------------------
+   Built-in themes. Each block is the runtime source of truth for that theme's
+   tokens and must stay in sync with `src/lib/theming/presets.ts` (enforced by
+   `resolve.test.ts`). Accent stops fall back to the ramp derived from
+   `--pp-accent-base`; PosterPilot sets its original violet ramp explicitly.
+   ------------------------------------------------------------------------ */
+
+[data-theme='posterpilot'] {
+	--pp-background: #0a0a0a;
+	--pp-surface: #171717;
+	--pp-surface-raised: #262626;
+	--pp-scrim: #000000;
+	--pp-text: #fafafa;
+	--pp-text-bright: #f5f5f5;
+	--pp-text-strong: #e5e5e5;
+	--pp-text-secondary: #d4d4d4;
+	--pp-text-muted: #a3a3a3;
+	--pp-text-faint: #737373;
+	--pp-border: #262626;
+	--pp-border-strong: #404040;
+	--pp-border-hover: #737373;
+	--pp-accent-base: #7c3aed;
+	--pp-accent-100: #ede9fe;
+	--pp-accent-200: #ddd6fe;
+	--pp-accent-300: #c4b5fd;
+	--pp-accent-400: #a78bfa;
+	--pp-accent-500: #8b5cf6;
+	--pp-accent-600: #7c3aed;
+	--pp-accent-700: #6d28d9;
+	--pp-accent-800: #5b21b6;
+	--pp-accent-900: #4c1d95;
+	--pp-accent-950: #2e1065;
+	--pp-accent-foreground: #ffffff;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
 	color-scheme: dark;
+}
+
+[data-theme='darcula'] {
+	--pp-background: #2b2b2b;
+	--pp-surface: #3c3f41;
+	--pp-surface-raised: #4c4f51;
+	--pp-scrim: #1e1e1e;
+	--pp-text: #d3dbe3;
+	--pp-text-bright: #c6cfd8;
+	--pp-text-strong: #bcc6d0;
+	--pp-text-secondary: #b5c3d1;
+	--pp-text-muted: #8d9caa;
+	--pp-text-faint: #67737f;
+	--pp-border: #4c4f51;
+	--pp-border-strong: #5e6163;
+	--pp-border-hover: #7a7e80;
+	--pp-accent-base: #7a5c8d;
+	--pp-accent-foreground: #ffffff;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='monokai'] {
+	--pp-background: #272822;
+	--pp-surface: #3e3d32;
+	--pp-surface-raised: #49483e;
+	--pp-scrim: #1e1f1a;
+	--pp-text: #f8f8f2;
+	--pp-text-bright: #eeeedd;
+	--pp-text-strong: #e3e3d2;
+	--pp-text-secondary: #cfcfc0;
+	--pp-text-muted: #a5a58f;
+	--pp-text-faint: #75715e;
+	--pp-border: #49483e;
+	--pp-border-strong: #5a594b;
+	--pp-border-hover: #75715e;
+	--pp-accent-base: #a6e22e;
+	--pp-accent-foreground: #272822;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='catppuccin'] {
+	--pp-background: #1e1e2e;
+	--pp-surface: #313244;
+	--pp-surface-raised: #45475a;
+	--pp-scrim: #11111b;
+	--pp-text: #cdd6f4;
+	--pp-text-bright: #bac2de;
+	--pp-text-strong: #a6adc8;
+	--pp-text-secondary: #b3bcd8;
+	--pp-text-muted: #8a8fab;
+	--pp-text-faint: #6c7086;
+	--pp-border: #45475a;
+	--pp-border-strong: #585b70;
+	--pp-border-hover: #7f849c;
+	--pp-accent-base: #cba6f7;
+	--pp-accent-foreground: #1e1e2e;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='white'] {
+	--pp-background: #ffffff;
+	--pp-surface: #f5f5f5;
+	--pp-surface-raised: #e5e5e5;
+	--pp-scrim: #ffffff;
+	--pp-text: #171717;
+	--pp-text-bright: #262626;
+	--pp-text-strong: #404040;
+	--pp-text-secondary: #525252;
+	--pp-text-muted: #737373;
+	--pp-text-faint: #a3a3a3;
+	--pp-border: #e5e5e5;
+	--pp-border-strong: #d4d4d4;
+	--pp-border-hover: #a3a3a3;
+	--pp-accent-base: #7c3aed;
+	/* Light-theme inversion: stops used as accent *text* (200/300/400) must be
+	   dark enough to read on white, and stops used as tint *fills* (900/950)
+	   become light tints. */
+	--pp-accent-200: #6d28d9;
+	--pp-accent-300: #7c3aed;
+	--pp-accent-400: #8b5cf6;
+	--pp-accent-900: #ddd6fe;
+	--pp-accent-950: #ede9fe;
+	--pp-accent-foreground: #ffffff;
+	--pp-logo-filter: brightness(0.15);
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: light;
+}
+
+[data-theme='overseerr'] {
+	--pp-background: #111827;
+	--pp-surface: #1f2937;
+	--pp-surface-raised: #374151;
+	--pp-scrim: #030712;
+	--pp-text: #e5e7eb;
+	--pp-text-bright: #d1d5db;
+	--pp-text-strong: #c9cfd8;
+	--pp-text-secondary: #a9b1bf;
+	--pp-text-muted: #959dab;
+	--pp-text-faint: #6b7280;
+	--pp-border: #374151;
+	--pp-border-strong: #4b5563;
+	--pp-border-hover: #6b7280;
+	--pp-accent-base: #4f46e5;
+	--pp-accent-foreground: #ffffff;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+		'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='sonarr'] {
+	--pp-background: #222227;
+	--pp-surface: #2f2f35;
+	--pp-surface-raised: #3a3a41;
+	--pp-scrim: #161618;
+	--pp-text: #f0f0f2;
+	--pp-text-bright: #e2e2e6;
+	--pp-text-strong: #d0d0d6;
+	--pp-text-secondary: #b0b0ba;
+	--pp-text-muted: #8a8a95;
+	--pp-text-faint: #6a6a75;
+	--pp-border: #3a3a41;
+	--pp-border-strong: #4a4a52;
+	--pp-border-hover: #6a6a75;
+	--pp-accent-base: #35c5f4;
+	--pp-accent-foreground: #16161c;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+/* Terminal: the TUI identity — pure black, phosphor green, monospace, zero
+   radius. Surface tokens equal the background so translucency is invisible;
+   background/image/radius stay locked (see presets.ts). */
+[data-theme='terminal'] {
+	--pp-background: #000000;
+	--pp-surface: #000000;
+	--pp-surface-raised: #0d0d0d;
+	--pp-scrim: #000000;
+	--pp-text: #33ff33;
+	--pp-text-bright: #2be32b;
+	--pp-text-strong: #24c724;
+	--pp-text-secondary: #1fae1f;
+	--pp-text-muted: #1fae1f;
+	--pp-text-faint: #178a17;
+	--pp-border: #145214;
+	--pp-border-strong: #1a6b1a;
+	--pp-border-hover: #24c724;
+	--pp-accent-base: #33ff33;
+	--pp-accent-foreground: #000000;
+	--pp-radius: 0;
+	--pp-radius-sm: 0;
+	--pp-font-sans:
+		ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+	color-scheme: dark;
+}
+
+@theme inline {
+	--color-background: var(--pp-background);
+	--color-surface: var(--pp-surface);
+	--color-surface-raised: var(--pp-surface-raised);
+	--color-scrim: var(--pp-scrim);
+
+	--color-text: var(--pp-text);
+	--color-text-bright: var(--pp-text-bright);
+	--color-text-strong: var(--pp-text-strong);
+	--color-text-secondary: var(--pp-text-secondary);
+	--color-text-muted: var(--pp-text-muted);
+	--color-text-faint: var(--pp-text-faint);
+
+	--color-border: var(--pp-border);
+	--color-border-strong: var(--pp-border-strong);
+	--color-border-hover: var(--pp-border-hover);
+
+	/* Stops fall back to a ramp derived from --pp-accent-base when a theme (or a
+	   user override) doesn't set them explicitly. */
+	--color-accent-100: var(--pp-accent-100, color-mix(in oklab, var(--pp-accent-base), white 88%));
+	--color-accent-200: var(--pp-accent-200, color-mix(in oklab, var(--pp-accent-base), white 70%));
+	--color-accent-300: var(--pp-accent-300, color-mix(in oklab, var(--pp-accent-base), white 45%));
+	--color-accent-400: var(--pp-accent-400, color-mix(in oklab, var(--pp-accent-base), white 25%));
+	--color-accent-500: var(--pp-accent-500, color-mix(in oklab, var(--pp-accent-base), white 10%));
+	--color-accent-600: var(--pp-accent-600, var(--pp-accent-base));
+	--color-accent-700: var(--pp-accent-700, color-mix(in oklab, var(--pp-accent-base), black 12%));
+	--color-accent-800: var(--pp-accent-800, color-mix(in oklab, var(--pp-accent-base), black 25%));
+	--color-accent-900: var(--pp-accent-900, color-mix(in oklab, var(--pp-accent-base), black 40%));
+	--color-accent-950: var(--pp-accent-950, color-mix(in oklab, var(--pp-accent-base), black 65%));
+	/* Text color on top of accent fills (btn-accent, MediUX badge). Themes with
+	   a light accent (Monokai, Catppuccin, Terminal) set a dark foreground. */
+	--color-accent-foreground: var(--pp-accent-foreground);
+
+	--radius-surface: var(--pp-radius);
+	--radius-control: var(--pp-radius-sm);
+
+	--font-sans: var(--pp-font-sans);
 }
 
 html,
@@ -26,9 +324,36 @@ body {
 }
 
 body {
-	background-color: #0a0a0a;
-	color: #fafafa;
+	background-color: var(--pp-background);
+	/* Custom background image layer: defaults are no-ops (image `none`, dim 0%),
+	   so only a user-set `--pp-background-image` ever paints. The dim overlay is
+	   the theme background at `--pp-background-image-dim` opacity, keeping text
+	   legible over any image. */
+	background-image:
+		linear-gradient(
+			color-mix(
+				in oklab,
+				var(--pp-background) calc(var(--pp-background-image-dim, 0) * 100%),
+				transparent
+			),
+			color-mix(
+				in oklab,
+				var(--pp-background) calc(var(--pp-background-image-dim, 0) * 100%),
+				transparent
+			)
+		),
+		var(--pp-background-image, none);
+	background-size: cover;
+	background-position: center;
+	background-attachment: fixed;
+	color: var(--pp-text);
 	-webkit-font-smoothing: antialiased;
+}
+
+/* Themes may restyle the header logo (the shipped asset is light-on-dark);
+   the White theme sets `--pp-logo-filter` for a dark silhouette. */
+.app-logo {
+	filter: var(--pp-logo-filter, none);
 }
 
 /* A single, consistent keyboard-focus indicator for every interactive element.
@@ -54,21 +379,23 @@ body {
 	}
 }
 
-/* Shared building blocks used across pages. */
+/* Shared building blocks used across pages. Colors come from the semantic
+   `--pp-*` tokens so every theme restyles them; semantic colors (emerald /
+   amber / red) carry meaning and stay fixed. */
 @layer components {
 	.surface {
-		@apply rounded-xl border border-neutral-800 bg-neutral-900/60;
+		@apply rounded-surface border border-border bg-surface/60;
 	}
 
 	.section-title {
-		@apply mb-3 text-sm font-semibold tracking-wide text-neutral-400 uppercase;
+		@apply mb-3 text-sm font-semibold tracking-wide text-text-muted uppercase;
 	}
 
 	.chip {
-		@apply inline-flex items-center rounded-full border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 transition-colors;
+		@apply inline-flex items-center rounded-full border border-border-strong px-2.5 py-1 text-xs text-text-secondary transition-colors;
 	}
 	.chip:hover {
-		@apply border-neutral-500;
+		@apply border-border-hover;
 	}
 	.chip-active {
 		@apply border-accent-600 bg-accent-950/60 text-accent-200;
@@ -78,7 +405,7 @@ body {
 		@apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold;
 	}
 	.badge-mediux {
-		@apply bg-accent-600/90 text-white;
+		@apply bg-accent-600/90 text-accent-foreground;
 	}
 	.badge-changed {
 		@apply bg-emerald-600/90 text-white;
@@ -87,10 +414,10 @@ body {
 		@apply bg-emerald-600/90 text-white;
 	}
 	.badge-muted {
-		@apply border border-neutral-700 bg-black/50 text-neutral-300;
+		@apply border border-border-strong bg-scrim/50 text-text-secondary;
 	}
 	.badge-info {
-		@apply bg-neutral-800 text-neutral-300;
+		@apply bg-surface-raised text-text-secondary;
 	}
 	.badge-warn {
 		@apply bg-amber-900/50 text-amber-300;
@@ -100,45 +427,45 @@ body {
 	}
 
 	.btn {
-		@apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
+		@apply inline-flex items-center justify-center rounded-control px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
 	}
 	.btn-accent {
-		@apply bg-accent-600 text-white hover:bg-accent-500;
+		@apply bg-accent-600 text-accent-foreground hover:bg-accent-500;
 	}
 	.btn-ghost {
-		@apply border border-neutral-700 text-neutral-200 hover:bg-neutral-800;
+		@apply border border-border-strong text-text-strong hover:bg-surface-raised;
 	}
 	.btn-subtle {
-		@apply bg-neutral-800 text-neutral-100 hover:bg-neutral-700;
+		@apply bg-surface-raised text-text hover:bg-border-strong;
 	}
 
 	.input {
-		@apply rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm transition-colors focus:border-accent-500;
+		@apply rounded-control border border-border-strong bg-surface px-3 py-1.5 text-sm transition-colors focus:border-accent-500;
 	}
 
 	/* Rendered GitHub release notes in the What's New modal. */
 	.release-notes :where(h2) {
-		@apply mt-5 mb-2 text-base font-semibold text-neutral-100 first:mt-0;
+		@apply mt-5 mb-2 text-base font-semibold text-text-bright first:mt-0;
 	}
 	.release-notes :where(h3, h4) {
-		@apply mt-4 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase first:mt-0;
+		@apply mt-4 mb-2 text-xs font-semibold tracking-wide text-text-muted uppercase first:mt-0;
 	}
 	.release-notes :where(p) {
-		@apply my-2 text-neutral-300;
+		@apply my-2 text-text-secondary;
 	}
 	.release-notes :where(ul) {
 		@apply my-2 list-disc space-y-1 pl-5;
 	}
 	.release-notes :where(li) {
-		@apply text-neutral-300 marker:text-neutral-500;
+		@apply text-text-secondary marker:text-text-faint;
 	}
 	.release-notes :where(a) {
 		@apply text-accent-300 underline underline-offset-2 hover:text-accent-200;
 	}
 	.release-notes :where(strong) {
-		@apply font-semibold text-neutral-100;
+		@apply font-semibold text-text-bright;
 	}
 	.release-notes :where(code) {
-		@apply rounded bg-neutral-800 px-1 py-0.5 text-[0.85em] text-neutral-200;
+		@apply rounded-control bg-surface-raised px-1 py-0.5 text-[0.85em] text-text-strong;
 	}
 }

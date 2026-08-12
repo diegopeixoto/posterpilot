@@ -12,7 +12,7 @@
 	const styles: Record<string, string> = {
 		success: 'border-emerald-800 bg-emerald-950/80 text-emerald-100',
 		error: 'border-red-800 bg-red-950/85 text-red-100',
-		info: 'border-neutral-700 bg-neutral-900/90 text-neutral-100'
+		info: 'border-border-strong bg-surface/90 text-text-bright'
 	};
 	const icons: Record<string, string> = { success: '✓', error: '⚠', info: 'ℹ' };
 </script>

@@ -425,7 +425,7 @@
 			<h2 id="server-manager-title" class="text-base font-semibold">
 				{m.server_manager_title()}
 			</h2>
-			<p class="mt-1 max-w-2xl text-xs text-neutral-400">{m.server_manager_hint()}</p>
+			<p class="mt-1 max-w-2xl text-xs text-text-muted">{m.server_manager_hint()}</p>
 		</div>
 		<button
 			type="button"
@@ -460,7 +460,7 @@
 			}}
 		>
 			<h3 class="sm:col-span-2 text-sm font-semibold">{m.server_manager_add_title()}</h3>
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.server_manager_name()}
 				<input
 					bind:this={addNameInput}
@@ -470,7 +470,7 @@
 					class="input mt-1 w-full"
 				/>
 			</label>
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.server_manager_type()}
 				<select bind:value={addType} aria-label={m.server_manager_type()} class="input mt-1 w-full">
 					<option value="plex">Plex</option>
@@ -478,7 +478,7 @@
 					<option value="emby">Emby</option>
 				</select>
 			</label>
-			<label class="text-sm text-neutral-300 sm:col-span-2">
+			<label class="text-sm text-text-secondary sm:col-span-2">
 				{m.server_manager_url()}
 				<input
 					bind:value={addBaseUrl}
@@ -490,10 +490,10 @@
 					class="input mt-1 w-full"
 				/>
 			</label>
-			<label class="text-sm text-neutral-300 sm:col-span-2">
+			<label class="text-sm text-text-secondary sm:col-span-2">
 				{m.server_manager_credential()}
 				<input bind:value={addCredential} required type="password" class="input mt-1 w-full" />
-				<span class="mt-1 block text-xs text-neutral-500">
+				<span class="mt-1 block text-xs text-text-faint">
 					{m.server_manager_credential_new_hint({ server: typeLabel(addType) })}
 				</span>
 			</label>
@@ -520,15 +520,15 @@
 	{/if}
 
 	{#if servers.length === 0 && !addOpen}
-		<p class="mt-4 text-sm text-neutral-400">{m.server_manager_empty()}</p>
+		<p class="mt-4 text-sm text-text-muted">{m.server_manager_empty()}</p>
 	{:else if servers.length > 0}
 		<ul class="mt-4 space-y-3">
 			{#each servers as server (server.id)}
-				<li class="rounded-xl border border-neutral-800 bg-neutral-950/45 p-4">
+				<li class="rounded-xl border border-border bg-background/45 p-4">
 					<div class="flex flex-wrap items-start justify-between gap-3">
 						<div class="min-w-0">
 							<div class="flex flex-wrap items-center gap-2">
-								<h3 class="font-medium text-neutral-100">{server.name}</h3>
+								<h3 class="font-medium text-text-bright">{server.name}</h3>
 								<span class="badge badge-info">{typeLabel(server.type)}</span>
 								{#if server.id === activeServerId}
 									<span class="badge badge-success">{m.server_manager_active()}</span>
@@ -544,8 +544,8 @@
 									</span>
 								{/if}
 							</div>
-							<p class="mt-1 truncate text-xs text-neutral-400">{server.baseUrl ?? '—'}</p>
-							<p class="mt-1 text-xs text-neutral-500">
+							<p class="mt-1 truncate text-xs text-text-muted">{server.baseUrl ?? '—'}</p>
+							<p class="mt-1 text-xs text-text-faint">
 								{m.server_manager_last_tested({ date: formatDate(server.lastTestedAt) })}
 								· {server.credentialSet
 									? m.server_manager_credential_set()
@@ -645,14 +645,14 @@
 					{#if editingId === server.id}
 						<form
 							id={`server-edit-form-${server.id}`}
-							class="mt-4 grid gap-3 border-t border-neutral-800 pt-4 sm:grid-cols-2"
+							class="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2"
 							onsubmit={(event) => {
 								event.preventDefault();
 								void saveEdit(server.id);
 							}}
 						>
 							<h4 class="text-sm font-semibold sm:col-span-2">{m.server_manager_edit_title()}</h4>
-							<label class="text-sm text-neutral-300">
+							<label class="text-sm text-text-secondary">
 								{m.server_manager_name()}
 								<input
 									bind:this={editNameInput}
@@ -662,7 +662,7 @@
 									class="input mt-1 w-full"
 								/>
 							</label>
-							<label class="text-sm text-neutral-300">
+							<label class="text-sm text-text-secondary">
 								{m.server_manager_type()}
 								<select
 									bind:value={editType}
@@ -674,14 +674,14 @@
 									<option value="emby">Emby</option>
 								</select>
 							</label>
-							<label class="text-sm text-neutral-300 sm:col-span-2">
+							<label class="text-sm text-text-secondary sm:col-span-2">
 								{m.server_manager_url()}
 								<input bind:value={editBaseUrl} required type="url" class="input mt-1 w-full" />
 							</label>
-							<label class="text-sm text-neutral-300 sm:col-span-2">
+							<label class="text-sm text-text-secondary sm:col-span-2">
 								{m.server_manager_credential()}
 								<input bind:value={editCredential} type="password" class="input mt-1 w-full" />
-								<span class="mt-1 block text-xs text-neutral-500">
+								<span class="mt-1 block text-xs text-text-faint">
 									{m.server_manager_credential_edit_hint()}
 								</span>
 							</label>

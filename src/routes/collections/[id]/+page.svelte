@@ -342,10 +342,10 @@
 			/>
 		{/if}
 		<div
-			class="absolute inset-0 bg-gradient-to-r from-neutral-950 via-neutral-950/85 to-neutral-950/30"
+			class="absolute inset-0 bg-gradient-to-r from-background via-background/85 to-background/30"
 		></div>
 		<div
-			class="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-transparent"
+			class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"
 		></div>
 		<div class="relative max-w-3xl">
 			<div class="mb-3 flex flex-wrap gap-2">
@@ -361,13 +361,13 @@
 				</span>
 			</div>
 			<h1 class="text-3xl font-bold tracking-tight sm:text-5xl">{data.collection.name}</h1>
-			<p class="mt-3 text-sm text-neutral-300">
+			<p class="mt-3 text-sm text-text-secondary">
 				{m.collections_members_summary({
 					local: data.collection.localMembers.length,
 					unavailable: data.collection.unavailableMembers.length
 				})}
 			</p>
-			<p class="mt-5 max-w-2xl text-sm leading-6 text-neutral-300">
+			<p class="mt-5 max-w-2xl text-sm leading-6 text-text-secondary">
 				{m.collection_review_only_hint()}
 			</p>
 		</div>
@@ -401,7 +401,7 @@
 			<h2 id="suggestions-title" class="text-xl font-semibold">
 				{m.collection_suggestion_title()}
 			</h2>
-			<p class="mt-2 text-sm leading-6 text-neutral-400">
+			<p class="mt-2 text-sm leading-6 text-text-muted">
 				{m.collection_suggestion_hint()}
 			</p>
 		</div>
@@ -410,7 +410,7 @@
 			<div class="grid gap-4 lg:grid-cols-2">
 				{#each data.suggestions.families as suggestion, index (suggestion.id)}
 					<article class="surface overflow-hidden">
-						<div class="border-b border-neutral-800 p-5">
+						<div class="border-b border-border p-5">
 							<div class="flex flex-wrap items-start justify-between gap-3">
 								<div class="min-w-0">
 									<div class="flex flex-wrap items-center gap-2">
@@ -426,7 +426,7 @@
 										{suggestionEvidenceLabel(suggestion)}
 									</h3>
 									{#if suggestion.language}
-										<p class="mt-1 text-xs text-neutral-400">
+										<p class="mt-1 text-xs text-text-muted">
 											{m.collection_suggestion_language({ language: suggestion.language })}
 										</p>
 									{/if}
@@ -443,7 +443,7 @@
 									family: suggestionEvidenceLabel(suggestion)
 								})}
 							></progress>
-							<p class="mt-2 text-sm text-neutral-300">
+							<p class="mt-2 text-sm text-text-secondary">
 								{m.collection_suggestion_member_coverage({
 									covered: suggestion.coveredMemberIds.length,
 									total: data.collection.localMembers.length,
@@ -451,8 +451,8 @@
 								})}
 							</p>
 							<dl class="mt-4 grid grid-cols-2 gap-2 text-sm">
-								<div class="rounded-md border border-neutral-800 bg-neutral-950/60 p-3">
-									<dt class="text-xs text-neutral-400">{m.collection_poster()}</dt>
+								<div class="rounded-md border border-border bg-background/60 p-3">
+									<dt class="text-xs text-text-muted">{m.collection_poster()}</dt>
 									<dd class="mt-1 font-semibold">
 										{m.collections_artwork_coverage({
 											covered: suggestion.posterCoveredMemberIds.length,
@@ -460,8 +460,8 @@
 										})}
 									</dd>
 								</div>
-								<div class="rounded-md border border-neutral-800 bg-neutral-950/60 p-3">
-									<dt class="text-xs text-neutral-400">{m.collection_background()}</dt>
+								<div class="rounded-md border border-border bg-background/60 p-3">
+									<dt class="text-xs text-text-muted">{m.collection_background()}</dt>
 									<dd class="mt-1 font-semibold">
 										{m.collections_artwork_coverage({
 											covered: suggestion.backgroundCoveredMemberIds.length,
@@ -480,7 +480,7 @@
 									<img
 										src={candidateImageUrl(selection.candidateId)}
 										alt=""
-										class="aspect-[2/3] w-full rounded border border-neutral-800 object-cover"
+										class="aspect-[2/3] w-full rounded border border-border object-cover"
 										loading="lazy"
 									/>
 								{/each}
@@ -511,7 +511,7 @@
 									? m.collection_suggestion_staging()
 									: m.collection_suggestion_stage()}
 							</button>
-							<p class="mt-2 text-center text-xs text-neutral-400">
+							<p class="mt-2 text-center text-xs text-text-muted">
 								{m.collection_suggestion_stage_hint()}
 							</p>
 						</div>
@@ -521,14 +521,14 @@
 		{:else if data.suggestions.hasCandidates}
 			<div class="surface border-amber-900/60 p-6">
 				<h3 class="font-semibold text-amber-200">{m.collection_suggestion_no_common()}</h3>
-				<p class="mt-2 max-w-3xl text-sm leading-6 text-neutral-300">
+				<p class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
 					{m.collection_suggestion_no_common_hint()}
 				</p>
 			</div>
 		{:else}
 			<div class="surface p-6">
 				<h3 class="font-semibold">{m.collection_suggestion_no_candidates()}</h3>
-				<p class="mt-2 text-sm text-neutral-400">
+				<p class="mt-2 text-sm text-text-muted">
 					{m.collection_suggestion_no_candidates_hint()}
 				</p>
 			</div>
@@ -540,7 +540,7 @@
 			<h2 id="consistency-title" class="text-xl font-semibold">
 				{m.collection_consistency_title()}
 			</h2>
-			<p class="mt-2 text-sm leading-6 text-neutral-400">
+			<p class="mt-2 text-sm leading-6 text-text-muted">
 				{m.collection_consistency_hint()}
 			</p>
 		</div>
@@ -563,7 +563,7 @@
 						value={slot.coverage.percentage}
 						aria-label={m.collection_consistency_progress({ slot: slot.label })}
 					></progress>
-					<p class="mt-3 text-sm leading-6 text-neutral-300">
+					<p class="mt-3 text-sm leading-6 text-text-secondary">
 						{m.collection_consistency_coverage({
 							covered: slot.coverage.coveredMembers,
 							total: slot.coverage.localMembers,
@@ -571,31 +571,31 @@
 						})}
 					</p>
 					{#if slot.coverage.dominantFamily}
-						<p class="mt-2 text-xs text-neutral-400">
+						<p class="mt-2 text-xs text-text-muted">
 							{m.collection_consistency_dominant({
 								family: familyLabel(slot.coverage.dominantFamily)
 							})}
 						</p>
 					{/if}
 					<dl class="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-						<div class="rounded-md border border-neutral-800 bg-neutral-950/60 p-2">
-							<dt class="text-neutral-400">{m.collection_consistency_known()}</dt>
-							<dd class="mt-1 font-semibold text-neutral-200">{slot.coverage.knownEvidence}</dd>
+						<div class="rounded-md border border-border bg-background/60 p-2">
+							<dt class="text-text-muted">{m.collection_consistency_known()}</dt>
+							<dd class="mt-1 font-semibold text-text-strong">{slot.coverage.knownEvidence}</dd>
 						</div>
-						<div class="rounded-md border border-neutral-800 bg-neutral-950/60 p-2">
-							<dt class="text-neutral-400">{m.collection_consistency_unknown_short()}</dt>
-							<dd class="mt-1 font-semibold text-neutral-200">{slot.coverage.unknownProvenance}</dd>
+						<div class="rounded-md border border-border bg-background/60 p-2">
+							<dt class="text-text-muted">{m.collection_consistency_unknown_short()}</dt>
+							<dd class="mt-1 font-semibold text-text-strong">{slot.coverage.unknownProvenance}</dd>
 						</div>
-						<div class="rounded-md border border-neutral-800 bg-neutral-950/60 p-2">
-							<dt class="text-neutral-400">{m.collection_consistency_missing_short()}</dt>
-							<dd class="mt-1 font-semibold text-neutral-200">{slot.coverage.missingArtwork}</dd>
+						<div class="rounded-md border border-border bg-background/60 p-2">
+							<dt class="text-text-muted">{m.collection_consistency_missing_short()}</dt>
+							<dd class="mt-1 font-semibold text-text-strong">{slot.coverage.missingArtwork}</dd>
 						</div>
 					</dl>
 				</article>
 			{/each}
 		</div>
 		{#if data.collection.unavailableMembers.length > 0}
-			<p class="mt-3 text-xs text-neutral-400">
+			<p class="mt-3 text-xs text-text-muted">
 				{m.collection_consistency_excluded({ count: data.collection.unavailableMembers.length })}
 			</p>
 		{/if}
@@ -606,23 +606,23 @@
 			<h2 id="local-members-title" class="text-xl font-semibold">
 				{m.collection_local_members()}
 			</h2>
-			<p class="mt-2 text-sm text-neutral-400">{m.collection_local_members_hint()}</p>
+			<p class="mt-2 text-sm text-text-muted">{m.collection_local_members_hint()}</p>
 		</div>
 
 		{#if data.collection.localMembers.length === 0}
-			<div class="surface p-8 text-center text-sm text-neutral-400">
+			<div class="surface p-8 text-center text-sm text-text-muted">
 				{m.collection_no_local_members()}
 			</div>
 		{:else}
 			<div class="grid gap-5 xl:grid-cols-2">
 				{#each data.collection.localMembers as member (member.id)}
 					<article class="surface overflow-hidden">
-						<header class="flex items-start justify-between gap-4 border-b border-neutral-800 p-4">
+						<header class="flex items-start justify-between gap-4 border-b border-border p-4">
 							<div class="min-w-0">
 								<h3 class="truncate font-semibold">
 									<a class="hover:text-accent-200" href={`/item/${member.id}`}>{member.title}</a>
 								</h3>
-								<p class="mt-1 text-xs text-neutral-400">
+								<p class="mt-1 text-xs text-text-muted">
 									{member.year ?? '—'} · {member.type === 'movie'
 										? m.manual_match_type_movie()
 										: m.manual_match_type_show()}
@@ -638,7 +638,7 @@
 									aria-label={m.collection_member_slot({ title: member.title, slot: slot.label })}
 								>
 									<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-										<h4 class="text-xs font-semibold tracking-wide text-neutral-300 uppercase">
+										<h4 class="text-xs font-semibold tracking-wide text-text-secondary uppercase">
 											{slot.label}
 										</h4>
 										<span class={`badge ${consistencyClass(slot.artwork.consistency)}`}>
@@ -650,11 +650,11 @@
 									<div class="grid grid-cols-2 gap-3">
 										{#each [{ state: 'current' as const, label: m.collection_current(), available: slot.artwork.current.available, provenance: slot.artwork.current.provenance }, { state: 'staged' as const, label: m.collection_staged(), available: slot.artwork.staged.available, provenance: slot.artwork.staged.provenance }] as image (image.state)}
 											<figure class="min-w-0">
-												<figcaption class="mb-1.5 text-xs font-medium text-neutral-300">
+												<figcaption class="mb-1.5 text-xs font-medium text-text-secondary">
 													{image.label}
 												</figcaption>
 												<div
-													class={`${slot.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'} overflow-hidden rounded-md border border-neutral-800 bg-neutral-950`}
+													class={`${slot.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'} overflow-hidden rounded-md border border-border bg-background`}
 												>
 													{#if image.available}
 														<img
@@ -668,14 +668,14 @@
 														/>
 													{:else}
 														<div
-															class="flex h-full items-center justify-center px-3 text-center text-xs text-neutral-400"
+															class="flex h-full items-center justify-center px-3 text-center text-xs text-text-muted"
 														>
 															{m.collection_no_artwork()}
 														</div>
 													{/if}
 												</div>
 												<p
-													class="mt-2 truncate text-[11px] text-neutral-400"
+													class="mt-2 truncate text-[11px] text-text-muted"
 													title={familyLabel(image.provenance)}
 												>
 													{image.available
@@ -686,10 +686,8 @@
 										{/each}
 									</div>
 									{#if options.length > 0 || slot.artwork.staged.available}
-										<details
-											class="mt-3 rounded-md border border-neutral-800 bg-neutral-950/40 p-3"
-										>
-											<summary class="cursor-pointer text-xs font-medium text-neutral-200">
+										<details class="mt-3 rounded-md border border-border bg-background/40 p-3">
+											<summary class="cursor-pointer text-xs font-medium text-text-strong">
 												{m.collection_override_options({ count: options.length })}
 											</summary>
 											{#if options.length > 0}
@@ -699,7 +697,7 @@
 													{#each options as candidate (candidate.candidateId)}
 														<button
 															type="button"
-															class={`group overflow-hidden rounded-md border bg-neutral-950 text-left transition-colors ${slot.artwork.staged.candidateId === candidate.candidateId ? 'border-accent-400' : 'border-neutral-800 hover:border-neutral-600'}`}
+															class={`group overflow-hidden rounded-md border bg-background text-left transition-colors ${slot.artwork.staged.candidateId === candidate.candidateId ? 'border-accent-400' : 'border-border hover:border-border-hover'}`}
 															aria-pressed={slot.artwork.staged.candidateId ===
 																candidate.candidateId}
 															aria-label={m.collection_override_stage_candidate({
@@ -717,11 +715,11 @@
 																loading="lazy"
 															/>
 															<span
-																class="block truncate px-2 pt-2 text-[10px] font-medium text-neutral-200"
+																class="block truncate px-2 pt-2 text-[10px] font-medium text-text-strong"
 															>
 																{providerName(candidate.provider)}
 															</span>
-															<span class="block truncate px-2 pb-2 text-[10px] text-neutral-400">
+															<span class="block truncate px-2 pb-2 text-[10px] text-text-muted">
 																{candidate.setAuthor ?? candidate.designFamily ?? candidate.setId}
 															</span>
 															{#if candidate.stale}
@@ -733,7 +731,7 @@
 													{/each}
 												</div>
 											{:else}
-												<p class="mt-3 text-xs text-neutral-400">
+												<p class="mt-3 text-xs text-text-muted">
 													{m.collection_override_no_candidates()}
 												</p>
 											{/if}
@@ -791,7 +789,7 @@
 			<h2 id="unavailable-members-title" class="text-xl font-semibold">
 				{m.collection_unavailable_members()}
 			</h2>
-			<p class="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+			<p class="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
 				{m.collection_unavailable_hint()}
 			</p>
 			<ul class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -801,11 +799,11 @@
 							<p class="truncate text-sm font-medium">
 								{member.title ?? m.collection_unknown_member()}
 							</p>
-							<p class="mt-1 text-xs text-neutral-400">{member.year ?? '—'}</p>
+							<p class="mt-1 text-xs text-text-muted">{member.year ?? '—'}</p>
 						</div>
 						<div class="flex flex-col items-end gap-2">
 							<span class="badge badge-warn">! {m.collection_member_unavailable()}</span>
-							<span class="text-[10px] text-neutral-400">
+							<span class="text-[10px] text-text-muted">
 								{member.source === 'tmdb'
 									? m.collections_source_tmdb()
 									: m.collections_source_native({

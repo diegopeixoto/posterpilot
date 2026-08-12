@@ -98,7 +98,7 @@
 			aria-label={m.server_purge_cancel()}
 			disabled={busy}
 			onclick={onCancel}
-			class="absolute inset-0 cursor-default bg-black/75 backdrop-blur-sm"
+			class="absolute inset-0 cursor-default bg-scrim/75 backdrop-blur-sm"
 		></button>
 
 		<div
@@ -110,14 +110,14 @@
 			aria-describedby="server-purge-description"
 			tabindex="-1"
 		>
-			<header class="border-b border-neutral-800 px-5 py-4">
+			<header class="border-b border-border px-5 py-4">
 				<p class="text-[11px] font-medium tracking-[0.14em] text-red-300 uppercase">
 					{m.server_purge_permanent_label()}
 				</p>
 				<h2 id="server-purge-title" class="mt-1 text-lg font-semibold tracking-tight">
 					{m.server_purge_title({ name: serverName })}
 				</h2>
-				<p id="server-purge-description" class="mt-1 text-sm text-neutral-400">
+				<p id="server-purge-description" class="mt-1 text-sm text-text-muted">
 					{m.server_purge_description()}
 				</p>
 			</header>
@@ -129,34 +129,34 @@
 				</div>
 
 				<div>
-					<h3 class="text-xs font-medium text-neutral-200">{m.server_purge_impact_title()}</h3>
+					<h3 class="text-xs font-medium text-text-strong">{m.server_purge_impact_title()}</h3>
 					<dl class="mt-2 grid grid-cols-2 gap-x-5 gap-y-2 text-sm">
-						<div class="flex items-center justify-between gap-2 border-b border-neutral-800 pb-1.5">
-							<dt class="text-neutral-400">{m.server_purge_items()}</dt>
+						<div class="flex items-center justify-between gap-2 border-b border-border pb-1.5">
+							<dt class="text-text-muted">{m.server_purge_items()}</dt>
 							<dd class="font-medium tabular-nums">{impact.items}</dd>
 						</div>
-						<div class="flex items-center justify-between gap-2 border-b border-neutral-800 pb-1.5">
-							<dt class="text-neutral-400">{m.server_purge_candidates()}</dt>
+						<div class="flex items-center justify-between gap-2 border-b border-border pb-1.5">
+							<dt class="text-text-muted">{m.server_purge_candidates()}</dt>
 							<dd class="font-medium tabular-nums">{impact.candidates}</dd>
 						</div>
-						<div class="flex items-center justify-between gap-2 border-b border-neutral-800 pb-1.5">
-							<dt class="text-neutral-400">{m.server_purge_history()}</dt>
+						<div class="flex items-center justify-between gap-2 border-b border-border pb-1.5">
+							<dt class="text-text-muted">{m.server_purge_history()}</dt>
 							<dd class="font-medium tabular-nums">{impact.revisions}</dd>
 						</div>
-						<div class="flex items-center justify-between gap-2 border-b border-neutral-800 pb-1.5">
-							<dt class="text-neutral-400">{m.server_purge_snapshots()}</dt>
+						<div class="flex items-center justify-between gap-2 border-b border-border pb-1.5">
+							<dt class="text-text-muted">{m.server_purge_snapshots()}</dt>
 							<dd class="font-medium tabular-nums">{impact.snapshots}</dd>
 						</div>
-						<div class="flex items-center justify-between gap-2 border-b border-neutral-800 pb-1.5">
-							<dt class="text-neutral-400">{m.server_purge_jobs()}</dt>
+						<div class="flex items-center justify-between gap-2 border-b border-border pb-1.5">
+							<dt class="text-text-muted">{m.server_purge_jobs()}</dt>
 							<dd class="font-medium tabular-nums">{impact.jobs}</dd>
 						</div>
-						<div class="flex items-center justify-between gap-2 border-b border-neutral-800 pb-1.5">
-							<dt class="text-neutral-400">{m.server_purge_automations()}</dt>
+						<div class="flex items-center justify-between gap-2 border-b border-border pb-1.5">
+							<dt class="text-text-muted">{m.server_purge_automations()}</dt>
 							<dd class="font-medium tabular-nums">{impact.schedules}</dd>
 						</div>
 					</dl>
-					<p class="mt-3 text-xs text-neutral-400">
+					<p class="mt-3 text-xs text-text-muted">
 						{m.server_purge_total({ count: impact.totalRecords })}
 					</p>
 				</div>
@@ -170,7 +170,7 @@
 					</p>
 				{/if}
 
-				<p class="text-xs text-neutral-400">
+				<p class="text-xs text-text-muted">
 					{m.server_purge_backup_hint()}
 					<a
 						class="ml-1 text-accent-300 underline hover:text-accent-200"
@@ -181,7 +181,7 @@
 				</p>
 			</div>
 
-			<footer class="flex flex-wrap justify-end gap-2 border-t border-neutral-800 px-5 py-4">
+			<footer class="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
 				<button
 					bind:this={cancelButton}
 					type="button"

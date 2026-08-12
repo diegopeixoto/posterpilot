@@ -541,7 +541,7 @@
 <svelte:head><title>{m.kometa_manager_title()} · PosterPilot</title></svelte:head>
 
 <!-- Spotlight hero -->
-<div class="relative overflow-hidden rounded-xl border border-neutral-800">
+<div class="relative overflow-hidden rounded-xl border border-border">
 	{#if data.montage?.length}
 		<!-- Decorative collage of random library posters behind the title. -->
 		<div class="absolute inset-0 flex" aria-hidden="true">
@@ -561,19 +561,19 @@
 			class="absolute inset-0 h-full w-full object-cover"
 		/>
 	{:else}
-		<div class="absolute inset-0 bg-gradient-to-br from-accent-900/40 to-neutral-950"></div>
+		<div class="absolute inset-0 bg-gradient-to-br from-accent-900/40 to-background"></div>
 	{/if}
 	<!-- Darken + left-weight so the title stays AA-legible over any artwork. -->
-	<div class="absolute inset-0 bg-neutral-950/70"></div>
+	<div class="absolute inset-0 bg-background/70"></div>
 	<div
-		class="absolute inset-0 bg-gradient-to-r from-neutral-950/95 via-neutral-950/70 to-transparent"
+		class="absolute inset-0 bg-gradient-to-r from-background/95 via-background/70 to-transparent"
 	></div>
 	<div class="relative flex min-h-44 flex-col justify-end gap-1 p-6">
 		<p class="text-xs tracking-wide text-accent-300 uppercase">{m.kometa_manager_eyebrow()}</p>
 		<h1 class="text-2xl font-semibold tracking-tight text-white">{m.kometa_manager_title()}</h1>
-		<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-300">
+		<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
 			{#if km.active}
-				<span class="font-mono text-neutral-200">{km.resolvedConfigPath}</span>
+				<span class="font-mono text-text-strong">{km.resolvedConfigPath}</span>
 				<span
 					class="badge {km.parseError ? 'badge-error' : km.exists ? 'badge-info' : 'badge-warn'}"
 				>
@@ -619,13 +619,13 @@
 			placeholder="config"
 			class="input w-full font-mono text-xs disabled:opacity-50"
 		/>
-		<p id="metadataPathPrefixHint" class="mt-1 max-w-xl text-[11px] text-neutral-400">
+		<p id="metadataPathPrefixHint" class="mt-1 max-w-xl text-[11px] text-text-muted">
 			{m.kometa_metadata_path_hint()}
 		</p>
 		{#if metadataPathValidation.valid}
 			<p
 				id="metadataPathPrefixFeedback"
-				class="mt-1 break-all font-mono text-[11px] text-neutral-400"
+				class="mt-1 break-all font-mono text-[11px] text-text-muted"
 			>
 				{m.kometa_metadata_resolved({ path: metadataPathValidation.references.join(', ') })}
 			</p>
@@ -667,7 +667,7 @@
 				<h2 id="configRecoveryTitle" class="text-sm font-semibold text-amber-100">
 					{m.kometa_config_recovery_title()}
 				</h2>
-				<p class="mt-1 text-sm text-neutral-300">
+				<p class="mt-1 text-sm text-text-secondary">
 					{km.configCommitRecovery.status === 'unreadable'
 						? m.kometa_config_recovery_unreadable_hint()
 						: km.configCommitRecovery.scopeMatches
@@ -715,7 +715,7 @@
 {/if}
 
 {#if !km.active}
-	<p class="mt-3 text-sm text-neutral-400">{m.kometa_setup_hint()}</p>
+	<p class="mt-3 text-sm text-text-muted">{m.kometa_setup_hint()}</p>
 {:else}
 	{#if mode === 'own'}<p class="mt-3 text-xs text-amber-400">{m.kometa_mode_own_warning()}</p>{/if}
 	{#if bindingReady && !headerDirty && !savingHeader}
@@ -727,13 +727,13 @@
 	{/if}
 
 	<!-- Section tabs -->
-	<div class="mt-5 flex flex-wrap gap-1 border-b border-neutral-800">
+	<div class="mt-5 flex flex-wrap gap-1 border-b border-border">
 		{#each sections as s (s.key)}
 			<button
 				onclick={() => (section = s.key)}
 				class="-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition {section === s.key
 					? 'border-accent-500 text-accent-200'
-					: 'border-transparent text-neutral-400 hover:text-neutral-100'}"
+					: 'border-transparent text-text-muted hover:text-text-bright'}"
 			>
 				{s.label()}
 			</button>
@@ -742,7 +742,7 @@
 
 	<div class="mt-6 space-y-5">
 		{#if section === 'connections'}
-			<p class="text-xs text-neutral-400">{m.kometa_plex_only_note()}</p>
+			<p class="text-xs text-text-muted">{m.kometa_plex_only_note()}</p>
 			<p class="text-xs text-amber-400">{m.kometa_secrets_note()}</p>
 			{#each connectors as c (c.section)}
 				{@const cdoc = km.connectorDocs[c.section]}
@@ -761,7 +761,7 @@
 						{/if}
 					</summary>
 					{#if cdoc?.description}
-						<p class="mt-2 text-xs text-neutral-400">{cdoc.description}</p>
+						<p class="mt-2 text-xs text-text-muted">{cdoc.description}</p>
 					{/if}
 					<div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
 						{#each c.fields as f (f.key)}
@@ -769,7 +769,7 @@
 							<div>
 								<label
 									for="conn-{c.section}-{f.key}"
-									class="mb-1 block text-xs text-neutral-300"
+									class="mb-1 block text-xs text-text-secondary"
 									title={help}
 								>
 									{f.key}{#if f.type === 'secret'}<span class="text-amber-400"> ·</span>{/if}
@@ -790,18 +790,18 @@
 			{/each}
 		{:else if section === 'libraries'}
 			{#if libs.length === 0}
-				<p class="text-xs text-neutral-400">{m.kometa_no_libraries()}</p>
+				<p class="text-xs text-text-muted">{m.kometa_no_libraries()}</p>
 			{/if}
 			{#each libs as lib (lib.key)}
 				<div class="surface p-4">
 					<div class="flex items-center justify-between gap-3">
 						<label
 							class="flex items-center gap-2 text-sm font-medium"
-							class:text-neutral-400={!lib.supported}
+							class:text-text-muted={!lib.supported}
 						>
 							<input type="checkbox" bind:checked={lib.managed} disabled={!lib.supported} />
 							{lib.title}
-							<span class="text-xs text-neutral-400">
+							<span class="text-xs text-text-muted">
 								({lib.type === 'movie'
 									? m.manual_match_type_movie()
 									: lib.type === 'show'
@@ -824,14 +824,14 @@
 						</p>
 					{/if}
 					{#if lib.managed && expanded === lib.key}
-						<div class="mt-4 space-y-4 border-t border-neutral-800 pt-4">
+						<div class="mt-4 space-y-4 border-t border-border pt-4">
 							<div>
-								<p class="mb-2 text-xs font-medium text-neutral-300">
+								<p class="mb-2 text-xs font-medium text-text-secondary">
 									{m.kometa_section_collections()}
 								</p>
 								{#each km.catalog as g (g.id)}
 									<div class="mb-2">
-										<p class="mb-1 flex items-center gap-2 text-[11px] text-neutral-400">
+										<p class="mb-1 flex items-center gap-2 text-[11px] text-text-muted">
 											<span>{g.label}</span>
 											{#if g.docUrl}<a
 													href={g.docUrl}
@@ -843,7 +843,7 @@
 										<div class="flex flex-wrap gap-x-4 gap-y-1">
 											{#each g.collections as c (c.name)}
 												<label
-													class="flex items-center gap-1.5 text-xs text-neutral-300"
+													class="flex items-center gap-1.5 text-xs text-text-secondary"
 													title={c.description}
 												>
 													<input
@@ -859,12 +859,12 @@
 								{/each}
 							</div>
 							<div>
-								<p class="mb-2 text-xs font-medium text-neutral-300">
+								<p class="mb-2 text-xs font-medium text-text-secondary">
 									{m.kometa_section_overlays()}
 								</p>
 								{#each km.overlayCatalog as g (g.id)}
 									<div class="mb-2">
-										<p class="mb-1 flex items-center gap-2 text-[11px] text-neutral-400">
+										<p class="mb-1 flex items-center gap-2 text-[11px] text-text-muted">
 											<span>{g.label}</span>
 											{#if g.docUrl}<a
 													href={g.docUrl}
@@ -876,7 +876,7 @@
 										<div class="flex flex-wrap gap-x-4 gap-y-1">
 											{#each g.overlays as o (o.name)}
 												<label
-													class="flex items-center gap-1.5 text-xs text-neutral-300"
+													class="flex items-center gap-1.5 text-xs text-text-secondary"
 													title={o.description}
 												>
 													<input
@@ -892,14 +892,14 @@
 								{/each}
 							</div>
 							<div>
-								<p class="mb-2 text-xs font-medium text-neutral-300">
+								<p class="mb-2 text-xs font-medium text-text-secondary">
 									{m.kometa_section_operations()}
 								</p>
 								<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 									{#each km.operationCatalog as op (op.key)}
 										<div class="flex items-center gap-2" title={op.description}>
 											{#if op.type === 'bool'}
-												<label class="flex items-center gap-1.5 text-xs text-neutral-300">
+												<label class="flex items-center gap-1.5 text-xs text-text-secondary">
 													<input
 														type="checkbox"
 														checked={lib.operations[op.key] === 'true'}
@@ -912,7 +912,7 @@
 													{op.label}
 												</label>
 											{:else if op.enumValues}
-												<label class="flex flex-1 items-center gap-2 text-xs text-neutral-300">
+												<label class="flex flex-1 items-center gap-2 text-xs text-text-secondary">
 													<span class="w-44 shrink-0 truncate">{op.label}</span>
 													<select
 														bind:value={lib.operations[op.key]}
@@ -923,7 +923,7 @@
 													</select>
 												</label>
 											{:else}
-												<label class="flex flex-1 items-center gap-2 text-xs text-neutral-300">
+												<label class="flex flex-1 items-center gap-2 text-xs text-text-secondary">
 													<span class="w-44 shrink-0 truncate">{op.label}</span>
 													<input
 														bind:value={lib.operations[op.key]}
@@ -941,11 +941,11 @@
 				</div>
 			{/each}
 		{:else if section === 'settings'}
-			<p class="text-xs text-neutral-400">{m.kometa_settings_hint()}</p>
+			<p class="text-xs text-text-muted">{m.kometa_settings_hint()}</p>
 			<div class="surface space-y-3 p-4">
 				{#each km.managedSettingDefs as def (def.id)}
 					<div>
-						<label for="gset-{def.id}" class="mb-1 block text-sm text-neutral-300">
+						<label for="gset-{def.id}" class="mb-1 block text-sm text-text-secondary">
 							{settingLabel[def.id]?.() ?? def.id}
 						</label>
 						<input
@@ -962,7 +962,7 @@
 				{/each}
 			</div>
 		{:else if section === 'raw'}
-			<p class="text-xs text-neutral-400">{m.kometa_raw_hint()}</p>
+			<p class="text-xs text-text-muted">{m.kometa_raw_hint()}</p>
 			<textarea
 				bind:value={rawText}
 				aria-label={m.kometa_raw_editor_label()}
@@ -995,7 +995,7 @@
 				<button onclick={loadRaw} disabled={rawBusy} class="btn btn-ghost px-3 py-2">
 					{m.kometa_raw_reload()}
 				</button>
-				{#if rawMsg}<span class="text-sm text-neutral-300">{rawMsg}</span>{/if}
+				{#if rawMsg}<span class="text-sm text-text-secondary">{rawMsg}</span>{/if}
 			</div>
 			{#if rawPreview}
 				<div class="surface space-y-2 p-3 text-sm" aria-live="polite">
@@ -1003,16 +1003,16 @@
 						<p class="text-amber-400">{m.kometa_diff_truncated()}</p>
 					{/if}
 					{#if !rawPreview.changes?.length}
-						<p class="text-neutral-400">{m.kometa_preview_none()}</p>
+						<p class="text-text-muted">{m.kometa_preview_none()}</p>
 					{:else}
 						<ul class="space-y-1">
 							{#each rawPreview.changes as change, index (index)}
-								<li class="font-mono text-xs text-neutral-300">
+								<li class="font-mono text-xs text-text-secondary">
 									<span class="text-amber-300">{change.op}</span>
 									{change.path}
-									{#if change.before != null}<span class="text-neutral-400">{change.before}</span
+									{#if change.before != null}<span class="text-text-muted">{change.before}</span
 										>{/if}
-									{#if change.after != null}<span class="text-neutral-400">→ {change.after}</span
+									{#if change.after != null}<span class="text-text-muted">→ {change.after}</span
 										>{/if}
 								</li>
 							{/each}
@@ -1022,12 +1022,12 @@
 			{/if}
 		{:else if section === 'backups'}
 			{#if backups.length === 0}
-				<p class="text-xs text-neutral-400">{m.kometa_backups_none()}</p>
+				<p class="text-xs text-text-muted">{m.kometa_backups_none()}</p>
 			{:else}
-				<div class="surface divide-y divide-neutral-800/60">
+				<div class="surface divide-y divide-border/60">
 					{#each backups as b (b.name)}
 						<div class="flex items-center justify-between gap-3 px-4 py-2 text-sm">
-							<span class="font-mono text-xs text-neutral-300">{fmtStamp(b.stamp)}</span>
+							<span class="font-mono text-xs text-text-secondary">{fmtStamp(b.stamp)}</span>
 							<button
 								type="button"
 								onclick={() => previewRestore(b.name)}
@@ -1050,16 +1050,16 @@
 						<p class="text-amber-400">{m.kometa_diff_truncated()}</p>
 					{/if}
 					{#if !restorePreview.changes?.length}
-						<p class="text-neutral-400">{m.kometa_preview_none()}</p>
+						<p class="text-text-muted">{m.kometa_preview_none()}</p>
 					{:else}
 						<ul class="max-h-72 space-y-1 overflow-auto">
 							{#each restorePreview.changes as change, index (index)}
-								<li class="font-mono text-xs text-neutral-300">
+								<li class="font-mono text-xs text-text-secondary">
 									<span class="text-amber-300">{change.op}</span>
 									{change.path}
-									{#if change.before != null}<span class="text-neutral-400">{change.before}</span
+									{#if change.before != null}<span class="text-text-muted">{change.before}</span
 										>{/if}
-									{#if change.after != null}<span class="text-neutral-400">→ {change.after}</span
+									{#if change.after != null}<span class="text-text-muted">→ {change.after}</span
 										>{/if}
 								</li>
 							{/each}
@@ -1158,7 +1158,7 @@
 					<p class="text-red-300">{m.kometa_dropped({ keys: preview.dropped.join(', ') })}</p>
 				{/if}
 				{#if preview.changes.length === 0}
-					<p class="text-neutral-400">{m.kometa_preview_none()}</p>
+					<p class="text-text-muted">{m.kometa_preview_none()}</p>
 				{:else}
 					<ul class="space-y-1">
 						{#each preview.changes as c, i (i)}
@@ -1170,9 +1170,9 @@
 											? 'text-emerald-300'
 											: 'text-amber-300'}>{c.op}</span
 								>
-								<span class="text-neutral-300">{c.path}</span>
-								{#if c.before != null}<span class="text-neutral-400">{c.before}</span>{/if}
-								{#if c.after != null}<span class="text-neutral-400">→ {c.after}</span>{/if}
+								<span class="text-text-secondary">{c.path}</span>
+								{#if c.before != null}<span class="text-text-muted">{c.before}</span>{/if}
+								{#if c.after != null}<span class="text-text-muted">→ {c.after}</span>{/if}
 							</li>
 						{/each}
 					</ul>

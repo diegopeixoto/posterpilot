@@ -177,8 +177,8 @@
 			{eventsLoading ? m.settings_activity_loading() : ''}
 		</span>
 		<table class="w-full text-sm">
-			<thead class="text-left text-xs text-neutral-400">
-				<tr class="border-b border-neutral-800">
+			<thead class="text-left text-xs text-text-muted">
+				<tr class="border-b border-border">
 					<th class="px-4 py-2 font-medium">{m.events_col_level()}</th>
 					<th class="px-4 py-2 font-medium">{m.events_col_type()}</th>
 					<th class="px-4 py-2 font-medium">{m.events_col_message()}</th>
@@ -188,7 +188,7 @@
 			<tbody>
 				{#if eventsLoading && events.length === 0}
 					{#each Array(5) as _, index (index)}
-						<tr class="border-b border-neutral-800/60" aria-hidden="true">
+						<tr class="border-b border-border/60" aria-hidden="true">
 							<td class="px-4 py-3"><Skeleton class="h-4 w-14 rounded" /></td>
 							<td class="px-4 py-3"><Skeleton class="h-4 w-20 rounded" /></td>
 							<td class="px-4 py-3"><Skeleton class="h-4 w-full rounded" /></td>
@@ -196,18 +196,18 @@
 						</tr>
 					{/each}
 				{:else if events.length === 0}
-					<tr><td colspan="4" class="p-4 text-sm text-neutral-400">{m.events_empty()}</td></tr>
+					<tr><td colspan="4" class="p-4 text-sm text-text-muted">{m.events_empty()}</td></tr>
 				{:else}
 					{#each events as event (event.id)}
-						<tr class="border-b border-neutral-800/60 align-top last:border-0">
+						<tr class="border-b border-border/60 align-top last:border-0">
 							<td class="px-4 py-2">
 								<span class={eventBadgeClass[event.level] ?? 'badge badge-muted'}>
 									{eventLevelLabel(event.level)}
 								</span>
 							</td>
-							<td class="px-4 py-2 text-neutral-400">{eventTypeLabel(event.type)}</td>
-							<td class="px-4 py-2 text-neutral-200">{event.message}</td>
-							<td class="px-4 py-2 whitespace-nowrap text-neutral-400">
+							<td class="px-4 py-2 text-text-muted">{eventTypeLabel(event.type)}</td>
+							<td class="px-4 py-2 text-text-strong">{event.message}</td>
+							<td class="px-4 py-2 whitespace-nowrap text-text-muted">
 								{fmtTime(event.createdAt)}
 							</td>
 						</tr>

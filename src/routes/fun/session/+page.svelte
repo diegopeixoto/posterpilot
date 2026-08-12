@@ -21,14 +21,14 @@
 <section class="space-y-6">
 	<header>
 		<h2 class="text-xl font-semibold tracking-tight text-white">{m.fun_session_title()}</h2>
-		<p class="mt-1 text-sm text-neutral-400">{m.fun_session_subtitle()}</p>
+		<p class="mt-1 text-sm text-text-muted">{m.fun_session_subtitle()}</p>
 	</header>
 
 	<form method="GET" action="/fun/session" onsubmit={stampSeed} class="surface space-y-4 p-5">
 		<input type="hidden" name="plan" value="1" />
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_session_budget()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_session_budget()}</span>
 				<input
 					type="number"
 					name="budget"
@@ -40,7 +40,7 @@
 				/>
 			</label>
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_session_films()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_session_films()}</span>
 				<select
 					name="films"
 					value={data.filmCount}
@@ -51,7 +51,7 @@
 				</select>
 			</label>
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_library_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_library_label()}</span>
 				<select
 					name="library"
 					value={data.filter.librarySectionKey ?? ''}
@@ -65,7 +65,7 @@
 				</select>
 			</label>
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_genre_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_genre_label()}</span>
 				<select
 					name="genre"
 					value={data.filter.genre ?? ''}
@@ -77,7 +77,7 @@
 				</select>
 			</label>
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_rating_min()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_rating_min()}</span>
 				<input
 					type="number"
 					name="ratingMin"
@@ -93,8 +93,8 @@
 				{/if}
 			</label>
 		</div>
-		<div class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 pt-4">
-			<label class="flex items-center gap-2 text-sm text-neutral-300">
+		<div class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+			<label class="flex items-center gap-2 text-sm text-text-secondary">
 				<input
 					type="checkbox"
 					name="excludeWatched"
@@ -103,7 +103,7 @@
 				/>
 				{m.fun_exclude_watched()}
 			</label>
-			<p class="text-xs text-neutral-500">
+			<p class="text-xs text-text-faint">
 				{m.fun_eligible_count({ count: data.eligibleCount })}
 			</p>
 			<button type="submit" class="btn btn-accent">
@@ -118,7 +118,7 @@
 		>
 			<div>
 				<p class="font-medium text-white">{m.fun_session_ready()}</p>
-				<p class="mt-0.5 text-sm text-neutral-400">
+				<p class="mt-0.5 text-sm text-text-muted">
 					{m.fun_session_total({
 						total: data.session.totalMinutes,
 						remaining: data.session.remainingMinutes
@@ -129,7 +129,7 @@
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each data.session.items as item, index (item.id)}
 				<article class="surface overflow-hidden">
-					<div class="relative aspect-[2/3] bg-neutral-950">
+					<div class="relative aspect-[2/3] bg-background">
 						{#if item.hasPoster}
 							<img
 								src={`/api/poster-thumb/${item.id}?v=${encodeURIComponent(item.posterVersion)}`}
@@ -138,7 +138,7 @@
 							/>
 						{/if}
 						<span
-							class="absolute top-3 left-3 rounded-full bg-black/80 px-2.5 py-1 text-xs font-semibold text-white"
+							class="absolute top-3 left-3 rounded-full bg-scrim/80 px-2.5 py-1 text-xs font-semibold text-white"
 						>
 							{index + 1}
 						</span>
@@ -147,7 +147,7 @@
 						<h3 class="font-semibold text-white">
 							<a class="hover:text-accent-200" href={`/item/${item.id}`}>{item.title}</a>
 						</h3>
-						<p class="mt-1 text-sm text-neutral-400">
+						<p class="mt-1 text-sm text-text-muted">
 							{m.fun_runtime_value({ minutes: item.runtime ?? 0 })} · {item.year ?? '—'}
 						</p>
 					</div>
@@ -156,8 +156,8 @@
 		</div>
 	{:else if data.session && !data.session.ok}
 		<div class="surface p-8 text-center">
-			<p class="font-medium text-neutral-200">{failureMessage(data.session.reason)}</p>
-			<p class="mt-1 text-sm text-neutral-500">{m.fun_session_adjust()}</p>
+			<p class="font-medium text-text-strong">{failureMessage(data.session.reason)}</p>
+			<p class="mt-1 text-sm text-text-faint">{m.fun_session_adjust()}</p>
 		</div>
 	{/if}
 </section>

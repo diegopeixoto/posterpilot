@@ -1374,7 +1374,7 @@
 	<div
 		class="relative flex flex-col rounded-lg border-2 transition-colors {staged
 			? 'border-accent-500'
-			: 'border-transparent hover:border-neutral-600'}"
+			: 'border-transparent hover:border-border-hover'}"
 	>
 		<button
 			type="button"
@@ -1410,7 +1410,7 @@
 		onclick={(event) => openPreview(c, event.currentTarget)}
 		aria-label={label}
 		title={label}
-		class="flex h-11 w-full shrink-0 items-center justify-center rounded-b-md border-t border-neutral-800 bg-neutral-900 text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
+		class="flex h-11 w-full shrink-0 items-center justify-center rounded-b-md border-t border-border bg-surface text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-bright"
 	>
 		<span aria-hidden="true" class="text-base leading-none">⤢</span>
 	</button>
@@ -1469,7 +1469,7 @@
 	<!-- Artwork the language preference would hide, kept because it is the staged pick.
 	     Icon + language name (never color alone) so the fallback is legible as such. -->
 	<span
-		class="pointer-events-none absolute top-1.5 right-1.5 z-10 inline-flex items-center gap-1 rounded-full bg-neutral-950/90 px-1.5 py-0.5 text-[10px] font-medium text-amber-200 shadow-sm ring-1 ring-black/30"
+		class="pointer-events-none absolute top-1.5 right-1.5 z-10 inline-flex items-center gap-1 rounded-full bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-amber-200 shadow-sm ring-1 ring-black/30"
 		aria-label={m.item_language_fallback({ language: candidateLanguageName(c) })}
 	>
 		<span aria-hidden="true">⚑</span>{candidateLanguageName(c)}
@@ -1480,7 +1480,7 @@
 	{#if total > CANDIDATE_DISCLOSURE_BATCH_SIZE}
 		{@const disclosure = disclosureFor(key, total)}
 		<div class="mt-1 flex flex-wrap items-center gap-2">
-			<p class="text-[11px] text-neutral-400">
+			<p class="text-[11px] text-text-muted">
 				{m.item_disclosure_count({
 					shown: disclosure.shown,
 					total,
@@ -1511,7 +1511,7 @@
 
 {#snippet chevron(open: boolean)}
 	<span
-		class="inline-block text-neutral-500 transition-transform motion-reduce:transition-none {open
+		class="inline-block text-text-faint transition-transform motion-reduce:transition-none {open
 			? 'rotate-90'
 			: ''}"
 		aria-hidden="true">▸</span
@@ -1522,7 +1522,7 @@
 	<a
 		href={data.returnTo}
 		onclick={returnToContext}
-		class="text-sm text-neutral-400 hover:text-neutral-200"
+		class="text-sm text-text-muted hover:text-text-strong"
 		>{data.isReviewReturn ? m.review_back_to_inbox() : m.item_back_to_library()}</a
 	>
 	{#if data.reviewNavigation}
@@ -1537,7 +1537,7 @@
 			{:else}
 				<button class="btn btn-ghost" type="button" disabled>← {m.review_previous_item()}</button>
 			{/if}
-			<span class="hidden text-xs text-neutral-500 sm:inline">
+			<span class="hidden text-xs text-text-faint sm:inline">
 				{m.review_context_count({ count: data.reviewNavigation.matchingCount })}
 			</span>
 			{#if data.reviewNavigation.next}
@@ -1554,8 +1554,8 @@
 	{/if}
 </div>
 {#if data.reviewNavigation}
-	<details class="mt-2 text-xs text-neutral-500">
-		<summary class="w-fit cursor-pointer hover:text-neutral-300"
+	<details class="mt-2 text-xs text-text-faint">
+		<summary class="w-fit cursor-pointer hover:text-text-secondary"
 			>{m.review_shortcuts_title()}</summary
 		>
 		<p class="mt-2 flex flex-wrap gap-x-4 gap-y-1" aria-label={m.review_shortcuts_title()}>
@@ -1570,7 +1570,7 @@
 {/if}
 
 <!-- Hero -->
-<section class="relative mt-3 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950">
+<section class="relative mt-3 overflow-hidden rounded-2xl border border-border bg-background">
 	{#if data.item.hasCurrentBackground || data.item.backdropUrl}
 		<img
 			src={data.item.hasCurrentBackground
@@ -1581,14 +1581,12 @@
 		/>
 	{/if}
 	<div
-		class="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-neutral-950/30"
+		class="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-background/30"
 	></div>
-	<div class="absolute inset-0 bg-gradient-to-r from-neutral-950/90 to-transparent"></div>
+	<div class="absolute inset-0 bg-gradient-to-r from-background/90 to-transparent"></div>
 
 	<div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-end sm:p-7">
-		<div
-			class="w-32 flex-none overflow-hidden rounded-lg border border-neutral-800 shadow-2xl sm:w-40"
-		>
+		<div class="w-32 flex-none overflow-hidden rounded-lg border border-border shadow-2xl sm:w-40">
 			{#if data.item.hasCurrentPoster}
 				<img
 					src={`/api/artwork/${data.item.id}/poster?v=${data.item.currentPosterFingerprint ?? data.item.artworkVersion}`}
@@ -1596,7 +1594,7 @@
 					class="w-full"
 				/>
 			{:else}
-				<div class="flex aspect-[2/3] items-center justify-center text-neutral-400">
+				<div class="flex aspect-[2/3] items-center justify-center text-text-muted">
 					{m.item_no_poster()}
 				</div>
 			{/if}
@@ -1614,8 +1612,8 @@
 			{/if}
 
 			{#if metaBits.length}
-				<p class="mt-2 text-sm text-neutral-300">
-					{#each metaBits as bit, i (bit)}{#if i > 0}<span class="text-neutral-400">
+				<p class="mt-2 text-sm text-text-secondary">
+					{#each metaBits as bit, i (bit)}{#if i > 0}<span class="text-text-muted">
 								·
 							</span>{/if}<span class={bit.startsWith('★') ? 'font-semibold text-amber-300' : ''}
 							>{bit}</span
@@ -1630,10 +1628,10 @@
 			{/if}
 
 			{#if data.item.tagline}
-				<p class="mt-3 text-sm text-neutral-400 italic">“{data.item.tagline}”</p>
+				<p class="mt-3 text-sm text-text-muted italic">“{data.item.tagline}”</p>
 			{/if}
 			{#if data.item.overview}
-				<p class="mt-2 line-clamp-3 max-w-2xl text-sm text-neutral-300">{data.item.overview}</p>
+				<p class="mt-2 line-clamp-3 max-w-2xl text-sm text-text-secondary">{data.item.overview}</p>
 			{/if}
 
 			<div class="mt-4 flex flex-wrap items-center gap-2">
@@ -1683,7 +1681,7 @@
 			</div>
 
 			{#if !enriched}
-				<p class="mt-3 text-xs text-neutral-400">
+				<p class="mt-3 text-xs text-text-muted">
 					{m.item_no_metadata()}
 				</p>
 			{/if}
@@ -1713,9 +1711,9 @@
 			     plus a different copy exported to Kometa is not "2 of 2 covered", and
 			     the slot panels below describe only the copy being viewed, so nothing
 			     else on this page would correct the overstatement. -->
-			<ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-300">
+			<ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
 				{#each occurrenceReport.destinations as entry (entry.destination)}
-					<li><span class="text-neutral-400">{entry.destinationLabel}:</span> {entry.label}</li>
+					<li><span class="text-text-muted">{entry.destinationLabel}:</span> {entry.label}</li>
 				{/each}
 			</ul>
 		{/if}
@@ -1723,7 +1721,7 @@
 	<div class="grid gap-3 sm:grid-cols-2">
 		{#each coverageReports as report (report.destination)}
 			<div class="surface p-3">
-				<h3 class="text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+				<h3 class="text-xs font-semibold tracking-wide text-text-muted uppercase">
 					{report.label}
 				</h3>
 				{#if report.empty}
@@ -1740,7 +1738,7 @@
 					<ul class="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
 						{#each report.slots as slot (slot.key)}
 							<li class="flex flex-wrap items-center justify-between gap-2">
-								<span class="text-xs text-neutral-300">{slot.label}</span>
+								<span class="text-xs text-text-secondary">{slot.label}</span>
 								<CoverageBadge status={slot.status} />
 							</li>
 						{/each}
@@ -1749,7 +1747,7 @@
 				{#if report.note}
 					<!-- The line the whole destination split exists for: a Kometa entry is a
 					     file on disk, and nothing about writing it proves Kometa ever ran. -->
-					<p class="mt-2 text-xs text-neutral-400">{report.note}</p>
+					<p class="mt-2 text-xs text-text-muted">{report.note}</p>
 				{/if}
 			</div>
 		{/each}
@@ -1762,9 +1760,7 @@
 		<div class="flex gap-4 overflow-x-auto pb-2">
 			{#each data.item.cast as person (person.name)}
 				<div class="w-20 flex-none text-center">
-					<div
-						class="aspect-[2/3] w-20 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900"
-					>
+					<div class="aspect-[2/3] w-20 overflow-hidden rounded-lg border border-border bg-surface">
 						{#if person.profileUrl}
 							<img
 								src={person.profileUrl}
@@ -1774,11 +1770,11 @@
 							/>
 						{/if}
 					</div>
-					<p class="mt-1 truncate text-xs font-medium text-neutral-200" title={person.name}>
+					<p class="mt-1 truncate text-xs font-medium text-text-strong" title={person.name}>
 						{person.name}
 					</p>
 					{#if person.character}<p
-							class="truncate text-[10px] text-neutral-400"
+							class="truncate text-[10px] text-text-muted"
 							title={person.character}
 						>
 							{person.character}
@@ -1794,11 +1790,11 @@
 {#if preferredLanguagePolicy.mode === 'preferred' && data.providerGroups.length}
 	<!-- Item-local language filter. Flipping it never touches the saved preference. -->
 	<section
-		class="mt-8 rounded-xl border border-neutral-800 bg-neutral-950/60 p-3"
+		class="mt-8 rounded-xl border border-border bg-background/60 p-3"
 		aria-label={m.item_language_filter_title()}
 	>
 		<div class="flex flex-wrap items-center justify-between gap-2">
-			<p class="text-xs text-neutral-300">
+			<p class="text-xs text-text-secondary">
 				<span aria-hidden="true">🌐</span>
 				{#if showAllLanguages}
 					{m.item_language_showing_all()}
@@ -1904,7 +1900,7 @@
 							</div>
 						{/if}
 						{#if group.sets.length === 0}
-							<p class="text-xs text-neutral-400">
+							<p class="text-xs text-text-muted">
 								{m.item_language_provider_empty({
 									provider: providerLabel(group.provider),
 									language: preferredLanguageName
@@ -1920,12 +1916,12 @@
 										type="button"
 										onclick={() => toggle(sKey)}
 										aria-expanded={isExpanded(sKey)}
-										class="flex items-center gap-2 text-sm text-neutral-300"
+										class="flex items-center gap-2 text-sm text-text-secondary"
 									>
 										{@render chevron(isExpanded(sKey))}
 										{#if set.author}{m.item_set_by()}
-											<span class="font-semibold text-neutral-100">{set.author}</span>{:else}<span
-												class="text-neutral-400">{m.item_set_unattributed()}</span
+											<span class="font-semibold text-text-bright">{set.author}</span>{:else}<span
+												class="text-text-muted">{m.item_set_unattributed()}</span
 											>{/if}
 									</button>
 									{#if g.posters.length || g.backgrounds.length || g.seasons.length}
@@ -1940,7 +1936,7 @@
 										{#if g.posters.length}
 											{@const pane = candidateDisclosureKey(group.provider, set.setId, 'poster')}
 											<div class="min-w-0 flex-1">
-												<p class="mb-1 text-[11px] text-neutral-400">
+												<p class="mb-1 text-[11px] text-text-muted">
 													{g.posters.length > 1 ? m.item_posters() : m.item_poster()}
 												</p>
 												<div id={pane} class="flex gap-2 overflow-x-auto pb-2">
@@ -1963,7 +1959,7 @@
 												'background'
 											)}
 											<div class="min-w-0 flex-1">
-												<p class="mb-1 text-[11px] text-neutral-400">
+												<p class="mb-1 text-[11px] text-text-muted">
 													{g.backgrounds.length > 1 ? m.item_backdrops() : m.item_backdrop()}
 												</p>
 												<div id={pane} class="grid grid-cols-2 gap-2">
@@ -1982,13 +1978,13 @@
 									{#if isShow}
 										{#each g.seasons as sg (sg.season)}
 											{@const seaKey = seasonKey(set.setId, sg.season)}
-											<div class="mt-4 rounded-lg border border-neutral-800 p-3">
+											<div class="mt-4 rounded-lg border border-border p-3">
 												<div class="flex items-center justify-between">
 													<button
 														type="button"
 														onclick={() => toggle(seaKey)}
 														aria-expanded={isExpanded(seaKey)}
-														class="flex items-center gap-2 text-sm font-medium text-neutral-200"
+														class="flex items-center gap-2 text-sm font-medium text-text-strong"
 													>
 														{@render chevron(isExpanded(seaKey))}
 														{m.item_season_label({ number: sg.season })}
@@ -2011,7 +2007,7 @@
 															'season',
 															sg.season
 														)}
-														<p class="mt-2 mb-1 text-[11px] text-neutral-400">
+														<p class="mt-2 mb-1 text-[11px] text-text-muted">
 															{sg.posters.length > 1 ? m.item_posters() : m.item_poster()}
 														</p>
 														<div id={pane} class="grid grid-cols-4 gap-2 sm:grid-cols-8">
@@ -2032,7 +2028,7 @@
 															'title_card',
 															sg.season
 														)}
-														<p class="mt-3 mb-1 text-[11px] text-neutral-400">
+														<p class="mt-3 mb-1 text-[11px] text-text-muted">
 															{m.item_title_cards({ count: sg.titleCards.length })}
 														</p>
 														<div id={pane} class="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2059,7 +2055,7 @@
 		{/each}
 	</section>
 {:else}
-	<p class="mt-8 pb-4 text-sm text-neutral-400">
+	<p class="mt-8 pb-4 text-sm text-text-muted">
 		{data.item.resolved ? m.item_no_candidates_resolved() : m.item_no_candidates_unresolved()}
 	</p>
 {/if}
@@ -2105,14 +2101,14 @@
 
 <!-- Sticky custom-set builder -->
 <div
-	class="fixed inset-x-0 bottom-0 z-30 border-t border-accent-900/40 bg-neutral-950/95 backdrop-blur"
+	class="fixed inset-x-0 bottom-0 z-30 border-t border-accent-900/40 bg-background/95 backdrop-blur"
 >
 	<div class="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-2.5">
 		{#if message}
 			<p
 				role={messageError ? 'alert' : 'status'}
 				aria-live={messageError ? 'assertive' : 'polite'}
-				class="basis-full text-xs {messageError ? 'text-red-300' : 'text-neutral-300'}"
+				class="basis-full text-xs {messageError ? 'text-red-300' : 'text-text-secondary'}"
 			>
 				{message}
 			</p>
@@ -2141,7 +2137,7 @@
 		{/if}
 		<div class="flex items-center gap-2">
 			<div
-				class="h-[51px] w-[34px] flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
+				class="h-[51px] w-[34px] flex-none overflow-hidden rounded border border-border-strong bg-surface"
 			>
 				{#if selectedPosterPreview}<img
 						src={selectedPosterPreview}
@@ -2150,7 +2146,7 @@
 					/>{/if}
 			</div>
 			<div
-				class="h-[45px] w-20 flex-none overflow-hidden rounded border border-neutral-700 bg-neutral-900"
+				class="h-[45px] w-20 flex-none overflow-hidden rounded border border-border-strong bg-surface"
 			>
 				{#if selectedBackgroundPreview}<img
 						src={selectedBackgroundPreview}
@@ -2159,7 +2155,7 @@
 					/>{/if}
 			</div>
 		</div>
-		<span class="text-xs text-neutral-400">
+		<span class="text-xs text-text-muted">
 			{selectedPoster ? m.item_label_poster() : m.item_label_no_poster()}{selectedBackground
 				? m.item_label_backdrop_suffix()
 				: ''}{#if stagedSeasons}
@@ -2168,11 +2164,11 @@
 		</span>
 
 		<details class="text-xs">
-			<summary class="cursor-pointer text-neutral-400 hover:text-neutral-200"
+			<summary class="cursor-pointer text-text-muted hover:text-text-strong"
 				>{m.item_custom()}</summary
 			>
 			<div
-				class="absolute bottom-14 left-4 flex flex-col gap-2 rounded-lg border border-neutral-800 bg-neutral-900 p-3 shadow-xl"
+				class="absolute bottom-14 left-4 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 shadow-xl"
 			>
 				<div class="flex gap-1.5">
 					<input
@@ -2204,7 +2200,7 @@
 							posterFile = e.currentTarget.files?.[0] ?? null;
 							uploadPreview = null;
 						}}
-						class="max-w-[180px] text-[11px] text-neutral-400"
+						class="max-w-[180px] text-[11px] text-text-muted"
 					/>
 					<button
 						onclick={uploadPoster}
@@ -2216,20 +2212,20 @@
 					>
 				</div>
 				{#if uploadPreview}
-					<div class="rounded border border-neutral-700 bg-neutral-950/70 p-2" role="status">
-						<p class="text-[11px] text-neutral-200">
+					<div class="rounded border border-border-strong bg-background/70 p-2" role="status">
+						<p class="text-[11px] text-text-strong">
 							{m.item_upload_preview_summary({
 								size: (uploadPreview.image.sizeBytes / (1024 * 1024)).toFixed(1)
 							})}
 						</p>
 						<button
 							type="button"
-							class="mt-1 text-[11px] text-neutral-400 underline hover:text-neutral-200"
+							class="mt-1 text-[11px] text-text-muted underline hover:text-text-strong"
 							onclick={() => (uploadPreview = null)}>{m.item_upload_cancel()}</button
 						>
 					</div>
 				{/if}
-				<p class="text-[10px] text-neutral-400">
+				<p class="text-[10px] text-text-muted">
 					{m.item_upload_hint()}
 				</p>
 			</div>
@@ -2255,7 +2251,7 @@
 			</select>
 			{#if confirmApply}
 				<!-- Confirm the exact frozen destination operations. -->
-				<span class="hidden text-xs text-neutral-200 sm:inline"
+				<span class="hidden text-xs text-text-strong sm:inline"
 					>{advanceAfterApply
 						? m.review_apply_next_confirm({ target: confirmTarget })
 						: m.item_apply_confirm({ target: confirmTarget })}

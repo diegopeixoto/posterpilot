@@ -6,9 +6,16 @@ import { SUPPORTED_LOCALES, LOCALE_NAMES } from '$lib/i18n/resolve';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { version } from '$lib/version';
 import { getTmdbRepairState } from '$lib/server/tmdb/repair';
+import { getAppearanceSettings, getCustomThemes } from '$lib/server/appearance';
+import { resolveStoredAppearance } from '$lib/theming/resolve';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
-	const [config, serverManagement] = await Promise.all([resolveConfig(), listManagedServers()]);
+	const [config, serverManagement, appearance, customThemes] = await Promise.all([
+		resolveConfig(),
+		listManagedServers(),
+		getAppearanceSettings(),
+		getCustomThemes()
+	]);
 	const [activeJobs, tmdbRepair] = serverManagement.activeServerId
 		? await Promise.all([
 				activeJobCount(serverManagement.activeServerId),
@@ -33,6 +40,14 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		},
 		// Gates the "Fun" nav entry (the /fun route also 404s server-side when off).
 		funEnabled: config.funEnabled,
+		// Appearance: raw settings + custom themes for the Settings UI, and the
+		// resolved appearance (same resolution the SSR html transform applied) for
+		// nav placement and instant client-side theme switching.
+		appearance: {
+			settings: appearance,
+			customThemes,
+			resolved: resolveStoredAppearance(appearance, customThemes)
+		},
 		// Active locale (resolved per request in hooks.server.ts) plus the available
 		// locales, so the header switcher and client runtime stay in sync with SSR.
 		locale: locals.locale,

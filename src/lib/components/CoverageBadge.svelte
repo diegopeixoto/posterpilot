@@ -39,15 +39,15 @@
 			case 'covered':
 				return 'border border-emerald-800 bg-emerald-950/60 text-emerald-200';
 			case 'exported':
-				return 'border border-neutral-700 bg-neutral-900 text-neutral-200';
+				return 'border border-border-strong bg-surface text-text-strong';
 			case 'changed':
 				return 'border border-amber-800 bg-amber-950/60 text-amber-200';
 			case 'unverified':
 				return 'border border-dashed border-amber-800 bg-amber-950/30 text-amber-200';
 			case 'absent':
-				return 'border border-neutral-800 bg-black/40 text-neutral-400';
+				return 'border border-border bg-scrim/40 text-text-muted';
 			case 'unknown':
-				return 'border border-dashed border-neutral-700 bg-neutral-900/60 text-neutral-400';
+				return 'border border-dashed border-border-strong bg-surface/60 text-text-muted';
 		}
 	}
 </script>

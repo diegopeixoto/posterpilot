@@ -88,7 +88,7 @@
 			aria-label={m.whats_new_close()}
 			tabindex="-1"
 			onclick={close}
-			class="absolute inset-0 cursor-default bg-black/60 backdrop-blur-sm"
+			class="absolute inset-0 cursor-default bg-scrim/60 backdrop-blur-sm"
 		></button>
 
 		<!-- Dialog -->
@@ -100,7 +100,7 @@
 			aria-labelledby="whats-new-title"
 			tabindex="-1"
 		>
-			<div class="flex items-start justify-between gap-3 border-b border-neutral-800 p-4">
+			<div class="flex items-start justify-between gap-3 border-b border-border p-4">
 				<h2 id="whats-new-title" class="text-lg font-semibold tracking-tight">{title}</h2>
 				<button
 					bind:this={closeButton}
@@ -116,13 +116,13 @@
 			<div class="overflow-y-auto p-4">
 				{#if body}
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -- release notes are HTML-escaped and tag-whitelisted in renderReleaseNotes -->
-					<div class="release-notes text-sm text-neutral-300">{@html renderedBody}</div>
+					<div class="release-notes text-sm text-text-secondary">{@html renderedBody}</div>
 				{:else}
-					<p class="text-sm text-neutral-400">{m.whats_new_empty()}</p>
+					<p class="text-sm text-text-muted">{m.whats_new_empty()}</p>
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-end gap-3 border-t border-neutral-800 p-4">
+			<div class="flex items-center justify-end gap-3 border-t border-border p-4">
 				<a
 					href={url}
 					target="_blank"

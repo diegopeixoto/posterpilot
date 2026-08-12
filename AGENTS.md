@@ -57,6 +57,10 @@ Read [`.impeccable.md`](./.impeccable.md) before any design work — it's the **
 design context (users, brand personality, aesthetic direction, accessibility, and the 5
 design principles). Actual token/component values live in `src/app.css`.
 
-The one-line version: **sleek & cinematic, dark-only, a single violet accent, MediUX
-image-forward** — explicitly _not_ gamer/RGB, toy-like, or corporate-SaaS — held to
-**WCAG AA** with `prefers-reduced-motion` honored.
+The one-line version: **sleek & cinematic, dark by default, a single violet accent,
+MediUX image-forward** — explicitly _not_ gamer/RGB, toy-like, or corporate-SaaS — held
+to **WCAG AA** with `prefers-reduced-motion` honored. The default look is governed by
+these principles; users can opt into other themes via the theme-kit engine
+(`src/lib/theming/` + `[data-theme]` blocks in `src/app.css`), where components must
+consume the semantic `--pp-*` tokens (`bg-surface`, `text-text-muted`, …) instead of
+hard-coded `neutral-*`/`accent-*` utilities.

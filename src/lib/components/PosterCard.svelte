@@ -18,10 +18,10 @@
 </script>
 
 <div
-	class="group relative overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 transition hover:border-neutral-600"
+	class="group relative overflow-hidden rounded-lg border border-border bg-surface transition hover:border-border-hover"
 >
 	<a {href} class="block" data-poster-card-link>
-		<div class="aspect-[2/3] w-full overflow-hidden bg-neutral-950">
+		<div class="aspect-[2/3] w-full overflow-hidden bg-background">
 			{#if item.hasPoster}
 				<!-- Served through the cached, grid-sized thumbnail proxy (by item id) so
 				     the browser doesn't hit the media server directly for every tile. -->
@@ -35,7 +35,7 @@
 					class="h-full w-full object-cover transition group-hover:scale-[1.03]"
 				/>
 			{:else}
-				<div class="flex h-full items-center justify-center text-xs text-neutral-400">
+				<div class="flex h-full items-center justify-center text-xs text-text-muted">
 					{m.poster_no_poster()}
 				</div>
 			{/if}
@@ -46,7 +46,7 @@
 			class="pointer-events-none absolute inset-x-0 bottom-0 translate-y-2 bg-gradient-to-t from-black/90 to-transparent p-2 opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100"
 		>
 			<p class="truncate text-sm font-medium text-white" title={item.title}>{item.title}</p>
-			<p class="text-xs text-neutral-300">
+			<p class="text-xs text-text-secondary">
 				{item.year ?? '—'} · {item.type === 'movie'
 					? m.manual_match_type_movie()
 					: m.manual_match_type_show()}
@@ -65,7 +65,7 @@
 
 	<!-- Rating. A near-opaque scrim keeps amber legible over bright posters (AA). -->
 	{#if item.rating}
-		<span class="badge absolute bottom-2 left-2 bg-black/70 text-amber-300"
+		<span class="badge absolute bottom-2 left-2 bg-scrim/70 text-amber-300"
 			>★ {item.rating.toFixed(1)}</span
 		>
 	{/if}
@@ -80,7 +80,7 @@
 			aria-pressed={selected}
 			class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded border text-sm font-bold transition {selected
 				? 'border-accent-400 bg-accent-500 text-white'
-				: 'border-neutral-600 bg-neutral-900/80 text-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-neutral-400 pointer-coarse:opacity-100'}"
+				: 'border-border-hover bg-surface/80 text-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-neutral-400 pointer-coarse:opacity-100'}"
 		>
 			✓
 		</button>

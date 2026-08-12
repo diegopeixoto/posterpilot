@@ -56,9 +56,9 @@
 
 <ServerManager {initial} {locale} />
 
-<div class="border-t border-neutral-800 pt-5">
+<div class="border-t border-border pt-5">
 	<h2 class="text-sm font-semibold">{m.server_manager_legacy_settings()}</h2>
-	<p class="mt-1 text-xs text-neutral-400">{m.server_manager_legacy_settings_hint()}</p>
+	<p class="mt-1 text-xs text-text-muted">{m.server_manager_legacy_settings_hint()}</p>
 </div>
 
 <div>
@@ -75,8 +75,8 @@
 	<div class="surface space-y-4 p-4">
 		<PlexLogin bind:plexUrl bind:plexTokenSet {onLogin} />
 
-		<details bind:open={manualOpen} class="border-t border-neutral-800 pt-3">
-			<summary class="cursor-pointer text-sm text-neutral-400 hover:text-neutral-200">
+		<details bind:open={manualOpen} class="border-t border-border pt-3">
+			<summary class="cursor-pointer text-sm text-text-muted hover:text-text-strong">
 				{m.settings_advanced_manual()}
 			</summary>
 			<div class="mt-3">
@@ -108,8 +108,8 @@
 			{onLogin}
 		/>
 
-		<details bind:open={manualOpen} class="border-t border-neutral-800 pt-3">
-			<summary class="cursor-pointer text-sm text-neutral-400 hover:text-neutral-200">
+		<details bind:open={manualOpen} class="border-t border-border pt-3">
+			<summary class="cursor-pointer text-sm text-text-muted hover:text-text-strong">
 				{m.settings_advanced_manual()}
 			</summary>
 			<div class="mt-3 space-y-4">
@@ -153,8 +153,8 @@
 	<div class="surface space-y-4 p-4">
 		<EmbyLogin flavor="emby" bind:serverUrl={embyUrl} bind:apiKeySet={embyApiKeySet} {onLogin} />
 
-		<details bind:open={manualOpen} class="border-t border-neutral-800 pt-3">
-			<summary class="cursor-pointer text-sm text-neutral-400 hover:text-neutral-200">
+		<details bind:open={manualOpen} class="border-t border-border pt-3">
+			<summary class="cursor-pointer text-sm text-text-muted hover:text-text-strong">
 				{m.settings_advanced_manual()}
 			</summary>
 			<div class="mt-3 space-y-4">
@@ -214,19 +214,19 @@
 		</p>
 	{/if}
 	{#if sections.length === 0}
-		<p class="text-xs text-neutral-400">{m.settings_libraries_connect_first()}</p>
+		<p class="text-xs text-text-muted">{m.settings_libraries_connect_first()}</p>
 	{:else}
-		<p class="mb-2 text-xs text-neutral-400">{m.settings_libraries_hint()}</p>
+		<p class="mb-2 text-xs text-text-muted">{m.settings_libraries_hint()}</p>
 		<div class="space-y-1">
 			{#each sections as section (section.key)}
-				<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<label class="flex items-center gap-2 text-sm text-text-secondary">
 					<input
 						type="checkbox"
 						checked={selectedSections.has(section.key)}
 						onchange={() => onToggleSection(section.key)}
 					/>
 					{section.title}
-					<span class="text-xs text-neutral-400">
+					<span class="text-xs text-text-muted">
 						({section.type === 'movie' ? m.manual_match_type_movie() : m.manual_match_type_show()})
 					</span>
 				</label>

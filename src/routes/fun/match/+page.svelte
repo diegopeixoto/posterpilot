@@ -69,12 +69,12 @@
 <section class="space-y-6">
 	<header>
 		<h2 class="text-xl font-semibold tracking-tight text-white">{m.fun_match_title()}</h2>
-		<p class="mt-1 text-sm text-neutral-400">{m.fun_match_subtitle()}</p>
+		<p class="mt-1 text-sm text-text-muted">{m.fun_match_subtitle()}</p>
 	</header>
 
 	<form method="GET" action="/fun/match" class="surface flex flex-wrap items-end gap-3 p-5">
 		<label class="min-w-64 flex-1">
-			<span class="mb-1 block text-xs text-neutral-400">{m.fun_match_item()}</span>
+			<span class="mb-1 block text-xs text-text-muted">{m.fun_match_item()}</span>
 			<select
 				name="item"
 				value={data.selectedItem?.id ?? ''}
@@ -93,10 +93,10 @@
 	</form>
 
 	{#if data.items.length === 0}
-		<div class="surface p-8 text-center text-sm text-neutral-400">{m.fun_match_no_items()}</div>
+		<div class="surface p-8 text-center text-sm text-text-muted">{m.fun_match_no_items()}</div>
 	{:else if data.selectedItem && pair.length === 2}
 		<div
-			class="flex flex-wrap items-center justify-between gap-3 text-sm text-neutral-400"
+			class="flex flex-wrap items-center justify-between gap-3 text-sm text-text-muted"
 			role="status"
 			aria-live="polite"
 			aria-atomic="true"
@@ -117,7 +117,7 @@
 					})}
 					class="surface group overflow-hidden text-left transition hover:border-accent-600 focus-visible:border-accent-500"
 				>
-					<div class="aspect-[2/3] overflow-hidden bg-neutral-950">
+					<div class="aspect-[2/3] overflow-hidden bg-background">
 						<img
 							src={`/api/thumb?url=${encodeURIComponent(candidate!.previewUrl ?? candidate!.url)}`}
 							alt=""
@@ -125,7 +125,7 @@
 							class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
 						/>
 					</div>
-					<div class="flex items-center justify-between gap-3 p-3 text-xs text-neutral-400">
+					<div class="flex items-center justify-between gap-3 p-3 text-xs text-text-muted">
 						<span>{candidate!.provider}</span>
 						<span>{candidate!.setAuthor ?? m.item_set_unattributed()}</span>
 					</div>
@@ -141,7 +141,7 @@
 			/>
 			<div class="space-y-3 p-5 text-center">
 				<h3 class="text-lg font-semibold text-white">{m.fun_match_winner()}</h3>
-				<p class="text-sm text-neutral-400">{m.fun_match_stage_hint()}</p>
+				<p class="text-sm text-text-muted">{m.fun_match_stage_hint()}</p>
 				<div class="flex flex-wrap justify-center gap-2">
 					<button
 						type="button"
@@ -165,6 +165,6 @@
 			</div>
 		</div>
 	{:else if data.selectedItem}
-		<div class="surface p-8 text-center text-sm text-neutral-400">{m.fun_match_unavailable()}</div>
+		<div class="surface p-8 text-center text-sm text-text-muted">{m.fun_match_unavailable()}</div>
 	{/if}
 </section>

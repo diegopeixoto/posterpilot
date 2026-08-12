@@ -295,7 +295,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3">
 	<div>
 		<h1 class="text-2xl font-semibold tracking-tight">{m.review_title()}</h1>
-		<p class="mt-1 text-sm text-neutral-400">
+		<p class="mt-1 text-sm text-text-muted">
 			{m.review_summary({ count: data.total })}
 		</p>
 	</div>
@@ -336,7 +336,7 @@
 
 {#if savingView}
 	<div id="review-save-view" class="surface mt-4 flex flex-wrap items-end gap-2 p-3">
-		<label class="min-w-56 flex-1 text-xs text-neutral-400">
+		<label class="min-w-56 flex-1 text-xs text-text-muted">
 			{m.review_view_name()}
 			<input class="input mt-1 w-full" maxlength="60" bind:value={viewName} />
 		</label>
@@ -383,7 +383,7 @@
 	</div>
 
 	<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-		<label class="text-xs text-neutral-400">
+		<label class="text-xs text-text-muted">
 			{m.review_server()}
 			<select
 				class="input mt-1 w-full"
@@ -395,7 +395,7 @@
 				{/each}
 			</select>
 		</label>
-		<label class="text-xs text-neutral-400">
+		<label class="text-xs text-text-muted">
 			{m.review_library()}
 			<select
 				class="input mt-1 w-full"
@@ -412,7 +412,7 @@
 				{/each}
 			</select>
 		</label>
-		<label class="text-xs text-neutral-400">
+		<label class="text-xs text-text-muted">
 			{m.review_media_type()}
 			<select
 				class="input mt-1 w-full"
@@ -424,7 +424,7 @@
 				<option value="show">{m.manual_match_type_show()}</option>
 			</select>
 		</label>
-		<label class="text-xs text-neutral-400">
+		<label class="text-xs text-text-muted">
 			{m.review_availability()}
 			<select
 				class="input mt-1 w-full"
@@ -437,7 +437,7 @@
 				<option value="none">{m.review_availability_none()}</option>
 			</select>
 		</label>
-		<label class="text-xs text-neutral-400">
+		<label class="text-xs text-text-muted">
 			{m.coverage_filter_label()}
 			<!--
 				Coverage sits with the availability filters, not with the state chips
@@ -457,7 +457,7 @@
 				{/each}
 			</select>
 		</label>
-		<label class="text-xs text-neutral-400">
+		<label class="text-xs text-text-muted">
 			{m.review_sort()}
 			<select
 				class="input mt-1 w-full"
@@ -473,7 +473,7 @@
 		<!-- Seven controls in a six-column grid: search takes the second row's slack
 		     rather than leaving a lone narrow field beside five empty cells. -->
 		<form
-			class="text-xs text-neutral-400 lg:col-span-2"
+			class="text-xs text-text-muted lg:col-span-2"
 			onsubmit={(event) => {
 				event.preventDefault();
 				void setFilter('q', query.trim());
@@ -498,7 +498,7 @@
 		{#if data.coverage}
 			<!-- The generic hint sends people to sync or discovery, which is the wrong
 			     advice when the inbox is full and only this filter is empty. -->
-			<p class="text-sm text-neutral-300">{m.coverage_empty_filtered()}</p>
+			<p class="text-sm text-text-secondary">{m.coverage_empty_filtered()}</p>
 			<div class="mt-4 flex flex-wrap items-center justify-center gap-2">
 				<button
 					type="button"
@@ -516,8 +516,8 @@
 				{/if}
 			</div>
 		{:else}
-			<p class="text-sm text-neutral-300">{m.review_empty()}</p>
-			<p class="mt-1 text-xs text-neutral-500">{m.review_empty_hint()}</p>
+			<p class="text-sm text-text-secondary">{m.review_empty()}</p>
+			<p class="mt-1 text-xs text-text-faint">{m.review_empty_hint()}</p>
 		{/if}
 	</div>
 {:else}
@@ -538,7 +538,7 @@
 							</h2>
 							<span class={stateClass(entry.item.state)}>{stateLabel(entry.item.state)}</span>
 						</div>
-						<p class="mt-1 text-xs text-neutral-400">
+						<p class="mt-1 text-xs text-text-muted">
 							{entry.item.year ?? m.manual_match_year_unknown()} · {entry.item.type === 'movie'
 								? m.manual_match_type_movie()
 								: m.manual_match_type_show()} · {entry.item.sectionKey}
@@ -549,13 +549,13 @@
 
 				<div class="mt-4 grid gap-4 xl:grid-cols-2">
 					<div>
-						<h3 class="mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+						<h3 class="mb-2 text-xs font-semibold tracking-wide text-text-muted uppercase">
 							{m.review_compare_poster()}
 						</h3>
 						<div class="grid grid-cols-3 gap-2">
 							<div>
-								<p class="mb-1 text-[10px] text-neutral-500">{m.review_current()}</p>
-								<div class="overflow-hidden rounded border border-neutral-800 bg-neutral-950">
+								<p class="mb-1 text-[10px] text-text-faint">{m.review_current()}</p>
+								<div class="overflow-hidden rounded border border-border bg-background">
 									{#if entry.item.hasCurrentPoster}
 										<img
 											src={`/api/artwork/${entry.item.id}/poster?v=${entry.item.currentPosterFingerprint ?? entry.item.artworkVersion}`}
@@ -563,15 +563,15 @@
 											class="aspect-[2/3] w-full object-cover"
 										/>
 									{:else}<div
-											class="flex aspect-[2/3] items-center justify-center p-2 text-center text-[10px] text-neutral-500"
+											class="flex aspect-[2/3] items-center justify-center p-2 text-center text-[10px] text-text-faint"
 										>
 											{m.item_no_poster()}
 										</div>{/if}
 								</div>
 							</div>
 							<div>
-								<p class="mb-1 text-[10px] text-neutral-500">{m.review_suggested()}</p>
-								<div class="overflow-hidden rounded border border-accent-900/60 bg-neutral-950">
+								<p class="mb-1 text-[10px] text-text-faint">{m.review_suggested()}</p>
+								<div class="overflow-hidden rounded border border-accent-900/60 bg-background">
 									{#if entry.suggestion.poster}
 										<img
 											src={proxied(
@@ -581,20 +581,20 @@
 											class="aspect-[2/3] w-full object-cover"
 										/>
 									{:else}<div
-											class="flex aspect-[2/3] items-center justify-center p-2 text-center text-[10px] text-neutral-500"
+											class="flex aspect-[2/3] items-center justify-center p-2 text-center text-[10px] text-text-faint"
 										>
 											{m.review_none()}
 										</div>{/if}
 								</div>
-								{#if entry.suggestion.poster}<p class="mt-1 truncate text-[10px] text-neutral-500">
+								{#if entry.suggestion.poster}<p class="mt-1 truncate text-[10px] text-text-faint">
 										{entry.suggestion.poster.provider}{entry.suggestion.poster.stale
 											? ` · ${m.review_stale()}`
 											: ''}
 									</p>{/if}
 							</div>
 							<div>
-								<p class="mb-1 text-[10px] text-neutral-500">{m.review_staged()}</p>
-								<div class="overflow-hidden rounded border border-neutral-700 bg-neutral-950">
+								<p class="mb-1 text-[10px] text-text-faint">{m.review_staged()}</p>
+								<div class="overflow-hidden rounded border border-border-strong bg-background">
 									{#if entry.item.selectedPosterPreviewUrl}
 										<img
 											src={proxied(entry.item.selectedPosterPreviewUrl)}
@@ -602,7 +602,7 @@
 											class="aspect-[2/3] w-full object-cover"
 										/>
 									{:else}<div
-											class="flex aspect-[2/3] items-center justify-center p-2 text-center text-[10px] text-neutral-500"
+											class="flex aspect-[2/3] items-center justify-center p-2 text-center text-[10px] text-text-faint"
 										>
 											{m.review_none()}
 										</div>{/if}
@@ -613,20 +613,20 @@
 
 					{#if entry.item.hasCurrentBackground || entry.suggestion.background || entry.item.selectedBackgroundUrl}
 						<div>
-							<h3 class="mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+							<h3 class="mb-2 text-xs font-semibold tracking-wide text-text-muted uppercase">
 								{m.review_compare_background()}
 							</h3>
 							<div class="grid grid-cols-3 gap-2">
 								{#each [{ label: m.review_current(), url: entry.item.hasCurrentBackground ? `/api/artwork/${entry.item.id}/background?v=${entry.item.currentBackgroundFingerprint ?? entry.item.artworkVersion}` : null }, { label: m.review_suggested(), url: proxied(entry.suggestion.background ? (entry.suggestion.background.previewUrl ?? entry.suggestion.background.url) : null) }, { label: m.review_staged(), url: proxied(entry.item.selectedBackgroundPreviewUrl) }] as image (image.label)}
 									<div>
-										<p class="mb-1 text-[10px] text-neutral-500">{image.label}</p>
-										<div class="overflow-hidden rounded border border-neutral-800 bg-neutral-950">
+										<p class="mb-1 text-[10px] text-text-faint">{image.label}</p>
+										<div class="overflow-hidden rounded border border-border bg-background">
 											{#if image.url}<img
 													src={image.url}
 													alt=""
 													class="aspect-video w-full object-cover"
 												/>{:else}<div
-													class="flex aspect-video items-center justify-center text-[10px] text-neutral-500"
+													class="flex aspect-video items-center justify-center text-[10px] text-text-faint"
 												>
 													{m.review_none()}
 												</div>{/if}
@@ -651,7 +651,7 @@
 					</div>
 				{/if}
 
-				<div class="mt-4 flex flex-wrap gap-2 border-t border-neutral-800 pt-3">
+				<div class="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
 					{#if entry.suggestion.poster || entry.suggestion.background}
 						<button
 							type="button"
@@ -711,7 +711,7 @@
 			onclick={() => setFilter('offset', String(Math.max(0, data.filter.offset - data.pageSize)))}
 			>{m.review_previous()}</button
 		>
-		<span class="text-xs text-neutral-400"
+		<span class="text-xs text-text-muted"
 			>{m.review_range({
 				start: data.filter.offset + 1,
 				end: Math.min(data.total, data.filter.offset + data.items.length),

@@ -129,14 +129,14 @@
 <section class="space-y-6">
 	<header>
 		<h2 class="text-xl font-semibold tracking-tight text-white">{m.fun_gallery_title()}</h2>
-		<p class="mt-1 text-sm text-neutral-400">{m.fun_gallery_subtitle()}</p>
+		<p class="mt-1 text-sm text-text-muted">{m.fun_gallery_subtitle()}</p>
 	</header>
 
 	<form method="GET" action="/fun/gallery" class="surface space-y-4 p-5">
 		<input type="hidden" name="seed" value={data.seed} />
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
 			<label>
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_gallery_artwork()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_gallery_artwork()}</span>
 				<select
 					name="artwork"
 					value={data.mode}
@@ -149,7 +149,7 @@
 				</select>
 			</label>
 			<label>
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_gallery_interval()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_gallery_interval()}</span>
 				<select
 					name="interval"
 					value={data.intervalSeconds}
@@ -162,7 +162,7 @@
 				</select>
 			</label>
 			<label>
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_library_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_library_label()}</span>
 				<select
 					name="library"
 					value={data.filter.librarySectionKey ?? ''}
@@ -176,7 +176,7 @@
 				</select>
 			</label>
 			<label>
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_type_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_type_label()}</span>
 				<select
 					name="type"
 					value={data.filter.type ?? ''}
@@ -189,7 +189,7 @@
 				</select>
 			</label>
 			<label>
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_genre_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_genre_label()}</span>
 				<select
 					name="genre"
 					value={data.filter.genre ?? ''}
@@ -201,8 +201,8 @@
 				</select>
 			</label>
 		</div>
-		<div class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 pt-4">
-			<p class="text-xs text-neutral-500">{m.fun_gallery_count({ count: data.slides.length })}</p>
+		<div class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+			<p class="text-xs text-text-faint">{m.fun_gallery_count({ count: data.slides.length })}</p>
 			<div class="flex gap-2">
 				<button type="submit" class="btn btn-ghost">{m.library_apply_filters()}</button>
 				<button
@@ -226,7 +226,7 @@
 				class="aspect-video w-full object-cover opacity-70"
 			/>
 		{:else}
-			<div class="p-10 text-center text-sm text-neutral-400">{m.fun_gallery_empty()}</div>
+			<div class="p-10 text-center text-sm text-text-muted">{m.fun_gallery_empty()}</div>
 		{/if}
 	</div>
 </section>
@@ -238,7 +238,7 @@
 		aria-modal="true"
 		aria-label={m.fun_gallery_title()}
 		tabindex="-1"
-		class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black"
+		class="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-scrim"
 	>
 		{#if current && !failed.has(current.id)}
 			<img
@@ -253,28 +253,28 @@
 				class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-6 pt-24"
 			>
 				<p class="text-lg font-medium text-white">{current.title}</p>
-				<p class="mt-1 text-xs text-neutral-400">{index + 1} / {data.slides.length}</p>
+				<p class="mt-1 text-xs text-text-muted">{index + 1} / {data.slides.length}</p>
 			</div>
 		{:else}
-			<p class="px-6 text-center text-sm text-neutral-300">{m.fun_gallery_empty()}</p>
+			<p class="px-6 text-center text-sm text-text-secondary">{m.fun_gallery_empty()}</p>
 		{/if}
 		<div class="absolute top-4 right-4 flex gap-2">
 			<button
 				type="button"
 				onclick={() => move(-1)}
-				class="btn bg-black/70"
+				class="btn bg-scrim/70"
 				aria-label={m.fun_gallery_previous()}>←</button
 			>
-			<button type="button" onclick={togglePlayback} aria-pressed={paused} class="btn bg-black/70">
+			<button type="button" onclick={togglePlayback} aria-pressed={paused} class="btn bg-scrim/70">
 				{paused ? m.fun_gallery_play() : m.fun_gallery_pause()}
 			</button>
 			<button
 				type="button"
 				onclick={() => move(1)}
-				class="btn bg-black/70"
+				class="btn bg-scrim/70"
 				aria-label={m.fun_gallery_next()}>→</button
 			>
-			<button type="button" onclick={closeGallery} class="btn bg-black/70"
+			<button type="button" onclick={closeGallery} class="btn bg-scrim/70"
 				>{m.whats_new_close()}</button
 			>
 		</div>

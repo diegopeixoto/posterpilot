@@ -371,7 +371,7 @@
 	aria-busy={loading || busy}
 >
 	<header
-		class="border-b border-neutral-800 bg-gradient-to-r from-accent-950/25 to-transparent px-5 py-4"
+		class="border-b border-border bg-gradient-to-r from-accent-950/25 to-transparent px-5 py-4"
 	>
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
@@ -381,7 +381,7 @@
 				<h2 id="native-collection-title" class="mt-1 text-lg font-semibold tracking-tight">
 					{m.native_collection_title()}
 				</h2>
-				<p class="mt-1 max-w-3xl text-sm text-neutral-400">{m.native_collection_hint()}</p>
+				<p class="mt-1 max-w-3xl text-sm text-text-muted">{m.native_collection_hint()}</p>
 			</div>
 			<span class="badge badge-info">{m.collection_apply_review_first()}</span>
 		</div>
@@ -389,18 +389,18 @@
 
 	<div class="p-5">
 		{#if loading}
-			<p class="text-sm text-neutral-400" role="status">{m.native_collection_loading()}</p>
+			<p class="text-sm text-text-muted" role="status">{m.native_collection_loading()}</p>
 		{:else if errorCode && !workspace}
 			<p class="text-sm text-red-300" role="alert">{errorMessage(errorCode)}</p>
 		{:else if workspace && !workspace.entity.available}
-			<div class="rounded-lg border border-neutral-800 bg-neutral-950/50 p-4">
-				<p class="text-sm text-neutral-300">{entityMessage(workspace.entity.reason)}</p>
-				<p class="mt-2 text-xs text-neutral-500">{m.native_collection_member_unaffected()}</p>
+			<div class="rounded-lg border border-border bg-background/50 p-4">
+				<p class="text-sm text-text-secondary">{entityMessage(workspace.entity.reason)}</p>
+				<p class="mt-2 text-xs text-text-faint">{m.native_collection_member_unaffected()}</p>
 			</div>
 		{:else if workspace}
 			{#if !workspace.candidateSource.available}
 				<p
-					class="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/50 p-3 text-xs text-neutral-400"
+					class="mb-4 rounded-lg border border-border bg-background/50 p-3 text-xs text-text-muted"
 				>
 					{candidateSourceMessage(workspace.candidateSource.reason)}
 				</p>
@@ -410,7 +410,7 @@
 				{#each workspace.slots as entry (entry.kind)}
 					<article aria-labelledby={`native-slot-${entry.kind}`}>
 						<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-							<h3 id={`native-slot-${entry.kind}`} class="text-sm font-semibold text-neutral-200">
+							<h3 id={`native-slot-${entry.kind}`} class="text-sm font-semibold text-text-strong">
 								{slotLabel(entry.kind)}
 							</h3>
 							<span
@@ -438,11 +438,11 @@
 
 						<div class="flex gap-3 overflow-x-auto pb-2">
 							<div class={`shrink-0 ${entry.kind === 'poster' ? 'w-32' : 'w-48'}`}>
-								<p class="mb-1.5 text-[10px] font-medium tracking-wide text-neutral-500 uppercase">
+								<p class="mb-1.5 text-[10px] font-medium tracking-wide text-text-faint uppercase">
 									{m.collection_current()}
 								</p>
 								<div
-									class={`overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 ${entry.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'}`}
+									class={`overflow-hidden rounded-lg border border-border bg-background ${entry.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'}`}
 								>
 									{#if entry.current.hasPreview}
 										<img
@@ -452,7 +452,7 @@
 										/>
 									{:else}
 										<span
-											class="flex h-full items-center justify-center p-3 text-center text-[11px] text-neutral-600"
+											class="flex h-full items-center justify-center p-3 text-center text-[11px] text-text-faint"
 										>
 											{m.collection_no_artwork()}
 										</span>
@@ -463,7 +463,7 @@
 							{#each entry.candidates as candidate, index (candidate.id)}
 								<button
 									type="button"
-									class={`group relative shrink-0 overflow-hidden rounded-lg border text-left transition-colors ${entry.kind === 'poster' ? 'aspect-[2/3] w-32' : 'aspect-video w-56'} ${selected[entry.kind] === candidate.id ? 'border-accent-400 ring-2 ring-accent-600/50' : 'border-neutral-800 hover:border-neutral-600'}`}
+									class={`group relative shrink-0 overflow-hidden rounded-lg border text-left transition-colors ${entry.kind === 'poster' ? 'aspect-[2/3] w-32' : 'aspect-video w-56'} ${selected[entry.kind] === candidate.id ? 'border-accent-400 ring-2 ring-accent-600/50' : 'border-border hover:border-border-hover'}`}
 									disabled={entry.capability !== 'supported' ||
 										entry.current.state === 'unavailable'}
 									aria-pressed={selected[entry.kind] === candidate.id}
@@ -483,7 +483,7 @@
 										class="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
 									/>
 									<span
-										class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pt-6 pb-2 text-[10px] text-neutral-200"
+										class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-2 pt-6 pb-2 text-[10px] text-text-strong"
 									>
 										{candidateProviderLabel(candidate.provider)}{candidate.language
 											? ` · ${candidate.language}`
@@ -501,7 +501,7 @@
 				{/each}
 			</div>
 
-			<div class="mt-5 border-t border-neutral-800 pt-4">
+			<div class="mt-5 border-t border-border pt-4">
 				<div class="flex flex-wrap items-center gap-3">
 					<button
 						type="button"
@@ -511,7 +511,7 @@
 					>
 						{busy ? m.collection_apply_previewing() : m.collection_apply_preview()}
 					</button>
-					<p class="text-xs text-neutral-500">{m.native_collection_member_unaffected()}</p>
+					<p class="text-xs text-text-faint">{m.native_collection_member_unaffected()}</p>
 				</div>
 				{#if errorCode}
 					<p class="mt-3 text-sm text-red-300" role="alert">{errorMessage(errorCode)}</p>
@@ -534,7 +534,7 @@
 			{#if preview}
 				<div class="mt-4 rounded-xl border border-accent-900/60 bg-accent-950/15 p-4">
 					<h3 class="text-sm font-semibold">{m.native_collection_preview_title()}</h3>
-					<p class="mt-1 text-xs text-neutral-400">
+					<p class="mt-1 text-xs text-text-muted">
 						{m.native_collection_preview_summary({
 							writes: preview.summary.operationCount,
 							skips: preview.summary.skipCount
@@ -574,18 +574,18 @@
 				</div>
 			{/if}
 
-			<div class="mt-7 border-t border-neutral-800 pt-5">
+			<div class="mt-7 border-t border-border pt-5">
 				<h3 class="text-sm font-semibold">{m.native_collection_history_title()}</h3>
 				{#if historyGroups.length === 0}
-					<p class="mt-2 text-sm text-neutral-500">{m.native_collection_history_empty()}</p>
+					<p class="mt-2 text-sm text-text-faint">{m.native_collection_history_empty()}</p>
 				{:else}
 					<ul class="mt-3 space-y-2">
 						{#each historyGroups as group (group.id)}
-							<li class="rounded-lg border border-neutral-800 bg-neutral-950/40 p-3">
+							<li class="rounded-lg border border-border bg-background/40 p-3">
 								<div class="flex flex-wrap items-center justify-between gap-3">
 									<div>
-										<p class="text-xs font-medium text-neutral-200">{date(group.createdAt)}</p>
-										<p class="mt-1 text-[11px] text-neutral-500">{statusLabel(group.outcome)}</p>
+										<p class="text-xs font-medium text-text-strong">{date(group.createdAt)}</p>
+										<p class="mt-1 text-[11px] text-text-faint">{statusLabel(group.outcome)}</p>
 									</div>
 									{#if group.entries.some((entry) => entry.undoAvailable)}
 										<button
@@ -598,11 +598,11 @@
 										</button>
 									{/if}
 								</div>
-								<ul class="mt-3 space-y-1 border-t border-neutral-800 pt-3">
+								<ul class="mt-3 space-y-1 border-t border-border pt-3">
 									{#each group.entries as entry (entry.id)}
 										<li class="flex flex-wrap items-center justify-between gap-3 py-1">
 											<div class="flex flex-wrap items-center gap-2">
-												<span class="text-xs text-neutral-300">
+												<span class="text-xs text-text-secondary">
 													{m.native_collection_history_entry({
 														slot: slotLabel(entry.kind),
 														status: statusLabel(entry.outcome)

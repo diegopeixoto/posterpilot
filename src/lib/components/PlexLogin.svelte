@@ -147,7 +147,7 @@
 				{m.settings_plex_account()}
 				<span class="badge badge-changed ml-1">{m.settings_plex_recommended()}</span>
 			</p>
-			<p class="text-xs text-neutral-400">
+			<p class="text-xs text-text-muted">
 				{plexTokenSet ? m.settings_plex_token_set() : m.settings_plex_login_hint()}
 			</p>
 		</div>
@@ -184,7 +184,7 @@
 		{#if login.status === 'pending'}
 			{#if tabBlocked}
 				<!-- New tab blocked: show the full manual plex.tv/link fallback. -->
-				<div class="rounded-md border border-neutral-800 bg-black/40 p-3 text-sm">
+				<div class="rounded-md border border-border bg-scrim/40 p-3 text-sm">
 					<p class="mb-2 text-amber-300">{m.settings_plex_tab_blocked()}</p>
 					<p>
 						{m.settings_plex_open_link_pre()}
@@ -194,7 +194,7 @@
 						{m.settings_plex_open_link_post()}
 					</p>
 					<p class="mt-2 font-mono text-2xl tracking-widest text-accent-200">{login.code}</p>
-					<p class="mt-2 text-xs text-neutral-400">
+					<p class="mt-2 text-xs text-text-muted">
 						{m.settings_plex_or_authorize_pre()}
 						<a href={login.authUrl} target="_blank" rel="noopener" class="text-accent-300 underline"
 							>{m.settings_plex_authorize_directly()}</a
@@ -203,10 +203,10 @@
 				</div>
 			{:else}
 				<!-- Tab open: keep the manual code one disclosure away as a fallback. -->
-				<div class="rounded-md border border-neutral-800 bg-black/40 p-3 text-sm">
-					<p class="text-neutral-300">{m.settings_plex_tab_waiting()}</p>
-					<details class="mt-2 text-xs text-neutral-400">
-						<summary class="cursor-pointer select-none hover:text-neutral-200">
+				<div class="rounded-md border border-border bg-scrim/40 p-3 text-sm">
+					<p class="text-text-secondary">{m.settings_plex_tab_waiting()}</p>
+					<details class="mt-2 text-xs text-text-muted">
+						<summary class="cursor-pointer select-none hover:text-text-strong">
 							{m.settings_plex_enter_code_manually()}
 						</summary>
 						<div class="mt-2">
@@ -272,11 +272,11 @@
 						class="flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left text-xs transition {plexUrl ===
 						conn.uri
 							? 'border-accent-600 bg-accent-950/60'
-							: 'border-neutral-700 hover:border-neutral-500'}"
+							: 'border-border-strong hover:border-border-hover'}"
 					>
 						<span class="truncate">
-							<span class="text-neutral-200">{conn.serverName}</span>
-							<span class="ml-1 text-neutral-400">{conn.uri}</span>
+							<span class="text-text-strong">{conn.serverName}</span>
+							<span class="ml-1 text-text-muted">{conn.uri}</span>
 						</span>
 						<span class="ml-2 flex shrink-0 gap-1">
 							<span class="badge {conn.local ? 'badge-changed' : 'badge-muted'}">

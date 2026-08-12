@@ -208,10 +208,10 @@
 		role="group"
 		aria-labelledby="full-rescan-confirm-title"
 	>
-		<h2 id="full-rescan-confirm-title" class="text-sm font-semibold text-neutral-100">
+		<h2 id="full-rescan-confirm-title" class="text-sm font-semibold text-text-bright">
 			{m.dashboard_full_rescan_confirm_title()}
 		</h2>
-		<p class="mt-1 max-w-3xl text-xs text-neutral-400">
+		<p class="mt-1 max-w-3xl text-xs text-text-muted">
 			{m.dashboard_full_rescan_confirm_hint()}
 		</p>
 		<div class="mt-3 flex flex-wrap gap-2">
@@ -236,7 +236,7 @@
 
 {#if syncMessage}
 	<p
-		class="mt-3 text-sm {syncMessageError ? 'text-red-300' : 'text-neutral-300'}"
+		class="mt-3 text-sm {syncMessageError ? 'text-red-300' : 'text-text-secondary'}"
 		role={syncMessageError ? 'alert' : 'status'}
 		aria-live="polite"
 	>
@@ -258,9 +258,9 @@
 	<div class="flex flex-wrap items-end justify-between gap-2">
 		<div>
 			<h2 id="dashboard-next-actions" class="section-title">{m.dashboard_next_actions()}</h2>
-			<p class="mt-1 text-xs text-neutral-400">{m.dashboard_next_actions_hint()}</p>
+			<p class="mt-1 text-xs text-text-muted">{m.dashboard_next_actions_hint()}</p>
 		</div>
-		<a class="text-xs text-neutral-400 hover:text-accent-200" href={reviewUrl({ attention: true })}>
+		<a class="text-xs text-text-muted hover:text-accent-200" href={reviewUrl({ attention: true })}>
 			{m.dashboard_open_review()} →
 		</a>
 	</div>
@@ -270,7 +270,7 @@
 			{#each nextActions as action (action.state)}
 				<a
 					href={reviewUrl({ state: action.state })}
-					class="surface group p-4 transition hover:-translate-y-0.5 hover:border-neutral-600 motion-reduce:transform-none {action.tone ===
+					class="surface group p-4 transition hover:-translate-y-0.5 hover:border-border-hover motion-reduce:transform-none {action.tone ===
 					'danger'
 						? 'border-red-900/60'
 						: action.tone === 'warning'
@@ -280,13 +280,13 @@
 								: ''}"
 				>
 					<div class="flex items-start justify-between gap-3">
-						<p class="text-sm font-medium text-neutral-200">{action.label}</p>
-						<span class="text-neutral-500 transition group-hover:text-accent-300" aria-hidden="true"
+						<p class="text-sm font-medium text-text-strong">{action.label}</p>
+						<span class="text-text-faint transition group-hover:text-accent-300" aria-hidden="true"
 							>↗</span
 						>
 					</div>
-					<p class="mt-2 text-3xl font-semibold tabular-nums text-neutral-50">{action.count}</p>
-					<p class="mt-1 text-xs text-neutral-400">{action.hint}</p>
+					<p class="mt-2 text-3xl font-semibold tabular-nums text-text">{action.count}</p>
+					<p class="mt-1 text-xs text-text-muted">{action.hint}</p>
 				</a>
 			{/each}
 			{#if data.review.failedJobs > 0}
@@ -295,29 +295,29 @@
 					class="surface group border-red-900/60 p-4 transition hover:-translate-y-0.5 hover:border-red-700 motion-reduce:transform-none"
 				>
 					<div class="flex items-start justify-between gap-3">
-						<p class="text-sm font-medium text-neutral-200">{m.dashboard_failed_jobs()}</p>
-						<span class="text-neutral-500 group-hover:text-red-300" aria-hidden="true">↗</span>
+						<p class="text-sm font-medium text-text-strong">{m.dashboard_failed_jobs()}</p>
+						<span class="text-text-faint group-hover:text-red-300" aria-hidden="true">↗</span>
 					</div>
 					<p class="mt-2 text-3xl font-semibold tabular-nums text-red-200">
 						{data.review.failedJobs}
 					</p>
-					<p class="mt-1 text-xs text-neutral-400">{m.dashboard_failed_jobs_hint()}</p>
+					<p class="mt-1 text-xs text-text-muted">{m.dashboard_failed_jobs_hint()}</p>
 				</a>
 			{/if}
 		</div>
 	{:else}
 		<div class="surface mt-3 p-5">
-			<p class="text-sm font-medium text-neutral-200">{m.dashboard_all_clear()}</p>
-			<p class="mt-1 text-xs text-neutral-400">{m.dashboard_all_clear_hint()}</p>
+			<p class="text-sm font-medium text-text-strong">{m.dashboard_all_clear()}</p>
+			<p class="mt-1 text-xs text-text-muted">{m.dashboard_all_clear_hint()}</p>
 		</div>
 	{/if}
 
 	{#if data.review.libraries.length > 0}
 		<div class="mt-4 flex flex-wrap items-center gap-2">
-			<span class="text-xs text-neutral-500">{m.dashboard_by_library()}</span>
+			<span class="text-xs text-text-faint">{m.dashboard_by_library()}</span>
 			{#each data.review.libraries as library (library.sectionKey)}
 				<a
-					class="chip hover:border-neutral-600"
+					class="chip hover:border-border-hover"
 					href={reviewUrl({ library: library.sectionKey, attention: true })}
 				>
 					{library.sectionKey} · {m.dashboard_actionable_count({
@@ -338,28 +338,28 @@
 			<p
 				class="font-semibold tabular-nums {i === 0
 					? 'text-4xl text-accent-300'
-					: 'text-2xl text-neutral-100'}"
+					: 'text-2xl text-text-bright'}"
 			>
 				{card.value}
 			</p>
-			<p class="text-xs text-neutral-400">{card.label}</p>
+			<p class="text-xs text-text-muted">{card.label}</p>
 		</div>
 	{/each}
 </div>
 
 <div class="mt-8 flex items-center justify-between">
 	<h2 class="section-title">{m.dashboard_recent_jobs()}</h2>
-	<a href="/settings?tab=activity" class="text-xs text-neutral-400 hover:text-accent-200"
+	<a href="/settings?tab=activity" class="text-xs text-text-muted hover:text-accent-200"
 		>{m.dashboard_view_activity()}</a
 	>
 </div>
 <div class="surface overflow-hidden">
 	{#if recentJobs.length === 0}
-		<p class="p-4 text-sm text-neutral-400">{m.dashboard_no_jobs()}</p>
+		<p class="p-4 text-sm text-text-muted">{m.dashboard_no_jobs()}</p>
 	{:else}
 		<table class="w-full text-sm">
-			<thead class="text-left text-xs text-neutral-400">
-				<tr class="border-b border-neutral-800">
+			<thead class="text-left text-xs text-text-muted">
+				<tr class="border-b border-border">
 					<th class="px-4 py-2 font-medium">{m.jobs_col_id()}</th>
 					<th class="px-4 py-2 font-medium">{m.jobs_col_type()}</th>
 					<th class="px-4 py-2 font-medium">{m.jobs_col_progress()}</th>
@@ -370,13 +370,10 @@
 			</thead>
 			<tbody>
 				{#each recentJobs as job (job.id)}
-					<tr
-						id={`job-${job.id}`}
-						class="scroll-mt-20 border-b border-neutral-800/60 last:border-0"
-					>
-						<td class="px-4 py-2 text-neutral-400">#{job.id}</td>
+					<tr id={`job-${job.id}`} class="scroll-mt-20 border-b border-border/60 last:border-0">
+						<td class="px-4 py-2 text-text-muted">#{job.id}</td>
 						<td class="px-4 py-2">{jobTypeLabel(job.type)}</td>
-						<td class="px-4 py-2 text-neutral-400">
+						<td class="px-4 py-2 text-text-muted">
 							{m.jobs_progress_count({ processed: job.processed, total: job.total })}
 						</td>
 						<td class="px-4 py-2">
@@ -389,7 +386,7 @@
 											? 'bg-amber-900/50 text-amber-200'
 											: job.status === 'running'
 												? 'bg-accent-900/50 text-accent-300'
-												: 'bg-neutral-800 text-neutral-400'}">{jobStatusLabel(job.status)}</span
+												: 'bg-surface-raised text-text-muted'}">{jobStatusLabel(job.status)}</span
 							>
 						</td>
 						<td class="px-4 py-2 text-right">
@@ -405,11 +402,8 @@
 						</td>
 					</tr>
 					{#if expandedJobIds.has(job.id)}
-						<tr
-							id={`job-row-details-${job.id}`}
-							class="border-b border-neutral-800/60 last:border-0"
-						>
-							<td colspan="5" class="bg-neutral-950/30 px-4 py-4">
+						<tr id={`job-row-details-${job.id}`} class="border-b border-border/60 last:border-0">
+							<td colspan="5" class="bg-background/30 px-4 py-4">
 								<JobDetails {job} {onRetryStarted} />
 							</td>
 						</tr>

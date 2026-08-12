@@ -307,7 +307,7 @@
 				{m.manual_match_title()}
 			</h2>
 			{#if current.tmdbId}
-				<p class="mt-1 text-xs text-neutral-400">
+				<p class="mt-1 text-xs text-text-muted">
 					{current.manualMatchPinned
 						? m.manual_match_current_manual({
 								type: mediaLabel(current.mediaType),
@@ -342,7 +342,7 @@
 	{/if}
 
 	{#if open}
-		<div class="mt-4 border-t border-neutral-800 pt-4">
+		<div class="mt-4 border-t border-border pt-4">
 			<form
 				class="grid gap-3 sm:grid-cols-[1fr_7rem_9rem_auto]"
 				onsubmit={(event) => {
@@ -351,7 +351,7 @@
 				}}
 			>
 				<div>
-					<label for={`tmdb-query-${item.id}`} class="mb-1 block text-xs text-neutral-400">
+					<label for={`tmdb-query-${item.id}`} class="mb-1 block text-xs text-text-muted">
 						{m.manual_match_query()}
 					</label>
 					<input
@@ -364,7 +364,7 @@
 					/>
 				</div>
 				<div>
-					<label for={`tmdb-year-${item.id}`} class="mb-1 block text-xs text-neutral-400">
+					<label for={`tmdb-year-${item.id}`} class="mb-1 block text-xs text-text-muted">
 						{m.manual_match_year()}
 					</label>
 					<input
@@ -383,7 +383,7 @@
 					/>
 				</div>
 				<div>
-					<label for={`tmdb-type-${item.id}`} class="mb-1 block text-xs text-neutral-400">
+					<label for={`tmdb-type-${item.id}`} class="mb-1 block text-xs text-text-muted">
 						{m.manual_match_media_type()}
 					</label>
 					<select id={`tmdb-type-${item.id}`} bind:value={searchType} class="input w-full">
@@ -409,14 +409,14 @@
 			{/if}
 
 			{#if searched && results.length === 0}
-				<p class="mt-4 text-sm text-neutral-400" role="status">{m.manual_match_empty()}</p>
+				<p class="mt-4 text-sm text-text-muted" role="status">{m.manual_match_empty()}</p>
 			{/if}
 
 			{#if results.length}
 				<ul class="mt-4 grid gap-3 lg:grid-cols-2" aria-label={m.manual_match_results()}>
 					{#each results as candidate (`${candidate.mediaType}:${candidate.tmdbId}`)}
-						<li class="flex gap-3 rounded-lg border border-neutral-800 bg-neutral-950/50 p-3">
-							<div class="w-16 flex-none overflow-hidden rounded bg-neutral-900">
+						<li class="flex gap-3 rounded-lg border border-border bg-background/50 p-3">
+							<div class="w-16 flex-none overflow-hidden rounded bg-surface">
 								{#if candidate.posterUrl}
 									<img
 										src={thumb(candidate.posterUrl)}
@@ -426,7 +426,7 @@
 									/>
 								{:else}
 									<div
-										class="flex aspect-[2/3] items-center justify-center px-1 text-center text-[10px] text-neutral-500"
+										class="flex aspect-[2/3] items-center justify-center px-1 text-center text-[10px] text-text-faint"
 									>
 										{m.manual_match_no_poster()}
 									</div>
@@ -435,8 +435,8 @@
 							<div class="min-w-0 flex-1">
 								<div class="flex items-start justify-between gap-2">
 									<div>
-										<p class="font-medium text-neutral-100">{candidate.title}</p>
-										<p class="text-xs text-neutral-400">
+										<p class="font-medium text-text-bright">{candidate.title}</p>
+										<p class="text-xs text-text-muted">
 											{mediaLabel(candidate.mediaType)} · {candidate.year ??
 												m.manual_match_year_unknown()} · TMDB {candidate.tmdbId}
 										</p>
@@ -450,12 +450,12 @@
 									</button>
 								</div>
 								{#if candidate.originalTitle && candidate.originalTitle !== candidate.title}
-									<p class="mt-1 text-xs text-neutral-500">
+									<p class="mt-1 text-xs text-text-faint">
 										{m.manual_match_original_title({ title: candidate.originalTitle })}
 									</p>
 								{/if}
 								{#if candidate.overview}
-									<p class="mt-2 line-clamp-3 text-xs text-neutral-300">{candidate.overview}</p>
+									<p class="mt-2 line-clamp-3 text-xs text-text-secondary">{candidate.overview}</p>
 								{/if}
 							</div>
 						</li>
@@ -472,10 +472,10 @@
 					<h3 id={`confirm-match-${item.id}`} class="text-sm font-semibold">
 						{m.manual_match_confirm_title()}
 					</h3>
-					<p class="mt-1 text-sm text-neutral-300">
+					<p class="mt-1 text-sm text-text-secondary">
 						{m.manual_match_confirm_body({ title: selected.title, id: selected.tmdbId })}
 					</p>
-					<p class="mt-1 text-xs text-neutral-400">{m.manual_match_confirm_hint()}</p>
+					<p class="mt-1 text-xs text-text-muted">{m.manual_match_confirm_hint()}</p>
 					<div class="mt-3 flex gap-2">
 						<button
 							type="button"
@@ -498,9 +498,9 @@
 			{/if}
 
 			{#if current.manualMatchPinned}
-				<div class="mt-5 border-t border-neutral-800 pt-4">
+				<div class="mt-5 border-t border-border pt-4">
 					<p class="text-sm font-medium">{m.manual_match_clear_title()}</p>
-					<p class="mt-1 text-xs text-neutral-400">{m.manual_match_clear_hint()}</p>
+					<p class="mt-1 text-xs text-text-muted">{m.manual_match_clear_hint()}</p>
 					<div class="mt-2 flex items-center gap-2">
 						<button
 							type="button"
@@ -519,18 +519,19 @@
 				</div>
 			{/if}
 
-			<details class="mt-5 border-t border-neutral-800 pt-4">
-				<summary class="cursor-pointer text-sm text-neutral-300">{m.manual_match_history()}</summary
+			<details class="mt-5 border-t border-border pt-4">
+				<summary class="cursor-pointer text-sm text-text-secondary"
+					>{m.manual_match_history()}</summary
 				>
 				{#if auditLoading}
-					<p class="mt-2 text-xs text-neutral-400">{m.manual_match_loading_history()}</p>
+					<p class="mt-2 text-xs text-text-muted">{m.manual_match_loading_history()}</p>
 				{:else if audits.length === 0}
-					<p class="mt-2 text-xs text-neutral-400">{m.manual_match_no_history()}</p>
+					<p class="mt-2 text-xs text-text-muted">{m.manual_match_no_history()}</p>
 				{:else}
 					<ol class="mt-2 space-y-2">
 						{#each [...audits].reverse() as audit (audit.id)}
-							<li class="text-xs text-neutral-400">
-								<span class="font-medium text-neutral-200">{auditAction(audit.action)}</span>
+							<li class="text-xs text-text-muted">
+								<span class="font-medium text-text-strong">{auditAction(audit.action)}</span>
 								{#if audit.resultingTmdbId}
 									· TMDB {audit.resultingTmdbId}{/if}
 								· {formatDate(audit.createdAt)}

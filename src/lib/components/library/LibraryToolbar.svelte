@@ -121,7 +121,7 @@
 		{/snippet}
 		<div class="space-y-3">
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.library_filter_type()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.library_filter_type()}</span>
 				<select
 					value={filter.type ?? ''}
 					onchange={(event) => onSetParam('type', valueFrom(event))}
@@ -133,7 +133,7 @@
 				</select>
 			</label>
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.library_filter_min_rating()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.library_filter_min_rating()}</span>
 				<select
 					value={filter.minRating?.toString() ?? ''}
 					onchange={(event) => onSetParam('minRating', valueFrom(event))}
@@ -148,7 +148,7 @@
 			</label>
 			{#if genres.length}
 				<label class="block">
-					<span class="mb-1 block text-xs text-neutral-400">{m.library_filter_genre()}</span>
+					<span class="mb-1 block text-xs text-text-muted">{m.library_filter_genre()}</span>
 					<select
 						value={filter.genre ?? ''}
 						onchange={(event) => onSetParam('genre', valueFrom(event))}
@@ -159,8 +159,8 @@
 					</select>
 				</label>
 			{/if}
-			<div class="space-y-1.5 border-t border-neutral-800 pt-2">
-				<label class="flex items-center gap-2 text-neutral-300">
+			<div class="space-y-1.5 border-t border-border pt-2">
+				<label class="flex items-center gap-2 text-text-secondary">
 					<input
 						type="checkbox"
 						checked={filter.hasCandidates}
@@ -172,7 +172,7 @@
 					/>
 					{m.library_filter_candidates()}
 				</label>
-				<label class="flex items-center gap-2 text-neutral-300">
+				<label class="flex items-center gap-2 text-text-secondary">
 					<input
 						type="checkbox"
 						checked={filter.hasMediux}
@@ -184,7 +184,7 @@
 					/>
 					{m.library_filter_mediux()}
 				</label>
-				<label class="flex items-center gap-2 text-neutral-300">
+				<label class="flex items-center gap-2 text-text-secondary">
 					<input
 						type="checkbox"
 						checked={filter.missingPoster}
@@ -196,7 +196,7 @@
 					/>
 					{m.library_filter_missing()}
 				</label>
-				<label class="flex items-center gap-2 text-neutral-300">
+				<label class="flex items-center gap-2 text-text-secondary">
 					<input
 						type="checkbox"
 						checked={filter.unchanged}
@@ -235,7 +235,7 @@
 		{/snippet}
 		<div class="space-y-3">
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.library_sort_button()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.library_sort_button()}</span>
 				<select
 					value={sortField}
 					onchange={(event) => onSortChange(valueFrom(event) as LibrarySort)}
@@ -262,7 +262,7 @@
 	<div
 		role="group"
 		aria-label={m.library_ignore_filter_label()}
-		class="inline-flex divide-x divide-neutral-800 overflow-hidden rounded-md border border-neutral-700"
+		class="inline-flex divide-x divide-border overflow-hidden rounded-md border border-border-strong"
 	>
 		{#each ignoreViews as view (view.value)}
 			<button
@@ -271,7 +271,7 @@
 				aria-pressed={ignoreView === view.value}
 				class="px-2.5 py-2 text-xs font-medium transition-colors {ignoreView === view.value
 					? 'bg-accent-600 text-white'
-					: 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'}"
+					: 'text-text-muted hover:bg-surface-raised hover:text-text-strong'}"
 			>
 				{view.label()}
 			</button>
@@ -284,7 +284,7 @@
 		title={m.library_autoapply()}
 		aria-label={m.library_autoapply()}
 		aria-pressed={autoApply}
-		class="btn px-2.5 py-2 {autoApply ? 'btn-accent' : 'btn-ghost text-neutral-400'}"
+		class="btn px-2.5 py-2 {autoApply ? 'btn-accent' : 'btn-ghost text-text-muted'}"
 	>
 		<svg
 			class="size-4"
@@ -301,7 +301,7 @@
 	</button>
 
 	{#if hasAnyFilter || hasSort}
-		<button type="button" onclick={onClearAll} class="text-neutral-400 hover:text-neutral-200">
+		<button type="button" onclick={onClearAll} class="text-text-muted hover:text-text-strong">
 			{m.library_clear_all()}
 		</button>
 	{/if}

@@ -22,6 +22,8 @@ import { pruneOperationPlans } from '$lib/server/plans/operation-plan-store';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { maintenanceBlocksRequest } from '$lib/server/maintenance-http';
 import { reconcileThumbCacheDisk } from '$lib/server/posters/thumb-cache';
+import { getAppearanceSettings, getCustomThemes } from '$lib/server/appearance';
+import { resolveStoredAppearance } from '$lib/theming/resolve';
 import { formatRequestError } from '$lib/server/db/error-detail';
 
 // Run database migrations once at server startup, before any request is handled.
@@ -211,9 +213,34 @@ export const handleError: HandleServerError = ({ error, event, status }) => {
 	return { message: 'Internal Error' };
 };
 
+/**
+ * Inject the resolved appearance into the `<html>` tag during SSR (data-theme +
+ * inline `--pp-*` overrides via the `%themeattrs%` placeholder in app.html), so
+ * the first paint already matches the saved theme — no flash of the default.
+ */
+const handleTheme: Handle = async ({ event, resolve }) => {
+	// Only page responses carry the `%themeattrs%` placeholder; skip API calls.
+	if (event.url.pathname.startsWith('/api/')) return resolve(event);
+	const [appearance, customThemes] = await Promise.all([
+		getAppearanceSettings(),
+		getCustomThemes()
+	]);
+	const resolved = resolveStoredAppearance(appearance, customThemes);
+	const escapeAttr = (value: string) =>
+		value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+	const style = Object.entries(resolved.vars)
+		.map(([key, value]) => `${key}:${escapeAttr(value)}`)
+		.join(';');
+	const attrs = ` data-theme="${resolved.dataTheme}"${style ? ` style="${style}"` : ''}`;
+	return resolve(event, {
+		transformPageChunk: ({ html }) => html.replace('%themeattrs%', attrs)
+	});
+};
+
 export const handle: Handle = sequence(
 	handleSecurityHeaders,
 	handleAuth,
 	handleMaintenance,
-	handleParaglide
+	handleParaglide,
+	handleTheme
 );

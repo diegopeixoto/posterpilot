@@ -154,13 +154,13 @@
 			<h2 id="collection-apply-title" class="text-lg font-semibold">
 				{m.collection_apply_title()}
 			</h2>
-			<p class="mt-1 max-w-2xl text-sm text-neutral-400">{m.collection_apply_hint()}</p>
+			<p class="mt-1 max-w-2xl text-sm text-text-muted">{m.collection_apply_hint()}</p>
 		</div>
 		<span class="badge badge-info">{m.collection_apply_review_first()}</span>
 	</div>
 
 	<div class="mt-4 flex flex-wrap items-end gap-3">
-		<label class="text-sm text-neutral-300">
+		<label class="text-sm text-text-secondary">
 			{m.collection_apply_destination()}
 			<select
 				class="input mt-1 min-w-44"
@@ -181,22 +181,22 @@
 		>
 			{previewing ? m.collection_apply_previewing() : m.collection_apply_preview()}
 		</button>
-		<p class="pb-2 text-xs text-neutral-400">
+		<p class="pb-2 text-xs text-text-muted">
 			{m.collection_apply_staged_count({ count: stagedCount })}
 		</p>
 	</div>
 
 	{#if stagedCount === 0}
-		<p class="mt-3 text-sm text-neutral-400">{m.collection_apply_nothing_staged()}</p>
+		<p class="mt-3 text-sm text-text-muted">{m.collection_apply_nothing_staged()}</p>
 	{/if}
 	{#if errorCode}
 		<p class="mt-3 text-sm text-red-300" role="alert">{errorMessage(errorCode)}</p>
 	{/if}
 
 	{#if preview}
-		<div class="mt-5 rounded-xl border border-accent-900/60 bg-neutral-950/50 p-4">
+		<div class="mt-5 rounded-xl border border-accent-900/60 bg-background/50 p-4">
 			<h3 class="text-sm font-semibold">{m.collection_apply_preview_title()}</h3>
-			<p class="mt-1 text-xs text-neutral-400">
+			<p class="mt-1 text-xs text-text-muted">
 				{m.collection_apply_preview_summary({
 					items: preview.summary.actionableItemCount,
 					writes: preview.summary.operationCount,
@@ -208,8 +208,8 @@
 			/>
 			<ul class="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
 				{#each preview.items as item (item.target.mediaItemId)}
-					<li class="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 text-xs">
-						<p class="font-medium text-neutral-200">
+					<li class="rounded-lg border border-border bg-surface/70 p-3 text-xs">
+						<p class="font-medium text-text-strong">
 							{titleById.get(item.target.mediaItemId) ?? m.collection_unknown_member()}
 						</p>
 						<div class="mt-2 flex flex-wrap gap-1.5">
@@ -227,7 +227,7 @@
 					</li>
 				{/each}
 			</ul>
-			<p class="mt-3 text-xs text-neutral-400">{m.collection_apply_confirm_hint()}</p>
+			<p class="mt-3 text-xs text-text-muted">{m.collection_apply_confirm_hint()}</p>
 			<div class="mt-3 flex flex-wrap gap-2">
 				<button
 					type="button"

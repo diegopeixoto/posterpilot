@@ -442,7 +442,7 @@
 				<h2 id="automation-title" class="text-lg font-semibold">{m.automation_title()}</h2>
 				<span class="badge badge-info">{m.automation_review_only_badge()}</span>
 			</div>
-			<p class="mt-1 max-w-2xl text-sm text-neutral-400">{m.automation_intro()}</p>
+			<p class="mt-1 max-w-2xl text-sm text-text-muted">{m.automation_intro()}</p>
 		</div>
 		<button id="automation-add" type="button" class="btn btn-accent" onclick={openCreate}>
 			{m.automation_add()}
@@ -464,9 +464,9 @@
 				<h3 class="text-sm font-semibold">
 					{editingId ? m.automation_edit_title() : m.automation_create_title()}
 				</h3>
-				<p class="mt-1 text-xs text-neutral-400">{m.automation_review_only_hint()}</p>
+				<p class="mt-1 text-xs text-text-muted">{m.automation_review_only_hint()}</p>
 			</div>
-			<label class="text-sm text-neutral-300 sm:col-span-2">
+			<label class="text-sm text-text-secondary sm:col-span-2">
 				{m.automation_name()}
 				<input
 					bind:this={nameInput}
@@ -476,7 +476,7 @@
 					class="input mt-1 w-full"
 				/>
 			</label>
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.automation_trigger()}
 				<select
 					bind:value={triggerType}
@@ -489,12 +489,12 @@
 				</select>
 			</label>
 			{#if triggerType === 'daily'}
-				<label class="text-sm text-neutral-300">
+				<label class="text-sm text-text-secondary">
 					{m.automation_daily_time()}
 					<input bind:value={localTime} type="time" required class="input mt-1 w-full" />
 				</label>
 			{:else if triggerType === 'interval'}
-				<label class="text-sm text-neutral-300">
+				<label class="text-sm text-text-secondary">
 					{m.automation_interval_minutes()}
 					<input
 						bind:value={intervalMinutes}
@@ -506,7 +506,7 @@
 					/>
 				</label>
 			{:else}
-				<label class="text-sm text-neutral-300">
+				<label class="text-sm text-text-secondary">
 					{m.automation_event_type()}
 					<select
 						bind:value={eventType}
@@ -518,7 +518,7 @@
 					</select>
 				</label>
 			{/if}
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.automation_timezone()}
 				<input
 					bind:value={timezone}
@@ -527,18 +527,18 @@
 					class="input mt-1 w-full"
 				/>
 			</label>
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.automation_action()}
 				<select bind:value={action} aria-label={m.automation_action()} class="input mt-1 w-full">
 					<option value="sync_discover">{m.automation_action_sync_discover()}</option>
 					<option value="sync">{m.automation_action_sync()}</option>
 				</select>
-				<span class="mt-1 block text-xs text-neutral-500">{m.automation_action_hint()}</span>
+				<span class="mt-1 block text-xs text-text-faint">{m.automation_action_hint()}</span>
 			</label>
 
 			<fieldset class="sm:col-span-2">
-				<legend class="text-sm text-neutral-300">{m.automation_libraries()}</legend>
-				<p class="mt-1 text-xs text-neutral-500">{m.automation_libraries_hint()}</p>
+				<legend class="text-sm text-text-secondary">{m.automation_libraries()}</legend>
+				<p class="mt-1 text-xs text-text-faint">{m.automation_libraries_hint()}</p>
 				<div class="mt-2 flex flex-wrap gap-2">
 					{#each libraries as library (library.key)}
 						<label class="chip cursor-pointer">
@@ -553,7 +553,7 @@
 				</div>
 			</fieldset>
 
-			<label class="text-sm text-neutral-300 sm:col-span-2">
+			<label class="text-sm text-text-secondary sm:col-span-2">
 				{m.automation_review_view()}
 				<select
 					bind:value={reviewViewId}
@@ -566,9 +566,11 @@
 			</label>
 
 			<details class="sm:col-span-2">
-				<summary class="cursor-pointer text-sm text-neutral-300">{m.automation_advanced()}</summary>
+				<summary class="cursor-pointer text-sm text-text-secondary"
+					>{m.automation_advanced()}</summary
+				>
 				<div class="mt-3 grid gap-3 sm:grid-cols-2">
-					<label class="text-sm text-neutral-300">
+					<label class="text-sm text-text-secondary">
 						{m.automation_failure_threshold()}
 						<input
 							bind:value={failurePauseThreshold}
@@ -578,7 +580,7 @@
 							class="input mt-1 w-full"
 						/>
 					</label>
-					<label class="text-sm text-neutral-300">
+					<label class="text-sm text-text-secondary">
 						{m.automation_catchup_window()}
 						<input
 							bind:value={catchUpWindowMinutes}
@@ -591,7 +593,7 @@
 				</div>
 			</details>
 
-			<label class="flex items-center gap-2 text-sm text-neutral-300 sm:col-span-2">
+			<label class="flex items-center gap-2 text-sm text-text-secondary sm:col-span-2">
 				<input type="checkbox" bind:checked={enabled} />
 				{m.automation_enabled_on_save()}
 			</label>
@@ -620,7 +622,7 @@
 			</button>
 		</div>
 		{#if schedules.length === 0}
-			<div class="surface mt-3 p-5 text-sm text-neutral-400">{m.automation_empty()}</div>
+			<div class="surface mt-3 p-5 text-sm text-text-muted">{m.automation_empty()}</div>
 		{:else}
 			<ul class="mt-3 space-y-3">
 				{#each schedules as schedule (schedule.id)}
@@ -631,7 +633,7 @@
 						<div class="flex flex-wrap items-start justify-between gap-3">
 							<div>
 								<div class="flex flex-wrap items-center gap-2">
-									<h4 class="font-medium text-neutral-100">{schedule.name}</h4>
+									<h4 class="font-medium text-text-bright">{schedule.name}</h4>
 									<span class={schedule.enabled ? 'badge badge-success' : 'badge badge-muted'}>
 										{schedule.pausedAt
 											? m.automation_paused()
@@ -644,11 +646,11 @@
 										<span class="badge badge-muted">{m.automation_webhook_enabled()}</span>
 									{/if}
 								</div>
-								<p class="mt-1 text-xs text-neutral-400">{timingLabel(schedule)}</p>
-								<p class="mt-1 text-xs text-neutral-400">
+								<p class="mt-1 text-xs text-text-muted">{timingLabel(schedule)}</p>
+								<p class="mt-1 text-xs text-text-muted">
 									{m.automation_scope_summary({ libraries: scopedLibraries })}
 								</p>
-								<p class="mt-2 text-xs text-neutral-500">
+								<p class="mt-2 text-xs text-text-faint">
 									{m.automation_next_run({ date: formatDate(schedule.nextRunAt) })} ·
 									{m.automation_last_run({ date: formatDate(schedule.lastRunAt) })} ·
 									{m.automation_last_success({ date: formatDate(schedule.lastSuccessAt) })}
@@ -753,7 +755,7 @@
 									</button>
 								</div>
 								<div class="mt-3 grid gap-2">
-									<label class="text-xs text-neutral-300">
+									<label class="text-xs text-text-secondary">
 										{m.automation_webhook_endpoint()}
 										<input
 											class="input mt-1 w-full font-mono text-xs"
@@ -761,7 +763,7 @@
 											value={webhookCredential.endpoint}
 										/>
 									</label>
-									<label class="text-xs text-neutral-300">
+									<label class="text-xs text-text-secondary">
 										{m.automation_webhook_header()}
 										<input
 											class="input mt-1 w-full font-mono text-xs"
@@ -769,7 +771,7 @@
 											value={webhookCredential.header}
 										/>
 									</label>
-									<label class="text-xs text-neutral-300">
+									<label class="text-xs text-text-secondary">
 										{m.automation_webhook_token()}
 										<input
 											class="input mt-1 w-full font-mono text-xs"
@@ -790,11 +792,11 @@
 	<section aria-labelledby="automation-history-title">
 		<h3 id="automation-history-title" class="section-title">{m.automation_history_title()}</h3>
 		{#if occurrences.length === 0}
-			<div class="surface mt-3 p-5 text-sm text-neutral-400">{m.automation_history_empty()}</div>
+			<div class="surface mt-3 p-5 text-sm text-text-muted">{m.automation_history_empty()}</div>
 		{:else}
 			<div class="surface mt-3 overflow-x-auto">
 				<table class="w-full text-left text-sm">
-					<thead class="border-b border-neutral-800 text-xs text-neutral-400">
+					<thead class="border-b border-border text-xs text-text-muted">
 						<tr>
 							<th class="px-4 py-2 font-medium">{m.automation_name()}</th>
 							<th class="px-4 py-2 font-medium">{m.automation_scheduled_for()}</th>
@@ -806,9 +808,9 @@
 						{#each occurrences as occurrence (occurrence.id)}
 							{@const schedule = scheduleById.get(occurrence.scheduleId)}
 							{@const summary = occurrence.job?.summary}
-							<tr class="border-b border-neutral-800/70 last:border-0">
-								<td class="px-4 py-3 text-neutral-200">{schedule?.name ?? '—'}</td>
-								<td class="px-4 py-3 text-xs text-neutral-400"
+							<tr class="border-b border-border/70 last:border-0">
+								<td class="px-4 py-3 text-text-strong">{schedule?.name ?? '—'}</td>
+								<td class="px-4 py-3 text-xs text-text-muted"
 									>{formatDate(occurrence.scheduledFor)}</td
 								>
 								<td class="px-4 py-3">
@@ -816,10 +818,10 @@
 								</td>
 								<td class="px-4 py-3 text-xs">
 									{#if occurrence.jobId}
-										<span class="text-neutral-400">#{occurrence.jobId}</span>
+										<span class="text-text-muted">#{occurrence.jobId}</span>
 									{/if}
 									{#if summary}
-										<p class="mt-1 text-neutral-300">
+										<p class="mt-1 text-text-secondary">
 											{m.automation_result_summary({
 												succeeded: summary.succeeded,
 												failed: summary.failed,
@@ -851,8 +853,8 @@
 										{/if}
 									</div>
 									{#if occurrence.job?.attempts.length}
-										<details class="mt-2 text-neutral-400">
-											<summary class="cursor-pointer text-neutral-300">
+										<details class="mt-2 text-text-muted">
+											<summary class="cursor-pointer text-text-secondary">
 												{m.automation_attempts({ count: occurrence.job.attempts.length })}
 											</summary>
 											<ul class="mt-1 space-y-1 pl-4">
@@ -873,7 +875,7 @@
 								</td>
 							</tr>
 							{#if occurrence.jobId && isActiveJob(occurrence)}
-								<tr class="border-b border-neutral-800/70">
+								<tr class="border-b border-border/70">
 									<td colspan="4" class="px-4 py-3">
 										<JobProgress
 											jobId={occurrence.jobId}

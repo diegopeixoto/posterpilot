@@ -59,18 +59,18 @@
 
 <section class="space-y-3" aria-labelledby={`job-details-${job.id}`}>
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<h3 id={`job-details-${job.id}`} class="text-sm font-medium text-neutral-200">
+		<h3 id={`job-details-${job.id}`} class="text-sm font-medium text-text-strong">
 			{m.jobs_details_title({ id: job.id })}
 		</h3>
 		{#if job.attempt > 0}
-			<span class="text-xs tabular-nums text-neutral-400">
+			<span class="text-xs tabular-nums text-text-muted">
 				{m.jobs_attempt({ attempt: job.attempt, max: job.maxAttempts })}
 			</span>
 		{/if}
 	</div>
 
 	{#if resultCount > 0}
-		<p class="text-xs text-neutral-300">
+		<p class="text-xs text-text-secondary">
 			{m.jobs_result_summary({
 				succeeded: job.resultSummary.succeeded,
 				failed: job.resultSummary.failed,
@@ -89,24 +89,24 @@
 
 	{#if job.failures.length > 0}
 		<div>
-			<h4 class="text-xs font-medium text-neutral-300">
+			<h4 class="text-xs font-medium text-text-secondary">
 				{m.jobs_failures_title({ count: job.failureCount })}
 			</h4>
 			<ul class="mt-2 space-y-2">
 				{#each job.failures as failure (failure.outcomeId)}
-					<li class="rounded-lg border border-neutral-800 bg-neutral-950/50 px-3 py-2">
+					<li class="rounded-lg border border-border bg-background/50 px-3 py-2">
 						<div class="flex flex-wrap items-start justify-between gap-2">
 							<div>
-								<p class="text-xs text-neutral-300">{jobFailureTargetLabel(failure)}</p>
-								<p class="mt-0.5 text-xs text-neutral-400">
+								<p class="text-xs text-text-secondary">{jobFailureTargetLabel(failure)}</p>
+								<p class="mt-0.5 text-xs text-text-muted">
 									{jobErrorLabel(failure.errorCode)}
-									<code class="ml-1 text-[11px] text-neutral-500">{failure.errorCode}</code>
+									<code class="ml-1 text-[11px] text-text-faint">{failure.errorCode}</code>
 								</p>
 							</div>
 							<span
 								class="rounded px-2 py-0.5 text-[11px] {failure.retryable
 									? 'bg-amber-950/60 text-amber-200'
-									: 'bg-neutral-800 text-neutral-300'}"
+									: 'bg-surface-raised text-text-secondary'}"
 							>
 								{failure.retryable ? m.jobs_failure_retryable() : m.jobs_failure_permanent()}
 							</span>
@@ -115,7 +115,7 @@
 				{/each}
 			</ul>
 			{#if job.hiddenFailureCount > 0}
-				<p class="mt-2 text-xs text-neutral-400">
+				<p class="mt-2 text-xs text-text-muted">
 					{m.jobs_hidden_failures({ count: job.hiddenFailureCount })}
 				</p>
 			{/if}

@@ -66,7 +66,7 @@
 <section class="max-w-xl space-y-5" aria-labelledby="security-settings-title">
 	<div>
 		<h2 id="security-settings-title" class="text-sm font-semibold">{m.security_title()}</h2>
-		<p class="mt-1 text-sm text-neutral-400">{m.security_intro()}</p>
+		<p class="mt-1 text-sm text-text-muted">{m.security_intro()}</p>
 	</div>
 
 	{#if auth.envManaged}
@@ -82,7 +82,7 @@
 		<legend class="mb-1 text-sm font-medium">{m.security_mode_label()}</legend>
 		{#each modes as opt (opt.v)}
 			<label
-				class="flex cursor-pointer items-start gap-2 rounded-md border border-neutral-800 p-3 has-[:checked]:border-accent-600 has-[:checked]:bg-accent-950/30"
+				class="flex cursor-pointer items-start gap-2 rounded-md border border-border p-3 has-[:checked]:border-accent-600 has-[:checked]:bg-accent-950/30"
 			>
 				<input
 					type="radio"
@@ -93,8 +93,8 @@
 					class="mt-0.5 accent-accent-500"
 				/>
 				<span>
-					<span class="block text-sm font-medium text-neutral-100">{opt.l()}</span>
-					<span class="block text-xs text-neutral-400">{opt.d()}</span>
+					<span class="block text-sm font-medium text-text-bright">{opt.l()}</span>
+					<span class="block text-xs text-text-muted">{opt.d()}</span>
 				</span>
 			</label>
 		{/each}
@@ -127,11 +127,11 @@
 				disabled={auth.envManaged || authMode === 'disabled'}
 				class="input w-full"
 			/>
-			<p class="mt-1 text-xs text-neutral-500">{m.security_password_hint()}</p>
+			<p class="mt-1 text-xs text-text-faint">{m.security_password_hint()}</p>
 		</div>
 	</div>
 
-	<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
+	<div class="flex items-center gap-3 border-t border-border pt-4">
 		<button
 			onclick={saveSecurity}
 			disabled={savingAuth || auth.envManaged}

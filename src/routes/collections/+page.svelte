@@ -37,9 +37,9 @@
 			{m.collections_eyebrow()}
 		</p>
 		<h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{m.collections_title()}</h1>
-		<p class="mt-3 text-sm leading-6 text-neutral-300">{m.collections_intro()}</p>
+		<p class="mt-3 text-sm leading-6 text-text-secondary">{m.collections_intro()}</p>
 		{#if data.serverName}
-			<p class="mt-3 text-xs text-neutral-400">
+			<p class="mt-3 text-xs text-text-muted">
 				{m.collections_server_scope({ server: data.serverName })}
 			</p>
 		{/if}
@@ -49,25 +49,25 @@
 		<section class="surface flex min-h-72 items-center justify-center px-6 py-12 text-center">
 			<div class="max-w-md">
 				<div
-					class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-xl text-neutral-300"
+					class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-border-strong bg-background text-xl text-text-secondary"
 					aria-hidden="true"
 				>
 					◫
 				</div>
 				<h2 class="text-lg font-semibold">{m.collections_empty_title()}</h2>
-				<p class="mt-2 text-sm leading-6 text-neutral-400">{m.collections_empty_hint()}</p>
+				<p class="mt-2 text-sm leading-6 text-text-muted">{m.collections_empty_hint()}</p>
 				<a class="btn btn-ghost mt-5" href="/library">{m.collections_open_library()}</a>
 			</div>
 		</section>
 	{:else}
-		<p class="mb-4 text-sm text-neutral-400" aria-live="polite">
+		<p class="mb-4 text-sm text-text-muted" aria-live="polite">
 			{m.collections_count({ count: data.collections.length })}
 		</p>
 		<div class="grid gap-5 lg:grid-cols-2">
 			{#each data.collections as collection (collection.id)}
 				<a
 					href={`/collections/${encodeURIComponent(collection.id)}`}
-					class="group surface relative overflow-hidden transition-colors hover:border-neutral-600"
+					class="group surface relative overflow-hidden transition-colors hover:border-border-hover"
 					aria-label={m.collections_open_named({ name: collection.name })}
 				>
 					{#if collection.heroBackgroundItemId}
@@ -79,13 +79,13 @@
 						/>
 					{/if}
 					<div
-						class="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-black/15 via-neutral-950/75 to-neutral-950"
+						class="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-black/15 via-background/75 to-background"
 					></div>
 
 					<div class="relative grid grid-cols-4 gap-1.5 p-4 pb-0 sm:gap-2 sm:p-5 sm:pb-0">
 						{#each collection.previewMembers as member (member.id)}
 							<div
-								class="aspect-[2/3] overflow-hidden rounded-md border border-neutral-700 bg-neutral-950 shadow-lg"
+								class="aspect-[2/3] overflow-hidden rounded-md border border-border-strong bg-background shadow-lg"
 							>
 								{#if member.hasCurrentPoster}
 									<img
@@ -105,7 +105,7 @@
 									/>
 								{:else}
 									<div
-										class="flex h-full items-center justify-center px-2 text-center text-[10px] text-neutral-400"
+										class="flex h-full items-center justify-center px-2 text-center text-[10px] text-text-muted"
 									>
 										{m.collection_no_artwork()}
 									</div>
@@ -120,10 +120,10 @@
 								<span class="badge badge-muted mb-2">
 									◎ {sourceLabel(collection.source, collection.nativeProvider)}
 								</span>
-								<h2 class="truncate text-xl font-semibold text-neutral-50 group-hover:text-white">
+								<h2 class="truncate text-xl font-semibold text-text group-hover:text-white">
 									{collection.name}
 								</h2>
-								<p class="mt-1 text-xs text-neutral-400">
+								<p class="mt-1 text-xs text-text-muted">
 									{m.collections_members_summary({
 										local: collection.localMemberCount,
 										unavailable: collection.unavailableMemberCount
@@ -135,7 +135,7 @@
 
 						<div class="mt-5 grid gap-3 sm:grid-cols-2">
 							<div>
-								<div class="mb-1.5 flex justify-between gap-3 text-xs text-neutral-300">
+								<div class="mb-1.5 flex justify-between gap-3 text-xs text-text-secondary">
 									<span>{m.collection_poster()}</span>
 									<span
 										>{m.collections_artwork_coverage({
@@ -152,7 +152,7 @@
 								></progress>
 							</div>
 							<div>
-								<div class="mb-1.5 flex justify-between gap-3 text-xs text-neutral-300">
+								<div class="mb-1.5 flex justify-between gap-3 text-xs text-text-secondary">
 									<span>{m.collection_background()}</span>
 									<span
 										>{m.collections_artwork_coverage({

@@ -120,7 +120,7 @@
 	}
 </script>
 
-<div class="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4" aria-busy={!done}>
+<div class="rounded-xl border border-border bg-surface/60 p-4" aria-busy={!done}>
 	<p class="sr-only" aria-live="polite" aria-atomic="true">
 		{m.jobs_progress({ id: jobId, status: jobStatusLabel(progress.status) })}.
 		{m.jobs_phase({ phase })}.
@@ -128,20 +128,20 @@
 	</p>
 	<div class="mb-2 flex flex-wrap items-start justify-between gap-2 text-xs">
 		<div>
-			<p class="font-medium text-neutral-200">
+			<p class="font-medium text-text-strong">
 				{m.jobs_progress({ id: jobId, status: jobStatusLabel(progress.status) })}
 			</p>
-			<p class="mt-0.5 text-neutral-400">{m.jobs_phase({ phase })}</p>
+			<p class="mt-0.5 text-text-muted">{m.jobs_phase({ phase })}</p>
 		</div>
 		<div class="flex flex-wrap items-center justify-end gap-2">
 			{#if progress.attempt > 0}
-				<span class="tabular-nums text-neutral-400">
+				<span class="tabular-nums text-text-muted">
 					{m.jobs_attempt({ attempt: progress.attempt, max: progress.maxAttempts })}
 				</span>
 			{/if}
 			{#if !done}
 				<span
-					class="inline-flex items-center gap-1.5 rounded-full border border-neutral-700 px-2 py-0.5 text-neutral-300"
+					class="inline-flex items-center gap-1.5 rounded-full border border-border-strong px-2 py-0.5 text-text-secondary"
 				>
 					<span
 						class="size-1.5 rounded-full {connection === 'live'
@@ -154,7 +154,7 @@
 					{connectionLabel}
 				</span>
 			{/if}
-			<span class="tabular-nums text-neutral-400">
+			<span class="tabular-nums text-text-muted">
 				{m.jobs_progress_count({
 					processed: progress.processed,
 					total: progress.total
@@ -164,7 +164,7 @@
 		</div>
 	</div>
 	<div
-		class="h-2 w-full overflow-hidden rounded bg-neutral-800"
+		class="h-2 w-full overflow-hidden rounded bg-surface-raised"
 		role="progressbar"
 		aria-label={m.jobs_progress({ id: jobId, status: jobStatusLabel(progress.status) })}
 		aria-valuemin="0"
@@ -187,7 +187,7 @@
 		></div>
 	</div>
 	<div class="mt-2 flex min-h-5 items-start justify-between gap-3">
-		<span class="truncate text-xs text-neutral-400" title={progress.currentItem ?? ''}>
+		<span class="truncate text-xs text-text-muted" title={progress.currentItem ?? ''}>
 			{progress.currentItem ?? ''}
 		</span>
 		{#if !done}
@@ -195,7 +195,7 @@
 				type="button"
 				onclick={cancel}
 				disabled={cancelling}
-				class="shrink-0 text-xs text-neutral-400 hover:text-red-300"
+				class="shrink-0 text-xs text-text-muted hover:text-red-300"
 			>
 				{m.jobs_cancel()}
 			</button>
@@ -205,7 +205,7 @@
 		<p class="mt-2 text-xs text-red-300" role="alert">{cancelError}</p>
 	{/if}
 	{#if hasDetails}
-		<div class="mt-3 border-t border-neutral-800 pt-3">
+		<div class="mt-3 border-t border-border pt-3">
 			<JobDetails job={progress} {onRetryStarted} />
 		</div>
 	{/if}

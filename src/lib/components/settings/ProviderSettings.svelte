@@ -216,8 +216,8 @@
 	<span id="provider-order-label" class="mb-1 block text-sm font-medium">
 		{m.settings_providers()}
 	</span>
-	<p class="text-xs text-neutral-400">{m.settings_providers_hint()}</p>
-	<p class="mt-1 mb-3 text-xs text-neutral-400">{m.settings_provider_order_hint()}</p>
+	<p class="text-xs text-text-muted">{m.settings_providers_hint()}</p>
+	<p class="mt-1 mb-3 text-xs text-text-muted">{m.settings_provider_order_hint()}</p>
 	<ul class="space-y-2" aria-labelledby="provider-order-label" bind:this={orderList}>
 		{#each providerPriority as provider, index (provider)}
 			{@const dragging = dragProvider === provider}
@@ -225,9 +225,9 @@
 			{@const credential = credentialState[provider]}
 			<li
 				data-provider-row
-				class="relative rounded-lg border bg-neutral-950/40 p-2 transition-colors {dragging
+				class="relative rounded-lg border bg-background/40 p-2 transition-colors {dragging
 					? 'border-accent-600'
-					: 'border-neutral-800'}"
+					: 'border-border'}"
 			>
 				{#if dropIndex === index && dragFromIndex >= 0 && dropIndex !== dragFromIndex}
 					<span
@@ -248,7 +248,7 @@
 						onpointermove={trackDrag}
 						onpointerup={endDrag}
 						onpointercancel={cancelDrag}
-						class="shrink-0 touch-none rounded-md p-2 text-neutral-500 select-none hover:text-neutral-300 {dragging
+						class="shrink-0 touch-none rounded-md p-2 text-text-faint select-none hover:text-text-secondary {dragging
 							? 'cursor-grabbing text-accent-300'
 							: 'cursor-grab'}"
 					>
@@ -262,14 +262,14 @@
 						</svg>
 					</button>
 					<span
-						class="w-5 shrink-0 text-center text-sm font-semibold text-neutral-300 tabular-nums"
+						class="w-5 shrink-0 text-center text-sm font-semibold text-text-secondary tabular-nums"
 					>
 						<span aria-hidden="true">{position}</span>
 						<span class="sr-only">
 							{m.settings_provider_order_position({ position, total: providerPriority.length })}
 						</span>
 					</span>
-					<label class="flex min-w-0 flex-1 items-center gap-2 text-sm text-neutral-300">
+					<label class="flex min-w-0 flex-1 items-center gap-2 text-sm text-text-secondary">
 						<input
 							type="checkbox"
 							checked={providerEnabled[provider]}
@@ -311,7 +311,7 @@
 							</span>
 						{/if}
 						{#if provider === 'theposterdb'}
-							<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
+							<span class="text-xs text-text-muted">{m.settings_experimental()}</span>
 						{/if}
 						{#if providerEnvManaged[provider]}
 							<span class="text-xs text-amber-400">{m.settings_set_from_env()}</span>
@@ -343,14 +343,14 @@
 				<option value={code}>{artworkLanguageName(code)}</option>
 			{/each}
 		</select>
-		<p class="mt-1 text-xs text-neutral-400">{m.settings_tmdb_artwork_language_hint()}</p>
+		<p class="mt-1 text-xs text-text-muted">{m.settings_tmdb_artwork_language_hint()}</p>
 		{#if env.tmdbArtworkLanguage}<p class="mt-1 text-xs text-amber-400">
 				{m.settings_set_from_env()}
 			</p>{/if}
 	</div>
 	{#if providerThePosterDb}
-		<div class="mt-3 space-y-2 rounded-md border border-neutral-800 p-3">
-			<p class="text-xs text-neutral-400">{m.settings_theposterdb_auth_hint()}</p>
+		<div class="mt-3 space-y-2 rounded-md border border-border p-3">
+			<p class="text-xs text-text-muted">{m.settings_theposterdb_auth_hint()}</p>
 			<div>
 				<label for="thePosterDbUsername" class="mb-1 block text-sm font-medium"
 					>{m.settings_theposterdb_username()}</label
