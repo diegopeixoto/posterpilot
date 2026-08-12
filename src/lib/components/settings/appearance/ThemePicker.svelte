@@ -41,12 +41,8 @@
 	 * preview goes through exactly the path the page does. Built-ins that are
 	 * palette variants resolve to their parent's `data-theme` plus inline deltas,
 	 * which is also how a custom theme resolves — one code path, both cases.
-	 *
-	 * `custom` takes a default rather than being declared optional (`custom?:`):
-	 * the component-test transform leaves that `?` in the emitted JS and the
-	 * browser fails to parse the module.
 	 */
-	function previewOf(id: string, custom: CustomTheme | null = null) {
+	function previewOf(id: string, custom?: CustomTheme) {
 		const resolved = resolveAppearance({ themeId: id }, custom ? [custom] : []);
 		return {
 			dataTheme: resolved.dataTheme,

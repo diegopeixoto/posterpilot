@@ -1,4 +1,4 @@
-import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
@@ -47,7 +47,19 @@ export default defineConfig({
 				// names — `touch-action` confined to the drag handle is a real behavioral
 				// guarantee, and asserting the class instead would pass even if the
 				// utility were renamed out from under it.
-				plugins: [tailwindcss(), svelte({ compilerOptions: { runes: true } })],
+				// The preprocessor must match vite.config.ts. The bare Svelte plugin does
+				// not carry the TypeScript handling the SvelteKit plugin supplies, so
+				// without this a component compiled one way for the app and another for
+				// its own test: an optional parameter reached the browser as
+				// `function f(a, b?)` and the whole test file failed to import, while
+				// `check` and `build` stayed green.
+				plugins: [
+					tailwindcss(),
+					svelte({
+						preprocess: vitePreprocess({ script: true, style: false }),
+						compilerOptions: { runes: true }
+					})
+				],
 				resolve: { alias },
 				test: {
 					name: 'component',

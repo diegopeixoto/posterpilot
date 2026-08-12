@@ -1,5 +1,6 @@
 import adapter from '@sveltejs/adapter-node';
 import tailwindcss from '@tailwindcss/vite';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig } from 'vite';
@@ -23,6 +24,15 @@ export default defineConfig({
 			strategy: ['custom-setting', 'preferredLanguage', 'baseLocale']
 		}),
 		sveltekit({
+			// Stated explicitly, and identically in vitest.config.ts, so the app and its
+			// component tests cannot compile the same `<script lang="ts">` differently.
+			// Svelte 5's built-in type stripping is syntactic and incomplete — an
+			// optional parameter comes out as `function f(a, b?)`, invalid JavaScript
+			// that fails only when a browser parses the module. The SvelteKit plugin
+			// happens to cover this already; pinning it means a change upstream, or a
+			// second plugin setup, cannot quietly reintroduce the gap.
+			// `style: false` leaves the CSS pipeline alone — this is about scripts.
+			preprocess: vitePreprocess({ script: true, style: false }),
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 				runes: ({ filename }) =>
