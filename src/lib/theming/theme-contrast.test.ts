@@ -40,8 +40,15 @@ const TEXT_TOKENS = [
 	'text-faint'
 ] as const;
 
+/** What a theme actually renders with: its parent's block for a palette
+ *  variant, with the variant's deltas layered on. */
+function effectiveTokens(id: string): Record<string, string> {
+	const theme = BUILTIN_THEMES.find((entry) => entry.id === id)!;
+	return { ...themeTokens(theme.variantOf ?? theme.id), ...(theme.tokens ?? {}) };
+}
+
 describe.each(BUILTIN_THEMES.map((theme) => theme.id))('theme %s', (id) => {
-	const tokens = themeTokens(id);
+	const tokens = effectiveTokens(id);
 
 	it.each(TEXT_TOKENS)('reads at AA for %s on both backgrounds', (token) => {
 		for (const surface of ['background', 'surface'] as const) {

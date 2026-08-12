@@ -76,6 +76,18 @@ export interface Theme {
 	/** When set, the theme forces this chrome layout regardless of the user's
 	 *  nav-placement setting (extreme themes reskin the layout, Winamp-style). */
 	layout?: 'sidebar';
+	/**
+	 * A palette variant of another built-in: it renders under that theme's
+	 * `data-theme`, so it inherits the whole reskin (Terminal's monospace, zero
+	 * radius, scanlines and bloom) and only restates the colors in `tokens`.
+	 *
+	 * This is the same mechanism a user-authored theme uses to extend a base —
+	 * shipping the terminal palettes as data rather than as eight more near-copies
+	 * of the same CSS block is the point of the engine.
+	 */
+	variantOf?: string;
+	/** Token deltas over `variantOf`'s block. Ignored without `variantOf`. */
+	tokens?: Partial<Record<TokenKey, string>>;
 	/** [background, surface, accent] preview colors for the picker. */
 	swatches: [string, string, string];
 }

@@ -36,13 +36,25 @@
 		return themeId === id ? 'border-accent-500 ring-1 ring-accent-500' : '';
 	}
 
-	/** A custom theme's deltas as an inline style, the same way the applier writes
-	 *  them onto `<html>` — so its tile previews the theme, not just its base. */
-	function previewVars(theme: CustomTheme): string {
-		const { vars } = resolveAppearance({ themeId: theme.id }, [theme]);
-		return Object.entries(vars)
-			.map(([key, value]) => `${key}:${value}`)
-			.join(';');
+	/**
+	 * What a tile needs to render itself in a theme, taken from the resolver so a
+	 * preview goes through exactly the path the page does. Built-ins that are
+	 * palette variants resolve to their parent's `data-theme` plus inline deltas,
+	 * which is also how a custom theme resolves — one code path, both cases.
+	 *
+	 * `custom` takes a default rather than being declared optional (`custom?:`):
+	 * the component-test transform leaves that `?` in the emitted JS and the
+	 * browser fails to parse the module.
+	 */
+	function previewOf(id: string, custom: CustomTheme | null = null) {
+		const resolved = resolveAppearance({ themeId: id }, custom ? [custom] : []);
+		return {
+			dataTheme: resolved.dataTheme,
+			vars: Object.entries(resolved.vars)
+				.map(([key, value]) => `${key}:${value}`)
+				.join(';'),
+			sidebar: resolved.navPlacement === 'left'
+		};
 	}
 </script>
 
@@ -62,7 +74,7 @@
 							theme.id
 						)}"
 					>
-						<ThemeTile dataTheme={theme.id} sidebar={theme.layout === 'sidebar'} />
+						<ThemeTile {...previewOf(theme.id)} />
 						<span class="px-1 pb-0.5 text-xs font-medium">{theme.name}</span>
 					</button>
 				{/each}
@@ -85,11 +97,7 @@
 							aria-pressed={themeId === theme.id}
 							class="flex flex-col gap-2 text-left"
 						>
-							<ThemeTile
-								dataTheme={base?.id ?? theme.base}
-								vars={previewVars(theme)}
-								sidebar={base?.layout === 'sidebar'}
-							/>
+							<ThemeTile {...previewOf(theme.id, theme)} />
 							<span class="px-1 text-xs font-medium">{theme.name}</span>
 							<span class="px-1 pb-0.5 text-[10px] text-text-faint">
 								{m.appearance_based_on({ base: base?.name ?? theme.base })}

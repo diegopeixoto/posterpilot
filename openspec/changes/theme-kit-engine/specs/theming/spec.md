@@ -46,6 +46,18 @@ Appearance section in Settings: PosterPilot (default), Darcula, Monokai, Catppuc
 Mocha, White, Overseerr, Sonarr/Radarr, and Terminal. The PosterPilot theme SHALL
 reproduce the current default look exactly.
 
+A built-in MAY be a *palette variant* of another built-in: it renders under the
+parent's `data-theme` and states only token deltas, inheriting the parent's reskin
+whole. Terminal SHALL ship Gruvbox, Nord and Solarized palettes this way. A
+variant SHALL declare its own capability flags and SHALL be held to the same
+contrast floor as any other shipped theme.
+
+#### Scenario: Palette variant inherits its parent's reskin
+
+- **WHEN** a Terminal palette variant is active
+- **THEN** the TUI treatment (monospace, zero radius, scanlines, block cursor) applies
+  unchanged and only the colors differ from Terminal's own
+
 #### Scenario: Selecting a preset
 
 - **WHEN** the user selects a preset in the Appearance settings

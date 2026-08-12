@@ -4,7 +4,7 @@ description: Pick a built-in theme, customize what it allows, and author or shar
 ---
 
 PosterPilot is dark and violet by default because darkness makes artwork pop. It
-is not stuck that way. **Settings → Appearance** carries eight built-in themes,
+is not stuck that way. **Settings → Appearance** carries eleven built-in themes,
 per-theme customization, and a theme-kit engine that user-authored themes ride
 too.
 
@@ -60,7 +60,15 @@ a light theme still needs a dark scrim to separate a dialog from the page.
 
 ![PosterPilot library in the White theme: white background, dark text, violet accent](/posterpilot/screenshots/theme-white.webp)
 
-**Extreme themes** — Overseerr, Sonarr/Radarr, and Terminal, above.
+**Extreme themes** — Overseerr, Sonarr/Radarr, Terminal, and three Terminal
+palettes: **Gruvbox**, **Nord**, and **Solarized**.
+
+The three palettes are worth a note, because they are the engine arguing for
+itself. Each one is *data* — a name and a list of colors — that renders under
+Terminal's `data-theme`. They inherit the entire TUI reskin (monospace, zero
+radius, scanlines, phosphor bloom, block cursor) without repeating a line of it,
+which is exactly the mechanism a theme you author uses to extend a base. Adding a
+fourth palette is a dozen lines of color, not a new stylesheet.
 
 Every shipped theme is held to WCAG AA contrast (4.5:1 for text against both the
 theme background and its surfaces) by an automated check that reads the themes

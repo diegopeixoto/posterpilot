@@ -93,28 +93,53 @@ function isHttpUrl(value: string): boolean {
 }
 
 interface ThemeLookup {
-	/** Effective base theme (for custom themes: the base they extend). */
+	/** Theme whose `[data-theme]` block styles the page — for a custom theme the
+	 *  base it extends, for a palette variant the built-in it varies. */
 	base: Theme;
-	/** Token deltas when the selected theme is a custom one. */
+	/** Token deltas layered over the base block (variant palette or custom theme). */
 	deltas: CustomTheme['tokens'] | null;
 	/** Free-form CSS shipped with a custom theme (null for built-ins). */
 	css: string | null;
+	/** Capability flags that gate the user's overrides. A built-in states its own;
+	 *  a custom theme can never widen what its base allows. */
+	flags: CustomizableFlags;
 	resolvedId: string;
 }
 
 function lookupTheme(themeId: string | null | undefined, customThemes: CustomTheme[]): ThemeLookup {
 	const id = themeId ?? DEFAULT_THEME_ID;
 	const builtin = findBuiltinTheme(id);
-	if (builtin) return { base: builtin, deltas: null, css: null, resolvedId: builtin.id };
+	if (builtin) {
+		const base = builtin.variantOf ? (findBuiltinTheme(builtin.variantOf) ?? builtin) : builtin;
+		return {
+			base,
+			deltas: builtin.variantOf ? (builtin.tokens ?? null) : null,
+			css: null,
+			flags: builtin.customizable,
+			resolvedId: builtin.id
+		};
+	}
 
 	const custom = customThemes.find((theme) => theme.id === id);
 	if (custom) {
 		const base = findBuiltinTheme(custom.base) ?? findBuiltinTheme(DEFAULT_THEME_ID)!;
-		return { base, deltas: custom.tokens, css: custom.css ?? null, resolvedId: custom.id };
+		return {
+			base,
+			deltas: custom.tokens,
+			css: custom.css ?? null,
+			flags: base.customizable,
+			resolvedId: custom.id
+		};
 	}
 
 	const fallback = findBuiltinTheme(DEFAULT_THEME_ID)!;
-	return { base: fallback, deltas: null, css: null, resolvedId: fallback.id };
+	return {
+		base: fallback,
+		deltas: null,
+		css: null,
+		flags: fallback.customizable,
+		resolvedId: fallback.id
+	};
 }
 
 export interface StoredAppearanceLike {
@@ -151,11 +176,10 @@ export function resolveAppearance(
 	input: AppearanceInput,
 	customThemes: CustomTheme[] = []
 ): ResolvedAppearance {
-	const { base, deltas, css, resolvedId } = lookupTheme(input.themeId, customThemes);
-	const flags = base.customizable;
+	const { base, deltas, css, flags, resolvedId } = lookupTheme(input.themeId, customThemes);
 	const vars: Record<string, string> = {};
 
-	// Stage 1: custom theme deltas (authored against the base; applied as-is).
+	// Stage 1: token deltas (a variant's palette or a custom theme's, applied as-is).
 	// An accent delta expands to the full derived ramp — bases with explicit
 	// accent stops (PosterPilot) would otherwise keep their own ramp.
 	if (deltas) {

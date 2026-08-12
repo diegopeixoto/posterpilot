@@ -6,7 +6,7 @@ import { resolveAppearance, resolveStoredAppearance } from './resolve';
 import { TOKEN_KEYS, tokenVar, type CustomTheme } from './schema';
 
 describe('theme registry', () => {
-	it('ships the 8 built-in themes in two families', () => {
+	it('ships the built-in themes in two families', () => {
 		expect(BUILTIN_THEMES.map((theme) => theme.id)).toEqual([
 			'posterpilot',
 			'darcula',
@@ -15,11 +15,43 @@ describe('theme registry', () => {
 			'white',
 			'overseerr',
 			'sonarr',
-			'terminal'
+			'terminal',
+			'terminal-gruvbox',
+			'terminal-nord',
+			'terminal-solarized'
 		]);
 		expect(new Set(BUILTIN_THEMES.map((theme) => theme.family))).toEqual(
 			new Set(['base', 'extreme'])
 		);
+	});
+
+	it('resolves a palette variant to its parent block plus token deltas', () => {
+		const resolved = resolveAppearance({ themeId: 'terminal-nord' });
+		// The variant renders as Terminal, so the whole TUI reskin applies to it.
+		expect(resolved.dataTheme).toBe('terminal');
+		expect(resolved.themeId).toBe('terminal-nord');
+		expect(resolved.vars['--pp-background']).toBe('#2e3440');
+		// An accent delta expands to the full ramp, as it does for a custom theme.
+		expect(resolved.vars['--pp-accent-600']).toBe('#88c0d0');
+		// The variant states its own locks rather than borrowing Terminal's object.
+		expect(resolved.flags).toEqual({
+			accent: true,
+			background: false,
+			backgroundImage: false,
+			radius: false
+		});
+	});
+
+	it('keeps a variant locked against the overrides its family forbids', () => {
+		const resolved = resolveAppearance({
+			themeId: 'terminal-gruvbox',
+			backgroundOverride: '#ffffff',
+			radiusOverride: '1rem',
+			accentOverride: '#ffb000'
+		});
+		expect(resolved.vars['--pp-background']).toBe('#282828');
+		expect(resolved.vars['--pp-radius']).toBeUndefined();
+		expect(resolved.vars['--pp-accent-600']).toBe('#ffb000');
 	});
 
 	it('locks the identity properties of the White and Terminal themes', () => {
@@ -40,7 +72,9 @@ describe('theme registry', () => {
 	it('has a matching [data-theme] block in app.css for every built-in theme', () => {
 		const cssPath = fileURLToPath(new URL('../../app.css', import.meta.url));
 		const css = readFileSync(cssPath, 'utf8');
-		for (const theme of BUILTIN_THEMES) {
+		// Palette variants carry no block of their own — that is the point of
+		// them; they render under their parent's and only restate colors.
+		for (const theme of BUILTIN_THEMES.filter((t) => !t.variantOf)) {
 			const blockMatch = css.match(
 				new RegExp(`\\[data-theme=['"]${theme.id}['"]\\]\\s*\\{([^}]*)\\}`)
 			);
@@ -53,6 +87,17 @@ describe('theme registry', () => {
 			);
 			for (const key of required) {
 				expect(block, `${theme.id} missing ${tokenVar(key)}`).toContain(`${tokenVar(key)}:`);
+			}
+		}
+	});
+
+	it('points every palette variant at a real parent with known token keys', () => {
+		for (const theme of BUILTIN_THEMES.filter((t) => t.variantOf)) {
+			const parent = findBuiltinTheme(theme.variantOf!);
+			expect(parent, `${theme.id} varies unknown theme ${theme.variantOf}`).toBeDefined();
+			expect(parent!.variantOf, `${theme.id} varies another variant`).toBeUndefined();
+			for (const key of Object.keys(theme.tokens ?? {})) {
+				expect(TOKEN_KEYS, `${theme.id} sets unknown token ${key}`).toContain(key);
 			}
 		}
 	});
