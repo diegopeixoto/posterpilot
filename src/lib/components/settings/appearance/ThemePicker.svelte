@@ -2,6 +2,7 @@
 	/** The theme grid: built-ins grouped by family, then the user's own themes. */
 	import { m } from '$lib/paraglide/messages';
 	import { BUILTIN_THEMES, findBuiltinTheme } from '$lib/theming/presets';
+	import { resolveAppearance } from '$lib/theming/resolve';
 	import type { CustomTheme } from '$lib/theming/schema';
 	import ThemeTile from './ThemeTile.svelte';
 
@@ -34,6 +35,15 @@
 	function selected(id: string): string {
 		return themeId === id ? 'border-accent-500 ring-1 ring-accent-500' : '';
 	}
+
+	/** A custom theme's deltas as an inline style, the same way the applier writes
+	 *  them onto `<html>` — so its tile previews the theme, not just its base. */
+	function previewVars(theme: CustomTheme): string {
+		const { vars } = resolveAppearance({ themeId: theme.id }, [theme]);
+		return Object.entries(vars)
+			.map(([key, value]) => `${key}:${value}`)
+			.join(';');
+	}
 </script>
 
 <div class="space-y-4">
@@ -48,11 +58,12 @@
 						type="button"
 						onclick={() => onSelect(theme.id)}
 						aria-pressed={themeId === theme.id}
-						class="surface flex flex-col gap-2 p-3 text-left transition hover:border-border-hover {selected(
+						class="surface flex flex-col gap-2 p-2 text-left transition hover:border-border-hover {selected(
 							theme.id
 						)}"
 					>
-						<ThemeTile swatches={theme.swatches} name={theme.name} />
+						<ThemeTile dataTheme={theme.id} sidebar={theme.layout === 'sidebar'} />
+						<span class="px-1 pb-0.5 text-xs font-medium">{theme.name}</span>
 					</button>
 				{/each}
 			</div>
@@ -67,7 +78,7 @@
 			<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 				{#each customThemes as theme (theme.id)}
 					{@const base = findBuiltinTheme(theme.base)}
-					<div class="surface flex flex-col gap-2 p-3 {selected(theme.id)}">
+					<div class="surface flex flex-col gap-2 p-2 {selected(theme.id)}">
 						<button
 							type="button"
 							onclick={() => onSelect(theme.id)}
@@ -75,11 +86,12 @@
 							class="flex flex-col gap-2 text-left"
 						>
 							<ThemeTile
-								swatches={base?.swatches ?? []}
-								name={theme.name}
-								accentOverride={theme.tokens['accent-base'] ?? null}
+								dataTheme={base?.id ?? theme.base}
+								vars={previewVars(theme)}
+								sidebar={base?.layout === 'sidebar'}
 							/>
-							<span class="text-[10px] text-text-faint">
+							<span class="px-1 text-xs font-medium">{theme.name}</span>
+							<span class="px-1 pb-0.5 text-[10px] text-text-faint">
 								{m.appearance_based_on({ base: base?.name ?? theme.base })}
 								{theme.version ? ` · v${theme.version}` : ''}
 							</span>

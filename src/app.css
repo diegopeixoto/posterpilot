@@ -33,24 +33,6 @@
 	--pp-chrome-border: #262626;
 
 	--pp-accent-base: #7c3aed;
-	/* The default ramp is *derived* here rather than in the `@theme inline`
-	   fallbacks. Custom properties resolve against the element they land on, and
-	   `[data-theme]` blocks sit on the same `<html>` as `:root` — so a stop
-	   spelled out here stays defined for every theme, and a `var(--pp-accent-600,
-	   …)` fallback in the utility would never fire. Deriving from
-	   `var(--pp-accent-base)` instead means a theme that sets only its base gets a
-	   ramp in *its* hue, and one that wants exact stops (PosterPilot below) simply
-	   redeclares them. */
-	--pp-accent-100: color-mix(in oklab, var(--pp-accent-base), white 88%);
-	--pp-accent-200: color-mix(in oklab, var(--pp-accent-base), white 70%);
-	--pp-accent-300: color-mix(in oklab, var(--pp-accent-base), white 45%);
-	--pp-accent-400: color-mix(in oklab, var(--pp-accent-base), white 25%);
-	--pp-accent-500: color-mix(in oklab, var(--pp-accent-base), white 10%);
-	--pp-accent-600: var(--pp-accent-base);
-	--pp-accent-700: color-mix(in oklab, var(--pp-accent-base), black 12%);
-	--pp-accent-800: color-mix(in oklab, var(--pp-accent-base), black 25%);
-	--pp-accent-900: color-mix(in oklab, var(--pp-accent-base), black 40%);
-	--pp-accent-950: color-mix(in oklab, var(--pp-accent-base), black 65%);
 	--pp-accent-foreground: #ffffff;
 
 	--pp-radius: 0.75rem;
@@ -62,11 +44,38 @@
 	color-scheme: dark;
 }
 
+/* The derived accent ramp.
+ *
+ * It is declared for `[data-theme]` as well as `:root` because custom
+ * properties are inherited as *computed* values. Deriving only on `:root` would
+ * resolve `var(--pp-accent-base)` once, against `<html>`, and every nested
+ * `[data-theme]` element — the settings preview tiles — would inherit that
+ * already-resolved violet no matter which base it declares. Repeating the
+ * derivation makes every element that changes the base recompute the ramp from
+ * it.
+ *
+ * This also has to sit above the theme blocks, not inside `:root`: matching
+ * `[data-theme]` and `[data-theme='monokai']` weigh the same, so source order is
+ * what lets a theme (or White's light inversion) redeclare exact stops. */
+:root,
+[data-theme] {
+	--pp-accent-100: color-mix(in oklab, var(--pp-accent-base), white 88%);
+	--pp-accent-200: color-mix(in oklab, var(--pp-accent-base), white 70%);
+	--pp-accent-300: color-mix(in oklab, var(--pp-accent-base), white 45%);
+	--pp-accent-400: color-mix(in oklab, var(--pp-accent-base), white 25%);
+	--pp-accent-500: color-mix(in oklab, var(--pp-accent-base), white 10%);
+	--pp-accent-600: var(--pp-accent-base);
+	--pp-accent-700: color-mix(in oklab, var(--pp-accent-base), black 12%);
+	--pp-accent-800: color-mix(in oklab, var(--pp-accent-base), black 25%);
+	--pp-accent-900: color-mix(in oklab, var(--pp-accent-base), black 40%);
+	--pp-accent-950: color-mix(in oklab, var(--pp-accent-base), black 65%);
+}
+
 /* ---------------------------------------------------------------------------
    Built-in themes. Each block is the runtime source of truth for that theme's
    tokens and must stay in sync with `src/lib/theming/presets.ts` (enforced by
-   `resolve.test.ts`). Accent stops left out of a block come from the ramp
-   `:root` derives off that theme's own `--pp-accent-base`.
+   `resolve.test.ts`). Accent stops left out of a block come from the derived
+   ramp above, computed off that theme's own `--pp-accent-base`.
    ------------------------------------------------------------------------ */
 
 [data-theme='posterpilot'] {
@@ -395,7 +404,29 @@ body {
 	background-position: center;
 	background-attachment: fixed;
 	color: var(--pp-text);
+	/* Phosphor bloom and the like. A token rather than a rule on `body`, so the
+	   settings preview tiles — which are nested `[data-theme]` elements, not the
+	   page root — pick up the same treatment from the same declaration. */
+	text-shadow: var(--pp-text-bloom, none);
 	-webkit-font-smoothing: antialiased;
+}
+
+/**
+ * A miniature of the app chrome, used by the theme picker. It carries its own
+ * `data-theme` (an attribute selector matches any element, not just `<html>`),
+ * so every token *and* every reskin rule scoped to that theme applies inside it
+ * for free — the preview is the production CSS, not a redrawing of it.
+ *
+ * What does not reach it on its own is anything scoped to `body`; those are
+ * tokens above precisely so this can consume them too.
+ */
+.theme-preview {
+	background-color: var(--pp-background);
+	background-image: var(--pp-background-gradient, none);
+	background-size: cover;
+	color: var(--pp-text);
+	text-shadow: var(--pp-text-bloom, none);
+	font-family: var(--pp-font-sans);
 }
 
 /* Themes may swap the header logo (the shipped asset is light-on-dark); the
@@ -630,17 +661,16 @@ body {
    rings) or adds one it does (scanlines, phosphor bloom, a block cursor on the
    active row, bracketed panel headers). The scanline and bloom are static, so
    there is nothing for `prefers-reduced-motion` to turn off. */
-[data-theme='terminal'] body {
-	/* CRT scanlines. The theme locks background images, so this layer is the
-	   only thing painting here and can be declared outright. */
-	background-image: repeating-linear-gradient(
+[data-theme='terminal'] {
+	/* CRT scanlines and phosphor bloom, declared as tokens so the page and the
+	   settings preview tiles read them from one place. The bloom stays faint
+	   enough to leave small text legible. */
+	--pp-background-gradient: repeating-linear-gradient(
 		to bottom,
 		rgb(0 0 0 / 0) 0 2px,
 		rgb(0 0 0 / 0.32) 2px 4px
 	);
-	background-attachment: fixed;
-	/* Phosphor bloom, kept faint enough to leave small text legible. */
-	text-shadow: 0 0 6px color-mix(in oklab, currentColor, transparent 55%);
+	--pp-text-bloom: 0 0 6px color-mix(in oklab, currentColor, transparent 55%);
 }
 [data-theme='terminal'] .surface {
 	background-color: var(--pp-surface);
