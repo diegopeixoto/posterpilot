@@ -3,6 +3,9 @@ import { stat, statfs } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const INTEGRITY_ROW_LIMIT = 10;
+// quick_check scans the database. Keep support export predictably bounded by
+// skipping it above roughly 100 MiB at the common 4 KiB page size.
+export const QUICK_CHECK_MAX_PAGES = 25_000;
 
 function scalar(rows: readonly Record<string, unknown>[], key: string): unknown {
 	return rows[0]?.[key] ?? null;
@@ -30,7 +33,21 @@ export async function inspectSupportDatabase(client: Pick<Client, 'execute'>, fi
 	const autoCheckpoint = await client.execute('PRAGMA wal_autocheckpoint');
 	const pageSize = await client.execute('PRAGMA page_size');
 	const pageCount = await client.execute('PRAGMA page_count');
-	const integrity = await client.execute(`PRAGMA quick_check(${INTEGRITY_ROW_LIMIT})`);
+	const pages = finite(scalar(pageCount.rows, 'page_count'));
+	const integrity =
+		pages !== null && pages <= QUICK_CHECK_MAX_PAGES
+			? {
+					status: 'completed' as const,
+					rows: (await client.execute(`PRAGMA quick_check(${INTEGRITY_ROW_LIMIT})`)).rows.slice(
+						0,
+						INTEGRITY_ROW_LIMIT
+					)
+				}
+			: {
+					status: 'omitted' as const,
+					reason: pages === null ? 'page_count_unavailable' : 'database_too_large',
+					maxPages: QUICK_CHECK_MAX_PAGES
+				};
 	// PASSIVE may copy committed frames but never waits for readers or truncates the WAL.
 	const checkpoint = await client.execute('PRAGMA wal_checkpoint(PASSIVE)');
 
@@ -64,7 +81,7 @@ export async function inspectSupportDatabase(client: Pick<Client, 'execute'>, fi
 			pageSize: scalar(pageSize.rows, 'page_size'),
 			pageCount: scalar(pageCount.rows, 'page_count')
 		},
-		quickCheck: integrity.rows.slice(0, INTEGRITY_ROW_LIMIT),
+		quickCheck: integrity,
 		passiveCheckpoint: checkpoint.rows,
 		storage
 	};

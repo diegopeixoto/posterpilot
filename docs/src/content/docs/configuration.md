@@ -415,9 +415,11 @@ once. See [Automation and recovery](../automation-recovery/).
 The Diagnostics tab can export a bounded, sanitized support bundle. In addition
 to recent jobs, provider outcomes, events, schema state, and configuration shape,
 the bundle records recent job attempts and database operational metadata:
-journal/checkpoint PRAGMAs, a bounded SQLite quick check, a passive WAL checkpoint
-result, classified filesystem information, and database/WAL/SHM sizes. It never
-contains the database itself or its absolute path.
+journal/checkpoint PRAGMAs, a SQLite quick check for databases below a fixed page
+work limit, a passive WAL checkpoint result, classified filesystem information,
+and database/WAL/SHM sizes. Larger databases explicitly report the quick check as
+omitted instead of making support export perform an unbounded scan. The bundle
+never contains the database itself or its absolute path.
 
 Generating the bundle is explicit and does not upload anything. The passive
 checkpoint may copy already committed WAL frames into the main database, but it

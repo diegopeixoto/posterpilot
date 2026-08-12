@@ -15,8 +15,23 @@ describe('support database inspection', () => {
 		expect(JSON.stringify(result)).not.toContain('/');
 		expect(result).toMatchObject({
 			pragmas: { journalMode: 'wal' },
-			quickCheck: [{ quick_check: 'ok' }],
+			quickCheck: { status: 'completed', rows: [{ quick_check: 'ok' }] },
 			passiveCheckpoint: [{ busy: 0 }]
 		});
+	});
+
+	it('omits the full scan when the database exceeds the page work bound', async () => {
+		const execute = vi.fn(async (sql: string) => {
+			if (sql.includes('page_count')) return { rows: [{ page_count: 25_001 }] };
+			if (sql.includes('wal_checkpoint')) return { rows: [{ busy: 0, log: 0, checkpointed: 0 }] };
+			return { rows: [{}] };
+		});
+		const result = await inspectSupportDatabase({ execute } as never, null);
+		expect(result.quickCheck).toEqual({
+			status: 'omitted',
+			reason: 'database_too_large',
+			maxPages: 25_000
+		});
+		expect(execute.mock.calls.flat().join(' ')).not.toContain('quick_check');
 	});
 });
