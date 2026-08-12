@@ -11,6 +11,7 @@
 	import Toaster from '$lib/components/Toaster.svelte';
 	import TmdbRepairBanner from '$lib/components/TmdbRepairBanner.svelte';
 	import { toasts } from '$lib/stores/toasts.svelte';
+	import { chrome } from '$lib/stores/chrome.svelte';
 
 	// Local copy of the version comparison (the canonical `isNewerVersion` lives in
 	// `$lib/server/semver`, which SvelteKit forbids importing into client code).
@@ -66,7 +67,11 @@
 	// Left-sidebar navigation: from the Appearance nav-placement setting, or
 	// forced by an extreme theme that reskins the layout (e.g. Overseerr).
 	// Desktop-only: below the lg breakpoint the top bar + hamburger is always used.
-	const sidebar = $derived(data.appearance?.resolved.navPlacement === 'left');
+	// The client store wins while it holds an opinion, so switching theme in
+	// Settings rearranges the chrome at once instead of at the next page load.
+	const sidebar = $derived(
+		(chrome.navPlacement ?? data.appearance?.resolved.navPlacement) === 'left'
+	);
 
 	function isActive(href: string): boolean {
 		return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);

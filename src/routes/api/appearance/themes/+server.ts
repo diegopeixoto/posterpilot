@@ -7,23 +7,26 @@ import {
 	saveCustomThemes,
 	slugifyThemeName
 } from '$lib/server/appearance';
-import { MAX_CUSTOM_THEMES, parseThemeFile, sanitizeCustomTheme } from '$lib/theming/theme-file';
+import { MAX_CUSTOM_THEMES, parseCustomThemeInput, parseThemeFile } from '$lib/theming/theme-file';
 import type { CustomTheme } from '$lib/theming/schema';
 
 function badRequest(code: string) {
 	return json({ error: { code } }, { status: 400 });
 }
 
-function uniqueThemeId(name: string, existing: CustomTheme[], keepId?: string): string {
+function uniqueThemeId(name: string, existing: CustomTheme[]): string {
 	const base = slugifyThemeName(name);
 	let candidate = `custom:${base}`;
-	for (let i = 2; existing.some((t) => t.id === candidate && t.id !== keepId); i++) {
+	for (let i = 2; existing.some((t) => t.id === candidate); i++) {
 		candidate = `custom:${base}-${i}`;
 	}
 	return candidate;
 }
 
-/** Create or update a custom theme (update when `id` names an existing theme). */
+/** Create or update a custom theme (update when `id` names an existing theme).
+ *  Validation is strict and wholesale — an unknown token key or malformed value
+ *  is reported, never dropped, so the editor can never save a theme that is
+ *  quietly missing a property the author set. */
 export const PUT: RequestHandler = async ({ request }) => {
 	let body: unknown;
 	try {
@@ -32,8 +35,9 @@ export const PUT: RequestHandler = async ({ request }) => {
 		return badRequest('invalid_request');
 	}
 
-	const clean = sanitizeCustomTheme(body);
-	if (!clean) return badRequest('invalid_theme');
+	const parsed = parseCustomThemeInput(body);
+	if (!parsed.ok) return badRequest(parsed.error);
+	const clean = parsed.theme;
 
 	const themes = await getCustomThemes();
 	const requestedId = (body as Record<string, unknown>).id;

@@ -1693,5 +1693,16 @@
 	"appearance_import_too_large": "The theme file is too large.",
 	"appearance_too_many": "Custom theme limit reached.",
 	"appearance_custom_css": "Custom CSS",
-	"appearance_custom_css_hint": "Applied as-is, after the active theme, on every page. Nothing is validated — the browser ignores invalid CSS. Captured into custom themes you author and included in their export files."
+	"appearance_custom_css_hint": "Applied as-is, after the active theme, on every page. Nothing is validated — the browser ignores invalid CSS.",
+	"appearance_delete_theme_confirm": "Delete “{name}”? Export it first if you want a copy — this cannot be undone.",
+	"appearance_delete_theme_confirm_action": "Delete permanently",
+	"appearance_cancel": "Cancel",
+	"appearance_nav_locked": "{theme} sets its own layout.",
+	"appearance_include_custom_css": "Bundle my custom CSS into this theme",
+	"appearance_import_ships_css": "“{name}” ships {kb} KB of custom CSS that will run on every page. Import it?",
+	"appearance_import_confirm": "Import anyway",
+	"appearance_import_invalid_css": "This theme’s CSS is not allowed — themes cannot load remote fonts, images or stylesheets.",
+	"appearance_theme_css": "Theme CSS",
+	"appearance_theme_css_hint": "Ships with “{name}”. Runs while this theme is active, before your own custom CSS below. Saved to the theme, not to this instance — so it travels with the export.",
+	"appearance_theme_css_invalid": "Theme CSS cannot pull anything from another host — remote stylesheets, fonts and images are blocked."
 }

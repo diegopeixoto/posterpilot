@@ -184,7 +184,7 @@
 		{#if login.status === 'pending'}
 			{#if tabBlocked}
 				<!-- New tab blocked: show the full manual plex.tv/link fallback. -->
-				<div class="rounded-md border border-border bg-scrim/40 p-3 text-sm">
+				<div class="rounded-control border border-border bg-well/40 p-3 text-sm">
 					<p class="mb-2 text-amber-300">{m.settings_plex_tab_blocked()}</p>
 					<p>
 						{m.settings_plex_open_link_pre()}
@@ -203,7 +203,7 @@
 				</div>
 			{:else}
 				<!-- Tab open: keep the manual code one disclosure away as a fallback. -->
-				<div class="rounded-md border border-border bg-scrim/40 p-3 text-sm">
+				<div class="rounded-control border border-border bg-well/40 p-3 text-sm">
 					<p class="text-text-secondary">{m.settings_plex_tab_waiting()}</p>
 					<details class="mt-2 text-xs text-text-muted">
 						<summary class="cursor-pointer select-none hover:text-text-strong">
@@ -269,7 +269,7 @@
 					<button
 						type="button"
 						onclick={() => (plexUrl = conn.uri)}
-						class="flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left text-xs transition {plexUrl ===
+						class="flex w-full items-center justify-between rounded-control border px-2 py-1.5 text-left text-xs transition {plexUrl ===
 						conn.uri
 							? 'border-accent-600 bg-accent-950/60'
 							: 'border-border-strong hover:border-border-hover'}"

@@ -120,7 +120,7 @@
 	}
 </script>
 
-<div class="rounded-xl border border-border bg-surface/60 p-4" aria-busy={!done}>
+<div class="rounded-surface border border-border bg-surface/60 p-4" aria-busy={!done}>
 	<p class="sr-only" aria-live="polite" aria-atomic="true">
 		{m.jobs_progress({ id: jobId, status: jobStatusLabel(progress.status) })}.
 		{m.jobs_phase({ phase })}.
@@ -148,7 +148,7 @@
 							? 'bg-emerald-400'
 							: connection === 'reconnecting'
 								? 'bg-amber-400'
-								: 'bg-neutral-400'}"
+								: 'bg-text-faint'}"
 						aria-hidden="true"
 					></span>
 					{connectionLabel}

@@ -189,7 +189,7 @@
 	{:else}
 		<ul class="mt-4 space-y-2">
 			{#each groups as group (group.id)}
-				<li class="rounded-lg border border-border bg-background/40 p-3">
+				<li class="rounded-surface border border-border bg-background/40 p-3">
 					<div class="flex flex-wrap items-center justify-between gap-3">
 						<div>
 							<p class="text-sm font-medium text-text-strong">{date(group.createdAt)}</p>
@@ -220,7 +220,7 @@
 							<ul class="mt-3 space-y-2">
 								{#each group.revisions as revision (revision.id)}
 									<li
-										class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface/60 p-3"
+										class="flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-surface/60 p-3"
 									>
 										<div>
 											<p class="text-xs font-medium text-text-strong">

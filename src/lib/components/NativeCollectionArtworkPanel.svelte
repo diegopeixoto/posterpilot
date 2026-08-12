@@ -393,14 +393,14 @@
 		{:else if errorCode && !workspace}
 			<p class="text-sm text-red-300" role="alert">{errorMessage(errorCode)}</p>
 		{:else if workspace && !workspace.entity.available}
-			<div class="rounded-lg border border-border bg-background/50 p-4">
+			<div class="rounded-surface border border-border bg-background/50 p-4">
 				<p class="text-sm text-text-secondary">{entityMessage(workspace.entity.reason)}</p>
 				<p class="mt-2 text-xs text-text-faint">{m.native_collection_member_unaffected()}</p>
 			</div>
 		{:else if workspace}
 			{#if !workspace.candidateSource.available}
 				<p
-					class="mb-4 rounded-lg border border-border bg-background/50 p-3 text-xs text-text-muted"
+					class="mb-4 rounded-surface border border-border bg-background/50 p-3 text-xs text-text-muted"
 				>
 					{candidateSourceMessage(workspace.candidateSource.reason)}
 				</p>
@@ -442,7 +442,7 @@
 									{m.collection_current()}
 								</p>
 								<div
-									class={`overflow-hidden rounded-lg border border-border bg-background ${entry.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'}`}
+									class={`overflow-hidden rounded-surface border border-border bg-background ${entry.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'}`}
 								>
 									{#if entry.current.hasPreview}
 										<img
@@ -463,7 +463,7 @@
 							{#each entry.candidates as candidate, index (candidate.id)}
 								<button
 									type="button"
-									class={`group relative shrink-0 overflow-hidden rounded-lg border text-left transition-colors ${entry.kind === 'poster' ? 'aspect-[2/3] w-32' : 'aspect-video w-56'} ${selected[entry.kind] === candidate.id ? 'border-accent-400 ring-2 ring-accent-600/50' : 'border-border hover:border-border-hover'}`}
+									class={`group relative shrink-0 overflow-hidden rounded-surface border text-left transition-colors ${entry.kind === 'poster' ? 'aspect-[2/3] w-32' : 'aspect-video w-56'} ${selected[entry.kind] === candidate.id ? 'border-accent-400 ring-2 ring-accent-600/50' : 'border-border hover:border-border-hover'}`}
 									disabled={entry.capability !== 'supported' ||
 										entry.current.state === 'unavailable'}
 									aria-pressed={selected[entry.kind] === candidate.id}
@@ -532,7 +532,7 @@
 			</div>
 
 			{#if preview}
-				<div class="mt-4 rounded-xl border border-accent-900/60 bg-accent-950/15 p-4">
+				<div class="mt-4 rounded-surface border border-accent-900/60 bg-accent-950/15 p-4">
 					<h3 class="text-sm font-semibold">{m.native_collection_preview_title()}</h3>
 					<p class="mt-1 text-xs text-text-muted">
 						{m.native_collection_preview_summary({
@@ -581,7 +581,7 @@
 				{:else}
 					<ul class="mt-3 space-y-2">
 						{#each historyGroups as group (group.id)}
-							<li class="rounded-lg border border-border bg-background/40 p-3">
+							<li class="rounded-surface border border-border bg-background/40 p-3">
 								<div class="flex flex-wrap items-center justify-between gap-3">
 									<div>
 										<p class="text-xs font-medium text-text-strong">{date(group.createdAt)}</p>

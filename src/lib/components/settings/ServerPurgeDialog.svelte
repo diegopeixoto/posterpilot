@@ -123,7 +123,7 @@
 			</header>
 
 			<div class="space-y-4 px-5 py-4">
-				<div class="rounded-lg border border-red-900/60 bg-red-950/25 p-3">
+				<div class="rounded-surface border border-red-900/60 bg-red-950/25 p-3">
 					<p class="text-sm font-medium text-red-100">{m.server_purge_irreversible()}</p>
 					<p class="mt-1 text-xs text-red-200/80">{m.server_purge_scope_only()}</p>
 				</div>
@@ -163,7 +163,7 @@
 
 				{#if blocked}
 					<p
-						class="rounded-lg border border-amber-800/70 bg-amber-950/30 p-3 text-xs text-amber-100"
+						class="rounded-surface border border-amber-800/70 bg-amber-950/30 p-3 text-xs text-amber-100"
 						role="alert"
 					>
 						{m.server_purge_jobs_blocked({ count: impact.activeMutatingJobs })}

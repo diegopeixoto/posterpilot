@@ -144,7 +144,7 @@ PosterPilot.
 
 #### Scenario: Import a valid theme file
 
-- **WHEN** the user imports a theme file that passes validation
+- **WHEN** the user imports a theme file that passes validation and ships no CSS
 - **THEN** the theme registers as a custom theme and applies immediately
 
 #### Scenario: Reject a malicious or malformed file
@@ -222,16 +222,42 @@ SHALL win over the user's placement setting while that theme is active.
 
 - **WHEN** a theme that forces a layout (e.g. Overseerr → left sidebar) is active
 - **THEN** the chrome renders in that theme's signature layout regardless of the
-  placement setting, and the setting applies again when a non-forcing theme is active
+  placement setting, the placement control shows the forced layout and is disabled
+  with the reason given, and the setting applies again when a non-forcing theme is
+  active
 
 ### Requirement: Custom CSS
 
 The system SHALL offer a free-form custom CSS field (size-capped) that is applied
 verbatim as the last stylesheet on every page, after the active theme and all
-overrides. Custom themes SHALL carry an optional CSS field, captured from the
-current custom CSS at authoring time and included in theme export files; theme
-CSS applies while the theme is active, before the user's own custom CSS. Values
-containing a `</style>` breakout SHALL be rejected both at write and at import.
+overrides. Custom themes SHALL carry an optional CSS field; theme CSS applies
+while the theme is active, before the user's own custom CSS. Values containing a
+`</style>` breakout SHALL be rejected both at write and at import.
+
+Because a theme file is shared, CSS crossing that boundary SHALL be treated as
+third-party: bundling the user's own custom CSS into an authored theme SHALL be
+opt-in rather than automatic, theme CSS SHALL additionally reject `@import` and
+remote `url()` so a downloaded theme cannot call out to another host, and
+importing a theme that ships CSS SHALL disclose that and require confirmation
+before the theme is applied.
+
+#### Scenario: Instance CSS does not travel by default
+
+- **WHEN** the user saves the current appearance as a theme without opting in to
+  bundling their custom CSS
+- **THEN** the authored theme carries no CSS of theirs, and any CSS the theme
+  already shipped is preserved rather than dropped
+
+#### Scenario: Imported theme CSS is disclosed
+
+- **WHEN** the user imports a theme file that ships custom CSS
+- **THEN** the amount of CSS is shown and the import is applied only after explicit
+  confirmation
+
+#### Scenario: Theme CSS cannot phone home
+
+- **WHEN** a theme file's CSS contains `@import` or a remote `url()`
+- **THEN** the import is rejected wholesale
 
 #### Scenario: Custom CSS applies last
 
@@ -267,3 +293,47 @@ Appearance UI text SHALL be present in every supported locale catalog.
 - **WHEN** the active locale is not English
 - **THEN** the Appearance section labels and descriptions render in the active locale
   (preset names remain as proper nouns)
+
+### Requirement: Theme reskins beyond tokens
+
+A theme SHALL be able to change component shape and affordance, not only color:
+built-in themes through `[data-theme]` rules in `src/app.css`, user-authored
+themes through their theme file's CSS field, both landing in the same place in
+the cascade (unlayered, so a theme can override utilities written into the
+markup). The extreme presets SHALL use this to approach the applications they
+reskin rather than merely recoloring the default look.
+
+#### Scenario: Extreme presets reskin their references
+
+- **WHEN** an extreme preset is active
+- **THEN** its chrome takes on the reference application's signature treatment —
+  Overseerr an indigo backdrop wash with elevated cards and gradient primary
+  buttons, Sonarr/Radarr flat near-square surfaces with a left accent bar on the
+  active navigation row, Terminal a scanlined CRT with phosphor bloom, bracketed
+  panel headers and a block cursor on the active row
+
+#### Scenario: Reskin follows an accent override
+
+- **WHEN** a user overrides the accent of a preset whose reskin mixes its own
+  shades (gradients, active bars) from the accent
+- **THEN** those shades derive from the overridden accent, not the preset's original
+
+### Requirement: Contrast floor across shipped themes
+
+Every shipped theme's text tokens SHALL meet WCAG AA (4.5:1) against both the
+theme background and its surface, and each theme's accent foreground SHALL meet
+AA against its accent fill. This SHALL be enforced by an automated check reading
+the `[data-theme]` blocks, so a new or edited theme cannot ship below the floor.
+Where a live user override moves the accent, the accent foreground SHALL be
+re-derived so the pairing stays readable.
+
+#### Scenario: A theme below the floor fails the build
+
+- **WHEN** a theme declares a text token that does not clear AA on its surface
+- **THEN** the theme contrast check fails
+
+#### Scenario: Accent override keeps a readable foreground
+
+- **WHEN** the user picks an accent whose luminance is opposite the theme's own
+- **THEN** the accent foreground flips to the readable one instead of keeping the
+  theme's pairing

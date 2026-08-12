@@ -1693,5 +1693,16 @@
 	"appearance_import_too_large": "Le fichier de thème est trop volumineux.",
 	"appearance_too_many": "Limite de thèmes personnalisés atteinte.",
 	"appearance_custom_css": "CSS personnalisé",
-	"appearance_custom_css_hint": "Appliqué tel quel, après le thème actif, sur toutes les pages. Rien n'est validé : le navigateur ignore le CSS invalide. Capturé dans les thèmes personnalisés que vous créez et inclus dans leurs fichiers d'export."
+	"appearance_custom_css_hint": "Appliqué tel quel, après le thème actif, sur chaque page. Rien n’est validé — le navigateur ignore le CSS invalide.",
+	"appearance_delete_theme_confirm": "Supprimer « {name} » ? Exportez-le d’abord si vous voulez une copie — cette action est irréversible.",
+	"appearance_delete_theme_confirm_action": "Supprimer définitivement",
+	"appearance_cancel": "Annuler",
+	"appearance_nav_locked": "{theme} impose sa propre disposition.",
+	"appearance_include_custom_css": "Inclure mon CSS personnalisé dans ce thème",
+	"appearance_import_ships_css": "« {name} » contient {kb} Ko de CSS personnalisé qui s’exécutera sur chaque page. L’importer ?",
+	"appearance_import_confirm": "Importer quand même",
+	"appearance_import_invalid_css": "Le CSS de ce thème n’est pas autorisé : les thèmes ne peuvent pas charger de polices, d’images ou de feuilles de style distantes.",
+	"appearance_theme_css": "CSS du thème",
+	"appearance_theme_css_hint": "Fourni avec « {name} ». S’exécute tant que ce thème est actif, avant votre CSS personnalisé. Enregistré dans le thème, pas dans cette instance — il suit donc l’export.",
+	"appearance_theme_css_invalid": "Le CSS du thème ne peut rien charger depuis un autre hôte : feuilles de style, polices et images distantes sont bloquées."
 }

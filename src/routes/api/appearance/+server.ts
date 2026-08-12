@@ -1,26 +1,17 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
-	getAppearanceSettings,
+	getAppearanceState,
 	getCustomThemes,
 	saveAppearanceSettings,
 	validateCustomCss,
 	type AppearanceSettings
 } from '$lib/server/appearance';
 import { findBuiltinTheme } from '$lib/theming/presets';
-import { resolveStoredAppearance } from '$lib/theming/resolve';
 import { isValidColorValue, isValidRadiusValue } from '$lib/theming/theme-file';
 
 export const GET: RequestHandler = async () => {
-	const [appearance, customThemes] = await Promise.all([
-		getAppearanceSettings(),
-		getCustomThemes()
-	]);
-	return json({
-		settings: appearance,
-		customThemes,
-		resolved: resolveStoredAppearance(appearance, customThemes)
-	});
+	return json(await getAppearanceState());
 };
 
 function badRequest(code: string) {
@@ -101,13 +92,5 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	await saveAppearanceSettings(patch);
-	const [appearance, customThemes] = await Promise.all([
-		getAppearanceSettings(),
-		getCustomThemes()
-	]);
-	return json({
-		settings: appearance,
-		customThemes,
-		resolved: resolveStoredAppearance(appearance, customThemes)
-	});
+	return json(await getAppearanceState());
 };

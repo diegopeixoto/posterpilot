@@ -2,10 +2,21 @@
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { toasts } from '$lib/stores/toasts.svelte';
-	import { BUILTIN_THEMES, findBuiltinTheme } from '$lib/theming/presets';
+	import { chrome } from '$lib/stores/chrome.svelte';
+	import { findBuiltinTheme } from '$lib/theming/presets';
+	import ThemePicker from './appearance/ThemePicker.svelte';
+	import ThemeOverrides from './appearance/ThemeOverrides.svelte';
+	import NavPlacementField from './appearance/NavPlacementField.svelte';
+	import ThemeAuthorForm, { type ThemeAuthorPayload } from './appearance/ThemeAuthorForm.svelte';
+	import ThemeCssField from './appearance/ThemeCssField.svelte';
 	import { resolveAppearance, type ResolvedAppearance } from '$lib/theming/resolve';
 	import { applyAppearance } from '$lib/theming/apply.client';
-	import { serializeThemeFile } from '$lib/theming/theme-file';
+	import { captureThemeCss, captureThemeTokens } from '$lib/theming/authoring';
+	import {
+		MAX_THEME_FILE_BYTES,
+		parseThemeFile,
+		serializeThemeFile
+	} from '$lib/theming/theme-file';
 	import { DEFAULT_THEME_ID, type CustomTheme } from '$lib/theming/schema';
 
 	// Mirrors $lib/server/appearance.ts (kept structural: $lib/server modules must
@@ -48,18 +59,13 @@
 		findBuiltinTheme(activeCustom?.base ?? themeId) ?? findBuiltinTheme(DEFAULT_THEME_ID)!
 	);
 	const flags = $derived(baseTheme.customizable);
-	const isTerminal = $derived(baseTheme.id === 'terminal');
-
-	const baseThemes = BUILTIN_THEMES.filter((theme) => theme.family === 'base');
-	const extremeThemes = BUILTIN_THEMES.filter((theme) => theme.family === 'extreme');
-	const themeGroups = [
-		{ key: 'base', themes: baseThemes },
-		{ key: 'extreme', themes: extremeThemes }
-	];
-
-	// Classic phosphor palettes for the Terminal theme (its only customization).
-	const TERMINAL_ACCENTS = ['#33ff33', '#ffb000', '#e8e8e8'];
-	const RADIUS_OPTIONS = ['0', '0.25rem', '0.5rem', '0.75rem', '1rem'];
+	// An extreme theme that reskins the chrome forces its own layout, so the
+	// nav-placement control must show that rather than accept a click it will
+	// silently ignore (`resolveAppearance` discards the setting either way).
+	const navLocked = $derived(Boolean(baseTheme.layout));
+	const effectiveNav = $derived<'top' | 'left'>(
+		baseTheme.layout === 'sidebar' ? 'left' : navPlacement
+	);
 
 	function currentResolution() {
 		return resolveAppearance(
@@ -75,9 +81,14 @@
 		);
 	}
 
-	/** Instant client-side preview; persistence happens on change end. */
+	/** Instant client-side preview; persistence happens on change end.
+	 *  The chrome layout goes through the shared store rather than waiting for
+	 *  the next server render — picking Overseerr used to repaint the colors at
+	 *  once and leave the nav in the old arrangement until a reload. */
 	function preview() {
-		applyAppearance(currentResolution());
+		const resolved = currentResolution();
+		applyAppearance(resolved);
+		chrome.setNavPlacement(resolved.navPlacement);
 	}
 
 	async function persist(patch: Record<string, unknown>) {
@@ -89,13 +100,10 @@
 		if (!response.ok) throw new Error(`persist failed (${response.status})`);
 	}
 
-	async function applyAndPersist(patch: Record<string, unknown>, reload = false) {
+	async function applyAndPersist(patch: Record<string, unknown>) {
 		preview();
 		try {
 			await persist(patch);
-			// Nav placement restructures the root layout; like the locale strategy,
-			// persist then reload so the next SSR pass renders the new placement.
-			if (reload) window.location.reload();
 		} catch {
 			toasts.error(m.settings_save_failed());
 		}
@@ -129,7 +137,7 @@
 	function onNavPlacementChange(placement: 'top' | 'left') {
 		if (placement === navPlacement) return;
 		navPlacement = placement;
-		void applyAndPersist({ navPlacement: placement }, true);
+		void applyAndPersist({ navPlacement: placement });
 	}
 
 	/** Custom CSS: apply instantly by upserting the style element the SSR
@@ -158,38 +166,54 @@
 	// ── Custom theme authoring ────────────────────────────────────────────────
 
 	let authorOpen = $state(false);
-	let authorName = $state('');
-	let authorAuthor = $state('');
-	let authorUrl = $state('');
-	let authorVersion = $state('');
-	let authorDescription = $state('');
 	let authorBusy = $state(false);
+	let confirmDelete = $state(false);
 
-	/** The deltas an authored theme captures: the currently accepted overrides. */
+	// The active custom theme's own CSS, hydrated when the selection changes.
+	// Keyed on the theme id rather than mirrored on every state change, so an
+	// unsaved edit survives touching any other control.
+	let themeCss = $state(untrack(() => activeCustom?.css ?? ''));
+	let themeCssLoadedFor = $state<string | null>(untrack(() => activeCustom?.id ?? null));
+	$effect(() => {
+		const id = activeCustom?.id ?? null;
+		if (id === themeCssLoadedFor) return;
+		themeCssLoadedFor = id;
+		themeCss = activeCustom?.css ?? '';
+	});
+	/** A parsed import held back for confirmation because it ships CSS. */
+	let pendingImport = $state<{ file: string; name: string; kb: string } | null>(null);
+
+	/** What "save as theme" writes — see `$lib/theming/authoring`. */
 	function capturedTokens(): CustomTheme['tokens'] {
-		const tokens: CustomTheme['tokens'] = {};
-		if (flags.accent && accent) tokens['accent-base'] = accent;
-		if (flags.background && background) tokens.background = background;
-		if (flags.radius && radius) tokens.radius = radius;
-		return tokens;
+		return captureThemeTokens({
+			baseTokens: activeCustom?.tokens ?? {},
+			flags,
+			accent,
+			background,
+			radius
+		});
 	}
 
-	async function saveTheme() {
-		if (!authorName.trim() || authorBusy) return;
+	/** `includeCustomCss` is an authoring-form choice; updating an existing theme
+	 *  has no such prompt, so it never folds instance CSS in — it only preserves
+	 *  whatever the theme already ships. */
+	function capturedCss(includeCustomCss = false): string | undefined {
+		return captureThemeCss({ includeCustomCss, customCss, themeCss });
+	}
+
+	async function saveTheme(payload: ThemeAuthorPayload) {
+		if (authorBusy) return;
 		authorBusy = true;
 		try {
+			const { includeCustomCss, ...metadata } = payload;
 			const response = await fetch('/api/appearance/themes', {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
-					name: authorName.trim(),
-					author: authorAuthor.trim() || undefined,
-					url: authorUrl.trim() || undefined,
-					version: authorVersion.trim() || undefined,
-					description: authorDescription.trim() || undefined,
+					...metadata,
 					base: baseTheme.id,
 					tokens: capturedTokens(),
-					css: customCss.trim() || undefined
+					css: capturedCss(includeCustomCss)
 				})
 			});
 			if (!response.ok) throw new Error(String(response.status));
@@ -197,7 +221,6 @@
 			customThemes = body.themes;
 			themeId = body.theme.id;
 			authorOpen = false;
-			authorName = authorAuthor = authorUrl = authorVersion = authorDescription = '';
 			toasts.success(m.appearance_theme_saved({ name: body.theme.name }));
 			preview();
 		} catch {
@@ -217,7 +240,7 @@
 				body: JSON.stringify({
 					...activeCustom,
 					tokens: capturedTokens(),
-					css: customCss.trim() || undefined
+					css: capturedCss()
 				})
 			});
 			if (!response.ok) throw new Error(String(response.status));
@@ -232,9 +255,12 @@
 		}
 	}
 
+	/** Deleting is irreversible and the export file is the only backup, so it
+	 *  takes a second, explicit press. */
 	async function deleteTheme() {
 		if (!activeCustom) return;
 		const deleted = activeCustom;
+		confirmDelete = false;
 		try {
 			const response = await fetch(`/api/appearance/themes?id=${encodeURIComponent(deleted.id)}`, {
 				method: 'DELETE'
@@ -258,16 +284,62 @@
 		a.href = url;
 		a.download = `${theme.id.replace(/^custom:/, '')}.posterpilot-theme.json`;
 		a.click();
-		URL.revokeObjectURL(url);
+		// Revoking in the same tick cancels the download in some browsers; give
+		// the navigation a turn of the event loop first.
+		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}
 
 	let importInput = $state<HTMLInputElement | null>(null);
+
+	/**
+	 * Read a theme file and decide whether it can be applied straight away.
+	 *
+	 * A theme file arrives from somebody else, and one that ships CSS gets to
+	 * restyle every page — so that case is disclosed and confirmed instead of
+	 * being applied the moment the file picker closes. Parsing here is for the
+	 * disclosure only; the server validates the file independently.
+	 */
 	async function importTheme(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file) return;
+		if (file.size > MAX_THEME_FILE_BYTES) {
+			toasts.error(m.appearance_import_too_large());
+			return;
+		}
 		const text = await file.text();
+		const parsed = parseThemeFile(text);
+		if (!parsed.ok) {
+			toasts.error(importErrorMessage(parsed.error));
+			return;
+		}
+		if (parsed.theme.css) {
+			const bytes = new TextEncoder().encode(parsed.theme.css).byteLength;
+			pendingImport = {
+				file: text,
+				name: parsed.theme.name,
+				kb: (bytes / 1024).toFixed(1)
+			};
+			return;
+		}
+		await sendImport(text);
+	}
+
+	function importErrorMessage(code: string): string {
+		return code === 'unsupported_version'
+			? m.appearance_import_unsupported_version()
+			: code === 'too_large'
+				? m.appearance_import_too_large()
+				: code === 'too_many_themes'
+					? m.appearance_too_many()
+					: code === 'invalid_css'
+						? m.appearance_import_invalid_css()
+						: m.appearance_import_invalid();
+	}
+
+	async function sendImport(text: string) {
+		pendingImport = null;
 		try {
 			const response = await fetch('/api/appearance/themes', {
 				method: 'POST',
@@ -287,16 +359,7 @@
 			toasts.success(m.appearance_imported({ name: body.theme.name }));
 			preview();
 		} catch (error) {
-			const code = error instanceof Error ? error.message : '';
-			toasts.error(
-				code === 'unsupported_version'
-					? m.appearance_import_unsupported_version()
-					: code === 'too_large'
-						? m.appearance_import_too_large()
-						: code === 'too_many_themes'
-							? m.appearance_too_many()
-							: m.appearance_import_invalid()
-			);
+			toasts.error(importErrorMessage(error instanceof Error ? error.message : ''));
 		}
 	}
 </script>
@@ -307,253 +370,38 @@
 		<p class="text-sm text-text-muted">{m.appearance_description()}</p>
 	</div>
 
-	<!-- Theme picker -->
-	<div class="space-y-4">
-		{#each themeGroups as group (group.key)}
-			<div>
-				<h3 class="mb-2 text-xs font-semibold tracking-wide text-text-faint uppercase">
-					{group.key === 'base' ? m.appearance_themes_base() : m.appearance_themes_extreme()}
-				</h3>
-				<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-					{#each group.themes as theme (theme.id)}
-						<button
-							type="button"
-							onclick={() => selectTheme(theme.id)}
-							aria-pressed={themeId === theme.id}
-							class="surface flex flex-col gap-2 p-3 text-left transition hover:border-border-hover {themeId ===
-							theme.id
-								? 'border-accent-500 ring-1 ring-accent-500'
-								: ''}"
-						>
-							<span class="flex gap-1.5" aria-hidden="true">
-								{#each theme.swatches as swatch (swatch)}
-									<span
-										class="size-5 rounded-full border border-black/30"
-										style="background-color: {swatch}"
-									></span>
-								{/each}
-							</span>
-							<span class="text-xs font-medium">{theme.name}</span>
-						</button>
-					{/each}
-				</div>
-			</div>
-		{/each}
+	<ThemePicker {themeId} {customThemes} onSelect={selectTheme} onExport={exportTheme} />
 
-		{#if customThemes.length > 0}
-			<div>
-				<h3 class="mb-2 text-xs font-semibold tracking-wide text-text-faint uppercase">
-					{m.appearance_themes_custom()}
-				</h3>
-				<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-					{#each customThemes as theme (theme.id)}
-						{@const base = findBuiltinTheme(theme.base)}
-						<div
-							class="surface flex flex-col gap-2 p-3 {themeId === theme.id
-								? 'border-accent-500 ring-1 ring-accent-500'
-								: ''}"
-						>
-							<button
-								type="button"
-								onclick={() => selectTheme(theme.id)}
-								aria-pressed={themeId === theme.id}
-								class="flex flex-col gap-2 text-left"
-							>
-								<span class="flex gap-1.5" aria-hidden="true">
-									{#each base?.swatches ?? [] as swatch (swatch)}
-										<span
-											class="size-5 rounded-full border border-black/30"
-											style="background-color: {theme.tokens['accent-base'] &&
-											swatch === base?.swatches[2]
-												? theme.tokens['accent-base']
-												: swatch}"
-										></span>
-									{/each}
-								</span>
-								<span class="text-xs font-medium">{theme.name}</span>
-								<span class="text-[10px] text-text-faint">
-									{m.appearance_based_on({ base: base?.name ?? theme.base })}
-									{theme.version ? ` · v${theme.version}` : ''}
-								</span>
-							</button>
-							<span class="flex gap-1">
-								<button
-									type="button"
-									class="btn btn-ghost px-2 py-0.5 text-[10px]"
-									onclick={() => exportTheme(theme)}>{m.appearance_export()}</button
-								>
-							</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
-	</div>
+	<ThemeOverrides
+		{flags}
+		{baseTheme}
+		{activeCustom}
+		bind:accent
+		bind:background
+		bind:backgroundImage
+		bind:backgroundImageDim
+		bind:radius
+		onPreview={preview}
+		{onAccentChange}
+		{onBackgroundChange}
+		{onBackgroundImageChange}
+		{onRadiusChange}
+	/>
 
-	<!-- Overrides, gated by the active theme's capability flags -->
-	{#if flags.accent || flags.background || flags.backgroundImage || flags.radius}
-		<div class="surface space-y-4 p-4">
-			{#if flags.accent}
-				<div class="flex items-center justify-between gap-3">
-					<label for="appearance-accent" class="text-sm font-medium">{m.appearance_accent()}</label>
-					<div class="flex items-center gap-2">
-						{#if isTerminal}
-							{#each TERMINAL_ACCENTS as phosphor (phosphor)}
-								<button
-									type="button"
-									aria-label={phosphor}
-									aria-pressed={accent === phosphor}
-									onclick={() => {
-										accent = phosphor;
-										onAccentChange();
-									}}
-									class="size-6 rounded-full border {accent === phosphor
-										? 'border-white ring-1 ring-white'
-										: 'border-black/30'}"
-									style="background-color: {phosphor}"
-								></button>
-							{/each}
-						{:else}
-							<input
-								id="appearance-accent"
-								type="color"
-								value={accent || baseTheme.swatches[2]}
-								oninput={(event) => {
-									accent = event.currentTarget.value;
-									preview();
-								}}
-								onchange={onAccentChange}
-								class="h-7 w-10 cursor-pointer rounded border border-border-strong bg-transparent"
-							/>
-						{/if}
-						{#if accent}
-							<button
-								type="button"
-								class="btn btn-ghost px-2 py-1 text-xs"
-								onclick={() => {
-									accent = '';
-									onAccentChange();
-								}}>{m.appearance_reset()}</button
-							>
-						{/if}
-					</div>
-				</div>
-			{/if}
+	<NavPlacementField
+		effective={effectiveNav}
+		locked={navLocked}
+		lockedByTheme={baseTheme.name}
+		onChange={onNavPlacementChange}
+	/>
 
-			{#if flags.background}
-				<div class="flex items-center justify-between gap-3">
-					<label for="appearance-background" class="text-sm font-medium"
-						>{m.appearance_background()}</label
-					>
-					<div class="flex items-center gap-2">
-						<input
-							id="appearance-background"
-							type="color"
-							value={background || baseTheme.swatches[0]}
-							oninput={(event) => {
-								background = event.currentTarget.value;
-								preview();
-							}}
-							onchange={onBackgroundChange}
-							class="h-7 w-10 cursor-pointer rounded border border-border-strong bg-transparent"
-						/>
-						{#if background}
-							<button
-								type="button"
-								class="btn btn-ghost px-2 py-1 text-xs"
-								onclick={() => {
-									background = '';
-									onBackgroundChange();
-								}}>{m.appearance_reset()}</button
-							>
-						{/if}
-					</div>
-				</div>
-			{/if}
-
-			{#if flags.backgroundImage}
-				<div class="space-y-2">
-					<div class="flex items-center justify-between gap-3">
-						<label for="appearance-bg-image" class="text-sm font-medium"
-							>{m.appearance_background_image()}</label
-						>
-						{#if backgroundImage}
-							<button
-								type="button"
-								class="btn btn-ghost px-2 py-1 text-xs"
-								onclick={() => {
-									backgroundImage = '';
-									onBackgroundImageChange();
-								}}>{m.appearance_reset()}</button
-							>
-						{/if}
-					</div>
-					<input
-						id="appearance-bg-image"
-						type="url"
-						bind:value={backgroundImage}
-						onchange={onBackgroundImageChange}
-						placeholder="https://…"
-						class="input w-full"
-					/>
-					{#if backgroundImage}
-						<label class="flex items-center gap-3 text-sm text-text-muted">
-							<span class="shrink-0">{m.appearance_background_image_dim()}</span>
-							<input
-								type="range"
-								min="0"
-								max="1"
-								step="0.05"
-								bind:value={backgroundImageDim}
-								oninput={preview}
-								onchange={onBackgroundImageChange}
-								class="w-full accent-accent-500"
-							/>
-						</label>
-					{/if}
-				</div>
-			{/if}
-
-			{#if flags.radius}
-				<div class="flex items-center justify-between gap-3">
-					<label for="appearance-radius" class="text-sm font-medium">{m.appearance_radius()}</label>
-					<div class="flex items-center gap-2">
-						<select
-							id="appearance-radius"
-							bind:value={radius}
-							onchange={onRadiusChange}
-							class="input"
-						>
-							<option value="">{m.appearance_default()}</option>
-							{#each RADIUS_OPTIONS as option (option)}
-								<option value={option}>{option}</option>
-							{/each}
-						</select>
-					</div>
-				</div>
-			{/if}
-		</div>
+	<!-- The active theme's own CSS, so an imported theme's rules are readable and
+	     a theme you own is editable. Persists to the theme, not the instance. -->
+	{#if activeCustom}
+		<ThemeCssField themeName={activeCustom.name} bind:value={themeCss} onCommit={updateTheme} />
 	{/if}
 
-	<!-- Navigation placement -->
-	<div class="surface flex items-center justify-between gap-3 p-4">
-		<span class="text-sm font-medium">{m.appearance_nav_placement()}</span>
-		<div class="flex gap-2" role="radiogroup" aria-label={m.appearance_nav_placement()}>
-			{#each ['top', 'left'] as placement (placement)}
-				<button
-					type="button"
-					role="radio"
-					aria-checked={navPlacement === placement}
-					onclick={() => onNavPlacementChange(placement as 'top' | 'left')}
-					class="chip {navPlacement === placement ? 'chip-active' : ''}"
-				>
-					{placement === 'top' ? m.appearance_nav_top() : m.appearance_nav_left()}
-				</button>
-			{/each}
-		</div>
-	</div>
-
-	<!-- Custom CSS escape hatch -->
+	<!-- Custom CSS escape hatch (instance-wide, applies under every theme) -->
 	<div class="surface space-y-2 p-4">
 		<label for="appearance-custom-css" class="text-sm font-medium"
 			>{m.appearance_custom_css()}</label
@@ -579,9 +427,18 @@
 			<button type="button" class="btn btn-subtle" disabled={authorBusy} onclick={updateTheme}>
 				{m.appearance_update_theme()}
 			</button>
-			<button type="button" class="btn btn-ghost" onclick={deleteTheme}>
-				{m.appearance_delete_theme()}
-			</button>
+			{#if confirmDelete}
+				<button type="button" class="btn btn-ghost text-red-300" onclick={deleteTheme}>
+					{m.appearance_delete_theme_confirm_action()}
+				</button>
+				<button type="button" class="btn btn-ghost" onclick={() => (confirmDelete = false)}>
+					{m.appearance_cancel()}
+				</button>
+			{:else}
+				<button type="button" class="btn btn-ghost" onclick={() => (confirmDelete = true)}>
+					{m.appearance_delete_theme()}
+				</button>
+			{/if}
 		{/if}
 		<button type="button" class="btn btn-ghost" onclick={() => importInput?.click()}>
 			{m.appearance_import()}
@@ -595,59 +452,41 @@
 		/>
 	</div>
 
-	{#if authorOpen}
-		<div class="surface space-y-3 p-4">
-			<div class="grid gap-3 sm:grid-cols-2">
-				<label class="text-sm">
-					<span class="mb-1 block font-medium">{m.appearance_theme_name()} *</span>
-					<input type="text" bind:value={authorName} maxlength="60" class="input w-full" />
-				</label>
-				<label class="text-sm">
-					<span class="mb-1 block font-medium">{m.appearance_theme_author()}</span>
-					<input type="text" bind:value={authorAuthor} maxlength="200" class="input w-full" />
-				</label>
-				<label class="text-sm">
-					<span class="mb-1 block font-medium">{m.appearance_theme_url()}</span>
-					<input
-						type="url"
-						bind:value={authorUrl}
-						maxlength="500"
-						placeholder="https://…"
-						class="input w-full"
-					/>
-				</label>
-				<label class="text-sm">
-					<span class="mb-1 block font-medium">{m.appearance_theme_version()}</span>
-					<input
-						type="text"
-						bind:value={authorVersion}
-						maxlength="40"
-						placeholder="1.0.0"
-						class="input w-full"
-					/>
-				</label>
-			</div>
-			<label class="block text-sm">
-				<span class="mb-1 block font-medium">{m.appearance_theme_description()}</span>
-				<textarea bind:value={authorDescription} maxlength="500" rows="2" class="input w-full"
-				></textarea>
-			</label>
-			<p class="text-xs text-text-faint">
-				{m.appearance_based_on({ base: baseTheme.name })}
+	{#if confirmDelete && activeCustom}
+		<p class="text-sm text-amber-300" role="alert">
+			{m.appearance_delete_theme_confirm({ name: activeCustom.name })}
+		</p>
+	{/if}
+
+	<!-- A downloaded theme that ships CSS gets to restyle every page, so it is
+	     disclosed and confirmed rather than applied on file pick. -->
+	{#if pendingImport}
+		<div class="surface space-y-3 p-4" role="alert">
+			<p class="text-sm text-text-secondary">
+				{m.appearance_import_ships_css({ name: pendingImport.name, kb: pendingImport.kb })}
 			</p>
 			<div class="flex gap-2">
 				<button
 					type="button"
 					class="btn btn-accent"
-					disabled={!authorName.trim() || authorBusy}
-					onclick={saveTheme}
+					onclick={() => pendingImport && sendImport(pendingImport.file)}
 				>
-					{m.settings_save()}
+					{m.appearance_import_confirm()}
 				</button>
-				<button type="button" class="btn btn-ghost" onclick={() => (authorOpen = false)}>
-					{m.server_manager_cancel()}
+				<button type="button" class="btn btn-ghost" onclick={() => (pendingImport = null)}>
+					{m.appearance_cancel()}
 				</button>
 			</div>
 		</div>
+	{/if}
+
+	{#if authorOpen}
+		<ThemeAuthorForm
+			baseThemeName={baseTheme.name}
+			canBundleCss={Boolean(customCss.trim())}
+			busy={authorBusy}
+			onSave={saveTheme}
+			onCancel={() => (authorOpen = false)}
+		/>
 	{/if}
 </div>

@@ -85,7 +85,7 @@
 					<div class="relative grid grid-cols-4 gap-1.5 p-4 pb-0 sm:gap-2 sm:p-5 sm:pb-0">
 						{#each collection.previewMembers as member (member.id)}
 							<div
-								class="aspect-[2/3] overflow-hidden rounded-md border border-border-strong bg-background shadow-lg"
+								class="aspect-[2/3] overflow-hidden rounded-control border border-border-strong bg-background shadow-lg"
 							>
 								{#if member.hasCurrentPoster}
 									<img

@@ -369,7 +369,7 @@
 			tabindex={tab === item.key ? 0 : -1}
 			onclick={() => selectTab(item.key)}
 			onkeydown={(event) => onTabKeydown(event, item.key)}
-			class="-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition {tab === item.key
+			class="-mb-px rounded-t-control border-b-2 px-3 py-2 text-sm transition {tab === item.key
 				? 'border-accent-500 text-accent-200'
 				: 'border-transparent text-text-muted hover:text-text'}"
 		>

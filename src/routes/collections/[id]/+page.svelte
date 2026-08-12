@@ -451,7 +451,7 @@
 								})}
 							</p>
 							<dl class="mt-4 grid grid-cols-2 gap-2 text-sm">
-								<div class="rounded-md border border-border bg-background/60 p-3">
+								<div class="rounded-control border border-border bg-background/60 p-3">
 									<dt class="text-xs text-text-muted">{m.collection_poster()}</dt>
 									<dd class="mt-1 font-semibold">
 										{m.collections_artwork_coverage({
@@ -460,7 +460,7 @@
 										})}
 									</dd>
 								</div>
-								<div class="rounded-md border border-border bg-background/60 p-3">
+								<div class="rounded-control border border-border bg-background/60 p-3">
 									<dt class="text-xs text-text-muted">{m.collection_background()}</dt>
 									<dd class="mt-1 font-semibold">
 										{m.collections_artwork_coverage({
@@ -578,15 +578,15 @@
 						</p>
 					{/if}
 					<dl class="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-						<div class="rounded-md border border-border bg-background/60 p-2">
+						<div class="rounded-control border border-border bg-background/60 p-2">
 							<dt class="text-text-muted">{m.collection_consistency_known()}</dt>
 							<dd class="mt-1 font-semibold text-text-strong">{slot.coverage.knownEvidence}</dd>
 						</div>
-						<div class="rounded-md border border-border bg-background/60 p-2">
+						<div class="rounded-control border border-border bg-background/60 p-2">
 							<dt class="text-text-muted">{m.collection_consistency_unknown_short()}</dt>
 							<dd class="mt-1 font-semibold text-text-strong">{slot.coverage.unknownProvenance}</dd>
 						</div>
-						<div class="rounded-md border border-border bg-background/60 p-2">
+						<div class="rounded-control border border-border bg-background/60 p-2">
 							<dt class="text-text-muted">{m.collection_consistency_missing_short()}</dt>
 							<dd class="mt-1 font-semibold text-text-strong">{slot.coverage.missingArtwork}</dd>
 						</div>
@@ -654,7 +654,7 @@
 													{image.label}
 												</figcaption>
 												<div
-													class={`${slot.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'} overflow-hidden rounded-md border border-border bg-background`}
+													class={`${slot.kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video'} overflow-hidden rounded-control border border-border bg-background`}
 												>
 													{#if image.available}
 														<img
@@ -686,7 +686,7 @@
 										{/each}
 									</div>
 									{#if options.length > 0 || slot.artwork.staged.available}
-										<details class="mt-3 rounded-md border border-border bg-background/40 p-3">
+										<details class="mt-3 rounded-control border border-border bg-background/40 p-3">
 											<summary class="cursor-pointer text-xs font-medium text-text-strong">
 												{m.collection_override_options({ count: options.length })}
 											</summary>
@@ -697,7 +697,7 @@
 													{#each options as candidate (candidate.candidateId)}
 														<button
 															type="button"
-															class={`group overflow-hidden rounded-md border bg-background text-left transition-colors ${slot.artwork.staged.candidateId === candidate.candidateId ? 'border-accent-400' : 'border-border hover:border-border-hover'}`}
+															class={`group overflow-hidden rounded-control border bg-background text-left transition-colors ${slot.artwork.staged.candidateId === candidate.candidateId ? 'border-accent-400' : 'border-border hover:border-border-hover'}`}
 															aria-pressed={slot.artwork.staged.candidateId ===
 																candidate.candidateId}
 															aria-label={m.collection_override_stage_candidate({

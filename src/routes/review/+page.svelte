@@ -639,7 +639,7 @@
 				</div>
 
 				{#if entry.failedSlots.length}
-					<div class="mt-4 rounded-md border border-red-900/50 bg-red-950/20 p-3">
+					<div class="mt-4 rounded-control border border-red-900/50 bg-red-950/20 p-3">
 						<p class="text-xs font-semibold text-red-200">{m.review_failed_slots()}</p>
 						<ul class="mt-1 text-xs text-red-300">
 							{#each entry.failedSlots as slot, index (`${slot.destination}:${slot.kind}:${slot.season}:${slot.episode}:${index}`)}

@@ -453,7 +453,7 @@
 	{#if addOpen}
 		<form
 			id="server-manager-add-form"
-			class="mt-4 grid gap-3 rounded-xl border border-accent-900/60 bg-accent-950/20 p-4 sm:grid-cols-2"
+			class="mt-4 grid gap-3 rounded-surface border border-accent-900/60 bg-accent-950/20 p-4 sm:grid-cols-2"
 			onsubmit={(event) => {
 				event.preventDefault();
 				void addServer();
@@ -524,7 +524,7 @@
 	{:else if servers.length > 0}
 		<ul class="mt-4 space-y-3">
 			{#each servers as server (server.id)}
-				<li class="rounded-xl border border-border bg-background/45 p-4">
+				<li class="rounded-surface border border-border bg-background/45 p-4">
 					<div class="flex flex-wrap items-start justify-between gap-3">
 						<div class="min-w-0">
 							<div class="flex flex-wrap items-center gap-2">

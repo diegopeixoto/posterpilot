@@ -475,7 +475,7 @@
 				</dl>
 
 				{#if correctiveHint(status?.errorCode ?? null)}
-					<p class="mt-3 rounded-md bg-background/70 px-3 py-2 text-xs text-text-secondary">
+					<p class="mt-3 rounded-control bg-background/70 px-3 py-2 text-xs text-text-secondary">
 						{correctiveHint(status?.errorCode ?? null)}
 					</p>
 				{/if}

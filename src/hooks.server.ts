@@ -22,8 +22,7 @@ import { pruneOperationPlans } from '$lib/server/plans/operation-plan-store';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { maintenanceBlocksRequest } from '$lib/server/maintenance-http';
 import { reconcileThumbCacheDisk } from '$lib/server/posters/thumb-cache';
-import { getAppearanceSettings, getCustomThemes } from '$lib/server/appearance';
-import { resolveStoredAppearance } from '$lib/theming/resolve';
+import { getAppearanceState } from '$lib/server/appearance';
 import { formatRequestError } from '$lib/server/db/error-detail';
 
 // Run database migrations once at server startup, before any request is handled.
@@ -221,11 +220,11 @@ export const handleError: HandleServerError = ({ error, event, status }) => {
 const handleTheme: Handle = async ({ event, resolve }) => {
 	// Only page responses carry the `%themeattrs%` placeholder; skip API calls.
 	if (event.url.pathname.startsWith('/api/')) return resolve(event);
-	const [appearance, customThemes] = await Promise.all([
-		getAppearanceSettings(),
-		getCustomThemes()
-	]);
-	const resolved = resolveStoredAppearance(appearance, customThemes);
+	// One settings read per page request: stashed on locals so the root layout
+	// load reuses it instead of querying again.
+	const state = await getAppearanceState();
+	event.locals.appearance = state;
+	const { settings: appearance, resolved } = state;
 	const escapeAttr = (value: string) =>
 		value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 	const style = Object.entries(resolved.vars)

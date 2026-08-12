@@ -174,7 +174,7 @@
 	<div class="mt-4 space-y-2">
 		{#each providerPriority as provider (provider)}
 			<div
-				class="grid items-center gap-3 rounded-lg border border-border bg-background/40 p-3 sm:grid-cols-[1fr_8rem]"
+				class="grid items-center gap-3 rounded-surface border border-border bg-background/40 p-3 sm:grid-cols-[1fr_8rem]"
 			>
 				<label class="text-sm text-text-strong" for={`score-${provider}`}>
 					{RANKING_PROVIDER_LABELS[provider]}

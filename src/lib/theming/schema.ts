@@ -14,7 +14,14 @@ export const TOKEN_KEYS = [
 	'background',
 	'surface',
 	'surface-raised',
+	// `scrim` dims what is behind a dialog and always reads as an overlay, so it
+	// stays dark even in a light theme; `well` is the sunken inset panel that
+	// follows the theme. They used to be one token, which made the light theme
+	// paint white-on-white modal backdrops.
 	'scrim',
+	'well',
+	'chrome',
+	'chrome-border',
 	'text',
 	'text-bright',
 	'text-strong',

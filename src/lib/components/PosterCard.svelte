@@ -18,7 +18,7 @@
 </script>
 
 <div
-	class="group relative overflow-hidden rounded-lg border border-border bg-surface transition hover:border-border-hover"
+	class="group relative overflow-hidden rounded-surface border border-border bg-surface transition hover:border-border-hover"
 >
 	<a {href} class="block" data-poster-card-link>
 		<div class="aspect-[2/3] w-full overflow-hidden bg-background">
@@ -80,7 +80,7 @@
 			aria-pressed={selected}
 			class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded border text-sm font-bold transition {selected
 				? 'border-accent-400 bg-accent-500 text-white'
-				: 'border-border-hover bg-surface/80 text-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-neutral-400 pointer-coarse:opacity-100'}"
+				: 'border-border-hover bg-surface/80 text-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:border-border-hover pointer-coarse:opacity-100'}"
 		>
 			✓
 		</button>

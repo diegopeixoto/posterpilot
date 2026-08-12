@@ -262,7 +262,7 @@
 	<div
 		role="group"
 		aria-label={m.library_ignore_filter_label()}
-		class="inline-flex divide-x divide-border overflow-hidden rounded-md border border-border-strong"
+		class="inline-flex divide-x divide-border overflow-hidden rounded-control border border-border-strong"
 	>
 		{#each ignoreViews as view (view.value)}
 			<button
@@ -390,7 +390,7 @@
 {#if ignoreError}
 	<div
 		role="alert"
-		class="mt-3 rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+		class="mt-3 rounded-control border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
 	>
 		{ignoreError}
 	</div>

@@ -415,7 +415,7 @@
 			{#if results.length}
 				<ul class="mt-4 grid gap-3 lg:grid-cols-2" aria-label={m.manual_match_results()}>
 					{#each results as candidate (`${candidate.mediaType}:${candidate.tmdbId}`)}
-						<li class="flex gap-3 rounded-lg border border-border bg-background/50 p-3">
+						<li class="flex gap-3 rounded-surface border border-border bg-background/50 p-3">
 							<div class="w-16 flex-none overflow-hidden rounded bg-surface">
 								{#if candidate.posterUrl}
 									<img
@@ -465,7 +465,7 @@
 
 			{#if selected}
 				<div
-					class="mt-4 rounded-lg border border-accent-800 bg-accent-950/30 p-4"
+					class="mt-4 rounded-surface border border-accent-800 bg-accent-950/30 p-4"
 					role="alertdialog"
 					aria-labelledby={`confirm-match-${item.id}`}
 				>

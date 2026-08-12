@@ -22,7 +22,7 @@
 		<div aria-live={region.live} role="status" class="contents">
 			{#each region.list as toast (toast.id)}
 				<div
-					class="toast pointer-events-auto flex w-full max-w-sm items-start gap-2 rounded-lg border px-4 py-3 text-sm shadow-2xl {styles[
+					class="toast pointer-events-auto flex w-full max-w-sm items-start gap-2 rounded-surface border px-4 py-3 text-sm shadow-2xl {styles[
 						toast.type
 					]}"
 				>

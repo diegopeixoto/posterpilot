@@ -12,6 +12,9 @@ declare global {
 			authUser: string | null;
 			/** Effective auth mode for this request (for the UI to show the logout control). */
 			authMode: import('$lib/server/config').AuthMode;
+			/** Appearance state read once per page request by the theme hook, so the
+			 *  root layout load reuses it instead of querying settings a second time. */
+			appearance?: import('$lib/server/appearance').AppearanceState;
 		}
 		// interface PageData {}
 		// interface PageState {}

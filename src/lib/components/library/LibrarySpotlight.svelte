@@ -17,7 +17,7 @@
 {#if spotlight?.backdropUrl}
 	<a
 		href={`/item/${spotlight.id}`}
-		class="relative mt-4 block h-40 overflow-hidden rounded-xl border border-border"
+		class="relative mt-4 block h-40 overflow-hidden rounded-surface border border-border"
 	>
 		<img src={spotlight.backdropUrl} alt="" class="absolute inset-0 h-full w-full object-cover" />
 		<div class="absolute inset-0 bg-gradient-to-r from-background/90 to-transparent"></div>

@@ -1693,5 +1693,16 @@
 	"appearance_import_too_large": "O arquivo de tema é grande demais.",
 	"appearance_too_many": "Limite de temas personalizados atingido.",
 	"appearance_custom_css": "CSS personalizado",
-	"appearance_custom_css_hint": "Aplicado como está, depois do tema ativo, em todas as páginas. Nada é validado — o navegador ignora CSS inválido. Capturado nos temas personalizados que você criar e incluído nos arquivos de exportação."
+	"appearance_custom_css_hint": "Aplicado como está, depois do tema ativo, em toda página. Nada é validado — o navegador ignora CSS inválido.",
+	"appearance_delete_theme_confirm": "Excluir “{name}”? Exporte antes se quiser uma cópia — não dá para desfazer.",
+	"appearance_delete_theme_confirm_action": "Excluir definitivamente",
+	"appearance_cancel": "Cancelar",
+	"appearance_nav_locked": "{theme} define o próprio layout.",
+	"appearance_include_custom_css": "Incluir meu CSS personalizado neste tema",
+	"appearance_import_ships_css": "“{name}” traz {kb} KB de CSS personalizado que vai rodar em toda página. Importar?",
+	"appearance_import_confirm": "Importar mesmo assim",
+	"appearance_import_invalid_css": "O CSS deste tema não é permitido — temas não podem carregar fontes, imagens ou folhas de estilo remotas.",
+	"appearance_theme_css": "CSS do tema",
+	"appearance_theme_css_hint": "Vem com “{name}”. Roda enquanto este tema está ativo, antes do seu CSS personalizado abaixo. É salvo no tema, não nesta instância — então viaja junto na exportação.",
+	"appearance_theme_css_invalid": "O CSS do tema não pode carregar nada de outro host — folhas de estilo, fontes e imagens remotas estão bloqueadas."
 }

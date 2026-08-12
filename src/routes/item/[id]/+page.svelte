@@ -1372,7 +1372,7 @@
 	     `:focus-visible` outline is drawn 2px outside its control, and a wrapper with
 	     `overflow-hidden` would cut the keyboard focus ring off both siblings. -->
 	<div
-		class="relative flex flex-col rounded-lg border-2 transition-colors {staged
+		class="relative flex flex-col rounded-surface border-2 transition-colors {staged
 			? 'border-accent-500'
 			: 'border-transparent hover:border-border-hover'}"
 	>
@@ -1382,7 +1382,7 @@
 			onclick={stage}
 			aria-pressed={staged}
 			aria-label={m.item_candidate_label({ kind, provider: c.provider })}
-			class="block overflow-hidden rounded-t-md"
+			class="block overflow-hidden rounded-t-control"
 		>
 			<!-- `block` matters: an inline image leaves baseline space beneath it, which
 			     showed up as a gap between the artwork and the preview strip below. -->
@@ -1410,7 +1410,7 @@
 		onclick={(event) => openPreview(c, event.currentTarget)}
 		aria-label={label}
 		title={label}
-		class="flex h-11 w-full shrink-0 items-center justify-center rounded-b-md border-t border-border bg-surface text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-bright"
+		class="flex h-11 w-full shrink-0 items-center justify-center rounded-b-control border-t border-border bg-surface text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-bright"
 	>
 		<span aria-hidden="true" class="text-base leading-none">⤢</span>
 	</button>
@@ -1570,7 +1570,7 @@
 {/if}
 
 <!-- Hero -->
-<section class="relative mt-3 overflow-hidden rounded-2xl border border-border bg-background">
+<section class="relative mt-3 overflow-hidden rounded-surface border border-border bg-background">
 	{#if data.item.hasCurrentBackground || data.item.backdropUrl}
 		<img
 			src={data.item.hasCurrentBackground
@@ -1586,7 +1586,9 @@
 	<div class="absolute inset-0 bg-gradient-to-r from-background/90 to-transparent"></div>
 
 	<div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-end sm:p-7">
-		<div class="w-32 flex-none overflow-hidden rounded-lg border border-border shadow-2xl sm:w-40">
+		<div
+			class="w-32 flex-none overflow-hidden rounded-surface border border-border shadow-2xl sm:w-40"
+		>
 			{#if data.item.hasCurrentPoster}
 				<img
 					src={`/api/artwork/${data.item.id}/poster?v=${data.item.currentPosterFingerprint ?? data.item.artworkVersion}`}
@@ -1760,7 +1762,9 @@
 		<div class="flex gap-4 overflow-x-auto pb-2">
 			{#each data.item.cast as person (person.name)}
 				<div class="w-20 flex-none text-center">
-					<div class="aspect-[2/3] w-20 overflow-hidden rounded-lg border border-border bg-surface">
+					<div
+						class="aspect-[2/3] w-20 overflow-hidden rounded-surface border border-border bg-surface"
+					>
 						{#if person.profileUrl}
 							<img
 								src={person.profileUrl}
@@ -1790,7 +1794,7 @@
 {#if preferredLanguagePolicy.mode === 'preferred' && data.providerGroups.length}
 	<!-- Item-local language filter. Flipping it never touches the saved preference. -->
 	<section
-		class="mt-8 rounded-xl border border-border bg-background/60 p-3"
+		class="mt-8 rounded-surface border border-border bg-background/60 p-3"
 		aria-label={m.item_language_filter_title()}
 	>
 		<div class="flex flex-wrap items-center justify-between gap-2">
@@ -1881,7 +1885,7 @@
 							<!-- Stored before provenance existed: ask for a fresh search instead of
 							     guessing that untagged-looking artwork is language-neutral. -->
 							<div
-								class="flex flex-wrap items-center gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2"
+								class="flex flex-wrap items-center gap-2 rounded-surface border border-amber-900/50 bg-amber-950/20 p-2"
 							>
 								<p class="text-xs text-amber-200">
 									<span aria-hidden="true">⚠</span>
@@ -1978,7 +1982,7 @@
 									{#if isShow}
 										{#each g.seasons as sg (sg.season)}
 											{@const seaKey = seasonKey(set.setId, sg.season)}
-											<div class="mt-4 rounded-lg border border-border p-3">
+											<div class="mt-4 rounded-surface border border-border p-3">
 												<div class="flex items-center justify-between">
 													<button
 														type="button"
@@ -2168,7 +2172,7 @@
 				>{m.item_custom()}</summary
 			>
 			<div
-				class="absolute bottom-14 left-4 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 shadow-xl"
+				class="absolute bottom-14 left-4 flex flex-col gap-2 rounded-surface border border-border bg-surface p-3 shadow-xl"
 			>
 				<div class="flex gap-1.5">
 					<input

@@ -588,7 +588,7 @@
 	{#if errorMsg}
 		<div
 			role="alert"
-			class="mt-2 rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+			class="mt-2 rounded-control border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
 		>
 			{errorMsg}
 		</div>

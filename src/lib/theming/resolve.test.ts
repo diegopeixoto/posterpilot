@@ -75,10 +75,20 @@ describe('resolveAppearance', () => {
 
 	it('emits a full accent ramp for an accepted accent override', () => {
 		const resolved = resolveAppearance({ themeId: 'monokai', accentOverride: '#ff0000' });
-		expect(resolved.vars['--pp-accent-base']).toBeUndefined();
 		expect(resolved.vars['--pp-accent-600']).toBe('#ff0000');
 		expect(resolved.vars['--pp-accent-500']).toBe('color-mix(in oklab, #ff0000, white 10%)');
 		expect(resolved.vars['--pp-accent-950']).toBe('color-mix(in oklab, #ff0000, black 65%)');
+		// The base moves with the ramp: theme CSS mixes its own shades off it.
+		expect(resolved.vars['--pp-accent-base']).toBe('#ff0000');
+	});
+
+	it('re-derives a readable accent foreground when the accent changes', () => {
+		// Monokai pairs its lime accent with dark text; a dark override must not
+		// keep that pairing, or the primary button becomes black-on-navy.
+		const dark = resolveAppearance({ themeId: 'monokai', accentOverride: '#1d1b6b' });
+		expect(dark.vars['--pp-accent-foreground']).toBe('#ffffff');
+		const light = resolveAppearance({ themeId: 'posterpilot', accentOverride: '#fde047' });
+		expect(light.vars['--pp-accent-foreground']).toBe('#000000');
 	});
 
 	it('discards overrides the theme locks', () => {

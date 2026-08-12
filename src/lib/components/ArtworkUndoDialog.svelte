@@ -119,19 +119,19 @@
 
 			<div class="space-y-4 px-5 py-4">
 				<div class="grid grid-cols-3 gap-2" aria-label={m.item_undo_impact_title()}>
-					<div class="rounded-lg border border-border bg-background/60 p-3">
+					<div class="rounded-surface border border-border bg-background/60 p-3">
 						<strong class="block text-xl font-semibold text-text-bright">
 							{preview.summary.actionableCount}
 						</strong>
 						<span class="text-[11px] text-text-muted">{m.item_undo_changes()}</span>
 					</div>
-					<div class="rounded-lg border border-border bg-background/60 p-3">
+					<div class="rounded-surface border border-border bg-background/60 p-3">
 						<strong class="block text-xl font-semibold text-text-bright">
 							{preview.summary.targetCount}
 						</strong>
 						<span class="text-[11px] text-text-muted">{m.item_undo_targets()}</span>
 					</div>
-					<div class="rounded-lg border border-border bg-background/60 p-3">
+					<div class="rounded-surface border border-border bg-background/60 p-3">
 						<strong class="block text-xl font-semibold text-text-bright">
 							{preview.summary.slotCount}
 						</strong>
@@ -171,7 +171,7 @@
 
 				{#if preview.summary.unavailableCount > 0}
 					<p
-						class="rounded-lg border border-amber-800/70 bg-amber-950/30 p-3 text-xs text-amber-100"
+						class="rounded-surface border border-amber-800/70 bg-amber-950/30 p-3 text-xs text-amber-100"
 						role="status"
 					>
 						{m.item_undo_unavailable_warning({ count: preview.summary.unavailableCount })}

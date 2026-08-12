@@ -671,7 +671,7 @@
 
 			{#if restorePreview.report.restorable && restorePreview.confirmation}
 				<label
-					class="mt-4 flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/25 p-3 text-xs text-amber-100"
+					class="mt-4 flex items-start gap-2 rounded-surface border border-amber-900/60 bg-amber-950/25 p-3 text-xs text-amber-100"
 				>
 					<input type="checkbox" bind:checked={restoreAcknowledged} />
 					<span>{m.backup_restore_confirmation_warning()}</span>
@@ -709,7 +709,7 @@
 		{:else}
 			<ul class="mt-2 space-y-2">
 				{#each history as entry (entry.id)}
-					<li class="rounded-lg border border-border p-3 text-xs">
+					<li class="rounded-surface border border-border p-3 text-xs">
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<span>{formatDate(entry.createdAt)}</span>
 							<span class="badge badge-muted">{restoreStatus(entry.status)}</span>

@@ -5,9 +5,10 @@
  * saveSettings path can't represent.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
+import { resolveStoredAppearance, type ResolvedAppearance } from '$lib/theming/resolve';
 import { DEFAULT_THEME_ID, type CustomTheme, type TokenKey } from '$lib/theming/schema';
 import {
 	isValidCss,
@@ -17,6 +18,13 @@ import {
 } from '$lib/theming/theme-file';
 
 export type NavPlacement = 'top' | 'left';
+
+/** Everything a page request needs to render the active theme, read in one go. */
+export interface AppearanceState {
+	settings: AppearanceSettings;
+	customThemes: CustomTheme[];
+	resolved: ResolvedAppearance;
+}
 
 export interface AppearanceSettings {
 	themeId: string;
@@ -56,10 +64,14 @@ const SCALAR_KEYS = [
 ] as const;
 
 async function readAppearanceKv(): Promise<Record<string, string>> {
-	const rows = await db.select().from(settings);
-	const wanted = new Set<string>(SCALAR_KEYS);
+	// Keyed lookup, not a full scan: appearance is read on every page request
+	// (the SSR theme hook) and the settings table holds every app setting.
+	const rows = await db
+		.select()
+		.from(settings)
+		.where(inArray(settings.key, [...SCALAR_KEYS]));
 	const out: Record<string, string> = {};
-	for (const row of rows) if (wanted.has(row.key)) out[row.key] = row.value;
+	for (const row of rows) out[row.key] = row.value;
 	return out;
 }
 
@@ -80,9 +92,8 @@ function parseDim(raw: string | undefined): number | null {
 	return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
 }
 
-/** Read appearance settings, normalizing anything unexpected to defaults. */
-export async function getAppearanceSettings(): Promise<AppearanceSettings> {
-	const kv = await readAppearanceKv();
+/** Map the raw KV rows to settings, normalizing anything unexpected to defaults. */
+function mapAppearanceSettings(kv: Record<string, string>): AppearanceSettings {
 	return {
 		themeId: kv[KEYS.themeId] || DEFAULT_THEME_ID,
 		themeAccentOverride: kv[KEYS.themeAccentOverride] || null,
@@ -93,6 +104,11 @@ export async function getAppearanceSettings(): Promise<AppearanceSettings> {
 		navPlacement: kv[KEYS.navPlacement] === 'left' ? 'left' : 'top',
 		customCss: kv[KEYS.customCss] || null
 	};
+}
+
+/** Read appearance settings, normalizing anything unexpected to defaults. */
+export async function getAppearanceSettings(): Promise<AppearanceSettings> {
+	return mapAppearanceSettings(await readAppearanceKv());
 }
 
 /** Persist a partial update; `null` clears an override. */
@@ -122,9 +138,8 @@ export async function saveAppearanceSettings(patch: Partial<AppearanceSettings>)
 	await Promise.all(writes);
 }
 
-/** Read stored custom themes (invalid entries dropped, capped at the max). */
-export async function getCustomThemes(): Promise<CustomTheme[]> {
-	const kv = await readAppearanceKv();
+/** Map the raw KV rows to custom themes (invalid entries dropped, capped at the max). */
+function mapCustomThemes(kv: Record<string, string>): CustomTheme[] {
 	const raw = kv[KEYS.customThemes];
 	if (!raw) return [];
 	try {
@@ -146,6 +161,21 @@ export async function getCustomThemes(): Promise<CustomTheme[]> {
 	} catch {
 		return [];
 	}
+}
+
+/** Read stored custom themes (invalid entries dropped, capped at the max). */
+export async function getCustomThemes(): Promise<CustomTheme[]> {
+	return mapCustomThemes(await readAppearanceKv());
+}
+
+/** Settings, custom themes and the resolved appearance from a *single* read.
+ *  The theme hook stashes this on `event.locals` so the root layout load —
+ *  which needs the same three things — does not query settings again. */
+export async function getAppearanceState(): Promise<AppearanceState> {
+	const kv = await readAppearanceKv();
+	const settings = mapAppearanceSettings(kv);
+	const customThemes = mapCustomThemes(kv);
+	return { settings, customThemes, resolved: resolveStoredAppearance(settings, customThemes) };
 }
 
 /** Persist the custom theme list, enforcing count and size caps. */

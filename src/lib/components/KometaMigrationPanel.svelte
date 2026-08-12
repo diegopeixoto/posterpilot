@@ -969,7 +969,7 @@
 {#if required || migration || stateError}
 	<section
 		data-testid="kometa-migration-panel"
-		class="mt-4 rounded-xl border p-5 {panelTone()}"
+		class="mt-4 rounded-surface border p-5 {panelTone()}"
 		aria-labelledby="kometa-migration-title"
 		aria-busy={isBusy}
 	>
@@ -1097,7 +1097,10 @@
 
 		{#if !stateError && migration}
 			{#if !migration.scopeMatches && migration.status !== 'rolled_back'}
-				<div class="mt-4 rounded-xl border border-amber-800/70 bg-amber-950/25 p-4" role="status">
+				<div
+					class="mt-4 rounded-surface border border-amber-800/70 bg-amber-950/25 p-4"
+					role="status"
+				>
 					<h3 class="text-sm font-semibold text-amber-100">
 						{m.kometa_migration_scope_mismatch_title()}
 					</h3>
@@ -1105,30 +1108,30 @@
 						{m.kometa_migration_scope_mismatch_hint()}
 					</p>
 					<dl class="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-5">
-						<div class="rounded-lg border border-amber-900/60 bg-scrim/20 p-2">
+						<div class="rounded-surface border border-amber-900/60 bg-well/20 p-2">
 							<dt class="text-amber-300/80">{m.kometa_migration_scope_server()}</dt>
 							<dd class="mt-1 text-text-bright">{migration.frozenScope.serverName}</dd>
 							<dd class="mt-0.5 break-all font-mono text-[11px] text-text-muted">
 								{migration.frozenScope.serverInstanceId}
 							</dd>
 						</div>
-						<div class="rounded-lg border border-amber-900/60 bg-scrim/20 p-2">
+						<div class="rounded-surface border border-amber-900/60 bg-well/20 p-2">
 							<dt class="text-amber-300/80">{m.kometa_migration_scope_output_directory()}</dt>
 							<dd class="mt-1 break-all font-mono text-text-bright">
 								{migration.frozenScope.outputDirectory}
 							</dd>
 						</div>
-						<div class="rounded-lg border border-amber-900/60 bg-scrim/20 p-2">
+						<div class="rounded-surface border border-amber-900/60 bg-well/20 p-2">
 							<dt class="text-amber-300/80">{m.kometa_migration_scope_config_path()}</dt>
 							<dd class="mt-1 break-all font-mono text-text-bright">
 								{migration.frozenScope.configPath ?? m.kometa_migration_scope_config_path_empty()}
 							</dd>
 						</div>
-						<div class="rounded-lg border border-amber-900/60 bg-scrim/20 p-2">
+						<div class="rounded-surface border border-amber-900/60 bg-well/20 p-2">
 							<dt class="text-amber-300/80">{m.kometa_migration_scope_mode()}</dt>
 							<dd class="mt-1 text-text-bright">{modeLabel(migration.frozenScope.mode)}</dd>
 						</div>
-						<div class="rounded-lg border border-amber-900/60 bg-scrim/20 p-2">
+						<div class="rounded-surface border border-amber-900/60 bg-well/20 p-2">
 							<dt class="text-amber-300/80">{m.kometa_migration_scope_metadata_prefix()}</dt>
 							<dd class="mt-1 break-all font-mono text-text-bright">
 								{migration.frozenScope.metadataPathPrefix}
@@ -1151,19 +1154,19 @@
 				</p>
 			{/if}
 			<div class="mt-4 grid gap-2 sm:grid-cols-3" aria-label={m.kometa_migration_summary()}>
-				<div class="rounded-lg border border-border/80 bg-background/40 p-3">
+				<div class="rounded-surface border border-border/80 bg-background/40 p-3">
 					<strong class="block text-xl font-semibold tabular-nums text-text-bright">
 						{migration.classifiedCount}
 					</strong>
 					<span class="text-xs text-text-muted">{m.kometa_migration_classified()}</span>
 				</div>
-				<div class="rounded-lg border border-border/80 bg-background/40 p-3">
+				<div class="rounded-surface border border-border/80 bg-background/40 p-3">
 					<strong class="block text-xl font-semibold tabular-nums text-text-bright">
 						{migration.ambiguousCount}
 					</strong>
 					<span class="text-xs text-text-muted">{m.kometa_migration_ambiguous()}</span>
 				</div>
-				<div class="rounded-lg border border-border/80 bg-background/40 p-3">
+				<div class="rounded-surface border border-border/80 bg-background/40 p-3">
 					<strong class="block truncate font-mono text-sm font-semibold text-text-bright">
 						{dateLabel(migration.updatedAt)}
 					</strong>
@@ -1171,14 +1174,14 @@
 				</div>
 			</div>
 
-			<details class="mt-3 rounded-lg border border-border/80 bg-background/30 p-3">
+			<details class="mt-3 rounded-surface border border-border/80 bg-background/30 p-3">
 				<summary class="cursor-pointer text-xs font-medium text-text-secondary">
 					{m.kometa_migration_files_and_references()}
 				</summary>
 				<div class="mt-3 grid gap-3 md:grid-cols-2">
 					{#each ['movie', 'show'] as kind (kind)}
 						{@const file = migration.files[kind as MediaKind]}
-						<div class="rounded-lg border border-border p-3 text-xs">
+						<div class="rounded-surface border border-border p-3 text-xs">
 							<p class="font-medium text-text-strong">
 								{mediaKindLabel(kind as MediaKind)}
 							</p>
@@ -1192,7 +1195,7 @@
 			</details>
 
 			{#if migration.lastFailure}
-				<div class="mt-3 rounded-lg border border-red-900/70 bg-red-950/30 p-3" role="alert">
+				<div class="mt-3 rounded-surface border border-red-900/70 bg-red-950/30 p-3" role="alert">
 					<p class="text-sm font-medium text-red-200">{m.kometa_migration_last_failure()}</p>
 					<p class="mt-1 text-xs text-red-200">
 						{errorMessage(migration.lastFailure.code)}
@@ -1208,7 +1211,10 @@
 			{/if}
 
 			{#if migration.recoveryGuidance}
-				<div class="mt-3 rounded-lg border border-amber-900/70 bg-amber-950/25 p-3" role="status">
+				<div
+					class="mt-3 rounded-surface border border-amber-900/70 bg-amber-950/25 p-3"
+					role="status"
+				>
 					<p class="text-sm font-medium text-amber-100">
 						{m.kometa_migration_recovery_title()}
 					</p>
@@ -1240,7 +1246,7 @@
 			{/if}
 
 			{#if migration.requiresAcknowledgment && migration.manualSnippet}
-				<div class="mt-4 rounded-xl border border-amber-800/70 bg-background/50 p-4">
+				<div class="mt-4 rounded-surface border border-amber-800/70 bg-background/50 p-4">
 					<h3 class="text-sm font-semibold text-text-bright">
 						{m.kometa_migration_manual_title()}
 					</h3>
@@ -1251,7 +1257,7 @@
 						<li>{m.kometa_migration_manual_step_verify()}</li>
 					</ol>
 					<pre
-						class="mt-3 max-h-72 overflow-auto rounded-lg border border-border bg-scrim/60 p-3 text-xs whitespace-pre-wrap text-text-strong">{migration.manualSnippet}</pre>
+						class="mt-3 max-h-72 overflow-auto rounded-surface border border-border bg-well/60 p-3 text-xs whitespace-pre-wrap text-text-strong">{migration.manualSnippet}</pre>
 					<p class="mt-2 font-mono text-[11px] text-text-muted">
 						{m.kometa_migration_fingerprint({
 							fingerprint: shortFingerprint(migration.manualSnippetFingerprint)
@@ -1307,7 +1313,7 @@
 		{#if notice}<p class="mt-3 text-sm text-emerald-300" role="status">{notice}</p>{/if}
 
 		{#if preview}
-			<div class="mt-5 rounded-xl border border-accent-900/60 bg-background/60 p-4">
+			<div class="mt-5 rounded-surface border border-accent-900/60 bg-background/60 p-4">
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div>
 						<p class="text-[11px] font-medium tracking-[0.14em] text-accent-300 uppercase">
@@ -1334,18 +1340,18 @@
 				</div>
 
 				<div class="mt-4 grid grid-cols-2 gap-2">
-					<div class="rounded-lg border border-border p-3">
+					<div class="rounded-surface border border-border p-3">
 						<strong class="block text-xl tabular-nums">{preview.display.classified.length}</strong>
 						<span class="text-xs text-text-muted">{m.kometa_migration_classified()}</span>
 					</div>
-					<div class="rounded-lg border border-border p-3">
+					<div class="rounded-surface border border-border p-3">
 						<strong class="block text-xl tabular-nums">{preview.display.ambiguous.length}</strong>
 						<span class="text-xs text-text-muted">{m.kometa_migration_ambiguous()}</span>
 					</div>
 				</div>
 
 				{#if preview.display.ambiguous.length > 0}
-					<div class="mt-4 rounded-lg border border-amber-800/80 bg-amber-950/30 p-3">
+					<div class="mt-4 rounded-surface border border-amber-800/80 bg-amber-950/30 p-3">
 						<h4 class="text-sm font-semibold text-amber-100">
 							{m.kometa_migration_ambiguous_title({ count: preview.display.ambiguous.length })}
 						</h4>
@@ -1357,7 +1363,7 @@
 							class="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1"
 						>
 							{#each preview.display.ambiguous.slice(0, ambiguousDisclosure.shown) as item, index (`${item.entryFingerprint}-${index}`)}
-								<li class="rounded-md border border-amber-900/50 bg-scrim/20 p-2 text-xs">
+								<li class="rounded-control border border-amber-900/50 bg-well/20 p-2 text-xs">
 									<div class="flex flex-wrap items-baseline justify-between gap-2">
 										<span class="font-mono text-text-strong">{item.legacyKey}</span>
 										<span class="text-amber-200">{ambiguityLabel(item.reason)}</span>
@@ -1406,7 +1412,7 @@
 					<!-- Same consent shape as the ambiguous list: these deletions are
 					     proposed, shown exactly, and applied only after their own
 					     explicit acknowledgment. -->
-					<div class="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
+					<div class="mt-4 rounded-surface border border-amber-900/60 bg-amber-950/30 p-3">
 						<p class="text-sm font-medium text-amber-200">
 							{m.kometa_migration_removals_title({ count: configRemovals.length })}
 						</p>
@@ -1432,7 +1438,7 @@
 					</div>
 				{/if}
 
-				<details class="mt-4 rounded-lg border border-border p-3">
+				<details class="mt-4 rounded-surface border border-border p-3">
 					<summary class="cursor-pointer text-sm font-medium text-text-strong">
 						{m.kometa_migration_classified_details()}
 					</summary>
@@ -1444,7 +1450,7 @@
 							class="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1"
 						>
 							{#each preview.display.classified.slice(0, classifiedDisclosure.shown) as item, index (`${item.entryFingerprint}-${index}`)}
-								<li class="rounded-md border border-border bg-surface/50 p-2 text-xs">
+								<li class="rounded-control border border-border bg-surface/50 p-2 text-xs">
 									<div class="flex flex-wrap items-baseline justify-between gap-2">
 										<span class="font-mono text-text-strong">{item.legacyKey}</span>
 										<span class="text-text-muted">
@@ -1498,7 +1504,7 @@
 							file.changes.length,
 							MIGRATION_DISCLOSURE_BATCH_SIZE
 						)}
-						<div class="rounded-lg border border-border bg-surface/40 p-3">
+						<div class="rounded-surface border border-border bg-surface/40 p-3">
 							<div class="flex items-start justify-between gap-3">
 								<div>
 									<h4 class="text-sm font-medium text-text-bright">{file.filename}</h4>
@@ -1560,7 +1566,7 @@
 				</div>
 
 				{#if preview.display.libraries.length}
-					<div class="mt-4 rounded-lg border border-border p-3">
+					<div class="mt-4 rounded-surface border border-border p-3">
 						<h4 class="text-sm font-medium text-text-bright">
 							{m.kometa_migration_library_changes()}
 						</h4>
@@ -1581,7 +1587,7 @@
 				{/if}
 
 				{#if preview.activation === 'manual' && preview.manualSnippet}
-					<div class="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
+					<div class="mt-4 rounded-surface border border-amber-900/60 bg-amber-950/20 p-3">
 						<h4 class="text-sm font-medium text-amber-100">
 							{m.kometa_migration_manual_preview_title()}
 						</h4>
@@ -1589,11 +1595,11 @@
 							{m.kometa_migration_manual_preview_hint()}
 						</p>
 						<pre
-							class="mt-3 max-h-64 overflow-auto rounded-md border border-border bg-scrim/50 p-3 text-xs whitespace-pre-wrap text-text-strong">{preview.manualSnippet}</pre>
+							class="mt-3 max-h-64 overflow-auto rounded-control border border-border bg-well/50 p-3 text-xs whitespace-pre-wrap text-text-strong">{preview.manualSnippet}</pre>
 					</div>
 				{/if}
 
-				<details class="mt-4 rounded-lg border border-border p-3">
+				<details class="mt-4 rounded-surface border border-border p-3">
 					<summary class="cursor-pointer text-sm font-medium text-text-secondary">
 						{m.kometa_migration_fingerprints_title()}
 					</summary>
@@ -1643,7 +1649,7 @@
 		{/if}
 
 		{#if rollbackPreview}
-			<div class="mt-5 rounded-xl border border-red-900/70 bg-background/60 p-4">
+			<div class="mt-5 rounded-surface border border-red-900/70 bg-background/60 p-4">
 				<p class="text-[11px] font-medium tracking-[0.14em] text-red-300 uppercase">
 					{m.kometa_migration_rollback_eyebrow()}
 				</p>
@@ -1666,7 +1672,7 @@
 				{:else}
 					<ul
 						id="kometa-migration-rollback-changes"
-						class="mt-3 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-border bg-scrim/30 p-3"
+						class="mt-3 max-h-64 space-y-1 overflow-y-auto rounded-surface border border-border bg-well/30 p-3"
 					>
 						{#each rollbackPreview.changes.slice(0, rollbackDisclosure.shown) as change, index (index)}
 							<li class="flex flex-wrap gap-x-2 font-mono text-xs">
@@ -1705,7 +1711,7 @@
 				{/if}
 
 				<div
-					class="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3 text-xs text-amber-100"
+					class="mt-4 rounded-surface border border-amber-900/60 bg-amber-950/20 p-3 text-xs text-amber-100"
 				>
 					<p class="font-medium">{m.kometa_migration_rollback_preserves_title()}</p>
 					<p class="mt-1 text-amber-200/80">{m.kometa_migration_rollback_preserves_hint()}</p>

@@ -9,6 +9,7 @@
  * the theme locks is discarded here, in exactly one place.
  */
 
+import { readableForeground } from './contrast';
 import { findBuiltinTheme } from './presets';
 import {
 	DEFAULT_THEME_ID,
@@ -65,12 +66,24 @@ const ACCENT_RAMP: Record<string, string> = {
 };
 
 function accentRampVars(color: string): Record<string, string> {
-	return Object.fromEntries(
+	const vars: Record<string, string> = Object.fromEntries(
 		Object.entries(ACCENT_RAMP).map(([key, template]) => [
 			tokenVar(key as TokenKey),
 			template.replaceAll('%COLOR%', color)
 		])
 	);
+	// A theme's `accent-foreground` is paired with *its* accent. Once the accent
+	// moves the pair goes stale — a light accent under the default white
+	// foreground is an unreadable button — so re-derive it from the new color.
+	// An explicit `accent-foreground` delta still wins: it is applied after this
+	// in the TOKEN_KEYS order, and a locked theme never reaches stage 2 at all.
+	const foreground = readableForeground(color);
+	if (foreground) vars[tokenVar('accent-foreground')] = foreground;
+	// Keep the base in step with the ramp: theme CSS mixes its own shades off
+	// `--pp-accent-base` (the seerr button gradient, the Sonarr active bar), and
+	// leaving it at the theme's original value would strand those on the old hue.
+	vars[tokenVar('accent-base')] = color;
+	return vars;
 }
 
 function isHttpUrl(value: string): boolean {

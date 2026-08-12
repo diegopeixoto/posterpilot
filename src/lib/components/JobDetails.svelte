@@ -94,7 +94,7 @@
 			</h4>
 			<ul class="mt-2 space-y-2">
 				{#each job.failures as failure (failure.outcomeId)}
-					<li class="rounded-lg border border-border bg-background/50 px-3 py-2">
+					<li class="rounded-surface border border-border bg-background/50 px-3 py-2">
 						<div class="flex flex-wrap items-start justify-between gap-2">
 							<div>
 								<p class="text-xs text-text-secondary">{jobFailureTargetLabel(failure)}</p>

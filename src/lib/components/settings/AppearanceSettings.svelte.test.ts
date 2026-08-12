@@ -6,6 +6,7 @@ import { tick } from 'svelte';
 import AppearanceSettings from './AppearanceSettings.svelte';
 import { resolveAppearance } from '$lib/theming/resolve';
 import type { CustomTheme } from '$lib/theming/schema';
+import { chrome } from '$lib/stores/chrome.svelte';
 
 /**
  * Component tests for the Appearance settings section, in a real browser.
@@ -59,6 +60,7 @@ beforeEach(() => {
 	// The applier writes to the shared document element; reset between tests.
 	delete document.documentElement.dataset.theme;
 	document.documentElement.removeAttribute('style');
+	chrome.reset();
 });
 
 describe('Appearance settings', () => {
@@ -150,5 +152,101 @@ describe('Appearance settings', () => {
 		await tick();
 		expect(document.documentElement.dataset.theme).toBe('catppuccin');
 		expect(document.documentElement.style.getPropertyValue('--pp-accent-600')).toBe('#ff79c6');
+	});
+});
+
+describe('navigation placement', () => {
+	/** The fieldset wrapping the two placement radios. */
+	function placementFieldset(): HTMLFieldSetElement {
+		const fieldset = document.querySelector<HTMLFieldSetElement>('fieldset');
+		if (!fieldset) throw new Error('nav placement fieldset not found');
+		return fieldset;
+	}
+
+	it('offers both placements as real radios for a theme with no forced layout', async () => {
+		mount({ settings: { themeId: 'posterpilot', navPlacement: 'left' } });
+		await tick();
+		const fieldset = placementFieldset();
+		expect(fieldset.disabled).toBe(false);
+		const radios = [...fieldset.querySelectorAll<HTMLInputElement>('input[type=radio]')];
+		expect(radios).toHaveLength(2);
+		// Native radios: one name, so the browser gives arrow-key movement for free.
+		expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
+		expect(radios.find((radio) => radio.value === 'left')?.checked).toBe(true);
+	});
+
+	it('locks the control to the layout an extreme theme forces', async () => {
+		// Overseerr reskins the chrome around a sidebar, and `resolveAppearance`
+		// discards the setting — so the control must show that, not accept a click
+		// the resolver will throw away.
+		mount({ settings: { themeId: 'overseerr', navPlacement: 'top' } });
+		await tick();
+		const fieldset = placementFieldset();
+		expect(fieldset.disabled).toBe(true);
+		const radios = [...fieldset.querySelectorAll<HTMLInputElement>('input[type=radio]')];
+		expect(radios.find((radio) => radio.value === 'left')?.checked).toBe(true);
+		expect(radios.find((radio) => radio.value === 'top')?.checked).toBe(false);
+	});
+});
+
+describe('live chrome layout', () => {
+	it('rearranges the nav the moment a layout-forcing theme is picked', async () => {
+		// Previously the colors repainted instantly and the chrome stayed in the old
+		// arrangement until a full page load, because placement came only from the
+		// server-rendered layout data.
+		mount({ settings: { themeId: 'posterpilot', navPlacement: 'top' } });
+		await tick();
+		expect(chrome.navPlacement).toBeNull();
+
+		themeButton('Overseerr').click();
+		await tick();
+		expect(chrome.navPlacement).toBe('left');
+
+		themeButton('Darcula').click();
+		await tick();
+		expect(chrome.navPlacement).toBe('top');
+	});
+});
+
+describe('theme CSS field', () => {
+	const withCss: CustomTheme = {
+		id: 'custom:neon',
+		name: 'Neon',
+		base: 'posterpilot',
+		tokens: { 'accent-base': '#ff2d95' },
+		css: '.surface { border-width: 2px }'
+	};
+
+	function themeCssBox(): HTMLTextAreaElement | null {
+		return document.querySelector<HTMLTextAreaElement>('#appearance-theme-css');
+	}
+
+	it('does not offer a theme CSS box for a built-in theme', async () => {
+		mount();
+		await tick();
+		expect(themeCssBox()).toBeNull();
+	});
+
+	it('shows the CSS an imported theme ships, apart from the instance CSS box', async () => {
+		// Before this the theme's CSS applied unseen: there was nowhere to read it.
+		mount({
+			settings: { themeId: withCss.id, customCss: '.mine { color: red }' },
+			customThemes: [withCss]
+		});
+		await tick();
+		expect(themeCssBox()?.value).toBe('.surface { border-width: 2px }');
+		// The instance box keeps its own content — the two never merge.
+		const instance = document.querySelector<HTMLTextAreaElement>('#appearance-custom-css');
+		expect(instance?.value).toBe('.mine { color: red }');
+	});
+
+	it('flags CSS that would load from another host', async () => {
+		mount({ settings: { themeId: withCss.id }, customThemes: [withCss] });
+		await tick();
+		const box = themeCssBox()!;
+		box.value = '@import url(https://evil.example/x.css);';
+		box.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+		expect(box.getAttribute('aria-invalid')).toBe('true');
 	});
 });

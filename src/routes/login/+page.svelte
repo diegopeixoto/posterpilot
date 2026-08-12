@@ -24,13 +24,13 @@
 		<form
 			method="POST"
 			use:enhance
-			class="space-y-4 rounded-xl border border-border bg-surface/60 p-6 shadow-2xl"
+			class="space-y-4 rounded-surface border border-border bg-surface/60 p-6 shadow-2xl"
 		>
 			<input type="hidden" name="redirectTo" value={redirectTo} />
 
 			{#if errorText}
 				<p
-					class="flex items-center gap-2 rounded-md bg-red-900/40 px-3 py-2 text-sm text-red-200"
+					class="flex items-center gap-2 rounded-control bg-red-900/40 px-3 py-2 text-sm text-red-200"
 					role="alert"
 				>
 					<span aria-hidden="true">⚠</span>{errorText}

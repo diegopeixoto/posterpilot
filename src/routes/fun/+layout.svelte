@@ -16,7 +16,7 @@
 </script>
 
 <div class="mx-auto max-w-6xl space-y-6">
-	<header class="overflow-hidden rounded-xl border border-border bg-background">
+	<header class="overflow-hidden rounded-surface border border-border bg-background">
 		<div class="border-b border-border px-5 py-5 sm:px-7">
 			<p class="text-xs font-semibold tracking-[0.24em] text-accent-300">{m.fun_title()}</p>
 			<h1 class="mt-1 text-2xl font-semibold tracking-tight text-white">{m.fun_hub_title()}</h1>

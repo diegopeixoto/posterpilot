@@ -18,12 +18,25 @@ export const MAX_THEME_FILE_BYTES = 64 * 1024;
 /** Cap for the free-form CSS a theme file (or the customCss setting) may carry. */
 export const MAX_THEME_CSS_BYTES = 16 * 1024;
 
-/** Validate theme/setting CSS: size-capped, no `</style>` breakout. Anything
- *  else is the user's own business (self-hosted, single-user). */
+/** Validate the *user's own* custom CSS: size-capped, no `</style>` breakout.
+ *  Anything else is their own business (self-hosted, single-user instance). */
 export function isValidCss(value: string): boolean {
 	return (
 		new TextEncoder().encode(value).byteLength <= MAX_THEME_CSS_BYTES && !/<\/style/i.test(value)
 	);
+}
+
+/**
+ * Validate CSS *shipped inside a theme*. A theme file is a shareable artifact
+ * that arrives from someone else, so it gets a stricter grammar than the CSS the
+ * user types into their own instance: no `@import` and no remote `url()`, both
+ * of which would let a downloaded theme call out to a third-party host on every
+ * page load. Local `url()` (`/logo.png`, `data:`) still works.
+ */
+export function isValidThemeCss(value: string): boolean {
+	if (!isValidCss(value)) return false;
+	if (/@import/i.test(value)) return false;
+	return !/url\(\s*["']?\s*(?:https?:)?\/\//i.test(value);
 }
 
 const META_LIMITS = {
@@ -61,6 +74,7 @@ const TOKEN_KEY_SET = new Set<string>(TOKEN_KEYS);
 
 export type ValidationError =
 	| 'not_json'
+	| 'invalid_theme'
 	| 'wrong_format'
 	| 'unsupported_version'
 	| 'missing_name'
@@ -107,43 +121,25 @@ export function serializeThemeFile(theme: CustomTheme): string {
 	);
 }
 
-function cleanMeta(value: unknown, limit: number): string | undefined {
+/** `undefined` = absent, `null` = present but invalid (the caller rejects). */
+function cleanMeta(value: unknown, limit: number): string | undefined | null {
 	if (value === undefined || value === null) return undefined;
-	if (typeof value !== 'string') return null as never;
+	if (typeof value !== 'string') return null;
 	// eslint-disable-next-line no-control-regex -- intentionally strips control chars from imported metadata
 	const cleaned = value.replace(/[\x00-\x1f]/g, '').trim();
 	if (cleaned.length === 0) return undefined;
-	if (cleaned.length > limit) return null as never;
+	if (cleaned.length > limit) return null;
 	return cleaned;
 }
 
-/** Parse and strictly validate a theme file. Rejects wholesale — never partial. */
-export function parseThemeFile(raw: string | Uint8Array): ParseThemeFileResult {
-	const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-	if (new TextEncoder().encode(text).byteLength > MAX_THEME_FILE_BYTES) {
-		return { ok: false, error: 'too_large' };
-	}
-
-	let doc: unknown;
-	try {
-		doc = JSON.parse(text);
-	} catch {
-		return { ok: false, error: 'not_json' };
-	}
-	if (!doc || typeof doc !== 'object') return { ok: false, error: 'not_json' };
-
-	const file = doc as Record<string, unknown>;
-	if (file.format !== THEME_FILE_FORMAT) return { ok: false, error: 'wrong_format' };
-	if (file.formatVersion !== THEME_FILE_FORMAT_VERSION) {
-		return { ok: false, error: 'unsupported_version' };
-	}
-
-	const theme = file.theme;
-	if (!theme || typeof theme !== 'object' || Array.isArray(theme)) {
-		return { ok: false, error: 'not_json' };
-	}
-	const t = theme as Record<string, unknown>;
-
+/**
+ * Validate a theme body — the shape shared by an imported file and a theme
+ * authored through the API. Rejects wholesale: a single unknown token key or
+ * malformed value fails the whole theme rather than being dropped in silence,
+ * so the editor can report what is wrong instead of saving a theme with a
+ * property quietly missing.
+ */
+function parseThemePayload(t: Record<string, unknown>): ParseThemeFileResult {
 	const name = cleanMeta(t.name, META_LIMITS.name);
 	if (!name) return { ok: false, error: 'missing_name' };
 
@@ -174,7 +170,7 @@ export function parseThemeFile(raw: string | Uint8Array): ParseThemeFileResult {
 		tokens[key as TokenKey] = value;
 	}
 
-	if (t.css !== undefined && (typeof t.css !== 'string' || !isValidCss(t.css))) {
+	if (t.css !== undefined && (typeof t.css !== 'string' || !isValidThemeCss(t.css))) {
 		return { ok: false, error: 'invalid_css' };
 	}
 
@@ -193,7 +189,49 @@ export function parseThemeFile(raw: string | Uint8Array): ParseThemeFileResult {
 	};
 }
 
-/** Structural validation for themes already in storage (same grammars as import). */
+/** Parse and strictly validate a `.posterpilot-theme.json` file. */
+export function parseThemeFile(raw: string | Uint8Array): ParseThemeFileResult {
+	const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+	if (new TextEncoder().encode(text).byteLength > MAX_THEME_FILE_BYTES) {
+		return { ok: false, error: 'too_large' };
+	}
+
+	let doc: unknown;
+	try {
+		doc = JSON.parse(text);
+	} catch {
+		return { ok: false, error: 'not_json' };
+	}
+	if (!doc || typeof doc !== 'object') return { ok: false, error: 'not_json' };
+
+	const file = doc as Record<string, unknown>;
+	if (file.format !== THEME_FILE_FORMAT) return { ok: false, error: 'wrong_format' };
+	if (file.formatVersion !== THEME_FILE_FORMAT_VERSION) {
+		return { ok: false, error: 'unsupported_version' };
+	}
+
+	const theme = file.theme;
+	if (!theme || typeof theme !== 'object' || Array.isArray(theme)) {
+		return { ok: false, error: 'not_json' };
+	}
+	return parseThemePayload(theme as Record<string, unknown>);
+}
+
+/** Strictly validate a theme submitted by the authoring UI (same grammar as a
+ *  file, without the file envelope). */
+export function parseCustomThemeInput(raw: unknown): ParseThemeFileResult {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+		return { ok: false, error: 'invalid_theme' };
+	}
+	return parseThemePayload(raw as Record<string, unknown>);
+}
+
+/**
+ * Lenient validation for themes read back *out of storage*. Strict on the way
+ * in (`parseThemeFile` / `parseCustomThemeInput`), forgiving on the way out: a
+ * row written by an older version must not take the whole theme list down, so
+ * an unreadable property is dropped and the rest survives.
+ */
 export function sanitizeCustomTheme(raw: unknown): Omit<CustomTheme, 'id'> | null {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 	const t = raw as Record<string, unknown>;
@@ -223,6 +261,6 @@ export function sanitizeCustomTheme(raw: unknown): Omit<CustomTheme, 'id'> | nul
 			: {}),
 		base: t.base,
 		tokens,
-		...(typeof t.css === 'string' && t.css && isValidCss(t.css) ? { css: t.css } : {})
+		...(typeof t.css === 'string' && t.css && isValidThemeCss(t.css) ? { css: t.css } : {})
 	};
 }

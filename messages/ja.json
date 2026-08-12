@@ -1693,5 +1693,16 @@
 	"appearance_import_too_large": "テーマファイルが大きすぎます。",
 	"appearance_too_many": "カスタムテーマの上限に達しました。",
 	"appearance_custom_css": "カスタム CSS",
-	"appearance_custom_css_hint": "アクティブなテーマの後に、すべてのページにそのまま適用されます。検証は行われず、無効な CSS はブラウザに無視されます。作成したカスタムテーマに取り込まれ、エクスポートファイルにも含まれます。"
+	"appearance_custom_css_hint": "すべてのページで、有効なテーマの後にそのまま適用されます。検証は行われません — 無効な CSS はブラウザーが無視します。",
+	"appearance_delete_theme_confirm": "「{name}」を削除しますか？コピーが必要な場合は先にエクスポートしてください。元に戻せません。",
+	"appearance_delete_theme_confirm_action": "完全に削除",
+	"appearance_cancel": "キャンセル",
+	"appearance_nav_locked": "{theme} は独自のレイアウトを使用します。",
+	"appearance_include_custom_css": "カスタム CSS をこのテーマに含める",
+	"appearance_import_ships_css": "「{name}」には全ページで実行される {kb} KB のカスタム CSS が含まれています。インポートしますか？",
+	"appearance_import_confirm": "それでもインポート",
+	"appearance_import_invalid_css": "このテーマの CSS は許可されていません。テーマはリモートのフォント・画像・スタイルシートを読み込めません。",
+	"appearance_theme_css": "テーマ CSS",
+	"appearance_theme_css_hint": "「{name}」に同梱されています。このテーマが有効な間、下のカスタム CSS より前に実行されます。インスタンスではなくテーマに保存されるため、エクスポートにも含まれます。",
+	"appearance_theme_css_invalid": "テーマ CSS は他のホストから何も読み込めません。リモートのスタイルシート・フォント・画像はブロックされます。"
 }

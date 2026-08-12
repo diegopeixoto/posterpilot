@@ -225,7 +225,7 @@
 			{@const credential = credentialState[provider]}
 			<li
 				data-provider-row
-				class="relative rounded-lg border bg-background/40 p-2 transition-colors {dragging
+				class="relative rounded-surface border bg-background/40 p-2 transition-colors {dragging
 					? 'border-accent-600'
 					: 'border-border'}"
 			>
@@ -248,7 +248,7 @@
 						onpointermove={trackDrag}
 						onpointerup={endDrag}
 						onpointercancel={cancelDrag}
-						class="shrink-0 touch-none rounded-md p-2 text-text-faint select-none hover:text-text-secondary {dragging
+						class="shrink-0 touch-none rounded-control p-2 text-text-faint select-none hover:text-text-secondary {dragging
 							? 'cursor-grabbing text-accent-300'
 							: 'cursor-grab'}"
 					>
@@ -349,7 +349,7 @@
 			</p>{/if}
 	</div>
 	{#if providerThePosterDb}
-		<div class="mt-3 space-y-2 rounded-md border border-border p-3">
+		<div class="mt-3 space-y-2 rounded-control border border-border p-3">
 			<p class="text-xs text-text-muted">{m.settings_theposterdb_auth_hint()}</p>
 			<div>
 				<label for="thePosterDbUsername" class="mb-1 block text-sm font-medium"

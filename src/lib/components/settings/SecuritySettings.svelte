@@ -71,7 +71,7 @@
 
 	{#if auth.envManaged}
 		<p
-			class="flex items-start gap-2 rounded-md border border-amber-900/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200"
+			class="flex items-start gap-2 rounded-control border border-amber-900/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200"
 			role="status"
 		>
 			<span aria-hidden="true">🔒</span>{m.security_env_locked()}
@@ -82,7 +82,7 @@
 		<legend class="mb-1 text-sm font-medium">{m.security_mode_label()}</legend>
 		{#each modes as opt (opt.v)}
 			<label
-				class="flex cursor-pointer items-start gap-2 rounded-md border border-border p-3 has-[:checked]:border-accent-600 has-[:checked]:bg-accent-950/30"
+				class="flex cursor-pointer items-start gap-2 rounded-control border border-border p-3 has-[:checked]:border-accent-600 has-[:checked]:bg-accent-950/30"
 			>
 				<input
 					type="radio"

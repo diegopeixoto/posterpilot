@@ -1,17 +1,19 @@
 <script lang="ts">
-	// A shimmer placeholder. `class` sizes/shapes it (e.g. aspect-[2/3] rounded-lg).
+	// A shimmer placeholder. `class` sizes/shapes it (e.g. aspect-[2/3] rounded-surface).
 	let { class: className = '' }: { class?: string } = $props();
 </script>
 
 <div class="skeleton {className}" aria-hidden="true"></div>
 
 <style>
+	/* Theme tokens, not fixed neutrals: a hard-coded dark shimmer left grey blocks
+	   sitting on the light theme's white page. */
 	.skeleton {
 		background: linear-gradient(
 			100deg,
-			var(--color-neutral-900) 30%,
-			var(--color-neutral-800) 50%,
-			var(--color-neutral-900) 70%
+			var(--pp-surface) 30%,
+			var(--pp-surface-raised) 50%,
+			var(--pp-surface) 70%
 		);
 		background-size: 200% 100%;
 		animation: skeleton-shimmer 1.4s ease-in-out infinite;
@@ -25,7 +27,7 @@
 	@media (prefers-reduced-motion: reduce) {
 		.skeleton {
 			animation: none;
-			background: var(--color-neutral-900);
+			background: var(--pp-surface);
 		}
 	}
 </style>

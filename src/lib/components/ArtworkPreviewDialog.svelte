@@ -291,7 +291,7 @@
 					{#if failed}
 						<p
 							role="alert"
-							class="flex max-w-sm items-start gap-2 rounded-lg border border-red-800/70 bg-red-950/40 p-3 text-sm text-red-100"
+							class="flex max-w-sm items-start gap-2 rounded-surface border border-red-800/70 bg-red-950/40 p-3 text-sm text-red-100"
 						>
 							<span aria-hidden="true">⚠</span>
 							{m.item_preview_failed()}

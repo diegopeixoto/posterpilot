@@ -45,7 +45,7 @@
 			case 'unverified':
 				return 'border border-dashed border-amber-800 bg-amber-950/30 text-amber-200';
 			case 'absent':
-				return 'border border-border bg-scrim/40 text-text-muted';
+				return 'border border-border bg-well/40 text-text-muted';
 			case 'unknown':
 				return 'border border-dashed border-border-strong bg-surface/60 text-text-muted';
 		}

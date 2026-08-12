@@ -194,7 +194,7 @@
 	{/if}
 
 	{#if preview}
-		<div class="mt-5 rounded-xl border border-accent-900/60 bg-background/50 p-4">
+		<div class="mt-5 rounded-surface border border-accent-900/60 bg-background/50 p-4">
 			<h3 class="text-sm font-semibold">{m.collection_apply_preview_title()}</h3>
 			<p class="mt-1 text-xs text-text-muted">
 				{m.collection_apply_preview_summary({
@@ -208,7 +208,7 @@
 			/>
 			<ul class="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
 				{#each preview.items as item (item.target.mediaItemId)}
-					<li class="rounded-lg border border-border bg-surface/70 p-3 text-xs">
+					<li class="rounded-surface border border-border bg-surface/70 p-3 text-xs">
 						<p class="font-medium text-text-strong">
 							{titleById.get(item.target.mediaItemId) ?? m.collection_unknown_member()}
 						</p>

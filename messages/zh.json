@@ -1693,5 +1693,16 @@
 	"appearance_import_too_large": "主题文件过大。",
 	"appearance_too_many": "已达到自定义主题数量上限。",
 	"appearance_custom_css": "自定义 CSS",
-	"appearance_custom_css_hint": "按原样应用，在活动主题之后作用于所有页面。不做任何验证——无效 CSS 会被浏览器忽略。会保存进你创建的自定义主题，并包含在其导出文件中。"
+	"appearance_custom_css_hint": "在每个页面上按原样应用于当前主题之后。不做校验——浏览器会忽略无效的 CSS。",
+	"appearance_delete_theme_confirm": "删除“{name}”？如需备份请先导出——此操作无法撤销。",
+	"appearance_delete_theme_confirm_action": "永久删除",
+	"appearance_cancel": "取消",
+	"appearance_nav_locked": "{theme} 使用自己的布局。",
+	"appearance_include_custom_css": "将我的自定义 CSS 打包进此主题",
+	"appearance_import_ships_css": "“{name}”附带 {kb} KB 自定义 CSS，将在每个页面运行。要导入吗？",
+	"appearance_import_confirm": "仍然导入",
+	"appearance_import_invalid_css": "此主题的 CSS 不被允许——主题无法加载远程字体、图片或样式表。",
+	"appearance_theme_css": "主题 CSS",
+	"appearance_theme_css_hint": "随“{name}”一同提供。在此主题启用期间运行，先于下方你自己的自定义 CSS。保存在主题中而非本实例，因此会随导出一起携带。",
+	"appearance_theme_css_invalid": "主题 CSS 不能从其他主机加载任何内容——远程样式表、字体和图片均被阻止。"
 }

@@ -734,7 +734,7 @@
 						{/if}
 						{#if webhookCredential?.scheduleId === schedule.id}
 							<div
-								class="mt-4 rounded-lg border border-amber-800/60 bg-amber-950/30 p-3"
+								class="mt-4 rounded-surface border border-amber-800/60 bg-amber-950/30 p-3"
 								role="status"
 							>
 								<div class="flex items-start justify-between gap-3">

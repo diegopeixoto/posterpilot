@@ -87,7 +87,7 @@
 		>
 			{#each Array(16) as _, index (index)}
 				<div class="space-y-2">
-					<Skeleton class="aspect-[2/3] w-full rounded-lg" />
+					<Skeleton class="aspect-[2/3] w-full rounded-surface" />
 					<Skeleton class="h-3 w-4/5 rounded" />
 				</div>
 			{/each}
@@ -167,7 +167,7 @@
 							title={ignored ? m.poster_unignore() : m.poster_ignore()}
 							class="absolute right-2 bottom-2 flex h-8 w-8 items-center justify-center rounded border transition {ignored
 								? 'border-accent-400 bg-accent-600 text-white'
-								: 'border-border-hover bg-surface/80 text-text-secondary opacity-0 group-focus-within/wrap:opacity-100 group-hover/wrap:opacity-100 hover:border-neutral-400 focus-visible:opacity-100 pointer-coarse:opacity-100'}"
+								: 'border-border-hover bg-surface/80 text-text-secondary opacity-0 group-focus-within/wrap:opacity-100 group-hover/wrap:opacity-100 hover:border-border-hover focus-visible:opacity-100 pointer-coarse:opacity-100'}"
 						>
 							<svg
 								class="size-4"
@@ -196,7 +196,7 @@
 				aria-hidden="true"
 			>
 				{#each Array(8) as _, index (index)}
-					<Skeleton class="aspect-[2/3] w-full rounded-lg" />
+					<Skeleton class="aspect-[2/3] w-full rounded-surface" />
 				{/each}
 			</div>
 		{/if}

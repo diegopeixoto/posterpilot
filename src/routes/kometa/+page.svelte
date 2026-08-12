@@ -541,7 +541,7 @@
 <svelte:head><title>{m.kometa_manager_title()} · PosterPilot</title></svelte:head>
 
 <!-- Spotlight hero -->
-<div class="relative overflow-hidden rounded-xl border border-border">
+<div class="relative overflow-hidden rounded-surface border border-border">
 	{#if data.montage?.length}
 		<!-- Decorative collage of random library posters behind the title. -->
 		<div class="absolute inset-0 flex" aria-hidden="true">
@@ -731,7 +731,7 @@
 		{#each sections as s (s.key)}
 			<button
 				onclick={() => (section = s.key)}
-				class="-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition {section === s.key
+				class="-mb-px rounded-t-control border-b-2 px-3 py-2 text-sm transition {section === s.key
 					? 'border-accent-500 text-accent-200'
 					: 'border-transparent text-text-muted hover:text-text-bright'}"
 			>
