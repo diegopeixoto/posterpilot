@@ -16,7 +16,7 @@ export const THEME_FILE_FORMAT_VERSION = 1;
 export const MAX_CUSTOM_THEMES = 20;
 export const MAX_THEME_FILE_BYTES = 64 * 1024;
 /** Cap for the free-form CSS a theme file (or the customCss setting) may carry. */
-export const MAX_THEME_CSS_BYTES = 16 * 1024;
+const MAX_THEME_CSS_BYTES = 16 * 1024;
 
 /** Validate the *user's own* custom CSS: size-capped, no `</style>` breakout.
  *  Anything else is their own business (self-hosted, single-user instance). */
