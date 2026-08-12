@@ -85,6 +85,16 @@ registerServerLocaleStrategy();
  * pass through, other APIs get `401` JSON, other pages redirect to `/login`.
  */
 const handleAuth: Handle = async ({ event, resolve }) => {
+	// Public routes must remain reachable when the settings database is unavailable.
+	// In particular, readiness has to execute its own bounded query and return its
+	// stable 503 instead of failing first inside the database-backed auth lookup.
+	if (classifyPath(event.url.pathname) === 'public') {
+		event.locals.authMode = 'disabled';
+		event.locals.authed = true;
+		event.locals.authUser = null;
+		return resolve(event);
+	}
+
 	const auth = await getAuthState();
 	event.locals.authMode = auth.mode;
 	event.locals.authed = false;
@@ -140,7 +150,6 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 
 	// Unauthenticated — decide how to reject based on the route class.
 	const cls = classifyPath(event.url.pathname);
-	if (cls === 'public') return resolve(event);
 	if (cls === 'api') return json({ error: 'unauthorized' }, { status: 401 });
 
 	const redirectTo = safeRedirectTarget(event.url.pathname + event.url.search) ?? '/';
