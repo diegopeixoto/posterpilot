@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: {
 	themeBackgroundImageDim: number | null;
 	themeRadiusOverride: string | null;
 	navPlacement: 'top' | 'left';
+	customCss: string | null;
 } = {
 	themeId: 'posterpilot',
 	themeAccentOverride: null,
@@ -31,7 +32,8 @@ const DEFAULT_SETTINGS: {
 	themeBackgroundImage: null,
 	themeBackgroundImageDim: null,
 	themeRadiusOverride: null,
-	navPlacement: 'top'
+	navPlacement: 'top',
+	customCss: null
 };
 
 function mount(

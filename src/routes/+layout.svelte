@@ -222,7 +222,7 @@
 	data-app-hydrated={appHydrated ? 'true' : undefined}
 >
 	<header
-		class="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur {sidebar
+		class="sticky top-0 z-20 border-b border-chrome-border bg-chrome/80 backdrop-blur {sidebar
 			? 'lg:fixed lg:inset-y-0 lg:left-0 lg:w-56 lg:border-r lg:border-b-0'
 			: ''}"
 	>
@@ -232,7 +232,7 @@
 				: 'lg:h-14 lg:flex-nowrap lg:gap-6 lg:py-0'}"
 		>
 			<a href="/" class="flex items-center" aria-label={m.app_name()}>
-				<img src="/logo.png" alt={m.app_name()} class="app-logo h-7 w-auto" />
+				<span class="app-logo" role="img" aria-label={m.app_name()}></span>
 			</a>
 			<button
 				type="button"
@@ -249,7 +249,7 @@
 				id="primary-navigation"
 				class="{mobileMenuOpen
 					? 'flex'
-					: 'hidden'} order-last w-full flex-col gap-3 border-t border-border pt-3 lg:order-none lg:flex lg:min-w-0 lg:border-0 lg:pt-0 {sidebar
+					: 'hidden'} order-last w-full flex-col gap-3 border-t border-chrome-border pt-3 lg:order-none lg:flex lg:min-w-0 lg:border-0 lg:pt-0 {sidebar
 					? 'lg:flex-1 lg:gap-4'
 					: 'lg:flex-1 lg:flex-row lg:items-center'}"
 			>

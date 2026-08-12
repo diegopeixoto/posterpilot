@@ -18,6 +18,7 @@
 		themeBackgroundImageDim: number | null;
 		themeRadiusOverride: string | null;
 		navPlacement: 'top' | 'left';
+		customCss: string | null;
 	}
 
 	let {
@@ -39,6 +40,7 @@
 	let backgroundImageDim = $state<number>(snapshot.settings.themeBackgroundImageDim ?? 0.6);
 	let radius = $state(snapshot.settings.themeRadiusOverride ?? '');
 	let navPlacement = $state<'top' | 'left'>(snapshot.settings.navPlacement);
+	let customCss = $state(snapshot.settings.customCss ?? '');
 	let customThemes = $state<CustomTheme[]>([...snapshot.customThemes]);
 
 	const activeCustom = $derived(customThemes.find((theme) => theme.id === themeId) ?? null);
@@ -130,6 +132,29 @@
 		void applyAndPersist({ navPlacement: placement }, true);
 	}
 
+	/** Custom CSS: apply instantly by upserting the style element the SSR
+	 *  injection renders, then persist on change end. */
+	function previewCustomCss() {
+		let el = document.getElementById('pp-custom-css');
+		if (!customCss.trim()) {
+			el?.remove();
+			return;
+		}
+		if (!el) {
+			el = document.createElement('style');
+			el.id = 'pp-custom-css';
+			document.head.appendChild(el);
+		}
+		el.textContent = customCss;
+	}
+
+	function onCustomCssChange() {
+		previewCustomCss();
+		void persist({ customCss: customCss.trim() ? customCss : null }).catch(() =>
+			toasts.error(m.settings_save_failed())
+		);
+	}
+
 	// ── Custom theme authoring ────────────────────────────────────────────────
 
 	let authorOpen = $state(false);
@@ -163,7 +188,8 @@
 					version: authorVersion.trim() || undefined,
 					description: authorDescription.trim() || undefined,
 					base: baseTheme.id,
-					tokens: capturedTokens()
+					tokens: capturedTokens(),
+					css: customCss.trim() || undefined
 				})
 			});
 			if (!response.ok) throw new Error(String(response.status));
@@ -188,7 +214,11 @@
 			const response = await fetch('/api/appearance/themes', {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ ...activeCustom, tokens: capturedTokens() })
+				body: JSON.stringify({
+					...activeCustom,
+					tokens: capturedTokens(),
+					css: customCss.trim() || undefined
+				})
 			});
 			if (!response.ok) throw new Error(String(response.status));
 			const body = (await response.json()) as { themes: CustomTheme[]; theme: CustomTheme };
@@ -521,6 +551,23 @@
 				</button>
 			{/each}
 		</div>
+	</div>
+
+	<!-- Custom CSS escape hatch -->
+	<div class="surface space-y-2 p-4">
+		<label for="appearance-custom-css" class="text-sm font-medium"
+			>{m.appearance_custom_css()}</label
+		>
+		<textarea
+			id="appearance-custom-css"
+			bind:value={customCss}
+			oninput={previewCustomCss}
+			onchange={onCustomCssChange}
+			rows="5"
+			spellcheck="false"
+			placeholder={'.surface { border-width: 2px }'}
+			class="input w-full font-mono text-xs"></textarea>
+		<p class="text-xs text-text-faint">{m.appearance_custom_css_hint()}</p>
 	</div>
 
 	<!-- Authoring + import -->

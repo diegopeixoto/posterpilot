@@ -224,6 +224,33 @@ SHALL win over the user's placement setting while that theme is active.
 - **THEN** the chrome renders in that theme's signature layout regardless of the
   placement setting, and the setting applies again when a non-forcing theme is active
 
+### Requirement: Custom CSS
+
+The system SHALL offer a free-form custom CSS field (size-capped) that is applied
+verbatim as the last stylesheet on every page, after the active theme and all
+overrides. Custom themes SHALL carry an optional CSS field, captured from the
+current custom CSS at authoring time and included in theme export files; theme
+CSS applies while the theme is active, before the user's own custom CSS. Values
+containing a `</style>` breakout SHALL be rejected both at write and at import.
+
+#### Scenario: Custom CSS applies last
+
+- **WHEN** the user saves custom CSS
+- **THEN** it is injected as the final stylesheet on every page load, winning the
+  cascade over the active theme
+
+#### Scenario: Theme CSS round-trips
+
+- **WHEN** a custom theme was authored with custom CSS and is exported
+- **THEN** the export file includes the CSS, importing it registers the theme with
+  the CSS intact, and selecting that theme applies its CSS before the user's own
+
+#### Scenario: Breakout rejected
+
+- **WHEN** submitted custom CSS or an imported theme's CSS contains `</style>` or
+  exceeds the size cap
+- **THEN** the write or import is rejected with a validation error
+
 ### Requirement: Appearance persistence and i18n
 
 Appearance settings (theme, overrides, custom themes, navigation placement) SHALL be

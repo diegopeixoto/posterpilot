@@ -20,4 +20,19 @@ export function applyAppearance(resolved: ResolvedAppearance): void {
 		el.style.setProperty(key, value);
 		appliedKeys.add(key);
 	}
+
+	// Theme-shipped CSS: upsert the same element the SSR injection renders.
+	let themeCssEl = document.getElementById('pp-theme-css');
+	if (!resolved.css) {
+		themeCssEl?.remove();
+	} else {
+		if (!themeCssEl) {
+			themeCssEl = document.createElement('style');
+			themeCssEl.id = 'pp-theme-css';
+			// Keep theme CSS before the user's own #pp-custom-css (user wins).
+			const userCss = document.getElementById('pp-custom-css');
+			document.head.insertBefore(themeCssEl, userCss ?? null);
+		}
+		themeCssEl.textContent = resolved.css;
+	}
 }

@@ -93,6 +93,17 @@
 - [x] 6.3 Theme-forced chrome layout: themes may declare `layout: 'sidebar'`
   (Overseerr) which wins over the nav-placement setting via the resolver; seerr-style
   active pill and version chip in sidebar mode; seerr gray/indigo palette
+- [x] 6.4 Chrome tokens (`--pp-chrome`, `--pp-chrome-border`, fallback to
+  background/border) so extreme themes restyle the top bar/sidebar itself (seerr
+  darker sidebar, \*arr near-black navbar); Sonarr/Radarr also forces the sidebar
+
+## 6b. Custom CSS
+
+- [x] 6b.1 `customCss` setting (16 KB cap, `</style>` rejected), SSR-injected as the
+  last stylesheet in `<head>`; custom themes carry an optional `css` field captured
+  at authoring, validated on import, applied before the user's own customCss
+- [x] 6b.2 Appearance UI textarea with instant client-side application (upserts the
+  injected style element) and persistence; i18n in all 6 catalogs
 
 ## 7. i18n and docs
 

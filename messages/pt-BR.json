@@ -1691,5 +1691,7 @@
 	"appearance_import_invalid": "Esse arquivo não é um tema válido do PosterPilot.",
 	"appearance_import_unsupported_version": "Este arquivo de tema requer um PosterPilot mais recente.",
 	"appearance_import_too_large": "O arquivo de tema é grande demais.",
-	"appearance_too_many": "Limite de temas personalizados atingido."
+	"appearance_too_many": "Limite de temas personalizados atingido.",
+	"appearance_custom_css": "CSS personalizado",
+	"appearance_custom_css_hint": "Aplicado como está, depois do tema ativo, em todas as páginas. Nada é validado — o navegador ignora CSS inválido. Capturado nos temas personalizados que você criar e incluído nos arquivos de exportação."
 }

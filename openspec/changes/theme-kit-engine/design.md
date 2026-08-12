@@ -164,17 +164,30 @@ Theme files are JSON, extension `.posterpilot-theme.json`:
   explicit allowlist per token key beats a generic schema for CSS values. No new
   dependency.
 
-### 7. Navigation placement
+### 7. Custom CSS (escape hatch + theme-shipped CSS)
+
+Two layers, one rule: free-form CSS is allowed because the instance is
+self-hosted and single-user — validated only for size (16 KB cap) and the one
+real breakout vector (`</style>`); invalid CSS is ignored by the browser.
+
+- **User customCss** (instance setting): injected verbatim as the last
+  stylesheet in `<head>`, winning the cascade over any theme.
+- **Theme-shipped CSS**: custom themes carry an optional `css` field, captured
+  from the current customCss at authoring time and included in theme export
+  files — a shared theme reproduces its look exactly. Applied while the theme
+  is active, injected before the user's customCss.
+
+### 8. Navigation placement
 
 `navPlacement = 'left'` swaps the sticky header for a fixed left sidebar on desktop
 (`lg:` up) rendering the same `links` array vertically; mobile always uses top bar +
 hamburger. **Extreme themes can force the chrome layout** (Winamp-skin style): a
-theme declaring `layout: 'sidebar'` (Overseerr) wins over the user's setting — the
+theme declaring `layout: 'sidebar'` (Overseerr, Sonarr/Radarr) wins over the user's setting — the
 resolver computes the effective placement, so SSR, the settings UI, and the layout
 all agree. Sidebar mode also takes a seerr-style active pill (solid accent) and a
-version chip at the bottom.
+version chip at the bottom. Optional `--pp-chrome`/`--pp-chrome-border` tokens (fallback: background/border) let extreme themes restyle the top bar/sidebar itself — seerr's darker sidebar, the \*arr near-black navbar.
 
-### 8. i18n
+### 9. i18n
 
 All Appearance strings added to all 6 `messages/*.json` catalogs; theme names remain
 proper nouns.

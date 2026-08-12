@@ -85,4 +85,8 @@ export interface CustomTheme {
 	/** Id of the built-in base theme this extends. */
 	base: string;
 	tokens: Partial<Record<TokenKey, string>>;
+	/** Free-form CSS shipped with the theme (validated on import: size-capped,
+	 *  no `</style>`). Applied while the theme is active, before the user's own
+	 *  customCss, which still wins the cascade. */
+	css?: string;
 }

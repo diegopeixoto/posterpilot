@@ -180,10 +180,19 @@ describe('resolveAppearance', () => {
 		expect(resolveAppearance({ themeId: 'monokai' }).navPlacement).toBe('top');
 	});
 
-	it('lets a theme force its layout over the nav-placement setting', () => {
-		expect(resolveAppearance({ themeId: 'overseerr', navPlacement: 'top' }).navPlacement).toBe(
-			'left'
+	it('carries the custom theme CSS through resolution', () => {
+		const withCss: CustomTheme = { ...custom, css: '.surface { border-width: 2px }' };
+		expect(resolveAppearance({ themeId: 'custom:nebula' }, [withCss]).css).toBe(
+			'.surface { border-width: 2px }'
 		);
+		expect(resolveAppearance({ themeId: 'custom:nebula' }, [custom]).css).toBeNull();
+		expect(resolveAppearance({ themeId: 'monokai' }).css).toBeNull();
+	});
+
+	it('lets a theme force its layout over the nav-placement setting', () => {
+		for (const id of ['overseerr', 'sonarr']) {
+			expect(resolveAppearance({ themeId: id, navPlacement: 'top' }).navPlacement).toBe('left');
+		}
 		const onOverseerrBase: CustomTheme = { ...custom, id: 'custom:seer', base: 'overseerr' };
 		expect(
 			resolveAppearance({ themeId: 'custom:seer', navPlacement: 'top' }, [onOverseerrBase])

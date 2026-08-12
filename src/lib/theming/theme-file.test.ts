@@ -35,6 +35,17 @@ describe('serializeThemeFile / parseThemeFile round-trip', () => {
 		});
 	});
 
+	it('round-trips theme CSS and rejects a style breakout', () => {
+		const withCss: CustomTheme = { ...theme, css: '.surface { border-width: 2px }' };
+		const parsed = parseThemeFile(serializeThemeFile(withCss));
+		expect(parsed.ok).toBe(true);
+		if (parsed.ok) expect(parsed.theme.css).toBe('.surface { border-width: 2px }');
+
+		const evil = JSON.parse(serializeThemeFile(withCss));
+		evil.theme.css = 'x {} </style><script>alert(1)</script>';
+		expect(parseThemeFile(JSON.stringify(evil))).toEqual({ ok: false, error: 'invalid_css' });
+	});
+
 	it('omits absent optional metadata from the file', () => {
 		const minimal: CustomTheme = { id: 'custom:m', name: 'M', base: 'monokai', tokens: {} };
 		const doc = JSON.parse(serializeThemeFile(minimal));

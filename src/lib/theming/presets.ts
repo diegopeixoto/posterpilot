@@ -68,6 +68,8 @@ export const BUILTIN_THEMES: Theme[] = [
 		family: 'extreme',
 		colorScheme: 'dark',
 		customizable: { ...ALL_CUSTOMIZABLE },
+		// Sidebar chrome, matching the other extreme reskins.
+		layout: 'sidebar',
 		swatches: ['#222227', '#2f2f35', '#35c5f4']
 	},
 	{

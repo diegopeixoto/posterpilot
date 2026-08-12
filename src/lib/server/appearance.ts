@@ -10,6 +10,7 @@ import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { DEFAULT_THEME_ID, type CustomTheme, type TokenKey } from '$lib/theming/schema';
 import {
+	isValidCss,
 	MAX_CUSTOM_THEMES,
 	MAX_THEME_FILE_BYTES,
 	sanitizeCustomTheme
@@ -25,6 +26,9 @@ export interface AppearanceSettings {
 	themeBackgroundImageDim: number | null;
 	themeRadiusOverride: string | null;
 	navPlacement: NavPlacement;
+	/** Free-form CSS escape hatch (self-hosted, single-user; deliberately not
+	 *  part of the shareable theme-file format). Capped; `</style` rejected. */
+	customCss: string | null;
 }
 
 const KEYS = {
@@ -35,6 +39,7 @@ const KEYS = {
 	themeBackgroundImageDim: 'themeBackgroundImageDim',
 	themeRadiusOverride: 'themeRadiusOverride',
 	navPlacement: 'navPlacement',
+	customCss: 'customCss',
 	customThemes: 'customThemes'
 } as const;
 
@@ -46,6 +51,7 @@ const SCALAR_KEYS = [
 	KEYS.themeBackgroundImageDim,
 	KEYS.themeRadiusOverride,
 	KEYS.navPlacement,
+	KEYS.customCss,
 	KEYS.customThemes
 ] as const;
 
@@ -84,7 +90,8 @@ export async function getAppearanceSettings(): Promise<AppearanceSettings> {
 		themeBackgroundImage: kv[KEYS.themeBackgroundImage] || null,
 		themeBackgroundImageDim: parseDim(kv[KEYS.themeBackgroundImageDim]),
 		themeRadiusOverride: kv[KEYS.themeRadiusOverride] || null,
-		navPlacement: kv[KEYS.navPlacement] === 'left' ? 'left' : 'top'
+		navPlacement: kv[KEYS.navPlacement] === 'left' ? 'left' : 'top',
+		customCss: kv[KEYS.customCss] || null
 	};
 }
 
@@ -111,6 +118,7 @@ export async function saveAppearanceSettings(patch: Partial<AppearanceSettings>)
 		put(KEYS.themeRadiusOverride, patch.themeRadiusOverride);
 	if (patch.navPlacement !== undefined)
 		put(KEYS.navPlacement, patch.navPlacement === 'left' ? 'left' : 'top');
+	if (patch.customCss !== undefined) put(KEYS.customCss, patch.customCss);
 	await Promise.all(writes);
 }
 
@@ -148,6 +156,13 @@ export async function saveCustomThemes(themes: CustomTheme[]): Promise<void> {
 		throw new Error('custom themes exceed the storage cap');
 	}
 	await writeKv(KEYS.customThemes, value);
+}
+
+/** Validate custom CSS: size-capped, and the one real breakout (`</style>`)
+ *  rejected. Everything else is the user's own business (self-hosted escape
+ *  hatch, single-user instance). */
+export function validateCustomCss(value: unknown): value is string {
+	return typeof value === 'string' && isValidCss(value);
 }
 
 /** Slug for a custom theme id: lowercase, hyphenated, collision-safe suffix added by caller. */

@@ -232,8 +232,16 @@ const handleTheme: Handle = async ({ event, resolve }) => {
 		.map(([key, value]) => `${key}:${escapeAttr(value)}`)
 		.join(';');
 	const attrs = ` data-theme="${resolved.dataTheme}"${style ? ` style="${style}"` : ''}`;
+	// Theme CSS (from a custom theme) then the user's own customCss escape hatch:
+	// both validated on write (size-capped, no `</style>`), injected verbatim in
+	// that order so the user's CSS wins the cascade.
+	const themeCss = resolved.css ? `<style id="pp-theme-css">${resolved.css}</style>` : '';
+	const customCss = appearance.customCss
+		? `<style id="pp-custom-css">${appearance.customCss}</style>`
+		: '';
 	return resolve(event, {
-		transformPageChunk: ({ html }) => html.replace('%themeattrs%', attrs)
+		transformPageChunk: ({ html }) =>
+			html.replace('%themeattrs%', attrs).replace('</head>', `${themeCss}${customCss}</head>`)
 	});
 };
 

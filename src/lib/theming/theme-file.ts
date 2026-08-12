@@ -15,6 +15,16 @@ export const THEME_FILE_FORMAT_VERSION = 1;
 
 export const MAX_CUSTOM_THEMES = 20;
 export const MAX_THEME_FILE_BYTES = 64 * 1024;
+/** Cap for the free-form CSS a theme file (or the customCss setting) may carry. */
+export const MAX_THEME_CSS_BYTES = 16 * 1024;
+
+/** Validate theme/setting CSS: size-capped, no `</style>` breakout. Anything
+ *  else is the user's own business (self-hosted, single-user). */
+export function isValidCss(value: string): boolean {
+	return (
+		new TextEncoder().encode(value).byteLength <= MAX_THEME_CSS_BYTES && !/<\/style/i.test(value)
+	);
+}
 
 const META_LIMITS = {
 	name: 60,
@@ -57,6 +67,7 @@ export type ValidationError =
 	| 'unknown_base'
 	| 'invalid_tokens'
 	| 'invalid_metadata'
+	| 'invalid_css'
 	| 'too_large';
 
 export interface ThemeFilePayload {
@@ -67,6 +78,7 @@ export interface ThemeFilePayload {
 	description?: string;
 	base: string;
 	tokens: Partial<Record<TokenKey, string>>;
+	css?: string;
 }
 
 export type ParseThemeFileResult =
@@ -86,7 +98,8 @@ export function serializeThemeFile(theme: CustomTheme): string {
 				...(theme.version ? { version: theme.version } : {}),
 				...(theme.description ? { description: theme.description } : {}),
 				base: theme.base,
-				tokens: theme.tokens
+				tokens: theme.tokens,
+				...(theme.css ? { css: theme.css } : {})
 			}
 		},
 		null,
@@ -161,6 +174,10 @@ export function parseThemeFile(raw: string | Uint8Array): ParseThemeFileResult {
 		tokens[key as TokenKey] = value;
 	}
 
+	if (t.css !== undefined && (typeof t.css !== 'string' || !isValidCss(t.css))) {
+		return { ok: false, error: 'invalid_css' };
+	}
+
 	return {
 		ok: true,
 		theme: {
@@ -170,7 +187,8 @@ export function parseThemeFile(raw: string | Uint8Array): ParseThemeFileResult {
 			...(version ? { version } : {}),
 			...(description ? { description } : {}),
 			base: t.base,
-			tokens
+			tokens,
+			...(typeof t.css === 'string' && t.css ? { css: t.css } : {})
 		}
 	};
 }
@@ -204,6 +222,7 @@ export function sanitizeCustomTheme(raw: unknown): Omit<CustomTheme, 'id'> | nul
 			? { description: t.description.slice(0, META_LIMITS.description) }
 			: {}),
 		base: t.base,
-		tokens
+		tokens,
+		...(typeof t.css === 'string' && t.css && isValidCss(t.css) ? { css: t.css } : {})
 	};
 }

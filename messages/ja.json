@@ -1691,5 +1691,7 @@
 	"appearance_import_invalid": "このファイルは有効な PosterPilot テーマではありません。",
 	"appearance_import_unsupported_version": "このテーマファイルには新しいバージョンの PosterPilot が必要です。",
 	"appearance_import_too_large": "テーマファイルが大きすぎます。",
-	"appearance_too_many": "カスタムテーマの上限に達しました。"
+	"appearance_too_many": "カスタムテーマの上限に達しました。",
+	"appearance_custom_css": "カスタム CSS",
+	"appearance_custom_css_hint": "アクティブなテーマの後に、すべてのページにそのまま適用されます。検証は行われず、無効な CSS はブラウザに無視されます。作成したカスタムテーマに取り込まれ、エクスポートファイルにも含まれます。"
 }

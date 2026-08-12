@@ -4,6 +4,7 @@ import {
 	getAppearanceSettings,
 	getCustomThemes,
 	saveAppearanceSettings,
+	validateCustomCss,
 	type AppearanceSettings
 } from '$lib/server/appearance';
 import { findBuiltinTheme } from '$lib/theming/presets';
@@ -91,6 +92,12 @@ export const POST: RequestHandler = async ({ request }) => {
 			return badRequest('invalid_nav_placement');
 		}
 		patch.navPlacement = body.navPlacement;
+	}
+	if (body.customCss !== undefined) {
+		if (body.customCss !== null && !validateCustomCss(body.customCss)) {
+			return badRequest('invalid_custom_css');
+		}
+		patch.customCss = body.customCss;
 	}
 
 	await saveAppearanceSettings(patch);

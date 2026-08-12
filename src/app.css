@@ -192,7 +192,7 @@
 	--pp-accent-900: #ddd6fe;
 	--pp-accent-950: #ede9fe;
 	--pp-accent-foreground: #ffffff;
-	--pp-logo-filter: brightness(0.15);
+	--pp-logo-image: url('/logo-dark.png');
 	--pp-radius: 0.75rem;
 	--pp-radius-sm: 0.375rem;
 	--pp-font-sans:
@@ -204,6 +204,7 @@
 
 [data-theme='overseerr'] {
 	--pp-background: #111827;
+	--pp-chrome: #0c1425;
 	--pp-surface: #1f2937;
 	--pp-surface-raised: #374151;
 	--pp-scrim: #030712;
@@ -229,6 +230,7 @@
 
 [data-theme='sonarr'] {
 	--pp-background: #222227;
+	--pp-chrome: #1a1a1e;
 	--pp-surface: #2f2f35;
 	--pp-surface-raised: #3a3a41;
 	--pp-scrim: #161618;
@@ -315,6 +317,12 @@
 	--radius-surface: var(--pp-radius);
 	--radius-control: var(--pp-radius-sm);
 
+	/* Chrome (top bar / sidebar) tokens. Optional per theme — extreme themes use
+	   them to push the chrome closer to the app they reskin (e.g. seerr's darker
+	   sidebar); everything else falls back to the theme background/border. */
+	--color-chrome: var(--pp-chrome, var(--pp-background));
+	--color-chrome-border: var(--pp-chrome-border, var(--pp-border));
+
 	--font-sans: var(--pp-font-sans);
 }
 
@@ -350,10 +358,16 @@ body {
 	-webkit-font-smoothing: antialiased;
 }
 
-/* Themes may restyle the header logo (the shipped asset is light-on-dark);
-   the White theme sets `--pp-logo-filter` for a dark silhouette. */
+/* Themes may swap the header logo (the shipped asset is light-on-dark); the
+   White theme points `--pp-logo-image` at the dark-wordmark variant. */
 .app-logo {
-	filter: var(--pp-logo-filter, none);
+	display: inline-block;
+	height: 1.75rem;
+	aspect-ratio: 923 / 148;
+	background-image: var(--pp-logo-image, url('/logo.png'));
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
 }
 
 /* A single, consistent keyboard-focus indicator for every interactive element.

@@ -43,6 +43,9 @@ export interface ResolvedAppearance {
 	navPlacement: 'top' | 'left';
 	/** Inline custom properties to set on `<html>` (`--pp-*` → value). */
 	vars: Record<string, string>;
+	/** Free-form CSS from the active custom theme (null for built-ins). Injected
+	 *  before the user's own customCss, which still wins the cascade. */
+	css: string | null;
 }
 
 /** Ramp derivation mirrors the `@theme inline` fallbacks in `app.css`. Emitting
@@ -81,22 +84,24 @@ interface ThemeLookup {
 	base: Theme;
 	/** Token deltas when the selected theme is a custom one. */
 	deltas: CustomTheme['tokens'] | null;
+	/** Free-form CSS shipped with a custom theme (null for built-ins). */
+	css: string | null;
 	resolvedId: string;
 }
 
 function lookupTheme(themeId: string | null | undefined, customThemes: CustomTheme[]): ThemeLookup {
 	const id = themeId ?? DEFAULT_THEME_ID;
 	const builtin = findBuiltinTheme(id);
-	if (builtin) return { base: builtin, deltas: null, resolvedId: builtin.id };
+	if (builtin) return { base: builtin, deltas: null, css: null, resolvedId: builtin.id };
 
 	const custom = customThemes.find((theme) => theme.id === id);
 	if (custom) {
 		const base = findBuiltinTheme(custom.base) ?? findBuiltinTheme(DEFAULT_THEME_ID)!;
-		return { base, deltas: custom.tokens, resolvedId: custom.id };
+		return { base, deltas: custom.tokens, css: custom.css ?? null, resolvedId: custom.id };
 	}
 
 	const fallback = findBuiltinTheme(DEFAULT_THEME_ID)!;
-	return { base: fallback, deltas: null, resolvedId: fallback.id };
+	return { base: fallback, deltas: null, css: null, resolvedId: fallback.id };
 }
 
 export interface StoredAppearanceLike {
@@ -133,7 +138,7 @@ export function resolveAppearance(
 	input: AppearanceInput,
 	customThemes: CustomTheme[] = []
 ): ResolvedAppearance {
-	const { base, deltas, resolvedId } = lookupTheme(input.themeId, customThemes);
+	const { base, deltas, css, resolvedId } = lookupTheme(input.themeId, customThemes);
 	const flags = base.customizable;
 	const vars: Record<string, string> = {};
 
@@ -174,6 +179,7 @@ export function resolveAppearance(
 		colorScheme: base.colorScheme,
 		flags,
 		navPlacement: base.layout === 'sidebar' ? 'left' : (input.navPlacement ?? 'top'),
-		vars
+		vars,
+		css
 	};
 }
