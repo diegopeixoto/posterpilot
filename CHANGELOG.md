@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/diegopeixoto/posterpilot/compare/v0.13.0...v0.13.1) (2026-08-13)
+
+
+### Under the hood
+
+* write 0.13.0 release notes ([#113](https://github.com/diegopeixoto/posterpilot/issues/113)) ([07ecaf3](https://github.com/diegopeixoto/posterpilot/commit/07ecaf3ca7f35fa2c631aa3fcee154b8d1a05444))
+
 ## [0.13.0](https://github.com/diegopeixoto/posterpilot/compare/v0.12.2...v0.13.0) (2026-08-13)
 
 ### Features
