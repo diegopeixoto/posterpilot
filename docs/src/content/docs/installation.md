@@ -262,3 +262,12 @@ health probe (the bundled `docker-compose.yml` already does):
 ```sh
 curl -s http://localhost:3000/api/health
 ```
+
+`/api/health` is a lightweight **liveness** probe and intentionally performs no
+database I/O. Use `GET /api/ready` as a **readiness** probe when the orchestrator
+must confirm that SQLite can serve a bounded query. It returns HTTP 503 with a
+stable, sanitized reason when the database query fails or times out:
+
+```sh
+curl -fsS http://localhost:3000/api/ready
+```

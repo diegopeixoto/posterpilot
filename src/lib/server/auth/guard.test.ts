@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPath, safeRedirectTarget } from './guard';
+import { bypassesAuthStateLookup, classifyPath, safeRedirectTarget } from './guard';
 
 describe('auth/guard · classifyPath', () => {
 	it('treats the health probe, login, logout, and assets as public', () => {
 		expect(classifyPath('/api/health')).toBe('public');
+		expect(classifyPath('/api/ready')).toBe('public');
 		expect(classifyPath('/login')).toBe('public');
 		expect(classifyPath('/api/auth/logout')).toBe('public');
 		expect(classifyPath('/api/automation-webhooks/automation-a')).toBe('public');
@@ -22,6 +23,20 @@ describe('auth/guard · classifyPath', () => {
 		expect(classifyPath('/')).toBe('page');
 		expect(classifyPath('/library')).toBe('page');
 		expect(classifyPath('/settings')).toBe('page');
+	});
+});
+
+describe('auth/guard · bypassesAuthStateLookup', () => {
+	it('bypasses the database only for liveness and readiness probes', () => {
+		expect(bypassesAuthStateLookup('/api/health')).toBe(true);
+		expect(bypassesAuthStateLookup('/api/ready')).toBe(true);
+	});
+
+	it('keeps login and other public routes on the real auth state', () => {
+		expect(bypassesAuthStateLookup('/login')).toBe(false);
+		expect(bypassesAuthStateLookup('/api/auth/logout')).toBe(false);
+		expect(bypassesAuthStateLookup('/api/automation-webhooks/automation-a')).toBe(false);
+		expect(bypassesAuthStateLookup('/favicon.ico')).toBe(false);
 	});
 });
 
