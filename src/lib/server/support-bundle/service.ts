@@ -1,12 +1,21 @@
 import { desc } from 'drizzle-orm';
 import { isAbsolute } from 'node:path';
 import { db, databaseClient } from '$lib/server/db';
-import { events, jobs, mediaItems, providerDiscoveryOutcomes } from '$lib/server/db/schema';
+import {
+	events,
+	jobAttempts,
+	jobs,
+	mediaItems,
+	providerDiscoveryOutcomes
+} from '$lib/server/db/schema';
+import { env } from '$env/dynamic/private';
+import { resolveDataPaths } from '$lib/server/data-paths';
 import { resolveConfig } from '$lib/server/config';
 import { getDiagnostics } from '$lib/server/diagnostics';
 import { getServerInstanceConnection, listServerInstances } from '$lib/server/server-instances';
 import { version } from '$lib/version';
 import { buildSupportBundle } from './builder';
+import { inspectSupportDatabase } from './database';
 
 // Reported as `latestExpected` and compared against the applied migrations, so a
 // stale value makes a healthy database look behind. Bump it with every migration.
@@ -40,64 +49,92 @@ async function appliedMigrations(): Promise<unknown> {
 
 /** Gather bounded summaries only; never add the database, artwork, raw responses, or secrets. */
 export async function createSupportBundle(includeTitles = false) {
-	const [config, servers, recentJobs, diagnostics, outcomes, recentEvents, migrations] =
-		await Promise.all([
-			resolveConfig(),
-			listServerInstances(),
-			db
-				.select({
-					id: jobs.id,
-					serverInstanceId: jobs.serverInstanceId,
-					librarySectionKey: jobs.librarySectionKey,
-					type: jobs.type,
-					status: jobs.status,
-					phase: jobs.phase,
-					attempt: jobs.attempt,
-					maxAttempts: jobs.maxAttempts,
-					processed: jobs.processed,
-					total: jobs.total,
-					errorCode: jobs.errorCode,
-					createdAt: jobs.createdAt,
-					startedAt: jobs.startedAt,
-					finishedAt: jobs.finishedAt
-				})
-				.from(jobs)
-				.orderBy(desc(jobs.createdAt))
-				.limit(50),
-			getDiagnostics(undefined, 10),
-			db
-				.select({
-					serverInstanceId: providerDiscoveryOutcomes.serverInstanceId,
-					mediaItemId: providerDiscoveryOutcomes.mediaItemId,
-					provider: providerDiscoveryOutcomes.provider,
-					status: providerDiscoveryOutcomes.status,
-					candidateCount: providerDiscoveryOutcomes.candidateCount,
-					retainedStaleCandidates: providerDiscoveryOutcomes.retainedStaleCandidates,
-					truncatedKinds: providerDiscoveryOutcomes.truncatedKinds,
-					latencyMs: providerDiscoveryOutcomes.latencyMs,
-					errorCode: providerDiscoveryOutcomes.errorCode,
-					error: providerDiscoveryOutcomes.error,
-					lastSuccessAt: providerDiscoveryOutcomes.lastSuccessAt,
-					completedAt: providerDiscoveryOutcomes.completedAt
-				})
-				.from(providerDiscoveryOutcomes)
-				.orderBy(desc(providerDiscoveryOutcomes.completedAt))
-				.limit(100),
-			db
-				.select({
-					id: events.id,
-					serverInstanceId: events.serverInstanceId,
-					jobId: events.jobId,
-					level: events.level,
-					type: events.type,
-					code: events.code,
-					createdAt: events.createdAt
-				})
-				.from(events)
-				.orderBy(desc(events.createdAt))
-				.limit(100),
-			appliedMigrations()
-		]);
+	const dataPaths = resolveDataPaths(env.DATABASE_URL, env.APP_KEY_FILE);
+	const [
+		config,
+		servers,
+		recentJobs,
+		recentAttempts,
+		diagnostics,
+		outcomes,
+		recentEvents,
+		migrations,
+		database
+	] = await Promise.all([
+		resolveConfig(),
+		listServerInstances(),
+		db
+			.select({
+				id: jobs.id,
+				serverInstanceId: jobs.serverInstanceId,
+				librarySectionKey: jobs.librarySectionKey,
+				type: jobs.type,
+				status: jobs.status,
+				phase: jobs.phase,
+				attempt: jobs.attempt,
+				maxAttempts: jobs.maxAttempts,
+				processed: jobs.processed,
+				total: jobs.total,
+				errorCode: jobs.errorCode,
+				createdAt: jobs.createdAt,
+				startedAt: jobs.startedAt,
+				finishedAt: jobs.finishedAt
+			})
+			.from(jobs)
+			.orderBy(desc(jobs.createdAt))
+			.limit(50),
+		db
+			.select({
+				id: jobAttempts.id,
+				jobId: jobAttempts.jobId,
+				attemptNumber: jobAttempts.attemptNumber,
+				trigger: jobAttempts.trigger,
+				status: jobAttempts.status,
+				retryable: jobAttempts.retryable,
+				errorCode: jobAttempts.errorCode,
+				startedAt: jobAttempts.startedAt,
+				finishedAt: jobAttempts.finishedAt
+			})
+			.from(jobAttempts)
+			.orderBy(desc(jobAttempts.createdAt))
+			.limit(100),
+		getDiagnostics(undefined, 10),
+		db
+			.select({
+				serverInstanceId: providerDiscoveryOutcomes.serverInstanceId,
+				mediaItemId: providerDiscoveryOutcomes.mediaItemId,
+				provider: providerDiscoveryOutcomes.provider,
+				status: providerDiscoveryOutcomes.status,
+				candidateCount: providerDiscoveryOutcomes.candidateCount,
+				retainedStaleCandidates: providerDiscoveryOutcomes.retainedStaleCandidates,
+				truncatedKinds: providerDiscoveryOutcomes.truncatedKinds,
+				latencyMs: providerDiscoveryOutcomes.latencyMs,
+				errorCode: providerDiscoveryOutcomes.errorCode,
+				error: providerDiscoveryOutcomes.error,
+				lastSuccessAt: providerDiscoveryOutcomes.lastSuccessAt,
+				completedAt: providerDiscoveryOutcomes.completedAt
+			})
+			.from(providerDiscoveryOutcomes)
+			.orderBy(desc(providerDiscoveryOutcomes.completedAt))
+			.limit(100),
+		db
+			.select({
+				id: events.id,
+				serverInstanceId: events.serverInstanceId,
+				jobId: events.jobId,
+				level: events.level,
+				type: events.type,
+				code: events.code,
+				createdAt: events.createdAt
+			})
+			.from(events)
+			.orderBy(desc(events.createdAt))
+			.limit(100),
+		appliedMigrations(),
+		inspectSupportDatabase(databaseClient, dataPaths.databaseFile).catch(() => ({
+			errorCode: 'database_diagnostics_unavailable'
+		}))
+	]);
 
 	const knownSecrets = [
 		config.plexToken,
@@ -198,7 +235,9 @@ export async function createSupportBundle(includeTitles = false) {
 			},
 			{ path: 'configuration.json', value: configurationShape },
 			{ path: 'schema.json', value: migrations },
+			{ path: 'database.json', value: database },
 			{ path: 'jobs.json', value: recentJobs },
+			{ path: 'job-attempts.json', value: recentAttempts },
 			{ path: 'diagnostics.json', value: diagnostics, optional: true },
 			{ path: 'provider-outcomes.json', value: outcomes, optional: true },
 			{ path: 'events.json', value: recentEvents, optional: true },
