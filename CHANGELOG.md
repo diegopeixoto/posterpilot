@@ -2,17 +2,15 @@
 
 ## [0.13.0](https://github.com/diegopeixoto/posterpilot/compare/v0.12.2...v0.13.0) (2026-08-13)
 
-
 ### Features
 
-* add database readiness probe ([#108](https://github.com/diegopeixoto/posterpilot/issues/108)) ([8be8636](https://github.com/diegopeixoto/posterpilot/commit/8be8636b41cd4d39474d7985ddf3b1e93baaac8f)), closes [#106](https://github.com/diegopeixoto/posterpilot/issues/106)
-* expand support diagnostics bundle ([22f7d91](https://github.com/diegopeixoto/posterpilot/commit/22f7d916eaefcd593320ee2023d239aefc9e231c)), closes [#107](https://github.com/diegopeixoto/posterpilot/issues/107)
-* theme-kit engine with 11 built-in themes and custom theme authoring ([#110](https://github.com/diegopeixoto/posterpilot/issues/110)) ([7b0225a](https://github.com/diegopeixoto/posterpilot/commit/7b0225af17093cffb34d632a6266188495838697))
+* Appearance is now fully themeable. Choose from eleven built-in themes — including full Overseerr, Sonarr/Radarr and Terminal reskins — with live previews, accessible contrast, accent/background/radius overrides, and top or left navigation where the theme permits it. The original PosterPilot look remains the default. ([#110](https://github.com/diegopeixoto/posterpilot/pull/110))
+* Create a theme from the current appearance, edit it, and export or import a versioned `.posterpilot-theme.json` file. Imported CSS is disclosed before activation and validated so escaped spellings cannot hide remote fonts, images, stylesheets or imports. ([#110](https://github.com/diegopeixoto/posterpilot/pull/110))
+* Operators can now distinguish a live process from a usable database with `GET /api/ready`, while `/api/health` stays lightweight. Support bundles also include bounded, sanitized SQLite, WAL, filesystem and recent job-attempt diagnostics without exporting the database path, secrets or raw settings. ([#108](https://github.com/diegopeixoto/posterpilot/pull/108), [#109](https://github.com/diegopeixoto/posterpilot/pull/109))
 
+### Upgrading
 
-### Under the hood
-
-* write 0.12.2 release notes ([2790415](https://github.com/diegopeixoto/posterpilot/commit/2790415c737c1ba78b6777656961d88781feba29))
+* No database migration or configuration change is required. Existing installations keep the original PosterPilot theme until another theme is selected. ([#110](https://github.com/diegopeixoto/posterpilot/pull/110))
 
 ## [0.12.2](https://github.com/diegopeixoto/posterpilot/compare/v0.12.1...v0.12.2) (2026-08-11)
 
