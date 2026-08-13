@@ -14,7 +14,7 @@ import { paraglideMiddleware } from '$lib/paraglide/server';
 import { registerServerLocaleStrategy } from '$lib/i18n/strategy.server';
 import { getAuthState } from '$lib/server/config';
 import { warnIfKeyFileInsecure } from '$lib/server/secrets/key';
-import { classifyPath, safeRedirectTarget } from '$lib/server/auth/guard';
+import { bypassesAuthStateLookup, classifyPath, safeRedirectTarget } from '$lib/server/auth/guard';
 import { decideLocalBypass } from '$lib/server/auth/local-address';
 import { verifySessionToken } from '$lib/server/auth/session';
 import { getSessionKey, issueSessionCookie, SESSION_COOKIE } from '$lib/server/auth/server';
@@ -85,10 +85,10 @@ registerServerLocaleStrategy();
  * pass through, other APIs get `401` JSON, other pages redirect to `/login`.
  */
 const handleAuth: Handle = async ({ event, resolve }) => {
-	// Public routes must remain reachable when the settings database is unavailable.
-	// In particular, readiness has to execute its own bounded query and return its
-	// stable 503 instead of failing first inside the database-backed auth lookup.
-	if (classifyPath(event.url.pathname) === 'public') {
+	// Probes must remain reachable when the settings database is unavailable.
+	// Other public routes still need the real auth state: setting `authMode` to
+	// disabled for `/login` makes its loader redirect away from the login form.
+	if (bypassesAuthStateLookup(event.url.pathname)) {
 		event.locals.authMode = 'disabled';
 		event.locals.authed = true;
 		event.locals.authUser = null;
