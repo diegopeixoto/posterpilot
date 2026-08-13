@@ -67,7 +67,7 @@
 			{m.settings_login_account({ server: serverName })}
 			<span class="badge badge-changed ml-1">{m.settings_plex_recommended()}</span>
 		</p>
-		<p class="text-xs text-neutral-400">
+		<p class="text-xs text-text-muted">
 			{apiKeySet ? m.settings_plex_token_set() : m.settings_login_hint({ server: serverName })}
 		</p>
 	</div>

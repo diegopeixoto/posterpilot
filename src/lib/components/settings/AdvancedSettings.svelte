@@ -73,7 +73,7 @@
 			<option value={server.id}>{server.name} · Plex</option>
 		{/each}
 	</select>
-	<p class="mt-1 text-xs text-neutral-400">{m.settings_kometa_server_hint()}</p>
+	<p class="mt-1 text-xs text-text-muted">{m.settings_kometa_server_hint()}</p>
 	{#if env.kometaServerInstanceId}<p class="mt-1 text-xs text-amber-400">
 			{m.settings_set_from_env()}
 		</p>{/if}
@@ -89,8 +89,8 @@
 		disabled={env.kometaAssetsDir}
 		class="input w-full disabled:opacity-50"
 	/>
-	<p class="mt-1 text-xs text-neutral-400">{m.settings_kometa_dir_hint()}</p>
-	<p class="mt-1 text-xs text-neutral-400">
+	<p class="mt-1 text-xs text-text-muted">{m.settings_kometa_dir_hint()}</p>
+	<p class="mt-1 text-xs text-text-muted">
 		{m.settings_kometa_manager_pointer()}
 		<a href="/kometa" class="text-accent-300 underline">{m.nav_kometa()}</a>
 	</p>
@@ -154,11 +154,11 @@
 		</p>{/if}
 </div>
 
-<div class="border-t border-neutral-800 pt-4">
+<div class="border-t border-border pt-4">
 	<div class="flex flex-wrap items-start justify-between gap-2">
 		<div>
 			<h2 class="text-sm font-semibold">{m.settings_artwork_ranking()}</h2>
-			<p class="mt-1 max-w-2xl text-xs text-neutral-400">
+			<p class="mt-1 max-w-2xl text-xs text-text-muted">
 				{m.settings_artwork_ranking_hint()}
 			</p>
 		</div>
@@ -169,14 +169,14 @@
 		</span>
 	</div>
 
-	<p class="mt-3 max-w-2xl text-xs text-neutral-400">{m.settings_score_weights_order_note()}</p>
+	<p class="mt-3 max-w-2xl text-xs text-text-muted">{m.settings_score_weights_order_note()}</p>
 
 	<div class="mt-4 space-y-2">
 		{#each providerPriority as provider (provider)}
 			<div
-				class="grid items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3 sm:grid-cols-[1fr_8rem]"
+				class="grid items-center gap-3 rounded-surface border border-border bg-background/40 p-3 sm:grid-cols-[1fr_8rem]"
 			>
-				<label class="text-sm text-neutral-200" for={`score-${provider}`}>
+				<label class="text-sm text-text-strong" for={`score-${provider}`}>
 					{RANKING_PROVIDER_LABELS[provider]}
 				</label>
 				<input
@@ -194,7 +194,7 @@
 	</div>
 
 	<div class="mt-3 grid gap-3 sm:grid-cols-2">
-		<label class="text-sm text-neutral-300" for="score-resolution">
+		<label class="text-sm text-text-secondary" for="score-resolution">
 			{m.settings_score_resolution()}
 			<input
 				id="score-resolution"
@@ -206,7 +206,7 @@
 				class="input mt-1 w-full"
 			/>
 		</label>
-		<label class="text-sm text-neutral-300" for="score-aspect">
+		<label class="text-sm text-text-secondary" for="score-aspect">
 			{m.settings_score_aspect()}
 			<input
 				id="score-aspect"
@@ -219,12 +219,12 @@
 			/>
 		</label>
 	</div>
-	<p class="mt-2 text-xs text-neutral-500">{m.settings_score_range()}</p>
+	<p class="mt-2 text-xs text-text-faint">{m.settings_score_range()}</p>
 </div>
 
-<div class="border-t border-neutral-800 pt-4">
+<div class="border-t border-border pt-4">
 	<h2 class="text-sm font-semibold">{m.settings_performance()}</h2>
-	<p class="mt-1 text-xs text-neutral-400">{m.settings_performance_hint()}</p>
+	<p class="mt-1 text-xs text-text-muted">{m.settings_performance_hint()}</p>
 
 	<div class="mt-3 grid grid-cols-3 gap-3">
 		<div>
@@ -285,15 +285,15 @@
 	</div>
 
 	<div class="mt-3 space-y-1">
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
+		<label class="flex items-center gap-2 text-sm text-text-secondary">
 			<input type="checkbox" bind:checked={suggestPreselect} disabled={env.suggestPreselect} />
 			{m.settings_suggest_preselect()}
 		</label>
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
+		<label class="flex items-center gap-2 text-sm text-text-secondary">
 			<input type="checkbox" bind:checked={incrementalSync} disabled={env.incrementalSync} />
 			{m.settings_incremental_sync()}
 		</label>
-		<label class="flex items-center gap-2 text-sm text-neutral-300">
+		<label class="flex items-center gap-2 text-sm text-text-secondary">
 			<input type="checkbox" bind:checked={funEnabled} disabled={env.funEnabled} />
 			{m.settings_fun_enabled()}
 		</label>

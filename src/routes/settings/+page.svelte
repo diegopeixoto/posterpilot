@@ -5,6 +5,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import ActivitySettings from '$lib/components/settings/ActivitySettings.svelte';
 	import AdvancedSettings from '$lib/components/settings/AdvancedSettings.svelte';
+	import AppearanceSettings from '$lib/components/settings/AppearanceSettings.svelte';
 	import AutomationSettings from '$lib/components/settings/AutomationSettings.svelte';
 	import BackupRestoreSettings from '$lib/components/settings/BackupRestoreSettings.svelte';
 	import DiagnosticsSettings from '$lib/components/settings/DiagnosticsSettings.svelte';
@@ -79,6 +80,7 @@
 		| 'automation'
 		| 'security'
 		| 'language'
+		| 'appearance'
 		| 'activity';
 	const TABS: Tab[] = [
 		'server',
@@ -89,6 +91,7 @@
 		'automation',
 		'security',
 		'language',
+		'appearance',
 		'activity'
 	];
 	const initialTab = untrack(() => page.url.searchParams.get('tab'));
@@ -102,6 +105,7 @@
 		{ key: 'automation', label: m.settings_tab_automation },
 		{ key: 'security', label: m.settings_tab_security },
 		{ key: 'language', label: m.settings_tab_language },
+		{ key: 'appearance', label: m.settings_tab_appearance },
 		{ key: 'activity', label: m.settings_tab_activity }
 	];
 
@@ -351,7 +355,7 @@
 <h1 class="text-2xl font-semibold tracking-tight">{m.settings_title()}</h1>
 
 <div
-	class="mt-5 flex flex-wrap gap-1 border-b border-neutral-800"
+	class="mt-5 flex flex-wrap gap-1 border-b border-border"
 	role="tablist"
 	aria-label={m.settings_title()}
 >
@@ -365,9 +369,9 @@
 			tabindex={tab === item.key ? 0 : -1}
 			onclick={() => selectTab(item.key)}
 			onkeydown={(event) => onTabKeydown(event, item.key)}
-			class="-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition {tab === item.key
+			class="-mb-px rounded-t-control border-b-2 px-3 py-2 text-sm transition {tab === item.key
 				? 'border-accent-500 text-accent-200'
-				: 'border-transparent text-neutral-400 hover:text-neutral-100'}"
+				: 'border-transparent text-text-muted hover:text-text'}"
 		>
 			{item.label()}
 		</button>
@@ -378,7 +382,9 @@
 	id="settings-tabpanel"
 	role="tabpanel"
 	aria-labelledby={`settings-tab-${tab}`}
-	class="mt-6 space-y-5 {tab === 'diagnostics' || tab === 'backup' ? 'max-w-4xl' : 'max-w-xl'}"
+	class="mt-6 space-y-5 {tab === 'diagnostics' || tab === 'backup' || tab === 'appearance'
+		? 'max-w-4xl'
+		: 'max-w-xl'}"
 >
 	{#if tab === 'server'}
 		<ServerSettings
@@ -465,6 +471,8 @@
 		/>
 	{:else if tab === 'language'}
 		<LanguageSettings initialLocale={data.locale} availableLocales={data.availableLocales} />
+	{:else if tab === 'appearance'}
+		<AppearanceSettings initial={data.appearance} />
 	{:else if tab === 'security'}
 		<SecuritySettings auth={data.auth} />
 	{:else}
@@ -476,7 +484,7 @@
 	{/if}
 
 	{#if tab === 'server' || tab === 'providers' || tab === 'advanced' || tab === 'language'}
-		<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
+		<div class="flex items-center gap-3 border-t border-border pt-4">
 			<button onclick={save} disabled={saving} class="btn btn-accent px-4 py-2">
 				{saving ? m.settings_saving() : m.settings_save()}
 			</button>

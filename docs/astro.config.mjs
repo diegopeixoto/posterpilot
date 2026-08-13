@@ -172,6 +172,17 @@ export default defineConfig({
 							link: '/fun-collections/'
 						},
 						{
+							label: 'Themes',
+							translations: {
+								es: 'Temas',
+								zh: '主题',
+								ja: 'テーマ',
+								'pt-BR': 'Temas',
+								fr: 'Thèmes'
+							},
+							link: '/themes/'
+						},
+						{
 							label: 'Multi-server migration',
 							translations: {
 								es: 'Migración multiservidor',

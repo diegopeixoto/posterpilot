@@ -91,7 +91,7 @@
 		class="btn btn-ghost gap-1.5 px-2.5 py-1.5 {active ? 'border-accent-600 text-accent-200' : ''}"
 	>
 		{@render trigger()}
-		<span aria-hidden="true" class="text-[10px] text-neutral-400">▾</span>
+		<span aria-hidden="true" class="text-[10px] text-text-muted">▾</span>
 	</button>
 	{#if open}
 		<div
@@ -100,7 +100,7 @@
 			role="dialog"
 			aria-label={label}
 			tabindex="-1"
-			class="surface absolute z-20 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-neutral-900 p-3 shadow-xl shadow-black/40 {align ===
+			class="surface absolute z-20 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-surface p-3 shadow-xl shadow-black/40 {align ===
 			'right'
 				? 'right-0'
 				: 'left-0'}"

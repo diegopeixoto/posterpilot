@@ -112,7 +112,7 @@
 				{#if repair.job}
 					<a
 						href={`/?job=${repair.job.id}#job-${repair.job.id}`}
-						class="rounded px-2 py-1 text-xs font-semibold text-amber-200 underline decoration-amber-500/60 underline-offset-2 hover:text-amber-50"
+						class="rounded-control px-2 py-1 text-xs font-semibold text-amber-200 underline decoration-amber-500/60 underline-offset-2 hover:text-amber-50"
 					>
 						{m.tmdb_repair_banner_job({ id: repair.job.id })}
 					</a>

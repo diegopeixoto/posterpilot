@@ -93,59 +93,59 @@
 			aria-label={m.item_undo_cancel()}
 			disabled={busy}
 			onclick={onCancel}
-			class="absolute inset-0 cursor-default bg-black/70 backdrop-blur-sm"
+			class="absolute inset-0 cursor-default bg-scrim/70 backdrop-blur-sm"
 		></button>
 
 		<div
 			bind:this={dialog}
-			class="surface relative max-h-[85vh] w-full max-w-lg overflow-y-auto border-neutral-700 shadow-2xl"
+			class="surface relative max-h-[85vh] w-full max-w-lg overflow-y-auto border-border-strong shadow-2xl"
 			role="alertdialog"
 			aria-modal="true"
 			aria-labelledby="artwork-undo-title"
 			aria-describedby="artwork-undo-description"
 			tabindex="-1"
 		>
-			<header class="border-b border-neutral-800 px-5 py-4">
+			<header class="border-b border-border px-5 py-4">
 				<p class="text-[11px] font-medium tracking-[0.14em] text-accent-300 uppercase">
 					{m.item_undo_preview_label()}
 				</p>
 				<h2 id="artwork-undo-title" class="mt-1 text-lg font-semibold tracking-tight">
 					{m.item_undo_dialog_title()}
 				</h2>
-				<p id="artwork-undo-description" class="mt-1 text-sm text-neutral-400">
+				<p id="artwork-undo-description" class="mt-1 text-sm text-text-muted">
 					{m.item_undo_dialog_description({ scope: contextLabel })}
 				</p>
 			</header>
 
 			<div class="space-y-4 px-5 py-4">
 				<div class="grid grid-cols-3 gap-2" aria-label={m.item_undo_impact_title()}>
-					<div class="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-						<strong class="block text-xl font-semibold text-neutral-100">
+					<div class="rounded-surface border border-border bg-background/60 p-3">
+						<strong class="block text-xl font-semibold text-text-bright">
 							{preview.summary.actionableCount}
 						</strong>
-						<span class="text-[11px] text-neutral-400">{m.item_undo_changes()}</span>
+						<span class="text-[11px] text-text-muted">{m.item_undo_changes()}</span>
 					</div>
-					<div class="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-						<strong class="block text-xl font-semibold text-neutral-100">
+					<div class="rounded-surface border border-border bg-background/60 p-3">
+						<strong class="block text-xl font-semibold text-text-bright">
 							{preview.summary.targetCount}
 						</strong>
-						<span class="text-[11px] text-neutral-400">{m.item_undo_targets()}</span>
+						<span class="text-[11px] text-text-muted">{m.item_undo_targets()}</span>
 					</div>
-					<div class="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-						<strong class="block text-xl font-semibold text-neutral-100">
+					<div class="rounded-surface border border-border bg-background/60 p-3">
+						<strong class="block text-xl font-semibold text-text-bright">
 							{preview.summary.slotCount}
 						</strong>
-						<span class="text-[11px] text-neutral-400">{m.item_undo_slots()}</span>
+						<span class="text-[11px] text-text-muted">{m.item_undo_slots()}</span>
 					</div>
 				</div>
 
 				<div>
-					<h3 class="text-xs font-medium text-neutral-200">{m.item_undo_impact_title()}</h3>
-					<ul class="mt-2 space-y-1.5 text-sm text-neutral-300">
+					<h3 class="text-xs font-medium text-text-strong">{m.item_undo_impact_title()}</h3>
+					<ul class="mt-2 space-y-1.5 text-sm text-text-secondary">
 						{#if preview.summary.destinations.server > 0}
 							<li class="flex items-center justify-between gap-3">
 								<span>{m.item_history_server()}</span>
-								<span class="tabular-nums text-neutral-400"
+								<span class="tabular-nums text-text-muted"
 									>{preview.summary.destinations.server}</span
 								>
 							</li>
@@ -153,7 +153,7 @@
 						{#if preview.summary.destinations.kometa > 0}
 							<li class="flex items-center justify-between gap-3">
 								<span>Kometa</span>
-								<span class="tabular-nums text-neutral-400"
+								<span class="tabular-nums text-text-muted"
 									>{preview.summary.destinations.kometa}</span
 								>
 							</li>
@@ -161,7 +161,7 @@
 						{#if preview.summary.restoreStates.absent > 0}
 							<li class="flex items-center justify-between gap-3">
 								<span>{m.item_undo_restore_absent()}</span>
-								<span class="tabular-nums text-neutral-400"
+								<span class="tabular-nums text-text-muted"
 									>{preview.summary.restoreStates.absent}</span
 								>
 							</li>
@@ -171,17 +171,17 @@
 
 				{#if preview.summary.unavailableCount > 0}
 					<p
-						class="rounded-lg border border-amber-800/70 bg-amber-950/30 p-3 text-xs text-amber-100"
+						class="rounded-surface border border-amber-800/70 bg-amber-950/30 p-3 text-xs text-amber-100"
 						role="status"
 					>
 						{m.item_undo_unavailable_warning({ count: preview.summary.unavailableCount })}
 					</p>
 				{/if}
 
-				<p class="text-xs text-neutral-400">{m.item_undo_history_preserved()}</p>
+				<p class="text-xs text-text-muted">{m.item_undo_history_preserved()}</p>
 			</div>
 
-			<footer class="flex flex-wrap justify-end gap-2 border-t border-neutral-800 px-5 py-4">
+			<footer class="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
 				<button
 					bind:this={cancelButton}
 					type="button"

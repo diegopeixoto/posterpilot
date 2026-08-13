@@ -444,7 +444,7 @@
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
 				<h2 id="backup-title" class="text-base font-semibold">{m.backup_title()}</h2>
-				<p class="mt-1 max-w-2xl text-xs text-neutral-400">{m.backup_intro()}</p>
+				<p class="mt-1 max-w-2xl text-xs text-text-muted">{m.backup_intro()}</p>
 			</div>
 			<button type="button" class="btn btn-accent" disabled={busy !== null} onclick={createBackup}>
 				{busy === 'create' ? m.backup_creating() : m.backup_create()}
@@ -474,13 +474,13 @@
 
 	<div class="surface p-4">
 		<h3 class="text-sm font-semibold">{m.backup_retention_title()}</h3>
-		<p class="mt-1 text-xs text-neutral-400">{m.backup_retention_hint()}</p>
+		<p class="mt-1 text-xs text-text-muted">{m.backup_retention_hint()}</p>
 		<div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.backup_retention_count()}
 				<input bind:value={maxCount} type="number" min="0" class="input mt-1 w-full" />
 			</label>
-			<label class="text-sm text-neutral-300">
+			<label class="text-sm text-text-secondary">
 				{m.backup_retention_age()}
 				<input bind:value={maxAgeDays} type="number" min="1" class="input mt-1 w-full" />
 			</label>
@@ -503,7 +503,7 @@
 			</button>
 		</div>
 		{#if backups.length === 0}
-			<p class="surface mt-3 p-4 text-sm text-neutral-400">{m.backup_empty()}</p>
+			<p class="surface mt-3 p-4 text-sm text-text-muted">{m.backup_empty()}</p>
 		{:else}
 			<ul class="mt-3 space-y-3">
 				{#each backups as item (item.id)}
@@ -525,7 +525,7 @@
 									{#if item.protected}<span class="badge badge-muted">{m.backup_protected()}</span
 										>{/if}
 								</div>
-								<p class="mt-1 text-xs text-neutral-400">
+								<p class="mt-1 text-xs text-text-muted">
 									{m.backup_metadata({
 										version: item.appVersion ?? '—',
 										schema: item.schemaVersion ?? '—',
@@ -621,7 +621,7 @@
 					<h3 id="restore-preview-title" class="text-sm font-semibold">
 						{m.backup_restore_preview_title()}
 					</h3>
-					<p class="mt-1 text-xs text-neutral-400">{m.backup_restore_preview_hint()}</p>
+					<p class="mt-1 text-xs text-text-muted">{m.backup_restore_preview_hint()}</p>
 				</div>
 				<span class="badge {restorePreview.report.restorable ? 'badge-success' : 'badge-error'}">
 					{restorePreview.report.restorable ? m.backup_restore_ready() : m.backup_restore_blocked()}
@@ -648,7 +648,7 @@
 			</div>
 
 			{#if restorePreview.report.schema?.requiredMigrations.length}
-				<p class="mt-3 text-xs text-neutral-300">
+				<p class="mt-3 text-xs text-text-secondary">
 					{m.backup_restore_migrations({
 						count: restorePreview.report.schema.requiredMigrations.length
 					})}
@@ -671,7 +671,7 @@
 
 			{#if restorePreview.report.restorable && restorePreview.confirmation}
 				<label
-					class="mt-4 flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/25 p-3 text-xs text-amber-100"
+					class="mt-4 flex items-start gap-2 rounded-surface border border-amber-900/60 bg-amber-950/25 p-3 text-xs text-amber-100"
 				>
 					<input type="checkbox" bind:checked={restoreAcknowledged} />
 					<span>{m.backup_restore_confirmation_warning()}</span>
@@ -705,16 +705,16 @@
 	<div>
 		<h3 class="text-sm font-semibold">{m.backup_history_title()}</h3>
 		{#if history.length === 0}
-			<p class="mt-2 text-xs text-neutral-400">{m.backup_history_empty()}</p>
+			<p class="mt-2 text-xs text-text-muted">{m.backup_history_empty()}</p>
 		{:else}
 			<ul class="mt-2 space-y-2">
 				{#each history as entry (entry.id)}
-					<li class="rounded-lg border border-neutral-800 p-3 text-xs">
+					<li class="rounded-surface border border-border p-3 text-xs">
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<span>{formatDate(entry.createdAt)}</span>
 							<span class="badge badge-muted">{restoreStatus(entry.status)}</span>
 						</div>
-						{#if entry.safetyBackupId}<p class="mt-1 text-neutral-500">
+						{#if entry.safetyBackupId}<p class="mt-1 text-text-faint">
 								{m.backup_safety_id({ id: entry.safetyBackupId })}
 							</p>{/if}
 					</li>

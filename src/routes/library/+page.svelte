@@ -454,7 +454,7 @@
 
 <div class="flex items-center justify-between">
 	<h1 class="text-2xl font-semibold tracking-tight">{m.library_title()}</h1>
-	<span class="text-sm text-neutral-400">
+	<span class="text-sm text-text-muted">
 		{m.library_item_range({ shown: visibleItems.length, total })}
 	</span>
 </div>
@@ -500,7 +500,7 @@
 	answer has to see what produced it without opening anything first.
 -->
 <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
-	<label for="library-coverage" class="text-xs text-neutral-400">{m.coverage_filter_label()}</label>
+	<label for="library-coverage" class="text-xs text-text-muted">{m.coverage_filter_label()}</label>
 	<select
 		id="library-coverage"
 		class="input min-h-11"
@@ -541,9 +541,9 @@
 		</select>
 		{#if confirmApply}
 			<!-- Two-step confirm: auto-apply writes to the live server and is hard to undo. -->
-			<span class="text-neutral-200">{m.library_apply_confirm({ count: selectedCount })}</span>
+			<span class="text-text-strong">{m.library_apply_confirm({ count: selectedCount })}</span>
 			<!-- Dry-run preview of what this apply would write, so the confirm is informed. -->
-			<span class="text-xs text-neutral-400">
+			<span class="text-xs text-text-muted">
 				{#if previewing}
 					{m.library_preview_calculating()}
 				{:else if applyPreview}
@@ -576,7 +576,7 @@
 				>{m.library_apply_auto()}</button
 			>
 		{/if}
-		<button onclick={clearSelection} class="ml-auto text-neutral-400 hover:text-neutral-200"
+		<button onclick={clearSelection} class="ml-auto text-text-muted hover:text-text-strong"
 			>{m.library_clear()}</button
 		>
 		{#if applyPreview}
@@ -588,7 +588,7 @@
 	{#if errorMsg}
 		<div
 			role="alert"
-			class="mt-2 rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+			class="mt-2 rounded-control border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
 		>
 			{errorMsg}
 		</div>
@@ -608,7 +608,7 @@
 		screen reader would otherwise report.
 	-->
 	<div role="status" class="surface mt-10 p-10 text-center">
-		<p class="text-sm text-neutral-300">{m.coverage_empty_filtered()}</p>
+		<p class="text-sm text-text-secondary">{m.coverage_empty_filtered()}</p>
 		<div class="mt-4 flex flex-wrap items-center justify-center gap-2">
 			<button type="button" onclick={() => setCoverage('')} class="btn btn-ghost min-h-11 px-3">
 				{m.coverage_filter_all()}

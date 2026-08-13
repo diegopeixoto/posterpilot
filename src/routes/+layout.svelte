@@ -11,6 +11,7 @@
 	import Toaster from '$lib/components/Toaster.svelte';
 	import TmdbRepairBanner from '$lib/components/TmdbRepairBanner.svelte';
 	import { toasts } from '$lib/stores/toasts.svelte';
+	import { chrome } from '$lib/stores/chrome.svelte';
 
 	// Local copy of the version comparison (the canonical `isNewerVersion` lives in
 	// `$lib/server/semver`, which SvelteKit forbids importing into client code).
@@ -62,6 +63,15 @@
 		...(data.funEnabled ? [{ href: '/fun', label: m.nav_fun() }] : []),
 		{ href: '/settings', label: m.nav_settings() }
 	]);
+
+	// Left-sidebar navigation: from the Appearance nav-placement setting, or
+	// forced by an extreme theme that reskins the layout (e.g. Overseerr).
+	// Desktop-only: below the lg breakpoint the top bar + hamburger is always used.
+	// The client store wins while it holds an opinion, so switching theme in
+	// Settings rearranges the chrome at once instead of at the next page load.
+	const sidebar = $derived(
+		(chrome.navPlacement ?? data.appearance?.resolved.navPlacement) === 'left'
+	);
 
 	function isActive(href: string): boolean {
 		return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
@@ -212,13 +222,22 @@
 	}
 </script>
 
-<div class="min-h-screen" data-app-hydrated={appHydrated ? 'true' : undefined}>
-	<header class="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-950/80 backdrop-blur">
+<div
+	class="min-h-screen {sidebar ? 'lg:pl-56' : ''}"
+	data-app-hydrated={appHydrated ? 'true' : undefined}
+>
+	<header
+		class="sticky top-0 z-20 border-b border-chrome-border bg-chrome/80 backdrop-blur {sidebar
+			? 'lg:fixed lg:inset-y-0 lg:left-0 lg:w-56 lg:border-r lg:border-b-0'
+			: ''}"
+	>
 		<div
-			class="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-3 px-4 py-2 lg:h-14 lg:flex-nowrap lg:gap-6 lg:py-0"
+			class="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-3 px-4 py-2 {sidebar
+				? 'lg:h-full lg:flex-col lg:items-stretch lg:gap-4 lg:py-4'
+				: 'lg:h-14 lg:flex-nowrap lg:gap-6 lg:py-0'}"
 		>
 			<a href="/" class="flex items-center" aria-label={m.app_name()}>
-				<img src="/logo.png" alt={m.app_name()} class="h-7 w-auto" />
+				<span class="app-logo" role="img" aria-label={m.app_name()}></span>
 			</a>
 			<button
 				type="button"
@@ -235,19 +254,25 @@
 				id="primary-navigation"
 				class="{mobileMenuOpen
 					? 'flex'
-					: 'hidden'} order-last w-full flex-col gap-3 border-t border-neutral-800 pt-3 lg:order-none lg:flex lg:min-w-0 lg:flex-1 lg:flex-row lg:items-center lg:border-0 lg:pt-0"
+					: 'hidden'} order-last w-full flex-col gap-3 border-t border-chrome-border pt-3 lg:order-none lg:flex lg:min-w-0 lg:border-0 lg:pt-0 {sidebar
+					? 'lg:flex-1 lg:gap-4'
+					: 'lg:flex-1 lg:flex-row lg:items-center'}"
 			>
 				<nav
-					class="grid grid-cols-2 gap-1 text-sm sm:grid-cols-4 lg:flex lg:min-w-0 lg:items-center lg:overflow-x-auto lg:whitespace-nowrap"
+					class="grid grid-cols-2 gap-1 text-sm sm:grid-cols-4 lg:flex lg:min-w-0 {sidebar
+						? 'lg:flex-col lg:items-stretch'
+						: 'lg:items-center lg:overflow-x-auto lg:whitespace-nowrap'}"
 				>
 					{#each links as link (link.href)}
 						<a
 							href={link.href}
 							aria-current={isActive(link.href) ? 'page' : undefined}
 							onclick={() => (mobileMenuOpen = false)}
-							class="rounded-md px-3 py-1.5 transition {isActive(link.href)
-								? 'bg-accent-600/15 text-accent-200'
-								: 'text-neutral-400 hover:text-neutral-100'}"
+							class="rounded-control px-3 py-1.5 transition {isActive(link.href)
+								? sidebar
+									? 'bg-accent-600 text-accent-foreground'
+									: 'bg-accent-600/15 text-accent-200'
+								: 'text-text-muted hover:text-text'}"
 						>
 							{link.label}
 							{#if link.href === '/' && data.activeJobs > 0}
@@ -259,10 +284,22 @@
 					{/each}
 				</nav>
 
-				<div class="flex flex-col gap-2 sm:flex-row sm:items-center lg:ml-auto lg:flex-none">
+				<div
+					class="flex flex-col gap-2 sm:flex-row sm:items-center {sidebar
+						? 'lg:mt-auto lg:flex-col lg:items-stretch'
+						: 'lg:ml-auto lg:flex-none'}"
+				>
+					{#if sidebar}
+						<div
+							class="surface hidden px-3 py-2 text-xs text-text-faint lg:block"
+							title={m.app_name()}
+						>
+							{m.app_name()} · v{data.version}
+						</div>
+					{/if}
 					{#if data.serverSelection.servers.length > 1}
 						<label
-							class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-neutral-400"
+							class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-text-muted"
 							aria-busy={switchingServer}
 						>
 							<span class="sr-only">{m.server_switcher_label()}</span>
@@ -286,7 +323,7 @@
 						</label>
 					{/if}
 					<label
-						class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-neutral-400"
+						class="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-text-muted"
 						aria-busy={switchingLocale}
 					>
 						<span class="sr-only">{m.language_label()}</span>
@@ -389,35 +426,35 @@
 		{/key}
 	</main>
 
-	<footer class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-neutral-400">
+	<footer class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-text-muted">
 		<a
 			href="https://github.com/diegopeixoto/posterpilot"
 			target="_blank"
 			rel="noopener"
-			class="hover:text-neutral-200"
+			class="hover:text-text-strong"
 		>
 			{m.app_name()}
 		</a>
-		<span class="text-neutral-600">·</span> v{data.version}
-		<span class="text-neutral-600">·</span>
+		<span class="text-text-faint">·</span> v{data.version}
+		<span class="text-text-faint">·</span>
 		<a
 			href="https://github.com/diegopeixoto"
 			target="_blank"
 			rel="noopener"
-			class="whitespace-nowrap hover:text-neutral-200"
+			class="whitespace-nowrap hover:text-text-strong"
 		>
 			© {new Date().getFullYear()} Diego Peixoto
 		</a>
-		<span class="text-neutral-600">·</span>
+		<span class="text-text-faint">·</span>
 		<a
 			href="https://aquarela.io"
 			target="_blank"
 			rel="noopener"
-			class="whitespace-nowrap hover:text-neutral-200"
+			class="whitespace-nowrap hover:text-text-strong"
 		>
 			{m.footer_aquarela()}
 		</a>
-		<p class="mx-auto mt-1 max-w-2xl text-neutral-400">{m.footer_disclaimer()}</p>
+		<p class="mx-auto mt-1 max-w-2xl text-text-muted">{m.footer_disclaimer()}</p>
 	</footer>
 </div>
 

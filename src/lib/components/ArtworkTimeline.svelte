@@ -135,7 +135,7 @@
 		if (outcome === 'success') return 'badge-changed';
 		if (outcome === 'failed') return 'border-red-800 bg-red-950/60 text-red-200';
 		if (outcome === 'partial') return 'border-amber-800 bg-amber-950/60 text-amber-200';
-		return 'border-neutral-700 bg-neutral-900 text-neutral-300';
+		return 'border-border-strong bg-surface text-text-secondary';
 	}
 
 	function formatDate(value: string): string {
@@ -190,7 +190,7 @@
 	<div class="mb-3 flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<h2 id="artwork-history-title" class="section-title">{m.item_history_title()}</h2>
-			<p class="mt-1 text-xs text-neutral-400">{m.item_history_hint()}</p>
+			<p class="mt-1 text-xs text-text-muted">{m.item_history_hint()}</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
 			{#if canUndoAny && onUndoItem}
@@ -198,7 +198,7 @@
 					{m.item_undo_item()}
 				</button>
 			{/if}
-			<label class="text-xs text-neutral-300">
+			<label class="text-xs text-text-secondary">
 				<span class="sr-only">{m.item_history_filter_destination()}</span>
 				<select bind:value={destination} onchange={refresh} class="input py-1.5 text-xs">
 					<option value="">{m.item_history_all_destinations()}</option>
@@ -206,7 +206,7 @@
 					<option value="kometa">Kometa</option>
 				</select>
 			</label>
-			<label class="text-xs text-neutral-300">
+			<label class="text-xs text-text-secondary">
 				<span class="sr-only">{m.item_history_filter_kind()}</span>
 				<select bind:value={kind} onchange={refresh} class="input py-1.5 text-xs">
 					<option value="">{m.item_history_all_artwork()}</option>
@@ -219,7 +219,7 @@
 	</div>
 
 	{#if loading && entries.length === 0}
-		<div class="surface p-5 text-sm text-neutral-300" role="status">
+		<div class="surface p-5 text-sm text-text-secondary" role="status">
 			{m.item_history_loading()}
 		</div>
 	{:else if failed && entries.length === 0}
@@ -230,31 +230,31 @@
 			>
 		</div>
 	{:else if groups.length === 0}
-		<div class="surface p-5 text-sm text-neutral-400">{m.item_history_empty()}</div>
+		<div class="surface p-5 text-sm text-text-muted">{m.item_history_empty()}</div>
 	{:else}
 		<div class="space-y-3">
 			{#each groups as block (block.group.id)}
 				<article class="surface overflow-hidden">
-					<header class="flex flex-wrap items-center gap-2 border-b border-neutral-800 px-4 py-3">
-						<strong class="text-sm text-neutral-100"
+					<header class="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+						<strong class="text-sm text-text-bright"
 							>{actionLabel(block.revisions[0].action)}</strong
 						>
 						<span class={`badge ${badgeClass(block.group.outcome)}`}
 							>{outcomeLabel(block.group.outcome)}</span
 						>
-						<time class="ml-auto text-xs text-neutral-400" datetime={block.group.createdAt}
+						<time class="ml-auto text-xs text-text-muted" datetime={block.group.createdAt}
 							>{formatDate(block.group.createdAt)}</time
 						>
 					</header>
-					<ul class="divide-y divide-neutral-800" aria-label={m.item_history_group_entries()}>
+					<ul class="divide-y divide-border" aria-label={m.item_history_group_entries()}>
 						{#each block.revisions as revision (revision.id)}
 							<li class="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[minmax(0,1fr)_auto]">
 								<div class="min-w-0">
-									<p class="font-medium text-neutral-200">
+									<p class="font-medium text-text-strong">
 										{revision.destination === 'server' ? m.item_history_server() : 'Kometa'} ·
 										{kindLabel(revision.kind)} · {scopeLabel(revision)}
 									</p>
-									<p class="mt-1 text-neutral-400">
+									<p class="mt-1 text-text-muted">
 										{verificationLabel(revision.verification)}{#if revision.sourceProvider}
 											· {revision.sourceProvider}{/if}
 										{#if revision.originalProtected}

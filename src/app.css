@@ -1,23 +1,375 @@
 @import 'tailwindcss';
 
-/* MediUX-style palette: a single violet accent on a near-black base. Defining the
-   accent as theme tokens generates `accent` color utilities (bg-accent-600, etc.)
-   so every page shares one accent instead of the old indigo/violet mix. */
-@theme {
-	--color-accent-100: #ede9fe;
-	--color-accent-200: #ddd6fe;
-	--color-accent-300: #c4b5fd;
-	--color-accent-400: #a78bfa;
-	--color-accent-500: #8b5cf6;
-	--color-accent-600: #7c3aed;
-	--color-accent-700: #6d28d9;
-	--color-accent-800: #5b21b6;
-	--color-accent-900: #4c1d95;
-	--color-accent-950: #2e1065;
+/* Theme-kit engine: every color/radius/font a theme can change is a `--pp-*`
+   custom property. `:root` holds the default PosterPilot (dark violet) values;
+   other built-in themes are `[data-theme]` blocks below; user overrides are
+   inline `--pp-*` writes on `<html>`. The `@theme inline` block exposes these
+   as semantic utilities (bg-surface, text-text-muted, border-border, …) so
+   components never hard-code a palette.
+
+   Accent ramps derive from a single `--pp-accent-base`: a theme sets just the
+   base and gets a full ramp in its own hue via color-mix (see the `:root` stops
+   below for why the derivation lives there). Themes that need exact stops
+   (PosterPilot keeps its original violet ramp pixel-exact, White inverts the
+   ones used as text) redeclare the individual `--pp-accent-*`. */
+:root {
+	--pp-background: #0a0a0a;
+	--pp-surface: #171717;
+	--pp-surface-raised: #262626;
+	--pp-scrim: #000000;
+	--pp-well: #000000;
+
+	--pp-text: #fafafa;
+	--pp-text-bright: #f5f5f5;
+	--pp-text-strong: #e5e5e5;
+	--pp-text-secondary: #d4d4d4;
+	--pp-text-muted: #a3a3a3;
+	--pp-text-faint: #818181;
+
+	--pp-border: #262626;
+	--pp-border-strong: #404040;
+	--pp-border-hover: #737373;
+	--pp-chrome: #0a0a0a;
+	--pp-chrome-border: #262626;
+
+	--pp-accent-base: #7c3aed;
+	--pp-accent-foreground: #ffffff;
+
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
 }
 
-:root {
+/* The derived accent ramp.
+ *
+ * It is declared for `[data-theme]` as well as `:root` because custom
+ * properties are inherited as *computed* values. Deriving only on `:root` would
+ * resolve `var(--pp-accent-base)` once, against `<html>`, and every nested
+ * `[data-theme]` element — the settings preview tiles — would inherit that
+ * already-resolved violet no matter which base it declares. Repeating the
+ * derivation makes every element that changes the base recompute the ramp from
+ * it.
+ *
+ * This also has to sit above the theme blocks, not inside `:root`: matching
+ * `[data-theme]` and `[data-theme='monokai']` weigh the same, so source order is
+ * what lets a theme (or White's light inversion) redeclare exact stops. */
+:root,
+[data-theme] {
+	--pp-accent-100: color-mix(in oklab, var(--pp-accent-base), white 88%);
+	--pp-accent-200: color-mix(in oklab, var(--pp-accent-base), white 70%);
+	--pp-accent-300: color-mix(in oklab, var(--pp-accent-base), white 45%);
+	--pp-accent-400: color-mix(in oklab, var(--pp-accent-base), white 25%);
+	--pp-accent-500: color-mix(in oklab, var(--pp-accent-base), white 10%);
+	--pp-accent-600: var(--pp-accent-base);
+	--pp-accent-700: color-mix(in oklab, var(--pp-accent-base), black 12%);
+	--pp-accent-800: color-mix(in oklab, var(--pp-accent-base), black 25%);
+	--pp-accent-900: color-mix(in oklab, var(--pp-accent-base), black 40%);
+	--pp-accent-950: color-mix(in oklab, var(--pp-accent-base), black 65%);
+}
+
+/* ---------------------------------------------------------------------------
+   Built-in themes. Each block is the runtime source of truth for that theme's
+   tokens and must stay in sync with `src/lib/theming/presets.ts` (enforced by
+   `resolve.test.ts`). Accent stops left out of a block come from the derived
+   ramp above, computed off that theme's own `--pp-accent-base`.
+   ------------------------------------------------------------------------ */
+
+[data-theme='posterpilot'] {
+	--pp-background: #0a0a0a;
+	--pp-surface: #171717;
+	--pp-surface-raised: #262626;
+	--pp-scrim: #000000;
+	--pp-well: #000000;
+	--pp-text: #fafafa;
+	--pp-text-bright: #f5f5f5;
+	--pp-text-strong: #e5e5e5;
+	--pp-text-secondary: #d4d4d4;
+	--pp-text-muted: #a3a3a3;
+	--pp-text-faint: #818181;
+	--pp-border: #262626;
+	--pp-border-strong: #404040;
+	--pp-border-hover: #737373;
+	--pp-chrome: #0a0a0a;
+	--pp-chrome-border: #262626;
+	--pp-accent-base: #7c3aed;
+	--pp-accent-100: #ede9fe;
+	--pp-accent-200: #ddd6fe;
+	--pp-accent-300: #c4b5fd;
+	--pp-accent-400: #a78bfa;
+	--pp-accent-500: #8b5cf6;
+	--pp-accent-600: #7c3aed;
+	--pp-accent-700: #6d28d9;
+	--pp-accent-800: #5b21b6;
+	--pp-accent-900: #4c1d95;
+	--pp-accent-950: #2e1065;
+	--pp-accent-foreground: #ffffff;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
 	color-scheme: dark;
+}
+
+[data-theme='darcula'] {
+	--pp-background: #2b2b2b;
+	--pp-surface: #3c3f41;
+	--pp-surface-raised: #4c4f51;
+	--pp-scrim: #1e1e1e;
+	--pp-well: #232323;
+	--pp-text: #d3dbe3;
+	--pp-text-bright: #c6cfd8;
+	--pp-text-strong: #bcc6d0;
+	--pp-text-secondary: #b5c3d1;
+	--pp-text-muted: #bbc4cc;
+	--pp-text-faint: #a5acb3;
+	--pp-border: #4c4f51;
+	--pp-border-strong: #5e6163;
+	--pp-border-hover: #7a7e80;
+	--pp-chrome: #313335;
+	--pp-chrome-border: #4c4f51;
+	--pp-accent-base: #7a5c8d;
+	--pp-accent-foreground: #ffffff;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='monokai'] {
+	--pp-background: #272822;
+	--pp-surface: #3e3d32;
+	--pp-surface-raised: #49483e;
+	--pp-scrim: #1e1f1a;
+	--pp-well: #22231d;
+	--pp-text: #f8f8f2;
+	--pp-text-bright: #eeeedd;
+	--pp-text-strong: #e3e3d2;
+	--pp-text-secondary: #cfcfc0;
+	--pp-text-muted: #c1c1b2;
+	--pp-text-faint: #aba89d;
+	--pp-border: #49483e;
+	--pp-border-strong: #5a594b;
+	--pp-border-hover: #75715e;
+	--pp-chrome: #1f201b;
+	--pp-chrome-border: #49483e;
+	--pp-accent-base: #a6e22e;
+	--pp-accent-foreground: #272822;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='catppuccin'] {
+	--pp-background: #1e1e2e;
+	--pp-surface: #313244;
+	--pp-surface-raised: #45475a;
+	--pp-scrim: #11111b;
+	--pp-well: #181825;
+	--pp-text: #cdd6f4;
+	--pp-text-bright: #bac2de;
+	--pp-text-strong: #a6adc8;
+	--pp-text-secondary: #b3bcd8;
+	--pp-text-muted: #afb3c6;
+	--pp-text-faint: #9a9cac;
+	--pp-border: #45475a;
+	--pp-border-strong: #585b70;
+	--pp-border-hover: #7f849c;
+	--pp-chrome: #181825;
+	--pp-chrome-border: #45475a;
+	--pp-accent-base: #cba6f7;
+	--pp-accent-foreground: #1e1e2e;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='white'] {
+	--pp-background: #ffffff;
+	--pp-surface: #f5f5f5;
+	--pp-surface-raised: #e5e5e5;
+	--pp-scrim: #171717;
+	--pp-well: #e8e8e8;
+	--pp-text: #171717;
+	--pp-text-bright: #262626;
+	--pp-text-strong: #404040;
+	--pp-text-secondary: #525252;
+	--pp-text-muted: #5d5d5d;
+	--pp-text-faint: #6f6f6f;
+	--pp-border: #e5e5e5;
+	--pp-border-strong: #d4d4d4;
+	--pp-border-hover: #a3a3a3;
+	--pp-chrome: #ffffff;
+	--pp-chrome-border: #e5e5e5;
+	--pp-accent-base: #7c3aed;
+	/* Light-theme inversion: stops used as accent *text* (200/300/400) must be
+	   dark enough to read on white, and stops used as tint *fills* (900/950)
+	   become light tints. */
+	--pp-accent-200: #6d28d9;
+	--pp-accent-300: #7c3aed;
+	--pp-accent-400: #8b5cf6;
+	--pp-accent-900: #ddd6fe;
+	--pp-accent-950: #ede9fe;
+	--pp-accent-foreground: #ffffff;
+	--pp-logo-image: url('/logo-dark.png');
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: light;
+}
+
+[data-theme='overseerr'] {
+	--pp-background: #111827;
+	--pp-surface: #1f2937;
+	--pp-surface-raised: #374151;
+	--pp-scrim: #030712;
+	--pp-well: #0b1220;
+	--pp-text: #e5e7eb;
+	--pp-text-bright: #d1d5db;
+	--pp-text-strong: #c9cfd8;
+	--pp-text-secondary: #a9b1bf;
+	--pp-text-muted: #9fa6b3;
+	--pp-text-faint: #8c919c;
+	--pp-border: #374151;
+	--pp-border-strong: #4b5563;
+	--pp-border-hover: #6b7280;
+	--pp-chrome: #0c1425;
+	--pp-chrome-border: #1f2937;
+	--pp-accent-base: #4f46e5;
+	--pp-accent-foreground: #ffffff;
+	--pp-radius: 0.75rem;
+	--pp-radius-sm: 0.375rem;
+	--pp-font-sans:
+		'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+		'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+[data-theme='sonarr'] {
+	--pp-background: #222227;
+	--pp-surface: #2f2f35;
+	--pp-surface-raised: #3a3a41;
+	--pp-scrim: #161618;
+	--pp-well: #1b1b1f;
+	--pp-text: #f0f0f2;
+	--pp-text-bright: #e2e2e6;
+	--pp-text-strong: #d0d0d6;
+	--pp-text-secondary: #b0b0ba;
+	--pp-text-muted: #aeaeb5;
+	--pp-text-faint: #97979f;
+	--pp-border: #3a3a41;
+	--pp-border-strong: #4a4a52;
+	--pp-border-hover: #6a6a75;
+	--pp-chrome: #1a1a1e;
+	--pp-chrome-border: #3a3a41;
+	--pp-accent-base: #35c5f4;
+	--pp-accent-foreground: #16161c;
+	--pp-radius: 4px;
+	--pp-radius-sm: 4px;
+	--pp-font-sans:
+		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+		'Noto Color Emoji';
+
+	color-scheme: dark;
+}
+
+/* Terminal: the TUI identity — pure black, phosphor green, monospace, zero
+   radius. Surface tokens equal the background so translucency is invisible;
+   background/image/radius stay locked (see presets.ts). */
+[data-theme='terminal'] {
+	--pp-background: #000000;
+	--pp-surface: #000000;
+	--pp-surface-raised: #0d0d0d;
+	--pp-scrim: #000000;
+	--pp-well: #050505;
+	--pp-text: #33ff33;
+	--pp-text-bright: #2be32b;
+	--pp-text-strong: #24c724;
+	--pp-text-secondary: #1fae1f;
+	--pp-text-muted: #1fae1f;
+	--pp-text-faint: #178a17;
+	--pp-border: #145214;
+	--pp-border-strong: #1a6b1a;
+	--pp-border-hover: #24c724;
+	--pp-chrome: #000000;
+	--pp-chrome-border: #145214;
+	--pp-accent-base: #33ff33;
+	--pp-accent-foreground: #000000;
+	--pp-radius: 0;
+	--pp-radius-sm: 0;
+	--pp-font-sans:
+		ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+	color-scheme: dark;
+}
+
+@theme inline {
+	--color-background: var(--pp-background);
+	--color-surface: var(--pp-surface);
+	--color-surface-raised: var(--pp-surface-raised);
+	/* `scrim` dims what sits behind a dialog, so it reads as an overlay and stays
+	   dark even in a light theme. `well` is the sunken inset panel (log boxes,
+	   muted badges) and follows the theme. One token used to do both, which is
+	   how the light theme ended up painting a white backdrop over a white page. */
+	--color-scrim: var(--pp-scrim);
+	--color-well: var(--pp-well);
+
+	--color-text: var(--pp-text);
+	--color-text-bright: var(--pp-text-bright);
+	--color-text-strong: var(--pp-text-strong);
+	--color-text-secondary: var(--pp-text-secondary);
+	--color-text-muted: var(--pp-text-muted);
+	--color-text-faint: var(--pp-text-faint);
+
+	--color-border: var(--pp-border);
+	--color-border-strong: var(--pp-border-strong);
+	--color-border-hover: var(--pp-border-hover);
+
+	/* Straight pass-through: the ramp itself is derived in `:root` (see there),
+	   so there is nothing left to fall back to here. */
+	--color-accent-100: var(--pp-accent-100);
+	--color-accent-200: var(--pp-accent-200);
+	--color-accent-300: var(--pp-accent-300);
+	--color-accent-400: var(--pp-accent-400);
+	--color-accent-500: var(--pp-accent-500);
+	--color-accent-600: var(--pp-accent-600);
+	--color-accent-700: var(--pp-accent-700);
+	--color-accent-800: var(--pp-accent-800);
+	--color-accent-900: var(--pp-accent-900);
+	--color-accent-950: var(--pp-accent-950);
+	/* Text color on top of accent fills (btn-accent, MediUX badge). Themes with
+	   a light accent (Monokai, Catppuccin, Terminal) set a dark foreground. */
+	--color-accent-foreground: var(--pp-accent-foreground);
+
+	--radius-surface: var(--pp-radius);
+	--radius-control: var(--pp-radius-sm);
+
+	/* Chrome (top bar / sidebar). A first-class token every theme states, so a
+	   custom theme can reskin the chrome the way the extreme presets do. */
+	--color-chrome: var(--pp-chrome);
+	--color-chrome-border: var(--pp-chrome-border);
+
+	--font-sans: var(--pp-font-sans);
 }
 
 html,
@@ -26,9 +378,67 @@ body {
 }
 
 body {
-	background-color: #0a0a0a;
-	color: #fafafa;
+	background-color: var(--pp-background);
+	/* Custom background image layer: defaults are no-ops (image `none`, dim 0%),
+	   so only a user-set `--pp-background-image` ever paints. The dim overlay is
+	   the theme background at `--pp-background-image-dim` opacity, keeping text
+	   legible over any image. */
+	background-image:
+		linear-gradient(
+			color-mix(
+				in oklab,
+				var(--pp-background) calc(var(--pp-background-image-dim, 0) * 100%),
+				transparent
+			),
+			color-mix(
+				in oklab,
+				var(--pp-background) calc(var(--pp-background-image-dim, 0) * 100%),
+				transparent
+			)
+		),
+		var(--pp-background-image, none),
+		/* Bottom layer: a theme's own backdrop (the seerr indigo wash). Sits under
+		   the user's image so setting one still covers it. */
+		var(--pp-background-gradient, none);
+	background-size: cover;
+	background-position: center;
+	background-attachment: fixed;
+	color: var(--pp-text);
+	/* Phosphor bloom and the like. A token rather than a rule on `body`, so the
+	   settings preview tiles — which are nested `[data-theme]` elements, not the
+	   page root — pick up the same treatment from the same declaration. */
+	text-shadow: var(--pp-text-bloom, none);
 	-webkit-font-smoothing: antialiased;
+}
+
+/**
+ * A miniature of the app chrome, used by the theme picker. It carries its own
+ * `data-theme` (an attribute selector matches any element, not just `<html>`),
+ * so every token *and* every reskin rule scoped to that theme applies inside it
+ * for free — the preview is the production CSS, not a redrawing of it.
+ *
+ * What does not reach it on its own is anything scoped to `body`; those are
+ * tokens above precisely so this can consume them too.
+ */
+.theme-preview {
+	background-color: var(--pp-background);
+	background-image: var(--pp-background-gradient, none);
+	background-size: cover;
+	color: var(--pp-text);
+	text-shadow: var(--pp-text-bloom, none);
+	font-family: var(--pp-font-sans);
+}
+
+/* Themes may swap the header logo (the shipped asset is light-on-dark); the
+   White theme points `--pp-logo-image` at the dark-wordmark variant. */
+.app-logo {
+	display: inline-block;
+	height: 1.75rem;
+	aspect-ratio: 923 / 148;
+	background-image: var(--pp-logo-image, url('/logo.png'));
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
 }
 
 /* A single, consistent keyboard-focus indicator for every interactive element.
@@ -54,21 +464,23 @@ body {
 	}
 }
 
-/* Shared building blocks used across pages. */
+/* Shared building blocks used across pages. Colors come from the semantic
+   `--pp-*` tokens so every theme restyles them; semantic colors (emerald /
+   amber / red) carry meaning and stay fixed. */
 @layer components {
 	.surface {
-		@apply rounded-xl border border-neutral-800 bg-neutral-900/60;
+		@apply rounded-surface border border-border bg-surface/60;
 	}
 
 	.section-title {
-		@apply mb-3 text-sm font-semibold tracking-wide text-neutral-400 uppercase;
+		@apply mb-3 text-sm font-semibold tracking-wide text-text-muted uppercase;
 	}
 
 	.chip {
-		@apply inline-flex items-center rounded-full border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 transition-colors;
+		@apply inline-flex items-center rounded-full border border-border-strong px-2.5 py-1 text-xs text-text-secondary transition-colors;
 	}
 	.chip:hover {
-		@apply border-neutral-500;
+		@apply border-border-hover;
 	}
 	.chip-active {
 		@apply border-accent-600 bg-accent-950/60 text-accent-200;
@@ -78,7 +490,7 @@ body {
 		@apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold;
 	}
 	.badge-mediux {
-		@apply bg-accent-600/90 text-white;
+		@apply bg-accent-600/90 text-accent-foreground;
 	}
 	.badge-changed {
 		@apply bg-emerald-600/90 text-white;
@@ -87,10 +499,10 @@ body {
 		@apply bg-emerald-600/90 text-white;
 	}
 	.badge-muted {
-		@apply border border-neutral-700 bg-black/50 text-neutral-300;
+		@apply border border-border-strong bg-well/60 text-text-secondary;
 	}
 	.badge-info {
-		@apply bg-neutral-800 text-neutral-300;
+		@apply bg-surface-raised text-text-secondary;
 	}
 	.badge-warn {
 		@apply bg-amber-900/50 text-amber-300;
@@ -100,45 +512,225 @@ body {
 	}
 
 	.btn {
-		@apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
+		@apply inline-flex items-center justify-center rounded-control px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50;
 	}
 	.btn-accent {
-		@apply bg-accent-600 text-white hover:bg-accent-500;
+		@apply bg-accent-600 text-accent-foreground hover:bg-accent-500;
 	}
 	.btn-ghost {
-		@apply border border-neutral-700 text-neutral-200 hover:bg-neutral-800;
+		@apply border border-border-strong text-text-strong hover:bg-surface-raised;
 	}
 	.btn-subtle {
-		@apply bg-neutral-800 text-neutral-100 hover:bg-neutral-700;
+		@apply bg-surface-raised text-text hover:bg-border-strong;
 	}
 
 	.input {
-		@apply rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm transition-colors focus:border-accent-500;
+		@apply rounded-control border border-border-strong bg-surface px-3 py-1.5 text-sm transition-colors focus:border-accent-500;
 	}
 
 	/* Rendered GitHub release notes in the What's New modal. */
 	.release-notes :where(h2) {
-		@apply mt-5 mb-2 text-base font-semibold text-neutral-100 first:mt-0;
+		@apply mt-5 mb-2 text-base font-semibold text-text-bright first:mt-0;
 	}
 	.release-notes :where(h3, h4) {
-		@apply mt-4 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase first:mt-0;
+		@apply mt-4 mb-2 text-xs font-semibold tracking-wide text-text-muted uppercase first:mt-0;
 	}
 	.release-notes :where(p) {
-		@apply my-2 text-neutral-300;
+		@apply my-2 text-text-secondary;
 	}
 	.release-notes :where(ul) {
 		@apply my-2 list-disc space-y-1 pl-5;
 	}
 	.release-notes :where(li) {
-		@apply text-neutral-300 marker:text-neutral-500;
+		@apply text-text-secondary marker:text-text-faint;
 	}
 	.release-notes :where(a) {
 		@apply text-accent-300 underline underline-offset-2 hover:text-accent-200;
 	}
 	.release-notes :where(strong) {
-		@apply font-semibold text-neutral-100;
+		@apply font-semibold text-text-bright;
 	}
 	.release-notes :where(code) {
-		@apply rounded bg-neutral-800 px-1 py-0.5 text-[0.85em] text-neutral-200;
+		@apply rounded-control bg-surface-raised px-1 py-0.5 text-[0.85em] text-text-strong;
 	}
+}
+
+/* Light-theme corrections for the semantic badges.
+
+   The hue carries the meaning and does not move — amber is still warn, red is
+   still error. What moves is the tint and the text stop, because a fill tuned
+   for a near-black page inverts badly on white: amber-300 on amber-900/50 lands
+   at 1.80:1 and red at 1.48:1 there. Custom themes built on White inherit this,
+   since they resolve to `data-theme="white"`. */
+[data-theme='white'] .badge-warn {
+	@apply bg-amber-100 text-amber-900;
+}
+[data-theme='white'] .badge-error {
+	@apply bg-red-100 text-red-900;
+}
+[data-theme='white'] .badge-changed,
+[data-theme='white'] .badge-success {
+	@apply bg-emerald-700;
+}
+/* Translucent fills lighten against a white page; keep these two solid. */
+[data-theme='white'] .badge-mediux {
+	@apply bg-accent-600;
+}
+
+/* ---------------------------------------------------------------------------
+   Extreme theme reskins.
+
+   Tokens alone can only repaint. These three themes reskin: they change the
+   *shapes and affordances* of the chrome to match the app they impersonate, and
+   they are the reference for how far a theme may go. Built-ins do it here in
+   `app.css`; a user-authored theme does the same through the `css` field of its
+   theme file, which lands in the same place in the cascade.
+
+   Rules are unlayered on purpose — unlayered declarations outrank both
+   `@layer components` and Tailwind's utilities, so a theme can override a
+   `bg-surface/60` written straight into the markup. Keep the selectors narrow:
+   shared component classes and chrome only, never bare elements.
+   ------------------------------------------------------------------------ */
+
+/* Overseerr — soft, glassy, elevated. An indigo wash behind the page, cards
+   that float on real shadows with a lit top edge, and a gradient primary
+   button. Its accent stops derive from `--pp-accent-base`, so the gradients
+   follow a user's accent override instead of stranding on indigo. */
+[data-theme='overseerr'] {
+	--pp-background-gradient: linear-gradient(180deg, #1e2547 0%, #131b2e 42%, #111827 100%);
+}
+[data-theme='overseerr'] .surface {
+	background-color: var(--pp-surface);
+	border-color: rgb(255 255 255 / 0.08);
+	box-shadow:
+		0 10px 15px -3px rgb(0 0 0 / 0.45),
+		0 4px 6px -4px rgb(0 0 0 / 0.45),
+		inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+[data-theme='overseerr'] .btn-accent {
+	background-image: linear-gradient(
+		180deg,
+		color-mix(in oklab, var(--pp-accent-base), white 10%),
+		color-mix(in oklab, var(--pp-accent-base), black 14%)
+	);
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+}
+[data-theme='overseerr'] .btn-accent:hover {
+	background-image: linear-gradient(
+		180deg,
+		color-mix(in oklab, var(--pp-accent-base), white 24%),
+		var(--pp-accent-base)
+	);
+}
+[data-theme='overseerr'] .section-title {
+	letter-spacing: 0.08em;
+}
+
+/* Sonarr/Radarr — flat and dense. No shadows, no translucency, near-square
+   corners (4px, set as the theme's radius token), buttons that read as outlined
+   rectangles, and the sidebar's active row marked by a left accent bar rather
+   than a filled pill. */
+[data-theme='sonarr'] .surface {
+	background-color: var(--pp-surface);
+	box-shadow: none;
+}
+[data-theme='sonarr'] header {
+	background-color: var(--pp-chrome);
+	backdrop-filter: none;
+}
+[data-theme='sonarr'] .btn {
+	border: 1px solid var(--pp-border-strong);
+}
+[data-theme='sonarr'] .btn-accent {
+	border-color: color-mix(in oklab, var(--pp-accent-base), black 25%);
+}
+/* Sonarr labels are rectangles, not pills. */
+[data-theme='sonarr'] .badge,
+[data-theme='sonarr'] .chip {
+	border-radius: var(--pp-radius-sm);
+}
+[data-theme='sonarr'] nav a[aria-current='page'] {
+	border-radius: 0;
+	border-left: 3px solid var(--pp-accent-base);
+	background-color: color-mix(in oklab, var(--pp-accent-base), transparent 86%);
+	color: var(--pp-text);
+}
+
+/* Terminal — a TUI that happens to run in a browser. Every rule here removes a
+   web affordance the reference does not have (rounded pills, blur, soft focus
+   rings) or adds one it does (scanlines, phosphor bloom, a block cursor on the
+   active row, bracketed panel headers). The scanline and bloom are static, so
+   there is nothing for `prefers-reduced-motion` to turn off. */
+[data-theme='terminal'] {
+	/* CRT scanlines and phosphor bloom, declared as tokens so the page and the
+	   settings preview tiles read them from one place. The bloom stays faint
+	   enough to leave small text legible. */
+	--pp-background-gradient: repeating-linear-gradient(
+		to bottom,
+		rgb(0 0 0 / 0) 0 2px,
+		rgb(0 0 0 / 0.32) 2px 4px
+	);
+	--pp-text-bloom: 0 0 6px color-mix(in oklab, currentColor, transparent 55%);
+}
+[data-theme='terminal'] .surface {
+	background-color: var(--pp-surface);
+}
+[data-theme='terminal'] header {
+	background-color: var(--pp-chrome);
+	backdrop-filter: none;
+}
+/* Nothing is a pill in a terminal. */
+[data-theme='terminal'] .badge,
+[data-theme='terminal'] .chip,
+[data-theme='terminal'] .rounded-full {
+	border-radius: 0;
+}
+[data-theme='terminal'] .btn {
+	border: 1px solid currentColor;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+[data-theme='terminal'] .input {
+	caret-color: var(--pp-accent-base);
+}
+/* Panel headers as box-drawing rules, and the active row as a block cursor. */
+[data-theme='terminal'] .section-title::before {
+	content: '── ';
+}
+[data-theme='terminal'] nav a[aria-current='page']::before {
+	content: '▌';
+	margin-right: 0.25ch;
+}
+/* The shipped wordmark is a raster logo; a TUI writes its name. */
+[data-theme='terminal'] .app-logo {
+	width: auto;
+	height: auto;
+	aspect-ratio: auto;
+	background-image: none;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	color: var(--pp-accent-base);
+}
+[data-theme='terminal'] .app-logo::before {
+	content: 'POSTERPILOT';
+}
+/* The caret a terminal always leaves blinking after the prompt. The global
+   reduced-motion block already collapses this animation, and because the
+   keyframe only dips opacity mid-cycle it settles solid rather than invisible. */
+[data-theme='terminal'] .app-logo::after {
+	content: '▌';
+	animation: pp-caret-blink 1.06s steps(1, end) infinite;
+}
+@keyframes pp-caret-blink {
+	50% {
+		opacity: 0;
+	}
+}
+[data-theme='terminal'] :focus-visible {
+	outline-offset: 0;
+	border-radius: 0;
+}
+[data-theme='terminal'] ::selection {
+	background-color: var(--pp-accent-base);
+	color: var(--pp-accent-foreground);
 }

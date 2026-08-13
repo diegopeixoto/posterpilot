@@ -17,14 +17,14 @@
 {#if spotlight?.backdropUrl}
 	<a
 		href={`/item/${spotlight.id}`}
-		class="relative mt-4 block h-40 overflow-hidden rounded-xl border border-neutral-800"
+		class="relative mt-4 block h-40 overflow-hidden rounded-surface border border-border"
 	>
 		<img src={spotlight.backdropUrl} alt="" class="absolute inset-0 h-full w-full object-cover" />
-		<div class="absolute inset-0 bg-gradient-to-r from-neutral-950/90 to-transparent"></div>
+		<div class="absolute inset-0 bg-gradient-to-r from-background/90 to-transparent"></div>
 		<div class="absolute bottom-4 left-5">
 			<p class="text-xs tracking-wide text-accent-300 uppercase">{m.library_recently_updated()}</p>
 			<p class="text-lg font-semibold text-white">{spotlight.title}</p>
-			<p class="text-xs text-neutral-300">{spotlight.year ?? ''}</p>
+			<p class="text-xs text-text-secondary">{spotlight.year ?? ''}</p>
 		</div>
 	</a>
 {/if}

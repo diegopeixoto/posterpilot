@@ -22,6 +22,7 @@ import { pruneOperationPlans } from '$lib/server/plans/operation-plan-store';
 import { maintenanceMode } from '$lib/server/maintenance';
 import { maintenanceBlocksRequest } from '$lib/server/maintenance-http';
 import { reconcileThumbCacheDisk } from '$lib/server/posters/thumb-cache';
+import { getAppearanceState } from '$lib/server/appearance';
 import { formatRequestError } from '$lib/server/db/error-detail';
 
 // Run database migrations once at server startup, before any request is handled.
@@ -220,9 +221,42 @@ export const handleError: HandleServerError = ({ error, event, status }) => {
 	return { message: 'Internal Error' };
 };
 
+/**
+ * Inject the resolved appearance into the `<html>` tag during SSR (data-theme +
+ * inline `--pp-*` overrides via the `%themeattrs%` placeholder in app.html), so
+ * the first paint already matches the saved theme — no flash of the default.
+ */
+const handleTheme: Handle = async ({ event, resolve }) => {
+	// Only page responses carry the `%themeattrs%` placeholder; skip API calls.
+	if (event.url.pathname.startsWith('/api/')) return resolve(event);
+	// One settings read per page request: stashed on locals so the root layout
+	// load reuses it instead of querying again.
+	const state = await getAppearanceState();
+	event.locals.appearance = state;
+	const { settings: appearance, resolved } = state;
+	const escapeAttr = (value: string) =>
+		value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+	const style = Object.entries(resolved.vars)
+		.map(([key, value]) => `${key}:${escapeAttr(value)}`)
+		.join(';');
+	const attrs = ` data-theme="${resolved.dataTheme}"${style ? ` style="${style}"` : ''}`;
+	// Theme CSS (from a custom theme) then the user's own customCss escape hatch:
+	// both validated on write (size-capped, no `</style>`), injected verbatim in
+	// that order so the user's CSS wins the cascade.
+	const themeCss = resolved.css ? `<style id="pp-theme-css">${resolved.css}</style>` : '';
+	const customCss = appearance.customCss
+		? `<style id="pp-custom-css">${appearance.customCss}</style>`
+		: '';
+	return resolve(event, {
+		transformPageChunk: ({ html }) =>
+			html.replace('%themeattrs%', attrs).replace('</head>', `${themeCss}${customCss}</head>`)
+	});
+};
+
 export const handle: Handle = sequence(
 	handleSecurityHeaders,
 	handleAuth,
 	handleMaintenance,
-	handleParaglide
+	handleParaglide,
+	handleTheme
 );

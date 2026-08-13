@@ -354,7 +354,7 @@
 	<div class="flex flex-wrap items-start justify-between gap-3">
 		<div>
 			<h2 class="text-base font-semibold">{m.diagnostics_title()}</h2>
-			<p class="mt-1 max-w-2xl text-sm text-neutral-400">{m.diagnostics_intro()}</p>
+			<p class="mt-1 max-w-2xl text-sm text-text-muted">{m.diagnostics_intro()}</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
 			<button
@@ -386,8 +386,8 @@
 			<h3 id="support-bundle-title" class="text-sm font-semibold">
 				{m.diagnostics_support_title()}
 			</h3>
-			<p class="mt-1 text-xs text-neutral-400">{m.diagnostics_support_intro()}</p>
-			<label class="mt-3 flex items-start gap-2 text-sm text-neutral-300">
+			<p class="mt-1 text-xs text-text-muted">{m.diagnostics_support_intro()}</p>
+			<label class="mt-3 flex items-start gap-2 text-sm text-text-secondary">
 				<input type="checkbox" class="mt-0.5" bind:checked={includeTitles} />
 				<span>
 					<span class="block">{m.diagnostics_support_include_titles()}</span>
@@ -434,8 +434,8 @@
 			<article class="surface p-4" aria-busy={pending}>
 				<div class="flex items-start justify-between gap-3">
 					<div>
-						<h3 class="font-medium text-neutral-100">{componentLabel(component)}</h3>
-						<p class="mt-0.5 text-xs text-neutral-500">
+						<h3 class="font-medium text-text-bright">{componentLabel(component)}</h3>
+						<p class="mt-0.5 text-xs text-text-faint">
 							{componentTypeLabel(component.componentType)}
 						</p>
 					</div>
@@ -451,62 +451,63 @@
 
 				<dl class="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
 					<div>
-						<dt class="text-neutral-500">{m.diagnostics_credential_label()}</dt>
-						<dd class="mt-0.5 text-neutral-300">
+						<dt class="text-text-faint">{m.diagnostics_credential_label()}</dt>
+						<dd class="mt-0.5 text-text-secondary">
 							{credentialLabel(status?.credentialStatus ?? 'unknown')}
 						</dd>
 					</div>
 					<div>
-						<dt class="text-neutral-500">{m.diagnostics_latency()}</dt>
-						<dd class="mt-0.5 text-neutral-300">
+						<dt class="text-text-faint">{m.diagnostics_latency()}</dt>
+						<dd class="mt-0.5 text-text-secondary">
 							{status?.latencyMs == null
 								? '—'
 								: m.diagnostics_latency_value({ value: status.latencyMs })}
 						</dd>
 					</div>
 					<div>
-						<dt class="text-neutral-500">{m.diagnostics_last_check()}</dt>
-						<dd class="mt-0.5 text-neutral-300">{dateTime(status?.lastAttemptAt ?? null)}</dd>
+						<dt class="text-text-faint">{m.diagnostics_last_check()}</dt>
+						<dd class="mt-0.5 text-text-secondary">{dateTime(status?.lastAttemptAt ?? null)}</dd>
 					</div>
 					<div>
-						<dt class="text-neutral-500">{m.diagnostics_last_success()}</dt>
-						<dd class="mt-0.5 text-neutral-300">{dateTime(status?.lastSuccessAt ?? null)}</dd>
+						<dt class="text-text-faint">{m.diagnostics_last_success()}</dt>
+						<dd class="mt-0.5 text-text-secondary">{dateTime(status?.lastSuccessAt ?? null)}</dd>
 					</div>
 				</dl>
 
 				{#if correctiveHint(status?.errorCode ?? null)}
-					<p class="mt-3 rounded-md bg-neutral-950/70 px-3 py-2 text-xs text-neutral-300">
+					<p class="mt-3 rounded-control bg-background/70 px-3 py-2 text-xs text-text-secondary">
 						{correctiveHint(status?.errorCode ?? null)}
 					</p>
 				{/if}
 
 				{#if path}
-					<dl class="mt-3 space-y-1 border-t border-neutral-800 pt-3 text-xs">
+					<dl class="mt-3 space-y-1 border-t border-border pt-3 text-xs">
 						<div class="flex justify-between gap-3">
-							<dt class="text-neutral-500">{m.diagnostics_path()}</dt>
-							<dd class="truncate font-mono text-neutral-300" title={String(path.path ?? '')}>
+							<dt class="text-text-faint">{m.diagnostics_path()}</dt>
+							<dd class="truncate font-mono text-text-secondary" title={String(path.path ?? '')}>
 								{String(path.path ?? '—')}
 							</dd>
 						</div>
 						<div class="flex justify-between gap-3">
-							<dt class="text-neutral-500">{m.diagnostics_readable()}</dt>
+							<dt class="text-text-faint">{m.diagnostics_readable()}</dt>
 							<dd>{path.readable ? m.diagnostics_yes() : m.diagnostics_no()}</dd>
 						</div>
 						<div class="flex justify-between gap-3">
-							<dt class="text-neutral-500">{m.diagnostics_writable()}</dt>
+							<dt class="text-text-faint">{m.diagnostics_writable()}</dt>
 							<dd>{path.writable ? m.diagnostics_yes() : m.diagnostics_no()}</dd>
 						</div>
 					</dl>
 				{/if}
 
 				{#if status?.capabilities && component.componentType === 'server'}
-					<details class="mt-3 border-t border-neutral-800 pt-3 text-xs">
-						<summary class="cursor-pointer text-neutral-300">{m.diagnostics_capabilities()}</summary
+					<details class="mt-3 border-t border-border pt-3 text-xs">
+						<summary class="cursor-pointer text-text-secondary"
+							>{m.diagnostics_capabilities()}</summary
 						>
 						<dl class="mt-2 space-y-1">
 							{#each Object.entries(capabilityLabels) as [key, label] (key)}
 								<div class="flex justify-between gap-3">
-									<dt class="text-neutral-500">{label()}</dt>
+									<dt class="text-text-faint">{label()}</dt>
 									<dd>{capabilityValue(status.capabilities[key])}</dd>
 								</div>
 							{/each}
@@ -520,13 +521,13 @@
 	<div>
 		<h3 class="section-title">{m.diagnostics_history()}</h3>
 		{#if history.length === 0}
-			<p class="text-sm text-neutral-400">{m.diagnostics_no_history()}</p>
+			<p class="text-sm text-text-muted">{m.diagnostics_no_history()}</p>
 		{:else}
-			<ul class="surface divide-y divide-neutral-800 text-sm">
+			<ul class="surface divide-y divide-border text-sm">
 				{#each history as entry (entry.run.id)}
 					<li class="flex items-center justify-between gap-3 px-4 py-3">
-						<span class="text-neutral-300">{dateTime(entry.run.startedAt)}</span>
-						<span class="text-xs text-neutral-400">{runStatusLabel(entry.run.status)}</span>
+						<span class="text-text-secondary">{dateTime(entry.run.startedAt)}</span>
+						<span class="text-xs text-text-muted">{runStatusLabel(entry.run.status)}</span>
 					</li>
 				{/each}
 			</ul>

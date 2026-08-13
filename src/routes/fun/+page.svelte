@@ -59,7 +59,7 @@
 <section class="space-y-6">
 	<header>
 		<h2 class="text-xl font-semibold tracking-tight text-white">{m.fun_picker_title()}</h2>
-		<p class="mt-1 text-sm text-neutral-400">{m.fun_picker_subtitle()}</p>
+		<p class="mt-1 text-sm text-text-muted">{m.fun_picker_subtitle()}</p>
 	</header>
 
 	<form method="GET" action="/fun" onsubmit={stampNonce} class="surface space-y-5 p-5">
@@ -68,7 +68,7 @@
 
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_preset_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_preset_label()}</span>
 				<select
 					name="preset"
 					value={data.filter.preset ?? ''}
@@ -84,7 +84,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_library_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_library_label()}</span>
 				<select
 					name="library"
 					value={data.filter.librarySectionKey ?? ''}
@@ -102,7 +102,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_type_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_type_label()}</span>
 				<select
 					name="type"
 					value={data.filter.type ?? ''}
@@ -119,7 +119,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_genre_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_genre_label()}</span>
 				<select
 					name="genre"
 					value={data.filter.genre ?? ''}
@@ -132,7 +132,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_year_min()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_year_min()}</span>
 				<input
 					type="number"
 					name="yearMin"
@@ -149,7 +149,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_year_max()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_year_max()}</span>
 				<input
 					type="number"
 					name="yearMax"
@@ -166,7 +166,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_runtime_max()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_runtime_max()}</span>
 				<input
 					type="number"
 					name="runtimeMax"
@@ -182,7 +182,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_rating_min()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_rating_min()}</span>
 				<input
 					type="number"
 					name="ratingMin"
@@ -199,7 +199,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_recency_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_recency_label()}</span>
 				<select
 					name="addedWithinDays"
 					value={data.filter.addedWithinDays ?? ''}
@@ -214,7 +214,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_choice_count()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_choice_count()}</span>
 				<select
 					name="count"
 					value={data.filter.count}
@@ -228,7 +228,7 @@
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-xs text-neutral-400">{m.fun_mode_label()}</span>
+				<span class="mb-1 block text-xs text-text-muted">{m.fun_mode_label()}</span>
 				<select
 					name="mode"
 					value={data.filter.mode}
@@ -242,9 +242,9 @@
 			</label>
 		</div>
 
-		<div class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 pt-4">
+		<div class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
 			<div class="space-y-1">
-				<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<label class="flex items-center gap-2 text-sm text-text-secondary">
 					<input
 						type="checkbox"
 						name="excludeWatched"
@@ -253,7 +253,7 @@
 					/>
 					{m.fun_exclude_watched()}
 				</label>
-				<p class="text-xs text-neutral-500">
+				<p class="text-xs text-text-faint">
 					{m.fun_eligible_count({ count: data.eligibleCount })}
 				</p>
 			</div>
@@ -266,7 +266,7 @@
 
 	{#if data.choices.length || data.unavailableChoiceIds.length}
 		<div class="flex items-center justify-between gap-3">
-			<p class="text-sm text-neutral-400">
+			<p class="text-sm text-text-muted">
 				{m.fun_result_count({ count: data.choices.length + data.unavailableChoiceIds.length })}
 			</p>
 			<button type="button" onclick={copyShareLink} class="btn btn-ghost px-3 py-1.5 text-xs">
@@ -282,7 +282,7 @@
 			{#each data.choices as item (item.id)}
 				{@const open = isRevealed(item.id)}
 				<article class="surface group relative overflow-hidden">
-					<div class="relative aspect-[2/3] overflow-hidden bg-neutral-950">
+					<div class="relative aspect-[2/3] overflow-hidden bg-background">
 						{#if item.hasPoster}
 							<img
 								src={`/api/poster-thumb/${item.id}?v=${encodeURIComponent(item.posterVersion)}`}
@@ -294,13 +294,13 @@
 									: 'scale-105 blur-xl brightness-50'}"
 							/>
 						{:else}
-							<div class="flex h-full items-center justify-center text-sm text-neutral-500">
+							<div class="flex h-full items-center justify-center text-sm text-text-faint">
 								{m.poster_no_poster()}
 							</div>
 						{/if}
 						{#if !open}
 							<div
-								class="absolute inset-0 flex items-center justify-center bg-black/20 p-6 text-center"
+								class="absolute inset-0 flex items-center justify-center bg-scrim/20 p-6 text-center"
 							>
 								<button
 									type="button"
@@ -321,7 +321,7 @@
 							>
 								{open ? item.title : m.fun_hidden_title()}
 							</h3>
-							<p class="mt-0.5 text-sm text-neutral-400">
+							<p class="mt-0.5 text-sm text-text-muted">
 								{item.type === 'movie' ? m.library_type_movies() : m.library_type_shows()}
 								· {item.year ?? '—'} · {item.runtime
 									? m.fun_runtime_value({ minutes: item.runtime })
@@ -331,10 +331,10 @@
 							</p>
 						</div>
 						{#if item.genres?.length}
-							<p class="text-xs text-neutral-400">{item.genres.join(' · ')}</p>
+							<p class="text-xs text-text-muted">{item.genres.join(' · ')}</p>
 						{/if}
 						{#if open}
-							{#if item.overview}<p class="line-clamp-3 text-sm text-neutral-300">
+							{#if item.overview}<p class="line-clamp-3 text-sm text-text-secondary">
 									{item.overview}
 								</p>{/if}
 							<a
@@ -344,19 +344,19 @@
 								{m.fun_view_item()}
 							</a>
 						{:else if item.tagline}
-							<p class="line-clamp-2 text-sm italic text-neutral-300">“{item.tagline}”</p>
+							<p class="line-clamp-2 text-sm italic text-text-secondary">“{item.tagline}”</p>
 						{/if}
 					</div>
 				</article>
 			{/each}
 			{#each data.unavailableChoiceIds as id (id)}
 				<article class="surface flex min-h-72 items-center justify-center p-8 text-center">
-					<p class="text-sm text-neutral-400">{m.fun_shared_choice_unavailable()}</p>
+					<p class="text-sm text-text-muted">{m.fun_shared_choice_unavailable()}</p>
 				</article>
 			{/each}
 		</div>
 	{:else if data.picking && Object.keys(data.errors).length === 0}
-		<div class="surface p-10 text-center text-sm text-neutral-400">{m.fun_empty()}</div>
+		<div class="surface p-10 text-center text-sm text-text-muted">{m.fun_empty()}</div>
 	{:else if Object.keys(data.errors).length > 0}
 		<div role="alert" class="surface border-red-900/60 p-4 text-sm text-red-300">
 			{m.fun_fix_filters()}

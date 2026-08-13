@@ -335,7 +335,7 @@
 		<button
 			type="button"
 			onclick={() => dismissSetup()}
-			class="text-sm text-neutral-400 underline hover:text-neutral-200"
+			class="text-sm text-text-muted underline hover:text-text-strong"
 		>
 			{m.setup_skip()}
 		</button>
@@ -353,11 +353,11 @@
 		{#each { length: total } as _, i (i)}
 			<div
 				aria-hidden="true"
-				class="h-1.5 flex-1 rounded-full {i <= step ? 'bg-accent-500' : 'bg-neutral-800'}"
+				class="h-1.5 flex-1 rounded-full {i <= step ? 'bg-accent-500' : 'bg-surface-raised'}"
 			></div>
 		{/each}
 	</div>
-	<p class="mt-2 text-xs text-neutral-400">{m.setup_step({ current: step + 1, total })}</p>
+	<p class="mt-2 text-xs text-text-muted">{m.setup_step({ current: step + 1, total })}</p>
 
 	<div class="surface mt-4 space-y-4 p-5">
 		<div>
@@ -368,7 +368,7 @@
 			>
 				{steps[step].title()}
 			</h2>
-			<p class="mt-0.5 text-sm text-neutral-400">{steps[step].desc()}</p>
+			<p class="mt-0.5 text-sm text-text-muted">{steps[step].desc()}</p>
 		</div>
 
 		{#if step === 0}
@@ -403,8 +403,8 @@
 					bind:apiKeySet={jellyfinApiKeySet}
 					onLogin={() => invalidateAll()}
 				/>
-				<details class="border-t border-neutral-800 pt-3">
-					<summary class="cursor-pointer text-sm text-neutral-400"
+				<details class="border-t border-border pt-3">
+					<summary class="cursor-pointer text-sm text-text-muted"
 						>{m.setup_api_key_fallback()}</summary
 					>
 					<div class="mt-3 space-y-3">
@@ -435,8 +435,8 @@
 					bind:apiKeySet={embyApiKeySet}
 					onLogin={() => invalidateAll()}
 				/>
-				<details class="border-t border-neutral-800 pt-3">
-					<summary class="cursor-pointer text-sm text-neutral-400"
+				<details class="border-t border-border pt-3">
+					<summary class="cursor-pointer text-sm text-text-muted"
 						>{m.setup_api_key_fallback()}</summary
 					>
 					<div class="mt-3 space-y-3">
@@ -484,7 +484,7 @@
 						: m.settings_tmdb_key_placeholder_unset()}
 					class="input w-full"
 				/>
-				<p class="mt-1 text-xs text-neutral-400">
+				<p class="mt-1 text-xs text-text-muted">
 					{m.setup_tmdb_get_key_pre()}
 					<a
 						href="https://www.themoviedb.org/settings/api"
@@ -496,22 +496,22 @@
 			</div>
 		{:else if step === 3}
 			<div class="space-y-1">
-				<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<label class="flex items-center gap-2 text-sm text-text-secondary">
 					<input type="checkbox" bind:checked={providerMediux} />
 					{m.settings_provider_mediux()}
 				</label>
-				<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<label class="flex items-center gap-2 text-sm text-text-secondary">
 					<input type="checkbox" bind:checked={providerTmdb} />
 					{m.settings_provider_tmdb()}
 				</label>
-				<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<label class="flex items-center gap-2 text-sm text-text-secondary">
 					<input type="checkbox" bind:checked={providerFanart} />
 					{m.settings_provider_fanart()}
 				</label>
-				<label class="flex items-center gap-2 text-sm text-neutral-300">
+				<label class="flex items-center gap-2 text-sm text-text-secondary">
 					<input type="checkbox" bind:checked={providerThePosterDb} />
 					{m.settings_provider_theposterdb()}
-					<span class="text-xs text-neutral-400">{m.settings_experimental()}</span>
+					<span class="text-xs text-text-muted">{m.settings_experimental()}</span>
 				</label>
 			</div>
 			<div>
@@ -532,13 +532,13 @@
 			<!-- Connection state -->
 			<div class="surface flex items-center gap-2 p-3 text-sm">
 				{#if refreshingLibs && connectionOk === null}
-					<span role="status" class="text-neutral-400">{m.setup_libraries_checking()}</span>
+					<span role="status" class="text-text-muted">{m.setup_libraries_checking()}</span>
 				{:else if connectionOk === true}
 					<span class="text-emerald-400">{m.setup_libraries_connected()}</span>
 				{:else if connectionOk === false}
 					<span class="text-red-400">{m.setup_libraries_not_connected()}</span>
 				{:else}
-					<span class="text-neutral-400">{m.setup_libraries_check_hint()}</span>
+					<span class="text-text-muted">{m.setup_libraries_check_hint()}</span>
 				{/if}
 			</div>
 
@@ -561,19 +561,19 @@
 					</p>
 				{/if}
 				{#if sections.length === 0}
-					<p class="text-xs text-neutral-400">{m.settings_libraries_connect_first()}</p>
+					<p class="text-xs text-text-muted">{m.settings_libraries_connect_first()}</p>
 				{:else}
-					<p class="mb-2 text-xs text-neutral-400">{m.settings_libraries_hint()}</p>
+					<p class="mb-2 text-xs text-text-muted">{m.settings_libraries_hint()}</p>
 					<div class="space-y-1">
 						{#each sections as section (section.key)}
-							<label class="flex items-center gap-2 text-sm text-neutral-300">
+							<label class="flex items-center gap-2 text-sm text-text-secondary">
 								<input
 									type="checkbox"
 									checked={selectedSections.has(section.key)}
 									onchange={() => toggleSection(section.key)}
 								/>
 								{section.title}
-								<span class="text-xs text-neutral-400">
+								<span class="text-xs text-text-muted">
 									({section.type === 'movie'
 										? m.manual_match_type_movie()
 										: m.manual_match_type_show()})
@@ -616,7 +616,7 @@
 		{/if}
 
 		{#if step < total - 1}
-			<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
+			<div class="flex items-center gap-3 border-t border-border pt-4">
 				{#if step > 0}
 					<button onclick={back} class="btn btn-ghost px-4 py-2">{m.setup_back()}</button>
 				{/if}
@@ -629,7 +629,7 @@
 				</button>
 			</div>
 		{:else}
-			<div class="flex items-center gap-3 border-t border-neutral-800 pt-4">
+			<div class="flex items-center gap-3 border-t border-border pt-4">
 				<button onclick={back} class="btn btn-ghost px-4 py-2">{m.setup_back()}</button>
 			</div>
 		{/if}

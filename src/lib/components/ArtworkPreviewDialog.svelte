@@ -241,7 +241,7 @@
 			tabindex="-1"
 			aria-label={m.item_preview_close()}
 			onclick={close}
-			class="absolute inset-0 cursor-default bg-black/85"
+			class="absolute inset-0 cursor-default bg-scrim/85"
 		></button>
 
 		<div
@@ -252,16 +252,16 @@
 			aria-labelledby="artwork-preview-title"
 			aria-describedby="artwork-preview-details"
 			tabindex="-1"
-			class="surface relative flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden border-neutral-700 bg-neutral-950/95 shadow-2xl"
+			class="surface relative flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden border-border-strong bg-background/95 shadow-2xl"
 		>
-			<header class="flex items-start justify-between gap-3 border-b border-neutral-800 px-4 py-3">
+			<header class="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
 				<div class="min-w-0">
 					<h2 id="artwork-preview-title" class="text-sm font-semibold tracking-tight">
 						{m.item_preview_title()}
 					</h2>
 					<!-- Provenance is what makes an enlarged image judgeable, so it wraps
 					     rather than truncating and describes the dialog itself. -->
-					<p id="artwork-preview-details" class="mt-0.5 text-xs text-neutral-400">{details}</p>
+					<p id="artwork-preview-details" class="mt-0.5 text-xs text-text-muted">{details}</p>
 				</div>
 				<button
 					bind:this={closeButton}
@@ -286,12 +286,12 @@
 			     percentage height on the image resolves against `auto` otherwise — it
 			     silently falls back to the asset's natural size, which overflowed the
 			     dialog and cropped exactly what this view exists to show in full. -->
-			<div class="relative min-h-0 flex-1 overflow-hidden bg-black">
+			<div class="relative min-h-0 flex-1 overflow-hidden bg-scrim">
 				<div class="absolute inset-0 flex items-center justify-center">
 					{#if failed}
 						<p
 							role="alert"
-							class="flex max-w-sm items-start gap-2 rounded-lg border border-red-800/70 bg-red-950/40 p-3 text-sm text-red-100"
+							class="flex max-w-sm items-start gap-2 rounded-surface border border-red-800/70 bg-red-950/40 p-3 text-sm text-red-100"
 						>
 							<span aria-hidden="true">⚠</span>
 							{m.item_preview_failed()}
@@ -315,7 +315,7 @@
 			</div>
 
 			<footer
-				class="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-800 px-4 py-3"
+				class="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3"
 			>
 				<button
 					bind:this={previousButton}
@@ -332,7 +332,11 @@
 
 				<!-- Position is announced politely rather than only drawn: navigating with
 				     the keyboard moves nothing else that assistive tech would report. -->
-				<p aria-live="polite" class="text-xs tabular-nums text-neutral-300" data-preview-position>
+				<p
+					aria-live="polite"
+					class="text-xs tabular-nums text-text-secondary"
+					data-preview-position
+				>
 					{position}
 				</p>
 

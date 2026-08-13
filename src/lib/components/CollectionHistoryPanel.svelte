@@ -168,7 +168,7 @@
 	<h2 id="collection-history-title" class="text-lg font-semibold">
 		{m.collection_history_title()}
 	</h2>
-	<p class="mt-1 text-sm text-neutral-400">{m.collection_history_hint()}</p>
+	<p class="mt-1 text-sm text-text-muted">{m.collection_history_hint()}</p>
 	{#if error}<p class="mt-3 text-sm text-red-300" role="alert">{error}</p>{/if}
 	{#if undoJobId}
 		<div class="mt-3"><JobProgress jobId={undoJobId} onDone={onUndoDone} /></div>
@@ -185,15 +185,15 @@
 	{/if}
 
 	{#if groups.length === 0}
-		<p class="mt-4 text-sm text-neutral-400">{m.collection_history_empty()}</p>
+		<p class="mt-4 text-sm text-text-muted">{m.collection_history_empty()}</p>
 	{:else}
 		<ul class="mt-4 space-y-2">
 			{#each groups as group (group.id)}
-				<li class="rounded-lg border border-neutral-800 bg-neutral-950/40 p-3">
+				<li class="rounded-surface border border-border bg-background/40 p-3">
 					<div class="flex flex-wrap items-center justify-between gap-3">
 						<div>
-							<p class="text-sm font-medium text-neutral-200">{date(group.createdAt)}</p>
-							<p class="mt-1 text-xs text-neutral-400">
+							<p class="text-sm font-medium text-text-strong">{date(group.createdAt)}</p>
+							<p class="mt-1 text-xs text-text-muted">
 								{m.collection_history_summary({
 									members: group.memberCount,
 									changes: group.revisionCount,
@@ -213,17 +213,17 @@
 						</button>
 					</div>
 					{#if group.revisions.length > 0}
-						<details class="mt-3 border-t border-neutral-800 pt-3">
-							<summary class="cursor-pointer text-xs font-medium text-neutral-300">
+						<details class="mt-3 border-t border-border pt-3">
+							<summary class="cursor-pointer text-xs font-medium text-text-secondary">
 								{m.collection_history_revisions()}
 							</summary>
 							<ul class="mt-3 space-y-2">
 								{#each group.revisions as revision (revision.id)}
 									<li
-										class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 p-3"
+										class="flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-surface/60 p-3"
 									>
 										<div>
-											<p class="text-xs font-medium text-neutral-200">
+											<p class="text-xs font-medium text-text-strong">
 												{m.collection_history_revision_summary({
 													title: revision.memberTitle ?? m.collection_unknown_member(),
 													slot: slotLabel(revision.kind),
