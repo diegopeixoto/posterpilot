@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0](https://github.com/diegopeixoto/posterpilot/compare/v0.12.2...v0.13.0) (2026-08-13)
+
+
+### Features
+
+* add database readiness probe ([#108](https://github.com/diegopeixoto/posterpilot/issues/108)) ([8be8636](https://github.com/diegopeixoto/posterpilot/commit/8be8636b41cd4d39474d7985ddf3b1e93baaac8f)), closes [#106](https://github.com/diegopeixoto/posterpilot/issues/106)
+* expand support diagnostics bundle ([22f7d91](https://github.com/diegopeixoto/posterpilot/commit/22f7d916eaefcd593320ee2023d239aefc9e231c)), closes [#107](https://github.com/diegopeixoto/posterpilot/issues/107)
+* theme-kit engine with 11 built-in themes and custom theme authoring ([#110](https://github.com/diegopeixoto/posterpilot/issues/110)) ([7b0225a](https://github.com/diegopeixoto/posterpilot/commit/7b0225af17093cffb34d632a6266188495838697))
+
+
+### Under the hood
+
+* write 0.12.2 release notes ([2790415](https://github.com/diegopeixoto/posterpilot/commit/2790415c737c1ba78b6777656961d88781feba29))
+
 ## [0.12.2](https://github.com/diegopeixoto/posterpilot/compare/v0.12.1...v0.12.2) (2026-08-11)
 
 Two fixes for work that quietly did not finish: a review list that could never be emptied, and a sync that gave up on a whole library because of one title.
