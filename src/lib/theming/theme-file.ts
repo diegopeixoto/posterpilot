@@ -29,14 +29,42 @@ export function isValidCss(value: string): boolean {
 /**
  * Validate CSS *shipped inside a theme*. A theme file is a shareable artifact
  * that arrives from someone else, so it gets a stricter grammar than the CSS the
- * user types into their own instance: no `@import` and no remote `url()`, both
- * of which would let a downloaded theme call out to a third-party host on every
+ * user types into their own instance: no `@import` and no remote resources,
+ * which would let a downloaded theme call out to a third-party host on every
  * page load. Local `url()` (`/logo.png`, `data:`) still works.
  */
 export function isValidThemeCss(value: string): boolean {
 	if (!isValidCss(value)) return false;
-	if (/@import/i.test(value)) return false;
-	return !/url\(\s*["']?\s*(?:https?:)?\/\//i.test(value);
+
+	// CSS identifiers and URLs may contain escapes. Chromium decodes, for
+	// example, `url(\68 ttps://host/pixel)` into a real remote request, so scan a
+	// canonical view rather than the source spelling supplied by the theme.
+	const canonical = decodeCssEscapes(value.replace(/\/\*[\s\S]*?\*\//g, ''));
+	if (/@import\b/i.test(canonical)) return false;
+	if (/[a-z][a-z0-9+.-]*:\/\//i.test(canonical)) return false;
+	return !/(?:^|[("'=,:])\s*\/\//im.test(canonical);
+}
+
+/** Decode the escape forms relevant to CSS tokenization for security checks. */
+function decodeCssEscapes(value: string): string {
+	return value.replace(
+		/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\r\n\f])?|(\r\n|[\n\r\f])|([\s\S]))/g,
+		(_match, hex: string | undefined, escapedNewline: string | undefined, escaped: string) => {
+			if (hex) {
+				const codePoint = Number.parseInt(hex, 16);
+				if (
+					codePoint === 0 ||
+					codePoint > 0x10ffff ||
+					(codePoint >= 0xd800 && codePoint <= 0xdfff)
+				) {
+					return '\ufffd';
+				}
+				return String.fromCodePoint(codePoint);
+			}
+			if (escapedNewline) return '';
+			return escaped ?? '';
+		}
+	);
 }
 
 const META_LIMITS = {
@@ -48,8 +76,11 @@ const META_LIMITS = {
 } as const;
 
 /** Per-token value grammars. Anything outside these is rejected wholesale. */
+// Hex is 3, 4, 6 or 8 digits — `{3,8}` also let `#12345` through, which passes
+// as "validated" and then fails as a color, unsetting the token (and, for an
+// accent, the whole ramp derived from it).
 const COLOR_RE =
-	/^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)|hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
+	/^(#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)|hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
 const LENGTH_RE = /^(0|\d{1,2}(\.\d{1,3})?(px|rem|em))$/;
 const FONT_STACK_RE = /^[\w\s,"'()-]{3,300}$/;
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomTheme } from './schema';
 import {
+	isValidColorValue,
 	isValidCss,
 	isValidThemeCss,
 	MAX_THEME_FILE_BYTES,
@@ -171,6 +172,30 @@ describe('isValidCss / isValidThemeCss', () => {
 		expect(isValidThemeCss('.surface { background: url(//evil.example/p.png) }')).toBe(false);
 	});
 
+	it('rejects remote resources and imports hidden behind CSS escapes', () => {
+		const escapedRemote = String.raw`.surface { background: url(\68 ttps://evil.example/p.png) }`;
+		const escapedSlashes = String.raw`.surface { background: url(https:\2f\2f evil.example/p.png) }`;
+		const escapedImport = String.raw`@\69 mport url('/local.css');`;
+		const remoteImageSet = String.raw`.surface { background: image-set("h\74tps://evil.example/a.png" 1x) }`;
+		const otherRemoteScheme = '.surface { background: url(ftp://evil.example/a.png) }';
+
+		for (const css of [
+			escapedRemote,
+			escapedSlashes,
+			escapedImport,
+			remoteImageSet,
+			otherRemoteScheme
+		]) {
+			expect(isValidCss(css), css).toBe(true);
+			expect(isValidThemeCss(css), css).toBe(false);
+		}
+	});
+
+	it('does not let comments split security-sensitive tokens', () => {
+		expect(isValidThemeCss('.x { background: u/**/rl(https://evil.example/p.png) }')).toBe(false);
+		expect(isValidThemeCss('@/**/import url("/local.css")')).toBe(false);
+	});
+
 	it('still allows a theme to reference local and inline assets', () => {
 		expect(isValidThemeCss(".app-logo { background-image: url('/logo.png') }")).toBe(true);
 		expect(isValidThemeCss('.x { background: url(data:image/gif;base64,R0lGOD) }')).toBe(true);
@@ -227,5 +252,26 @@ describe('sanitizeCustomTheme', () => {
 	it('rejects entries with no usable identity', () => {
 		expect(sanitizeCustomTheme({ base: 'catppuccin', tokens: {} })).toBeNull();
 		expect(sanitizeCustomTheme({ name: 'X', base: 'nope', tokens: {} })).toBeNull();
+	});
+});
+
+describe('isValidColorValue', () => {
+	it('accepts the four hex lengths CSS defines', () => {
+		for (const value of ['#abc', '#abcd', '#aabbcc', '#aabbccdd']) {
+			expect(isValidColorValue(value), value).toBe(true);
+		}
+	});
+
+	it('rejects hex lengths that are not colors', () => {
+		// `#12345` used to pass as "validated" and then fail as a color, silently
+		// unsetting the token — and with it any ramp derived from the accent.
+		for (const value of ['#12', '#12345', '#1234567', '#123456789']) {
+			expect(isValidColorValue(value), value).toBe(false);
+		}
+	});
+
+	it('still accepts the functional forms', () => {
+		expect(isValidColorValue('rgb(124, 58, 237)')).toBe(true);
+		expect(isValidColorValue('hsla(270, 90%, 58%, 0.5)')).toBe(true);
 	});
 });

@@ -75,7 +75,11 @@
 				backgroundOverride: background || null,
 				backgroundImage: backgroundImage || null,
 				backgroundImageDim,
-				radiusOverride: radius || null
+				radiusOverride: radius || null,
+				// Without this the resolver defaults to `top`, and since `preview()`
+				// now drives the live chrome, tweaking an accent would yank a
+				// left-sidebar layout back to a top bar until the next reload.
+				navPlacement
 			},
 			customThemes
 		);
@@ -111,6 +115,14 @@
 
 	function selectTheme(id: string) {
 		if (id === themeId) return;
+		themeId = id;
+		void applyAndPersist({ themeId: id });
+	}
+
+	/** Make a freshly created or imported theme the active one. Saving the theme
+	 *  list does not touch the appearance settings, so without this the UI showed
+	 *  it as active while the next SSR pass rendered the previous theme. */
+	function activateTheme(id: string) {
 		themeId = id;
 		void applyAndPersist({ themeId: id });
 	}
@@ -219,10 +231,9 @@
 			if (!response.ok) throw new Error(String(response.status));
 			const body = (await response.json()) as { themes: CustomTheme[]; theme: CustomTheme };
 			customThemes = body.themes;
-			themeId = body.theme.id;
 			authorOpen = false;
 			toasts.success(m.appearance_theme_saved({ name: body.theme.name }));
-			preview();
+			activateTheme(body.theme.id);
 		} catch {
 			toasts.error(m.settings_save_failed());
 		} finally {
@@ -355,9 +366,8 @@
 			}
 			const body = (await response.json()) as { themes: CustomTheme[]; theme: CustomTheme };
 			customThemes = body.themes;
-			themeId = body.theme.id;
 			toasts.success(m.appearance_imported({ name: body.theme.name }));
-			preview();
+			activateTheme(body.theme.id);
 		} catch (error) {
 			toasts.error(importErrorMessage(error instanceof Error ? error.message : ''));
 		}

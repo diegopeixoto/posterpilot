@@ -1,24 +1,34 @@
 /**
  * Theme-kit engine — client applier. Mirrors the SSR injection in
  * hooks.server.ts: sets `data-theme` and the resolved inline `--pp-*` variables
- * on `<html>`. Used by the Appearance settings UI for instant switching;
- * previously applied inline vars that the new resolution dropped are removed.
+ * on `<html>`. Used by the Appearance settings UI for instant switching.
  */
 
+import { TOKEN_KEYS, tokenVar } from './schema';
 import type { ResolvedAppearance } from './resolve';
 
-const appliedKeys = new Set<string>();
+/**
+ * Every custom property the resolver can put on `<html>`. Clearing from this
+ * set rather than from a memo of what *this module* wrote is the point: the
+ * first paint's variables come from the SSR injection, not from here, so a memo
+ * starts empty and the first reset or theme switch removes none of them —
+ * leaving a stale override in place, including on properties the newly selected
+ * theme locks, until a reload.
+ */
+const MANAGED_VARS: string[] = [
+	...TOKEN_KEYS.map(tokenVar),
+	'--pp-background-image',
+	'--pp-background-image-dim'
+];
 
 export function applyAppearance(resolved: ResolvedAppearance): void {
 	const el = document.documentElement;
 	el.dataset.theme = resolved.dataTheme;
-	for (const key of appliedKeys) {
+	for (const key of MANAGED_VARS) {
 		if (!(key in resolved.vars)) el.style.removeProperty(key);
 	}
-	appliedKeys.clear();
 	for (const [key, value] of Object.entries(resolved.vars)) {
 		el.style.setProperty(key, value);
-		appliedKeys.add(key);
 	}
 
 	// Theme-shipped CSS: upsert the same element the SSR injection renders.

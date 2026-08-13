@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 // The real stylesheet, so computed style is the app's, not the browser default.
 import '../../../app.css';
@@ -6,6 +6,7 @@ import { tick } from 'svelte';
 import AppearanceSettings from './AppearanceSettings.svelte';
 import { resolveAppearance } from '$lib/theming/resolve';
 import type { CustomTheme } from '$lib/theming/schema';
+import { isValidThemeCss, serializeThemeFile } from '$lib/theming/theme-file';
 import { chrome } from '$lib/stores/chrome.svelte';
 
 /**
@@ -63,7 +64,21 @@ beforeEach(() => {
 	chrome.reset();
 });
 
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
 describe('Appearance settings', () => {
+	it('rejects a remote URL that the browser would decode from a CSS escape', () => {
+		// This suite runs in Chromium. Keep a browser-backed regression for the
+		// tokenization behavior that made the source-level URL check bypassable.
+		expect(
+			isValidThemeCss(
+				String.raw`.surface { background-image: url(\68 ttps://beacon.invalid/p.png) }`
+			)
+		).toBe(false);
+	});
+
 	it('lists the 8 built-in themes grouped in two families, active theme pressed', async () => {
 		mount();
 		await tick();
@@ -248,5 +263,120 @@ describe('theme CSS field', () => {
 		box.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 		expect(box.getAttribute('aria-invalid')).toBe('true');
+	});
+});
+
+describe('applying over a server-rendered override', () => {
+	/** The inline variables SSR writes onto `<html>` for a saved accent override. */
+	function seedSsrAccent() {
+		const el = document.documentElement;
+		el.dataset.theme = 'posterpilot';
+		el.style.setProperty('--pp-accent-base', '#a6306f');
+		el.style.setProperty('--pp-accent-600', '#a6306f');
+		el.style.setProperty('--pp-accent-500', 'color-mix(in oklab, #a6306f, white 10%)');
+		el.style.setProperty('--pp-accent-foreground', '#ffffff');
+	}
+
+	it('clears variables it did not write itself', async () => {
+		// The first paint's variables come from the SSR injection, not from the
+		// applier, so tracking only what this module wrote left the override in
+		// place: resetting the accent changed nothing until a reload.
+		seedSsrAccent();
+		mount({ settings: { themeAccentOverride: '#a6306f' } });
+		await tick();
+
+		const reset = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+			(el) => el.textContent?.trim() === 'Reset'
+		);
+		expect(reset, 'accent reset button').toBeDefined();
+		reset!.click();
+		await tick();
+
+		const style = document.documentElement.style;
+		expect(style.getPropertyValue('--pp-accent-600')).toBe('');
+		expect(style.getPropertyValue('--pp-accent-base')).toBe('');
+		expect(style.getPropertyValue('--pp-accent-foreground')).toBe('');
+	});
+
+	it('keeps a left sidebar while previewing an unrelated change', async () => {
+		// `preview()` drives the live chrome, so a resolution that forgot the saved
+		// placement snapped a sidebar layout back to a top bar mid-edit.
+		mount({ settings: { themeId: 'posterpilot', navPlacement: 'left' } });
+		await tick();
+		themeButton('Darcula').click();
+		await tick();
+		expect(chrome.navPlacement).toBe('left');
+	});
+});
+
+describe('activating a newly stored theme', () => {
+	const created: CustomTheme = {
+		id: 'custom:nebula',
+		name: 'Nebula',
+		base: 'posterpilot',
+		tokens: { 'accent-base': '#ff79c6' }
+	};
+
+	function mockThemeWrite() {
+		const calls: Array<{ url: string; init?: RequestInit }> = [];
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+			const url = String(input);
+			calls.push({ url, init });
+			if (url === '/api/appearance/themes') {
+				return new Response(JSON.stringify({ themes: [created], theme: created }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			}
+			if (url === '/api/appearance') return new Response(null, { status: 204 });
+			throw new Error(`unexpected fetch: ${url}`);
+		});
+		return calls;
+	}
+
+	async function expectThemeIdPersisted(calls: Array<{ url: string; init?: RequestInit }>) {
+		await vi.waitFor(() => {
+			expect(calls.some((call) => call.url === '/api/appearance')).toBe(true);
+		});
+		const activation = calls.find((call) => call.url === '/api/appearance');
+		expect(JSON.parse(String(activation?.init?.body))).toEqual({ themeId: created.id });
+	}
+
+	it('persists the theme selected after authoring', async () => {
+		const calls = mockThemeWrite();
+		mount();
+		await tick();
+
+		const openAuthoring = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+			(button) => button.textContent?.trim() === 'Save current as theme…'
+		)!;
+		openAuthoring.click();
+		await tick();
+
+		const name = document.querySelector<HTMLInputElement>('input[maxlength="60"]')!;
+		name.value = created.name;
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+		const save = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+			(button) => button.textContent?.trim() === 'Save'
+		)!;
+		save.click();
+
+		await expectThemeIdPersisted(calls);
+	});
+
+	it('persists the theme selected after import', async () => {
+		const calls = mockThemeWrite();
+		mount();
+		await tick();
+
+		const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const file = new File([serializeThemeFile(created)], 'nebula.posterpilot-theme.json', {
+			type: 'application/json'
+		});
+		Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+
+		await expectThemeIdPersisted(calls);
 	});
 });
