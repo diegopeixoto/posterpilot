@@ -1,12 +1,13 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
-	import { onNavigate, goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { beforeNavigate, onNavigate, goto } from '$app/navigation';
+	import { page, updated } from '$app/state';
 	import { m } from '$lib/paraglide/messages';
 	import { setLocale } from '$lib/paraglide/runtime';
 	import { registerClientLocaleStrategy, seedClientLocale } from '$lib/i18n/strategy.client';
 	import { canonicalPathAfterServerSwitch } from '$lib/server-context-navigation';
+	import { fullPageTargetForNewBuild } from '$lib/client-update';
 	import WhatsNewModal from '$lib/components/WhatsNewModal.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
 	import TmdbRepairBanner from '$lib/components/TmdbRepairBanner.svelte';
@@ -44,6 +45,17 @@
 				await navigation.complete;
 			});
 		});
+	});
+
+	// A tab that was open when the container was upgraded is still running the old
+	// bundle; server data keeps refreshing, so it looks current while its code is
+	// not (#115). SvelteKit polls `_app/version.json` (version.pollInterval in
+	// vite.config.ts) and flips `updated.current` once a newer build is serving —
+	// from then on the next client-side navigation becomes a full page load of the
+	// same target, which is the first moment the new code can take over.
+	beforeNavigate((navigation) => {
+		const target = fullPageTargetForNewBuild(updated.current, navigation);
+		if (target) location.href = target;
 	});
 
 	let { children, data } = $props();
