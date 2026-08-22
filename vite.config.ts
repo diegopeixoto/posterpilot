@@ -40,7 +40,16 @@ export default defineConfig({
 			},
 
 			// adapter-node produces a standalone server (build/index.js) we run under Bun in Docker.
-			adapter: adapter()
+			adapter: adapter(),
+
+			// Let an open tab notice that the container behind it was upgraded. The
+			// client polls `_app/version.json` (a few bytes) and flips `updated.current`
+			// when the build it loaded is no longer the one serving; the root layout then
+			// turns the next navigation into a full page load (#115). Without this a tab
+			// keeps running the previous release's code for as long as it stays open,
+			// while the data it shows — version footer included — comes from the new one.
+			// `version.name` stays the default build timestamp so every rebuild counts.
+			version: { pollInterval: 60_000 }
 		})
 	]
 });
