@@ -2,15 +2,20 @@
 
 ## [0.13.1](https://github.com/diegopeixoto/posterpilot/compare/v0.13.0...v0.13.1) (2026-08-22)
 
+One fix, for the minute right after an upgrade: a tab you left open now notices the new release by itself.
 
 ### Bug Fixes
 
-* reload a tab left open across an upgrade once a new build is serving ([#116](https://github.com/diegopeixoto/posterpilot/issues/116)) ([9e9e2b4](https://github.com/diegopeixoto/posterpilot/commit/9e9e2b4b55fa1515f2e472410eef6e373a111e90))
+* **A tab left open across an upgrade no longer keeps running the old release.** A tab that was open when the container was replaced kept the previous client code for as long as it stayed open. Everything the server sends still refreshed — the version in the footer included — so the page looked current while its buttons and flows were the old ones. That is how an install already on 0.12.2 could still show the last item of a review run without **Apply and finish**. PosterPilot now checks once a minute whether the build it loaded is still the one serving, and the first click after an upgrade becomes a full page load of the same page, on the new code. No banner, nothing to dismiss. ([#116](https://github.com/diegopeixoto/posterpilot/pull/116))
 
+### Upgrading
 
-### Under the hood
+* No database migrations, no configuration changes.
+* One last time by hand: tabs that are open during *this* upgrade are still running 0.13.0 or earlier, which does not have the check, so reload them once after the container restarts. From 0.13.1 onward that happens on its own.
 
-* write 0.13.0 release notes ([#113](https://github.com/diegopeixoto/posterpilot/issues/113)) ([07ecaf3](https://github.com/diegopeixoto/posterpilot/commit/07ecaf3ca7f35fa2c631aa3fcee154b8d1a05444))
+### Contributors
+
+* [@lishremix](https://github.com/lishremix) followed up on [#100](https://github.com/diegopeixoto/posterpilot/issues/100) with a screenshot that should not have been possible — a 0.12.2 footer over a page still missing the 0.12.2 button — and a week later reported it had stopped happening, which is exactly what a tab that finally got reloaded looks like. That is what exposed the stale tab ([#115](https://github.com/diegopeixoto/posterpilot/issues/115)).
 
 ## [0.13.0](https://github.com/diegopeixoto/posterpilot/compare/v0.12.2...v0.13.0) (2026-08-13)
 
