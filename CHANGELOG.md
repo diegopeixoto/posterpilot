@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/diegopeixoto/posterpilot/compare/v0.13.1...v0.13.2) (2026-08-22)
+
+
+### Under the hood
+
+* write 0.13.1 release notes ([#118](https://github.com/diegopeixoto/posterpilot/issues/118)) ([ae616f3](https://github.com/diegopeixoto/posterpilot/commit/ae616f38cf99e70d2e351c529248bc4bed35f64d))
+
 ## [0.13.1](https://github.com/diegopeixoto/posterpilot/compare/v0.13.0...v0.13.1) (2026-08-22)
 
 One fix, for the minute right after an upgrade: a tab you left open now notices the new release by itself.
