@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.1](https://github.com/diegopeixoto/posterpilot/compare/v0.13.0...v0.13.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* reload a tab left open across an upgrade once a new build is serving ([#116](https://github.com/diegopeixoto/posterpilot/issues/116)) ([9e9e2b4](https://github.com/diegopeixoto/posterpilot/commit/9e9e2b4b55fa1515f2e472410eef6e373a111e90))
+
+
+### Under the hood
+
+* write 0.13.0 release notes ([#113](https://github.com/diegopeixoto/posterpilot/issues/113)) ([07ecaf3](https://github.com/diegopeixoto/posterpilot/commit/07ecaf3ca7f35fa2c631aa3fcee154b8d1a05444))
+
 ## [0.13.0](https://github.com/diegopeixoto/posterpilot/compare/v0.12.2...v0.13.0) (2026-08-13)
 
 ### Features
