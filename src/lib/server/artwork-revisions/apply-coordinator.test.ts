@@ -485,6 +485,95 @@ describe('ArtworkApplyCoordinator', () => {
 		}
 	);
 
+	it.each([
+		{ kind: 'poster' as const, bytesMethod: 'applyPosterBytes' as const },
+		{ kind: 'background' as const, bytesMethod: 'applyBackgroundBytes' as const }
+	])(
+		'locks the applied $kind field on a field-lock-capable server after the write succeeds',
+		async ({ kind, bytesMethod }) => {
+			const expectedBytes = bytes(`locked ${kind} bytes`);
+			const preflight = vi.fn(async () => ({
+				bytes: expectedBytes,
+				contentType: 'image/png'
+			}));
+			const subject = coordinator(preflight);
+			const planned = operation({ id: `lock-${kind}`, kind });
+			const beforeArtwork = artwork(`before lock ${kind}`, `before-lock-${kind}`, kind);
+			planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+			const liveArtwork = beforeArtwork;
+			const lockField = vi.fn(async () => undefined);
+			const server = {
+				type: 'jellyfin',
+				capabilities: { fieldLock: 'supported' },
+				readArtwork: vi.fn(async () => liveArtwork),
+				applyPosterBytes: vi.fn(async () => undefined),
+				applyBackgroundBytes: vi.fn(async () => undefined),
+				lockField
+			} as unknown as MediaServer;
+
+			await subject.prepareOperation(planned, { server });
+			await subject.executeServerOperation(planned, { server });
+
+			expect(lockField).toHaveBeenCalledWith(planned.targetId, kind, true);
+			// The lock only happens after the bytes are on the server.
+			expect(lockField.mock.invocationCallOrder[0]).toBeGreaterThan(
+				(server[bytesMethod] as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+			);
+		}
+	);
+
+	it('fails the server operation when the field lock cannot be applied', async () => {
+		const planned = operation({ id: 'lock-failure' });
+		const beforeArtwork = artwork('before lock failure', 'before-lock-failure');
+		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		const subject = coordinator(
+			vi.fn(async () => ({
+				bytes: bytes('lock failure bytes'),
+				contentType: 'image/jpeg'
+			}))
+		);
+		const lockField = vi.fn(async () => {
+			throw new Error('Jellyfin returned HTTP 403 Forbidden for /Items/item-1');
+		});
+		const server = {
+			type: 'jellyfin',
+			capabilities: { fieldLock: 'supported' },
+			readArtwork: vi.fn(async () => beforeArtwork),
+			applyPosterBytes: vi.fn(async () => undefined),
+			lockField
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
+			/Jellyfin returned HTTP 403/
+		);
+	});
+
+	it('skips the field lock when the server contract does not support it', async () => {
+		const planned = operation({ id: 'lock-unsupported' });
+		const beforeArtwork = artwork('before unsupported lock', 'before-unsupported-lock');
+		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		const subject = coordinator(
+			vi.fn(async () => ({
+				bytes: bytes('unsupported lock bytes'),
+				contentType: 'image/jpeg'
+			}))
+		);
+		const lockField = vi.fn(async () => undefined);
+		const server = {
+			type: 'plex',
+			capabilities: { fieldLock: 'unsupported' },
+			readArtwork: vi.fn(async () => beforeArtwork),
+			applyPosterBytes: vi.fn(async () => undefined),
+			lockField
+		} as unknown as MediaServer;
+
+		await subject.prepareOperation(planned, { server });
+		await subject.executeServerOperation(planned, { server });
+
+		expect(lockField).not.toHaveBeenCalled();
+	});
+
 	it.each(['snapshot', 'ledger'] as const)(
 		'releases prepared bytes when $s outcome recording fails and is converted',
 		async (failurePoint) => {

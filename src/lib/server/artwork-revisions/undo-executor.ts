@@ -53,6 +53,7 @@ export type ArtworkUndoOperationErrorCode =
 	| 'undo_server_write_unsupported'
 	| 'undo_server_delete_unsupported'
 	| 'undo_server_write_failed'
+	| 'undo_server_unlock_failed'
 	| 'undo_server_verify_unavailable'
 	| 'undo_server_verify_mismatch'
 	| 'undo_kometa_unavailable'
@@ -207,6 +208,7 @@ const SAFE_ERROR_TEXT: Record<ArtworkUndoOperationErrorCode, string> = {
 	undo_server_write_unsupported: 'This server cannot restore the selected artwork slot.',
 	undo_server_delete_unsupported: 'This server cannot restore an absent artwork slot.',
 	undo_server_write_failed: 'The media server did not complete the artwork restoration.',
+	undo_server_unlock_failed: 'The restored artwork could not be unlocked on the media server.',
 	undo_server_verify_unavailable: 'The restored server artwork could not be verified.',
 	undo_server_verify_mismatch: 'The media server does not expose the planned restored artwork.',
 	undo_kometa_unavailable: 'The Kometa metadata destination is unavailable.',
@@ -579,6 +581,26 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 			);
 		}
 
+		/**
+		 * Remove the apply-time artwork lock so the server's automatic agents can
+		 * manage the restored field again. Item targets only: native collections have
+		 * no apply-time lock. Best-effort by design — the artwork bytes are already
+		 * restored and verified, and a locked leftover is reported through the failed
+		 * outcome rather than thrown past the ledger.
+		 */
+		async function unlockRestoredArtwork(
+			server: MediaServer,
+			operation: UndoPlanOperation
+		): Promise<boolean> {
+			if (server.capabilities?.fieldLock !== 'supported' || !server.lockField) return false;
+			try {
+				await server.lockField(operation.targetId, serverArtworkKind(operation.slot), false);
+				return false;
+			} catch {
+				return true;
+			}
+		}
+
 		async function executeServerOperation(
 			operation: UndoPlanOperation,
 			groupId: string
@@ -750,6 +772,18 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 					verification: 'failed',
 					errorCode: unsupportedCode
 				});
+			}
+
+			if (!writeFailed && operation.target.kind === 'item') {
+				const unlockFailed = await unlockRestoredArtwork(server, operation);
+				if (unlockFailed) {
+					return record(operation, groupId, {
+						...base,
+						status: 'failed',
+						verification: 'failed',
+						errorCode: 'undo_server_unlock_failed'
+					});
+				}
 			}
 
 			const after = await captureServerObservation(operation, server);

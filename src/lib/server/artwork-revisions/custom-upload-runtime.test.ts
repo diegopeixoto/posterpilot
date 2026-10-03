@@ -132,12 +132,16 @@ interface Fixture {
 	recordOutcome: ReturnType<typeof vi.fn>;
 	finalizeGroup: ReturnType<typeof vi.fn>;
 	applyPosterBytes: ReturnType<typeof vi.fn>;
+	lockField: ReturnType<typeof vi.fn>;
 	active: { value: string | null };
 	/** Every coverage refresh this runtime asked for, in order. */
 	coverageRefreshes: { trigger: string; scope: { mediaItemIds: number[] } }[];
 }
 
-function fixture(reads: Array<ServerArtwork | null | Error>): Fixture {
+function fixture(
+	reads: Array<ServerArtwork | null | Error>,
+	options: { fieldLockSupported?: boolean } = {}
+): Fixture {
 	const events: string[] = [];
 	const store = new MemoryPlanStore(events);
 	let snapshotNumber = 0;
@@ -176,10 +180,13 @@ function fixture(reads: Array<ServerArtwork | null | Error>): Fixture {
 	const applyPosterBytes = vi.fn(async () => {
 		events.push('server:apply');
 	});
+	const lockField = vi.fn(async () => undefined);
 	const server = {
 		identity: { instanceId: 'server-a', name: 'Server A', type: 'plex' },
+		...(options.fieldLockSupported ? { capabilities: { fieldLock: 'supported' as const } } : {}),
 		readArtwork,
-		applyPosterBytes
+		applyPosterBytes,
+		lockField
 	} as unknown as MediaServer;
 	const active = { value: 'server-a' as string | null };
 	const coverageRefreshes: { trigger: string; scope: { mediaItemIds: number[] } }[] = [];
@@ -216,6 +223,7 @@ function fixture(reads: Array<ServerArtwork | null | Error>): Fixture {
 		recordOutcome,
 		finalizeGroup,
 		applyPosterBytes,
+		lockField,
 		active
 	};
 }
@@ -303,6 +311,31 @@ describe('custom upload runtime', () => {
 			})
 		);
 		expect(subject.finalizeGroup).toHaveBeenCalledOnce();
+	});
+
+	it('locks the poster field after a successful custom upload on a field-lock-capable server', async () => {
+		const upload = jpeg(9);
+		const before = artwork(jpeg(1), 'before');
+		const after = artwork(upload, 'after');
+		const subject = fixture([before, before, after], { fieldLockSupported: true });
+		const plan = await preview(subject, upload);
+		const result = await subject.runtime.confirm(confirmation(plan, upload));
+
+		expect(result).toMatchObject({ ok: true, status: 'success', verification: 'exact' });
+		expect(subject.lockField).toHaveBeenCalledWith('target-7', 'poster', true);
+		expect(subject.lockField.mock.invocationCallOrder[0]).toBeGreaterThan(
+			subject.applyPosterBytes.mock.invocationCallOrder[0]
+		);
+	});
+
+	it('does not lock the poster field when the server contract does not support it', async () => {
+		const before = artwork(jpeg(1), 'before');
+		const after = artwork(jpeg(9), 'after');
+		const subject = fixture([before, before, after]);
+		const plan = await preview(subject);
+		await subject.runtime.confirm(confirmation(plan));
+
+		expect(subject.lockField).not.toHaveBeenCalled();
 	});
 
 	it('records changed transcoded evidence as best-effort and advances version', async () => {

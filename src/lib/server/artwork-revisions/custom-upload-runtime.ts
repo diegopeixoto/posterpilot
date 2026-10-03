@@ -240,6 +240,18 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 			writeFailed = true;
 		}
 
+		// Lock the poster field right after a successful upload so the server's
+		// automatic metadata agents cannot overwrite the custom image. Same contract
+		// as the plan-based apply: capability-gated, and a lock failure fails the
+		// operation rather than leaving the artwork silently unprotected.
+		if (!writeFailed && scope.server.capabilities?.fieldLock === 'supported') {
+			try {
+				await scope.server.lockField?.(scope.item.targetId, 'poster', true);
+			} catch {
+				writeFailed = true;
+			}
+		}
+
 		let afterArtwork: ServerArtwork | null | undefined;
 		let afterReadError: unknown;
 		try {

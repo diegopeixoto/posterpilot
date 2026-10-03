@@ -360,6 +360,38 @@ export function embyLikeProvider(
 		if (!response.ok) throw new Error(`${label} artwork delete failed (${response.status}).`);
 	}
 
+	/**
+	 * Set the item-level `LockData` flag via the metadata-edit update endpoint.
+	 *
+	 * `POST /Items/{itemId}` assigns request fields onto the stored item
+	 * unconditionally, so a partial DTO would wipe Name, Overview, Genres,
+	 * ProviderIds, and more. The lock therefore round-trips the complete item DTO
+	 * read from the user-scoped single-item endpoint — the same read-modify-write
+	 * the Jellyfin web metadata editor performs. The userless list form
+	 * (`/Items?ids=…`) returns an incomplete DTO and must never feed this write.
+	 */
+	async function setItemLockData(itemId: string, locked: boolean): Promise<void> {
+		const userId = await resolveLibraryUserId();
+		if (!userId) {
+			throw new Error(
+				`${label} artwork locking requires an administrator user to read the full item; none was resolvable.`
+			);
+		}
+		const readPath = `/Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}`;
+		const item = await getJson<Record<string, unknown>>(readPath);
+		const response = await fetch(`${base}/Items/${encodeURIComponent(itemId)}`, {
+			method: 'POST',
+			headers: { ...headers, 'Content-Type': 'application/json' },
+			body: JSON.stringify({ ...item, LockData: locked }),
+			signal: AbortSignal.timeout(JSON_TIMEOUT_MS)
+		});
+		if (!response.ok) {
+			throw new Error(
+				`${label} rejected the artwork lock update: HTTP ${response.status} ${response.statusText}`
+			);
+		}
+	}
+
 	return {
 		type: flavor,
 		identity: context.identity,
@@ -572,10 +604,12 @@ export function embyLikeProvider(
 
 		deleteArtwork: deleteCurrentArtwork,
 
-		// Jellyfin/Emby do not auto-replace an explicitly set image, so there is no
-		// lock concept. The interface still exposes lockField for parity.
-		async lockField(_itemId: string, _field: LockField, _locked: boolean): Promise<void> {
-			// no-op
+		// Jellyfin/Emby expose no per-image lock; `LockData` is item-level and blocks
+		// both metadata and image providers for the item on ordinary refreshes. Both
+		// artwork fields therefore map to the same item-level flag, mirroring the
+		// Plex field locks' protective intent.
+		async lockField(itemId: string, _field: LockField, locked: boolean): Promise<void> {
+			await setItemLockData(itemId, locked);
 		}
 	};
 }

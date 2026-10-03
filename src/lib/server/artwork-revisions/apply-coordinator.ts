@@ -251,6 +251,22 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 		return pending;
 	}
 
+	/**
+	 * Lock the artwork field right after a successful server write so the server's
+	 * automatic metadata agents cannot overwrite the applied image. Skipped on
+	 * servers whose contract does not include field locks; a lock failure fails the
+	 * operation — silently leaving the applied artwork unprotected is the exact
+	 * failure mode this step exists to prevent.
+	 */
+	async function lockAppliedArtwork(
+		server: MediaServer,
+		operation: ApplyPlanOperation,
+		kind: 'poster' | 'background'
+	): Promise<void> {
+		if (server.capabilities?.fieldLock !== 'supported' || !server.lockField) return;
+		await server.lockField(operation.targetId, kind, true);
+	}
+
 	async function prepareServer(operation: ApplyPlanOperation, server?: MediaServer): Promise<void> {
 		const expected = preparedArtwork(
 			options.fetchArtworkBytes
@@ -349,6 +365,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 				captured.expectedBytes,
 				captured.expectedContentType
 			);
+			await lockAppliedArtwork(server, operation, 'background');
 			return;
 		}
 		await server.applyPosterBytes(
@@ -356,6 +373,7 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			captured.expectedBytes,
 			captured.expectedContentType
 		);
+		await lockAppliedArtwork(server, operation, 'poster');
 	}
 
 	async function prepareKometa(operation: ApplyPlanOperation): Promise<void> {

@@ -69,6 +69,7 @@ interface ServerHarness {
 	applyPosterBytes: ReturnType<typeof vi.fn>;
 	applyBackgroundBytes: ReturnType<typeof vi.fn>;
 	deleteArtwork: ReturnType<typeof vi.fn>;
+	lockField: ReturnType<typeof vi.fn>;
 }
 
 function serverHarness(input: {
@@ -94,6 +95,7 @@ function serverHarness(input: {
 	const deleteArtwork = vi.fn(async () => {
 		current = null;
 	});
+	const lockField = vi.fn(async () => undefined);
 	const type = input.type ?? 'plex';
 	const server: MediaServer = {
 		type,
@@ -119,14 +121,15 @@ function serverHarness(input: {
 		applyBackgroundBytes,
 		readArtwork: vi.fn(async () => current),
 		...(input.deleteSupported ? { deleteArtwork } : {}),
-		lockField: vi.fn()
+		lockField
 	};
 	return {
 		server,
 		getCurrent: () => current,
 		applyPosterBytes,
 		applyBackgroundBytes,
-		deleteArtwork
+		deleteArtwork,
+		lockField
 	};
 }
 
@@ -274,6 +277,7 @@ function ledgerHarness(): LedgerHarness {
 interface CandidateInput {
 	revisionId: string;
 	destination?: 'server' | 'kometa';
+	target?: UndoPlanCandidate['target'];
 	targetId?: string;
 	slot?: UndoPlanSlot;
 	current: FrozenUndoCurrentState;
@@ -287,7 +291,7 @@ function candidate(input: CandidateInput): UndoPlanCandidate {
 		revisionGroupId: 'source-group',
 		revisionCreatedAt: '2026-07-11T11:00:00.000Z',
 		serverInstanceId: 'server-1',
-		target: { kind: 'item', mediaItemId: 1 },
+		target: input.target ?? { kind: 'item', mediaItemId: 1 },
 		destination: input.destination ?? 'server',
 		targetId: input.targetId ?? 'server-target-1',
 		slot: input.slot ?? ROOT_POSTER,
@@ -298,9 +302,19 @@ function candidate(input: CandidateInput): UndoPlanCandidate {
 }
 
 function builtPlan(candidates: UndoPlanCandidate[]) {
+	const first = candidates[0];
+	const scope =
+		first.target.kind === 'collection'
+			? {
+					kind: 'destination' as const,
+					serverInstanceId: 'server-1',
+					target: first.target,
+					destination: 'server' as const
+				}
+			: { kind: 'item' as const, serverInstanceId: 'server-1', mediaItemId: 1 };
 	return buildUndoPlan({
 		plannedAt: NOW.toISOString(),
-		scope: { kind: 'item', serverInstanceId: 'server-1', mediaItemId: 1 },
+		scope,
 		operations: candidates
 	});
 }
@@ -475,6 +489,112 @@ describe('server artwork undo execution', () => {
 		expect(withKometaCommit).not.toHaveBeenCalled();
 		const publicResult = JSON.stringify(result);
 		expect(publicResult).not.toMatch(/https?:|\/private\/|storagePath|bytes|url/i);
+	});
+
+	it('unlocks the restored field on a field-lock-capable server after the restore succeeds', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'unlock-current');
+		const desired = snapshot('snapshot-unlock', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/unlock',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		const server = serverHarness({ current });
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-unlock',
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const harness = executorHarness({ server: server.server, snapshots });
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.status).toBe('success');
+		expect(server.lockField).toHaveBeenCalledWith('server-target-1', 'poster', false);
+		expect(server.lockField.mock.invocationCallOrder[0]).toBeGreaterThan(
+			server.applyPosterBytes.mock.invocationCallOrder[0]
+		);
+	});
+
+	it('does not unlock when the server contract does not support field locks', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'no-unlock-current');
+		const desired = snapshot('snapshot-no-unlock', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/no-unlock',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		// Non-Plex harness servers ship fieldLock 'unsupported'.
+		const server = serverHarness({ current, type: 'jellyfin' });
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-no-unlock',
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const harness = executorHarness({ server: server.server, snapshots });
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.status).toBe('success');
+		expect(server.lockField).not.toHaveBeenCalled();
+	});
+
+	it('does not unlock native collection targets', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'collection-undo-current');
+		const desired = snapshot('snapshot-collection-unlock', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/collection-unlock',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		const server = serverHarness({ current });
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-collection-unlock',
+				target: { kind: 'collection', mediaCollectionId: 'collection-1' },
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const harness = executorHarness({ server: server.server, snapshots });
+
+		await execute(harness.executor, plan);
+
+		expect(server.lockField).not.toHaveBeenCalled();
 	});
 
 	it.each(['pending config checkpoint', 'corrupt config checkpoint', 'invalid Kometa guard'])(
