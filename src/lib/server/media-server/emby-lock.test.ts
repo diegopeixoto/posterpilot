@@ -25,7 +25,22 @@ const FULL_ITEM_DTO = {
 	PremiereDate: '2006-11-14T00:00:00Z',
 	CommunityRating: 7.6,
 	LockData: false,
-	LockedFields: []
+	LockedFields: [],
+	// Present in real user-scoped DTOs; the update endpoint cannot deserialize
+	// it (TrickplayInfoDto constructor binding), so the lock write strips it.
+	Trickplay: {
+		'item-1': {
+			320: {
+				Bandwidth: 9480,
+				Height: 132,
+				Interval: 10000,
+				ThumbnailCount: 867,
+				TileHeight: 10,
+				TileWidth: 10,
+				Width: 320
+			}
+		}
+	}
 };
 
 function installStatefulServer(itemId: string) {
@@ -88,6 +103,9 @@ describe('emby lockField (Jellyfin LockData)', () => {
 		expect(body.People).toEqual(FULL_ITEM_DTO.People);
 		expect(body.ProviderIds).toEqual(FULL_ITEM_DTO.ProviderIds);
 		expect(body.PremiereDate).toBe(FULL_ITEM_DTO.PremiereDate);
+		// Trickplay cannot round-trip (the update endpoint 500s deserializing it),
+		// so the write strips it; every other field must survive.
+		expect(body.Trickplay).toBeUndefined();
 	});
 
 	it('clears LockData on unlock for revert', async () => {

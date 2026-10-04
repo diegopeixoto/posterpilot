@@ -379,6 +379,12 @@ export function embyLikeProvider(
 		}
 		const readPath = `/Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}`;
 		const item = await getJson<Record<string, unknown>>(readPath);
+		// `Trickplay` (server-generated scrub data) cannot round-trip through this
+		// endpoint: Jellyfin answers HTTP 500 failing to deserialize
+		// `TrickplayInfoDto` (System.Text.Json constructor binding; observed on
+		// 12.1.0). Omitting it does not clear the stored trickplay data (verified
+		// against a live server).
+		delete item.Trickplay;
 		const response = await fetch(`${base}/Items/${encodeURIComponent(itemId)}`, {
 			method: 'POST',
 			headers: { ...headers, 'Content-Type': 'application/json' },
