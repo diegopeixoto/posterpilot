@@ -153,6 +153,24 @@ describe('classifyCandidateLanguage', () => {
 		expect(providerTagsArtworkLanguage('theposterdb')).toBe(false);
 	});
 
+	it('governs Fanart.tv too when the language was picked for one title', () => {
+		// The item-view picker asks for a language on purpose, so a German
+		// Fanart.tv poster is as unwanted as a German TMDB one — while MediUX and
+		// ThePosterDB, which never tag languages, still pass.
+		const policy = { mode: 'preferred', language: 'da', providers: 'tagging' } as const;
+		const fanart = (language: string | null, languageProvenance: 'tagged' | 'untagged') => ({
+			provider: 'fanarttv',
+			language,
+			languageProvenance
+		});
+		expect(classifyCandidateLanguage(fanart('de', 'tagged'), policy)).toBe('foreign');
+		expect(classifyCandidateLanguage(fanart('da', 'tagged'), policy)).toBe('eligible');
+		expect(classifyCandidateLanguage(fanart(null, 'untagged'), policy)).toBe('eligible');
+		expect(classifyCandidateLanguage(tagged('de'), policy)).toBe('foreign');
+		const mediux = { provider: 'mediux', language: null, languageProvenance: 'unknown' as const };
+		expect(classifyCandidateLanguage(mediux, policy)).toBe('eligible');
+	});
+
 	it('does not filter a provider that tags languages but is not TMDB', () => {
 		// Fanart.tv does record tagged provenance, so without this it would be
 		// filtered on a signal this setting was never meant to govern.

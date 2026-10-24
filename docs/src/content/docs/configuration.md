@@ -321,9 +321,9 @@ entire pre-upgrade TMDB inventory the moment a preference is set would be worse 
 and the provider group offers a **re-search** so a fresh run can record the real
 tags.
 
-Item pages carry a **Show all languages** toggle (and **Show only _language_** to
-go back), so you can look past the preference for one title without changing the
-global setting. When the preference matches nothing for a title, the page says how
+Item pages carry an **Artwork language** picker, so you can look past the preference
+for one title — or pick another language for it, which then filters Fanart.tv too —
+without changing the global setting. When the preference matches nothing for a title, the page says how
 many covers exist in other languages and offers the same escape hatch instead of
 showing an empty grid.
 

@@ -127,8 +127,9 @@ todo o inventário TMDB anterior à atualização assim que uma preferência fos
 seria pior — e o grupo do provedor oferece **Pesquisar novamente**, para que uma
 execução nova registre as etiquetas reais.
 
-A página do item traz um alternador **Mostrar todos os idiomas** (e **Mostrar apenas
-_idioma_** para voltar), que não muda a configuração global. Quando a preferência não
+A página do item traz um seletor **Idioma das capas** para olhar além da preferência
+em um título — ou escolher outro idioma para ele, que então filtra também o Fanart.tv —
+sem mudar a configuração global. Quando a preferência não
 corresponde a nada para um título, a página diz quantas capas existem em outros idiomas
 e oferece a mesma saída em vez de exibir uma grade vazia.
 

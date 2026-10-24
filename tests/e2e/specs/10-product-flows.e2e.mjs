@@ -735,6 +735,123 @@ test.describe
 		await expectNoHorizontalOverflow(page);
 	});
 
+	test('narrows one title to a picked artwork language without touching the saved preference', async ({
+		page,
+		runtime,
+		scenario
+	}) => {
+		const itemId = scenario.primaryItems.echo;
+		const client = createClient({ url: `file:${runtime.databaseFile}` });
+		const now = Math.floor(Date.now() / 1000);
+		// Language-tagged TMDB covers beside the seeded MediUX pair, which never tags
+		// languages and so must stay visible under every pick. (Fanart.tv follows the
+		// same rule; its key is an encrypted secret this fixture cannot seed.)
+		const tagged = [
+			['echo-tmdb-da-1', 'da', 'tagged'],
+			['echo-tmdb-da-2', 'da', 'tagged'],
+			['echo-tmdb-en', 'en', 'tagged'],
+			['echo-tmdb-de', 'de', 'tagged'],
+			['echo-tmdb-textless', null, 'untagged']
+		];
+		// Setup disabled every provider; TMDB already has its key, so enabling it is
+		// enough for its stored candidates to show. Restored afterwards.
+		const priorTmdb = await client.execute({
+			sql: "select value from settings where key = 'providerTmdb'"
+		});
+		const settingsWrites = [];
+		page.on('request', (request) => {
+			if (request.method() === 'GET') return;
+			if (new URL(request.url()).pathname.startsWith('/api/settings')) {
+				settingsWrites.push(request.url());
+			}
+		});
+		try {
+			await client.execute({
+				sql: `insert into settings (key, value) values ('providerTmdb', 'true')
+				 on conflict(key) do update set value = excluded.value`
+			});
+			for (const [assetId, language, provenance] of tagged) {
+				await client.execute({
+					sql: `insert into poster_candidates (
+					 server_instance_id, media_item_id, discovery_run_id, set_id, provider,
+					 provider_asset_id, set_author, design_family, language, language_provenance,
+					 url, preview_url, kind, resolved_tmdb_id, resolved_media_type, width, height,
+					 score, active, stale, last_seen_at, created_at
+					) values (?, ?, null, 'tmdb', 'tmdb', ?, null, null, ?, ?, ?, ?, 'poster', '71003',
+					 'movie', 1000, 1500, 5, 1, 0, ?, ?)`,
+					args: [
+						scenario.primaryServerId,
+						itemId,
+						assetId,
+						language,
+						provenance,
+						`${runtime.fakeMediuxUrl}/${assetId}-original.png`,
+						`${runtime.fakeMediuxUrl}/${assetId}-preview.png`,
+						now,
+						now
+					]
+				});
+			}
+
+			await gotoHydrated(page, `/item/${itemId}`);
+			const picker = page.getByRole('combobox', { name: t('item_language_filter_title') });
+			await expect(picker).toHaveValue('any');
+			// Most covers first; textless and MediUX artwork belong to no language.
+			await expect(picker.locator('option')).toHaveText([
+				t('item_language_option_all'),
+				t('item_language_option', { language: 'Dansk', count: 2 }),
+				t('item_language_option', { language: 'Deutsch', count: 1 }),
+				t('item_language_option', { language: 'English', count: 1 })
+			]);
+			const tmdbPosters = page.getByRole('button', {
+				name: t('item_candidate_label', { kind: t('item_poster'), provider: 'tmdb' })
+			});
+
+			// Only the first provider opens by default; open every group and set.
+			const groups = page.locator('section', { has: page.locator('[data-artwork-select]') });
+			const expandAll = async () => {
+				const collapsed = groups.locator('button[aria-expanded="false"]');
+				for (let guard = 0; guard < 20 && (await collapsed.count()) > 0; guard += 1) {
+					await collapsed.first().click();
+				}
+				await expect(collapsed).toHaveCount(0);
+			};
+			const tiles = page.locator('button[data-artwork-select]');
+			await expandAll();
+			await expect(tiles).toHaveCount(7);
+			await expect(tmdbPosters).toHaveCount(5);
+
+			await picker.selectOption('da');
+			await expect(
+				page.getByText(t('item_language_filter_hidden', { language: 'Dansk', hidden: 2 }))
+			).toBeVisible();
+			await expect(page.getByText(t('item_language_choice_note'))).toBeVisible();
+			await expandAll();
+			// MediUX pair + both Danish covers + the textless one.
+			await expect(tiles).toHaveCount(5);
+			await expect(tmdbPosters).toHaveCount(3);
+
+			await picker.selectOption('any');
+			await expandAll();
+			await expect(tiles).toHaveCount(7);
+			expect(settingsWrites, 'the picker must not write the saved preference').toEqual([]);
+			await expectNoHorizontalOverflow(page);
+		} finally {
+			await client.execute({
+				sql: `delete from poster_candidates
+				 where server_instance_id = ? and media_item_id = ? and provider_asset_id like 'echo-tmdb-%'`,
+				args: [scenario.primaryServerId, itemId]
+			});
+			const prior = priorTmdb.rows[0]?.value;
+			await client.execute(
+				prior === undefined
+					? { sql: "delete from settings where key = 'providerTmdb'" }
+					: { sql: "update settings set value = ? where key = 'providerTmdb'", args: [prior] }
+			);
+			client.close();
+		}
+	});
+
 	test('narrows the library and the review inbox by derived artwork coverage', async ({
 		page,
 		runtime,

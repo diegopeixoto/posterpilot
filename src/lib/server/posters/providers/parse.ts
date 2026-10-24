@@ -175,7 +175,8 @@ export function parseFanart(json: unknown, mediaType: TmdbMediaType): ArtworkSet
 					episode: null,
 					width: null,
 					height: null,
-					...candidateLanguage(i.lang)
+					// Fanart.tv tags textless artwork `00` rather than leaving it blank.
+					...candidateLanguage(i.lang === '00' ? null : i.lang)
 				};
 			});
 

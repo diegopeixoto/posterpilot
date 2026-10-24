@@ -125,6 +125,11 @@ describe('parseTmdbImages', () => {
 });
 
 describe('parseFanart', () => {
+	it('reads the 00 textless tag as untagged rather than unknown', () => {
+		const sets = parseFanart({ movieposter: [{ url: 'http://f/t.png', lang: '00' }] }, 'movie');
+		expect(sets[0].candidates[0]).toMatchObject({ language: null, languageProvenance: 'untagged' });
+	});
+
 	it('maps movie posters and backgrounds', () => {
 		const sets = parseFanart(
 			{
