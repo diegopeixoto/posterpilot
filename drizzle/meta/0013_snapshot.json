@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b65c4475-cdd4-4919-ae74-b0d99e63fcc6",
+  "id": "e812a5db-15de-4710-b65b-c10cdea51a51",
   "prevId": "0d15135c-3877-495a-b143-5974946133eb",
   "tables": {
     "applied_posters": {
@@ -460,6 +460,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "holds": {
+          "name": "holds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

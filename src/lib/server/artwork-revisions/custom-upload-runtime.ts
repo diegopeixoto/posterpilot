@@ -233,6 +233,14 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 			initiator: 'user'
 		});
 
+		const lockKey = {
+			serverInstanceId: scope.serverInstanceId,
+			targetId: scope.item.targetId,
+			kind: 'poster' as const
+		};
+		// Read before the write, which on Plex takes the lock itself.
+		const lockClaim = await dependencies.artworkLocks?.beforeApply(scope.server, lockKey);
+
 		let writeFailed = false;
 		try {
 			await scope.server.applyPosterBytes(
@@ -246,12 +254,8 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 
 		// Same contract as the plan-based apply: lock the uploaded poster against the
 		// server's agents, and never let a lock failure mark the upload as failed.
-		if (!writeFailed) {
-			await dependencies.artworkLocks?.afterApply(scope.server, {
-				serverInstanceId: scope.serverInstanceId,
-				targetId: scope.item.targetId,
-				kind: 'poster'
-			});
+		if (!writeFailed && lockClaim) {
+			await dependencies.artworkLocks?.afterApply(scope.server, lockKey, lockClaim);
 		}
 
 		let afterArtwork: ServerArtwork | null | undefined;

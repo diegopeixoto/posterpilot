@@ -25,6 +25,18 @@ function itemLevelServer(initiallyLocked = false) {
 	return { server, lockField, isLocked: () => locked };
 }
 
+/** One apply as the runtimes run it: read the lock, write, then lock. */
+async function apply(
+	locks: ReturnType<typeof createArtworkLockManager>,
+	server: MediaServer,
+	key: ArtworkLockKey,
+	write: () => void = () => undefined
+) {
+	const claim = await locks.beforeApply(server, key);
+	write();
+	await locks.afterApply(server, key, claim);
+}
+
 function manager(
 	options: {
 		enabled?: boolean;
@@ -47,7 +59,7 @@ describe('artwork lock manager', () => {
 		const { server, isLocked } = itemLevelServer();
 		const { store, locks } = manager();
 
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 
 		expect(isLocked()).toBe(true);
 		expect(store.keys()).toEqual([POSTER]);
@@ -57,7 +69,7 @@ describe('artwork lock manager', () => {
 		const { server, lockField } = itemLevelServer();
 		const { store, locks } = manager({ enabled: false });
 
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 
 		expect(lockField).not.toHaveBeenCalled();
 		expect(store.keys()).toEqual([]);
@@ -67,7 +79,7 @@ describe('artwork lock manager', () => {
 		const { server, lockField, isLocked } = itemLevelServer(true);
 		const { store, locks } = manager();
 
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 		await locks.afterRestore(server, POSTER);
 
 		expect(lockField).not.toHaveBeenCalled();
@@ -79,9 +91,9 @@ describe('artwork lock manager', () => {
 		const { server, isLocked } = itemLevelServer();
 		const { store, locks } = manager();
 
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 		// Already locked by PosterPilot's own poster, so this is not the person's lock.
-		await locks.afterApply(server, BACKDROP);
+		await apply(locks, server, BACKDROP);
 		expect(store.keys()).toHaveLength(2);
 
 		await locks.afterRestore(server, POSTER);
@@ -97,15 +109,71 @@ describe('artwork lock manager', () => {
 		const server = {
 			type: 'plex',
 			capabilities: { fieldLock: 'supported', limitations: [] },
-			lockField
+			lockField,
+			readFieldLock: vi.fn(async () => false)
 		} as unknown as MediaServer;
 		const { locks } = manager();
 
-		await locks.afterApply(server, POSTER);
-		await locks.afterApply(server, BACKDROP);
+		await apply(locks, server, POSTER);
+		await apply(locks, server, BACKDROP);
 		await locks.afterRestore(server, POSTER);
 
 		expect(lockField).toHaveBeenLastCalledWith('item-1', 'poster', false);
+	});
+
+	it('reads the lock before the write, which on Plex takes the lock itself', async () => {
+		// Plex locks the field as part of the upload, so a read after the write
+		// would mistake every apply for a lock the person set.
+		const { server, lockField, isLocked } = itemLevelServer();
+		const { store, locks } = manager();
+
+		await apply(locks, server, POSTER, () => void lockField('item-1', 'poster', true));
+		await locks.afterRestore(server, POSTER);
+
+		expect(store.keys()).toEqual([]);
+		expect(isLocked()).toBe(false);
+	});
+
+	it('claims no lock whose state it cannot read', async () => {
+		const warn = vi.fn();
+		const lockField = vi.fn(async () => undefined);
+		const unreadable = {
+			type: 'plex',
+			capabilities: { fieldLock: 'supported', limitations: [] },
+			lockField,
+			readFieldLock: vi.fn(async () => {
+				throw new Error('HTTP 500');
+			})
+		} as unknown as MediaServer;
+		const noReader = { ...unreadable, readFieldLock: undefined } as unknown as MediaServer;
+		const { store, locks } = manager({ warn });
+
+		await apply(locks, unreadable, POSTER);
+		await apply(locks, noReader, BACKDROP);
+		await locks.afterRestore(unreadable, POSTER);
+
+		expect(store.keys()).toEqual([]);
+		expect(lockField).not.toHaveBeenCalled();
+		expect(warn).toHaveBeenCalledWith(
+			expect.stringMatching(/could not be read/),
+			expect.objectContaining({ error: 'HTTP 500' })
+		);
+	});
+
+	it('keeps the earlier applied artwork locked when a replacement is undone', async () => {
+		const { server, isLocked } = itemLevelServer();
+		const { store, locks } = manager();
+
+		await apply(locks, server, POSTER);
+		await apply(locks, server, POSTER);
+
+		await locks.afterRestore(server, POSTER);
+		expect(isLocked()).toBe(true);
+		expect(await store.holds(POSTER)).toBe(1);
+
+		await locks.afterRestore(server, POSTER);
+		expect(isLocked()).toBe(false);
+		expect(store.keys()).toEqual([]);
 	});
 
 	it('still releases its own locks after the opt-in is turned off', async () => {
@@ -114,7 +182,7 @@ describe('artwork lock manager', () => {
 		let enabled = true;
 		const locks = createArtworkLockManager({ store, lockingEnabled: () => enabled });
 
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 		enabled = false;
 		await locks.afterRestore(server, POSTER);
 
@@ -133,7 +201,7 @@ describe('artwork lock manager', () => {
 		} as unknown as MediaServer;
 		const { store, locks } = manager({ warn });
 
-		await expect(locks.afterApply(server, POSTER)).resolves.toBeUndefined();
+		await expect(apply(locks, server, POSTER)).resolves.toBeUndefined();
 
 		expect(store.keys()).toEqual([]);
 		expect(warn).toHaveBeenCalledWith(
@@ -145,7 +213,7 @@ describe('artwork lock manager', () => {
 	it('keeps the record when an unlock fails so a later undo can retry', async () => {
 		const { server, lockField } = itemLevelServer();
 		const { store, locks } = manager({ warn: vi.fn() });
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 		lockField.mockRejectedValueOnce(new Error('HTTP 500'));
 
 		await expect(locks.afterRestore(server, POSTER)).resolves.toBeUndefined();
@@ -162,7 +230,7 @@ describe('artwork lock manager', () => {
 		} as unknown as MediaServer;
 		const { locks } = manager();
 
-		await locks.afterApply(server, POSTER);
+		await apply(locks, server, POSTER);
 
 		expect(lockField).not.toHaveBeenCalled();
 	});

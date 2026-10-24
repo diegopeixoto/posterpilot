@@ -523,7 +523,8 @@ describe('ArtworkApplyCoordinator', () => {
 				readArtwork: vi.fn(async () => liveArtwork),
 				applyPosterBytes: vi.fn(async () => undefined),
 				applyBackgroundBytes: vi.fn(async () => undefined),
-				lockField
+				lockField,
+				readFieldLock: vi.fn(async () => false)
 			} as unknown as MediaServer;
 
 			await subject.prepareOperation(planned, { server });
@@ -559,7 +560,8 @@ describe('ArtworkApplyCoordinator', () => {
 			capabilities: { fieldLock: 'supported' },
 			readArtwork: vi.fn(async () => beforeArtwork),
 			applyPosterBytes: vi.fn(async () => undefined),
-			lockField
+			lockField,
+			readFieldLock: vi.fn(async () => false)
 		} as unknown as MediaServer;
 
 		await subject.prepareOperation(planned, { server });
@@ -588,7 +590,8 @@ describe('ArtworkApplyCoordinator', () => {
 			capabilities: { fieldLock: 'unsupported' },
 			readArtwork: vi.fn(async () => beforeArtwork),
 			applyPosterBytes: vi.fn(async () => undefined),
-			lockField
+			lockField,
+			readFieldLock: vi.fn(async () => false)
 		} as unknown as MediaServer;
 
 		await subject.prepareOperation(planned, { server });

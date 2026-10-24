@@ -1371,7 +1371,9 @@ export type NewEvent = typeof events.$inferInsert;
  *
  * A lock is only ever released by the code that took it: a lock that was already
  * on the item before PosterPilot applied anything belongs to the person who set
- * it and never gets a row. On servers whose lock covers the whole item
+ * it and never gets a row. Each apply that locked the slot adds a hold, and undo
+ * drops one, so undoing a replacement keeps the earlier applied artwork it
+ * restores protected. On servers whose lock covers the whole item
  * (Jellyfin/Emby `LockData`), undo releases it only once no row is left for the
  * target, so undoing the poster never unprotects a backdrop PosterPilot still owns.
  */
@@ -1383,6 +1385,8 @@ export const artworkFieldLocks = sqliteTable(
 			.references(() => serverInstances.id, { onDelete: 'cascade' }),
 		targetId: text('target_id').notNull(),
 		kind: text('kind', { enum: ['poster', 'background'] }).notNull(),
+		/** Applies still holding the lock; undo drops one, and the lock goes with the last. */
+		holds: integer('holds').notNull().default(1),
 		createdAt: integer('created_at', { mode: 'timestamp' })
 			.notNull()
 			.$defaultFn(() => new Date())

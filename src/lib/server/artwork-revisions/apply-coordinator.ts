@@ -255,20 +255,26 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 	}
 
 	/**
-	 * Lock the slot right after a successful server write so the server's agents
-	 * cannot overwrite the applied image. Never throws: the bytes are already on
+	 * Read the slot's lock before the server write, so a lock the person set is
+	 * told apart from the one the write itself takes, and return the step that
+	 * locks the slot right after a successful write so the server's agents cannot
+	 * overwrite the applied image. Neither step throws: the bytes are already on
 	 * the server, so a lock failure must not record the apply as failed.
 	 */
-	async function lockAppliedArtwork(
+	async function claimArtworkLock(
 		server: MediaServer,
 		operation: ApplyPlanOperation,
 		kind: 'poster' | 'background'
-	): Promise<void> {
-		await options.artworkLocks?.afterApply(server, {
+	): Promise<() => Promise<void>> {
+		const locks = options.artworkLocks;
+		if (!locks) return async () => undefined;
+		const key = {
 			serverInstanceId: operation.target.serverInstanceId,
 			targetId: operation.targetId,
 			kind
-		});
+		};
+		const claim = await locks.beforeApply(server, key);
+		return () => locks.afterApply(server, key, claim);
 	}
 
 	async function prepareServer(operation: ApplyPlanOperation, server?: MediaServer): Promise<void> {
@@ -364,20 +370,22 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 			if (!server.applyBackgroundBytes) {
 				throw new Error('Target server does not support background artwork bytes');
 			}
+			const lockAppliedArtwork = await claimArtworkLock(server, operation, 'background');
 			await server.applyBackgroundBytes(
 				operation.targetId,
 				captured.expectedBytes,
 				captured.expectedContentType
 			);
-			await lockAppliedArtwork(server, operation, 'background');
+			await lockAppliedArtwork();
 			return;
 		}
+		const lockAppliedArtwork = await claimArtworkLock(server, operation, 'poster');
 		await server.applyPosterBytes(
 			operation.targetId,
 			captured.expectedBytes,
 			captured.expectedContentType
 		);
-		await lockAppliedArtwork(server, operation, 'poster');
+		await lockAppliedArtwork();
 	}
 
 	async function prepareKometa(operation: ApplyPlanOperation): Promise<void> {

@@ -187,7 +187,8 @@ function fixture(
 		...(options.fieldLockSupported ? { capabilities: { fieldLock: 'supported' as const } } : {}),
 		readArtwork,
 		applyPosterBytes,
-		lockField
+		lockField,
+		readFieldLock: vi.fn(async () => false)
 	} as unknown as MediaServer;
 	const active = { value: 'server-a' as string | null };
 	const coverageRefreshes: { trigger: string; scope: { mediaItemIds: number[] } }[] = [];

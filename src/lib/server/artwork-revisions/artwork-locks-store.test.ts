@@ -26,7 +26,7 @@ afterEach(() => client.close());
 describe('database artwork lock store', () => {
 	const poster = { serverInstanceId: 'server-1', targetId: 'item-1', kind: 'poster' } as const;
 
-	it('records, counts per target, and forgets locks', async () => {
+	it('counts holds per slot and slots per target, and forgets a slot with its last hold', async () => {
 		const store = createDatabaseArtworkLockStore(drizzle(client, { schema }));
 
 		await store.add(poster);
@@ -34,12 +34,17 @@ describe('database artwork lock store', () => {
 		await store.add({ ...poster, kind: 'background' });
 		await store.add({ ...poster, serverInstanceId: 'server-2' });
 
-		expect(await store.has(poster)).toBe(true);
+		expect(await store.holds(poster)).toBe(2);
 		expect(await store.countForTarget('server-1', 'item-1')).toBe(2);
 
-		await store.remove(poster);
+		await store.release(poster);
+		expect(await store.holds(poster)).toBe(1);
+		expect(await store.countForTarget('server-1', 'item-1')).toBe(2);
 
-		expect(await store.has(poster)).toBe(false);
+		await store.release(poster);
+		await store.release(poster);
+
+		expect(await store.holds(poster)).toBe(0);
 		expect(await store.countForTarget('server-1', 'item-1')).toBe(1);
 		expect(await store.countForTarget('server-2', 'item-1')).toBe(1);
 	});
