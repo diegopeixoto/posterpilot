@@ -20,6 +20,8 @@ import {
 	type CustomUploadPlanPreview
 } from './custom-upload-plan';
 import { refreshCoverageAfter } from '$lib/server/coverage/refresh';
+import type { ArtworkLockManager } from './artwork-locks';
+import { createLiveArtworkLockManager } from './artwork-locks-db';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore, resolveArtworkSnapshotDirectory } from './snapshot-store';
 import { createArtworkSnapshotRepository, type ArtworkSnapshotRepository } from './snapshots';
@@ -53,6 +55,8 @@ export interface CustomUploadRuntimeDependencies {
 	getActiveServerInstanceId(): Promise<string | null>;
 	getItem(mediaItemId: number, serverInstanceId: string): Promise<CustomUploadRuntimeItem | null>;
 	resolveServer(serverInstanceId: string): Promise<MediaServer>;
+	/** Locks the uploaded poster against the server's agents; absent, nothing is locked. */
+	artworkLocks?: ArtworkLockManager;
 	/**
 	 * Told about a finished upload so coverage learns about it.
 	 *
@@ -240,16 +244,14 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 			writeFailed = true;
 		}
 
-		// Lock the poster field right after a successful upload so the server's
-		// automatic metadata agents cannot overwrite the custom image. Same contract
-		// as the plan-based apply: capability-gated, and a lock failure fails the
-		// operation rather than leaving the artwork silently unprotected.
-		if (!writeFailed && scope.server.capabilities?.fieldLock === 'supported') {
-			try {
-				await scope.server.lockField?.(scope.item.targetId, 'poster', true);
-			} catch {
-				writeFailed = true;
-			}
+		// Same contract as the plan-based apply: lock the uploaded poster against the
+		// server's agents, and never let a lock failure mark the upload as failed.
+		if (!writeFailed) {
+			await dependencies.artworkLocks?.afterApply(scope.server, {
+				serverInstanceId: scope.serverInstanceId,
+				targetId: scope.item.targetId,
+				kind: 'poster'
+			});
 		}
 
 		let afterArtwork: ServerArtwork | null | undefined;
@@ -361,6 +363,7 @@ function runtime() {
 		store: operationPlanStore,
 		snapshots: createArtworkSnapshotRepository(db, snapshotStore),
 		ledger: createArtworkRevisionLedger(db),
+		artworkLocks: createLiveArtworkLockManager(db),
 		getActiveServerInstanceId: async () => (await getActiveServerInstance())?.id ?? null,
 		getItem: async (mediaItemId, serverInstanceId) => {
 			const item = await getMediaItem(mediaItemId, serverInstanceId);

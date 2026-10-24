@@ -22,6 +22,7 @@ import {
 	createCustomUploadRuntime,
 	type CustomUploadRuntimeDependencies
 } from './custom-upload-runtime';
+import { createArtworkLockManager, createMemoryArtworkLockStore } from './artwork-locks';
 import type { ArtworkRevisionLedger } from './ledger';
 import type { ArtworkSnapshotRepository } from './snapshots';
 
@@ -208,6 +209,10 @@ function fixture(
 					}
 				: null,
 		resolveServer: async () => server,
+		artworkLocks: createArtworkLockManager({
+			store: createMemoryArtworkLockStore(),
+			lockingEnabled: () => true
+		}),
 		refreshCoverageAfter: async (trigger, scope) => {
 			coverageRefreshes.push({ trigger, scope });
 		},
@@ -326,6 +331,18 @@ describe('custom upload runtime', () => {
 		expect(subject.lockField.mock.invocationCallOrder[0]).toBeGreaterThan(
 			subject.applyPosterBytes.mock.invocationCallOrder[0]
 		);
+	});
+
+	it('keeps a successful upload when the poster lock fails', async () => {
+		const upload = jpeg(9);
+		const before = artwork(jpeg(1), 'before');
+		const after = artwork(upload, 'after');
+		const subject = fixture([before, before, after], { fieldLockSupported: true });
+		subject.lockField.mockRejectedValueOnce(new Error('HTTP 403'));
+		const plan = await preview(subject, upload);
+		const result = await subject.runtime.confirm(confirmation(plan, upload));
+
+		expect(result).toMatchObject({ ok: true, status: 'success', verification: 'exact' });
 	});
 
 	it('does not lock the poster field when the server contract does not support it', async () => {

@@ -52,7 +52,11 @@ describe('media-server capability normalization', () => {
 			nativeCollectionDiscovery: 'unsupported',
 			collectionArtwork: 'supported',
 			evidence: 'verified',
-			limitations: ['poster_write_disabled']
+			limitations: [
+				'poster_write_disabled',
+				'field_lock_item_level',
+				'field_lock_blocks_item_metadata_refresh'
+			]
 		});
 	});
 
@@ -66,6 +70,13 @@ describe('media-server capability normalization', () => {
 		expect(normalizeMediaServerCapabilities('emby', { fieldLock: false }).fieldLock).toBe(
 			'supported'
 		);
+		// The lock's scope travels with the contract too: a pre-upgrade snapshot's
+		// `field_lock_not_applicable` must not hide that the lock covers the whole item.
+		expect(
+			normalizeMediaServerCapabilities('jellyfin', {
+				limitations: ['field_lock_not_applicable', 'custom_note']
+			}).limitations
+		).toEqual(['custom_note', 'field_lock_item_level', 'field_lock_blocks_item_metadata_refresh']);
 	});
 
 	it('normalizes concrete non-secret instance identity', () => {

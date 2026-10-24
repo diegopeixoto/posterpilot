@@ -33,6 +33,7 @@ import {
 	verifyServerArtworkRead,
 	type ArtworkVerificationResult
 } from '$lib/server/revisions/verification';
+import type { ArtworkLockManager } from './artwork-locks';
 import type { ArtworkRevisionLedger } from './ledger';
 import type { ArtworkSnapshotRepository } from './snapshots';
 
@@ -65,6 +66,8 @@ export interface ArtworkApplyCoordinatorOptions {
 		targetItemIds: number[];
 	};
 	kometaAssetsDirectory: string;
+	/** Locks each applied slot against the server's agents; absent, nothing is locked. */
+	artworkLocks?: ArtworkLockManager;
 	clock?: () => Date;
 	/**
 	 * Test/integration seam; null or empty results fail the mandatory preflight.
@@ -252,19 +255,20 @@ export function createArtworkApplyCoordinator(options: ArtworkApplyCoordinatorOp
 	}
 
 	/**
-	 * Lock the artwork field right after a successful server write so the server's
-	 * automatic metadata agents cannot overwrite the applied image. Skipped on
-	 * servers whose contract does not include field locks; a lock failure fails the
-	 * operation — silently leaving the applied artwork unprotected is the exact
-	 * failure mode this step exists to prevent.
+	 * Lock the slot right after a successful server write so the server's agents
+	 * cannot overwrite the applied image. Never throws: the bytes are already on
+	 * the server, so a lock failure must not record the apply as failed.
 	 */
 	async function lockAppliedArtwork(
 		server: MediaServer,
 		operation: ApplyPlanOperation,
 		kind: 'poster' | 'background'
 	): Promise<void> {
-		if (server.capabilities?.fieldLock !== 'supported' || !server.lockField) return;
-		await server.lockField(operation.targetId, kind, true);
+		await options.artworkLocks?.afterApply(server, {
+			serverInstanceId: operation.target.serverInstanceId,
+			targetId: operation.targetId,
+			kind
+		});
 	}
 
 	async function prepareServer(operation: ApplyPlanOperation, server?: MediaServer): Promise<void> {

@@ -625,6 +625,8 @@
 	"settings_suggest_preselect": "Présélectionner le visuel le mieux noté comme suggestion",
 	"settings_incremental_sync": "Ne réanalyser que les éléments modifiés sur le serveur",
 	"settings_fun_enabled": "Activer la section Fun (expérimentations comme le tirage aléatoire)",
+	"settings_jellyfin_item_lock": "Verrouiller les visuels appliqués sur Jellyfin/Emby",
+	"settings_jellyfin_item_lock_hint": "Active le verrou de métadonnées de l'élément pour que les actualisations planifiées ne remplacent pas le visuel. Jellyfin et Emby ne verrouillent que l'élément entier : ses autres métadonnées cessent donc aussi d'être actualisées (y compris les saisons et épisodes d'une série) jusqu'à l'annulation. Annuler ne libère que les verrous posés par PosterPilot.",
 	"settings_library_default_sort": "Tri par défaut de la médiathèque",
 	"settings_default_apply_method": "Méthode d'application par défaut",
 	"settings_method_both": "{server} + Kometa",

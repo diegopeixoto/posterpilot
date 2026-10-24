@@ -370,7 +370,7 @@ export function embyLikeProvider(
 	 * the Jellyfin web metadata editor performs. The userless list form
 	 * (`/Items?ids=…`) returns an incomplete DTO and must never feed this write.
 	 */
-	async function setItemLockData(itemId: string, locked: boolean): Promise<void> {
+	async function readFullItem(itemId: string): Promise<Record<string, unknown>> {
 		const userId = await resolveLibraryUserId();
 		if (!userId) {
 			throw new Error(
@@ -378,7 +378,14 @@ export function embyLikeProvider(
 			);
 		}
 		const readPath = `/Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}`;
-		const item = await getJson<Record<string, unknown>>(readPath);
+		return getJson<Record<string, unknown>>(readPath);
+	}
+
+	async function setItemLockData(itemId: string, locked: boolean): Promise<void> {
+		const item = await readFullItem(itemId);
+		// Nothing to write: skipping the round-trip also avoids re-sending a DTO
+		// whose other fields someone may be editing right now.
+		if ((item.LockData === true) === locked) return;
 		// `Trickplay` (server-generated scrub data) cannot round-trip through this
 		// endpoint: Jellyfin answers HTTP 500 failing to deserialize
 		// `TrickplayInfoDto` (System.Text.Json constructor binding; observed on
@@ -616,6 +623,10 @@ export function embyLikeProvider(
 		// Plex field locks' protective intent.
 		async lockField(itemId: string, _field: LockField, locked: boolean): Promise<void> {
 			await setItemLockData(itemId, locked);
+		},
+
+		async readFieldLock(itemId: string, _field: LockField): Promise<boolean> {
+			return (await readFullItem(itemId)).LockData === true;
 		}
 	};
 }

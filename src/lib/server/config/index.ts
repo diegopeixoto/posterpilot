@@ -104,6 +104,12 @@ export interface AppConfig {
 	applyConcurrency: number;
 	/** Whether the UI pre-selects the top-scored candidate as a suggestion. */
 	suggestPreselect: boolean;
+	/**
+	 * Whether applying artwork on Jellyfin/Emby sets the item's `LockData`. That
+	 * lock covers the whole item — it also stops metadata refreshes — so it is
+	 * opt-in. Plex always locks the one applied field.
+	 */
+	jellyfinItemLock: boolean;
 	/** Whether library sync skips unchanged items by default. */
 	incrementalSync: boolean;
 	/** Days a cached thumbnail stays fresh before it is re-fetched. */
@@ -169,6 +175,7 @@ const ENV_MAP: Record<ConfigKey, string> = {
 	eventRetention: 'EVENT_RETENTION',
 	applyConcurrency: 'APPLY_CONCURRENCY',
 	suggestPreselect: 'SUGGEST_PRESELECT',
+	jellyfinItemLock: 'JELLYFIN_ITEM_LOCK',
 	incrementalSync: 'INCREMENTAL_SYNC',
 	thumbCacheTtlDays: 'THUMB_CACHE_TTL_DAYS',
 	thumbCacheMaxMb: 'THUMB_CACHE_MAX_MB',
@@ -201,6 +208,7 @@ const DEFAULTS = {
 	eventRetention: 2000,
 	applyConcurrency: 4,
 	suggestPreselect: true,
+	jellyfinItemLock: false,
 	incrementalSync: true,
 	thumbCacheTtlDays: 30,
 	thumbCacheMaxMb: 512,
@@ -244,6 +252,7 @@ const WRITABLE_KEYS: ConfigKey[] = [
 	'language',
 	'applyConcurrency',
 	'suggestPreselect',
+	'jellyfinItemLock',
 	'incrementalSync',
 	'thumbCacheTtlDays',
 	'thumbCacheMaxMb',
@@ -369,6 +378,7 @@ export async function resolveConfig(): Promise<AppConfig> {
 		eventRetention: toInt(rawValue('eventRetention', persisted), DEFAULTS.eventRetention),
 		applyConcurrency: toInt(rawValue('applyConcurrency', persisted), DEFAULTS.applyConcurrency),
 		suggestPreselect: toBool(rawValue('suggestPreselect', persisted), DEFAULTS.suggestPreselect),
+		jellyfinItemLock: toBool(rawValue('jellyfinItemLock', persisted), DEFAULTS.jellyfinItemLock),
 		incrementalSync: toBool(rawValue('incrementalSync', persisted), DEFAULTS.incrementalSync),
 		thumbCacheTtlDays: toInt(rawValue('thumbCacheTtlDays', persisted), DEFAULTS.thumbCacheTtlDays),
 		thumbCacheMaxMb: toInt(rawValue('thumbCacheMaxMb', persisted), DEFAULTS.thumbCacheMaxMb),
@@ -787,6 +797,12 @@ export interface PublicConfig {
 	applyConcurrency: number;
 	/** Whether the UI pre-selects the top-scored candidate as a suggestion. */
 	suggestPreselect: boolean;
+	/**
+	 * Whether applying artwork on Jellyfin/Emby sets the item's `LockData`. That
+	 * lock covers the whole item — it also stops metadata refreshes — so it is
+	 * opt-in. Plex always locks the one applied field.
+	 */
+	jellyfinItemLock: boolean;
 	/** Whether library sync skips unchanged items by default. */
 	incrementalSync: boolean;
 	/** Days a cached thumbnail stays fresh before it is re-fetched. */
@@ -840,6 +856,7 @@ export async function publicConfig(serverInstanceId?: string): Promise<PublicCon
 		eventRetention: c.eventRetention,
 		applyConcurrency: c.applyConcurrency,
 		suggestPreselect: c.suggestPreselect,
+		jellyfinItemLock: c.jellyfinItemLock,
 		incrementalSync: c.incrementalSync,
 		thumbCacheTtlDays: c.thumbCacheTtlDays,
 		thumbCacheMaxMb: c.thumbCacheMaxMb,

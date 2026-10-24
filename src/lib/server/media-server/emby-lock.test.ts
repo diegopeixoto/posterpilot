@@ -129,6 +129,26 @@ describe('emby lockField (Jellyfin LockData)', () => {
 		expect(server.lock()).toBe(true);
 	});
 
+	it('skips the write when LockData already matches', async () => {
+		// Nothing to change means no full-DTO round-trip racing someone's edit.
+		const server = installStatefulServer('item-1');
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		await provider.lockField('item-1', 'poster', true);
+		await provider.lockField('item-1', 'background', true);
+
+		expect(server.posts()).toHaveLength(1);
+	});
+
+	it('reads the current LockData so a hand-set lock is recognised', async () => {
+		installStatefulServer('item-1');
+		const provider = embyLikeProvider('http://jellyfin.local', 'secret', 'jellyfin');
+
+		expect(await provider.readFieldLock?.('item-1', 'poster')).toBe(false);
+		await provider.lockField('item-1', 'poster', true);
+		expect(await provider.readFieldLock?.('item-1', 'poster')).toBe(true);
+	});
+
 	it('fails closed when no administrator user is resolvable', async () => {
 		vi.stubGlobal(
 			'fetch',

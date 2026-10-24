@@ -98,6 +98,7 @@ const isolatedPosterPilotEnvironment = Object.fromEntries(
 		'APP_LANGUAGE',
 		'APPLY_CONCURRENCY',
 		'SUGGEST_PRESELECT',
+		'JELLYFIN_ITEM_LOCK',
 		'INCREMENTAL_SYNC',
 		'THUMB_CACHE_TTL_DAYS',
 		'THUMB_CACHE_MAX_MB',

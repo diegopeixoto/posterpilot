@@ -625,6 +625,8 @@
 	"settings_suggest_preselect": "将评分最高的封面预选为建议",
 	"settings_incremental_sync": "仅重新扫描服务器上已更改的项目",
 	"settings_fun_enabled": "启用趣味板块（如随机推荐器等实验功能）",
+	"settings_jellyfin_item_lock": "锁定在 Jellyfin/Emby 上应用的图片",
+	"settings_jellyfin_item_lock_hint": "为项目设置元数据锁，防止计划刷新替换图片。Jellyfin 和 Emby 只能锁定整个项目，因此在撤销之前，它的其他元数据（包括剧集的季和集）也会停止刷新。撤销只会解除 PosterPilot 设置的锁。",
 	"settings_library_default_sort": "媒体库默认排序",
 	"settings_default_apply_method": "默认应用方式",
 	"settings_method_both": "{server} + Kometa",

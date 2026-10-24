@@ -57,6 +57,12 @@ Em **Metadados e provedores**, ajuste os pesos de provedor, resolução e propor
 mesma configuração determinística vale na prévia e execução. `SUGGEST_PRESELECT`
 mostra a melhor sugestão, mas aceitar/preparar é sempre explícito.
 
+`JELLYFIN_ITEM_LOCK` (desligado por padrão) trava no Jellyfin/Emby as artes aplicadas
+com o `LockData` do item. Essa trava vale para o item inteiro e também impede a
+atualização dos outros metadados dele (incluindo temporadas e episódios de uma série),
+por isso é opcional; o Plex sempre trava só o campo aplicado. Desfazer libera apenas as
+travas que o PosterPilot colocou.
+
 ## Ordem dos provedores
 
 **Metadados e provedores** também permite **reordenar** os quatro provedores,
@@ -230,6 +236,7 @@ suportados são `en`, `es`, `zh`, `ja`, `pt-BR` e `fr`.
 | `HTTP_CACHE_TTL_DAYS` | `7` | TTL do cache HTTP em dias. |
 | `APPLY_CONCURRENCY` | `4` | Itens simultâneos em aplicação em massa. |
 | `SUGGEST_PRESELECT` | ligado | Calcula e mostra sugestões explícitas. |
+| `JELLYFIN_ITEM_LOCK` | desligado | Coloca o `LockData` do item ao aplicar no Jellyfin/Emby; também congela os metadados dele até desfazer. |
 | `INCREMENTAL_SYNC` | ligado | Ignora itens inalterados no sync normal. |
 | `LIBRARY_DEFAULT_SORT` | `title` | `title`, `year`, `rating`, `runtime`, `recent` ou `added`. |
 | `FUN_ENABLED` | desligado | Exibe as ferramentas FUN. |

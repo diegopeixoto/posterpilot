@@ -42,6 +42,8 @@ export function defaultMediaServerCapabilities(type: ServerType): MediaServerCap
 	};
 }
 
+const FIELD_LOCK_LIMITATION = 'field_lock_';
+
 /** Merge stored advertised/verified values into the conservative provider contract. */
 export function normalizeMediaServerCapabilities(
 	type: ServerType,
@@ -74,7 +76,15 @@ export function normalizeMediaServerCapabilities(
 		collectionArtwork: support(value.collectionArtwork, fallback.collectionArtwork ?? 'unknown'),
 		evidence,
 		limitations: Array.isArray(value.limitations)
-			? value.limitations.filter((entry): entry is string => typeof entry === 'string')
+			? [
+					// The field-lock limitations describe the same shipped contract as
+					// `fieldLock` above, so they come from the code, never the snapshot.
+					...value.limitations.filter(
+						(entry): entry is string =>
+							typeof entry === 'string' && !entry.startsWith(FIELD_LOCK_LIMITATION)
+					),
+					...fallback.limitations.filter((entry) => entry.startsWith(FIELD_LOCK_LIMITATION))
+				]
 			: fallback.limitations
 	};
 }

@@ -1366,6 +1366,30 @@ export type ThumbnailCacheEntry = typeof thumbnailCache.$inferSelect;
 export type NewThumbnailCacheEntry = typeof thumbnailCache.$inferInsert;
 export type Event = typeof events.$inferSelect;
 export type NewEvent = typeof events.$inferInsert;
+/**
+ * Artwork locks PosterPilot set on a media server, one row per target and slot.
+ *
+ * A lock is only ever released by the code that took it: a lock that was already
+ * on the item before PosterPilot applied anything belongs to the person who set
+ * it and never gets a row. On servers whose lock covers the whole item
+ * (Jellyfin/Emby `LockData`), undo releases it only once no row is left for the
+ * target, so undoing the poster never unprotects a backdrop PosterPilot still owns.
+ */
+export const artworkFieldLocks = sqliteTable(
+	'artwork_field_locks',
+	{
+		serverInstanceId: text('server_instance_id')
+			.notNull()
+			.references(() => serverInstances.id, { onDelete: 'cascade' }),
+		targetId: text('target_id').notNull(),
+		kind: text('kind', { enum: ['poster', 'background'] }).notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp' })
+			.notNull()
+			.$defaultFn(() => new Date())
+	},
+	(t) => [uniqueIndex('artwork_field_locks_slot_unique').on(t.serverInstanceId, t.targetId, t.kind)]
+);
+
 export type MediaCollection = typeof mediaCollections.$inferSelect;
 export type CollectionMembership = typeof collectionMemberships.$inferSelect;
 export type ArtworkSlotState = typeof artworkSlotStates.$inferSelect;

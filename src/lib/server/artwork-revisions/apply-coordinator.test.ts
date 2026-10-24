@@ -35,6 +35,11 @@ import {
 	type ArtworkApplyCoordinator,
 	type ArtworkApplyCoordinatorOptions
 } from './apply-coordinator';
+import {
+	createArtworkLockManager,
+	createMemoryArtworkLockStore,
+	type ArtworkLockManager
+} from './artwork-locks';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore } from './snapshot-store';
 import { createArtworkSnapshotRepository, type ArtworkSnapshotRepository } from './snapshots';
@@ -244,15 +249,25 @@ function coordinator(
 	preflight: NonNullable<ArtworkApplyCoordinatorOptions['fetchArtworkBytes']> = async (url) => ({
 		bytes: bytes(url),
 		contentType: 'image/jpeg'
-	})
+	}),
+	artworkLocks?: ArtworkLockManager
 ): ArtworkApplyCoordinator {
 	return createArtworkApplyCoordinator({
 		snapshots,
 		ledger,
 		planId: 'plan-global',
 		kometaAssetsDirectory: kometaDirectory,
+		artworkLocks,
 		clock: () => NOW,
 		fetchArtworkBytes: preflight
+	});
+}
+
+function lockManager(warn = vi.fn()) {
+	return createArtworkLockManager({
+		store: createMemoryArtworkLockStore(),
+		lockingEnabled: () => true,
+		warn
 	});
 }
 
@@ -496,7 +511,7 @@ describe('ArtworkApplyCoordinator', () => {
 				bytes: expectedBytes,
 				contentType: 'image/png'
 			}));
-			const subject = coordinator(preflight);
+			const subject = coordinator(preflight, lockManager());
 			const planned = operation({ id: `lock-${kind}`, kind });
 			const beforeArtwork = artwork(`before lock ${kind}`, `before-lock-${kind}`, kind);
 			planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
@@ -522,15 +537,19 @@ describe('ArtworkApplyCoordinator', () => {
 		}
 	);
 
-	it('fails the server operation when the field lock cannot be applied', async () => {
+	it('keeps a successful write when the field lock cannot be applied', async () => {
+		// The bytes are already on the server: failing the operation here would make
+		// the ledger and undo history disagree with what the server serves.
 		const planned = operation({ id: 'lock-failure' });
 		const beforeArtwork = artwork('before lock failure', 'before-lock-failure');
 		planned.current.fingerprint = sha256Bytes(beforeArtwork.data);
+		const warn = vi.fn();
 		const subject = coordinator(
 			vi.fn(async () => ({
 				bytes: bytes('lock failure bytes'),
 				contentType: 'image/jpeg'
-			}))
+			})),
+			lockManager(warn)
 		);
 		const lockField = vi.fn(async () => {
 			throw new Error('Jellyfin returned HTTP 403 Forbidden for /Items/item-1');
@@ -544,8 +563,11 @@ describe('ArtworkApplyCoordinator', () => {
 		} as unknown as MediaServer;
 
 		await subject.prepareOperation(planned, { server });
-		await expect(subject.executeServerOperation(planned, { server })).rejects.toThrow(
-			/Jellyfin returned HTTP 403/
+		await expect(subject.executeServerOperation(planned, { server })).resolves.toBeUndefined();
+		expect(server.applyPosterBytes).toHaveBeenCalledOnce();
+		expect(warn).toHaveBeenCalledWith(
+			expect.stringMatching(/could not be locked/),
+			expect.objectContaining({ error: expect.stringMatching(/HTTP 403/) })
 		);
 	});
 
@@ -557,7 +579,8 @@ describe('ArtworkApplyCoordinator', () => {
 			vi.fn(async () => ({
 				bytes: bytes('unsupported lock bytes'),
 				contentType: 'image/jpeg'
-			}))
+			})),
+			lockManager()
 		);
 		const lockField = vi.fn(async () => undefined);
 		const server = {
