@@ -160,6 +160,7 @@
 	let defaultApplyMethod = $state<string>(initialData.config.defaultApplyMethod);
 	let applyConcurrency = $state<string | number>(String(initialData.config.applyConcurrency));
 	let suggestPreselect = $state(initialData.config.suggestPreselect);
+	let jellyfinItemLock = $state(initialData.config.jellyfinItemLock);
 	let incrementalSync = $state(initialData.config.incrementalSync);
 	let thumbCacheTtlDays = $state<string | number>(String(initialData.config.thumbCacheTtlDays));
 	let thumbCacheMaxMb = $state<string | number>(String(initialData.config.thumbCacheMaxMb));
@@ -254,6 +255,7 @@
 				defaultApplyMethod,
 				applyConcurrency: String(applyConcurrency),
 				suggestPreselect: String(suggestPreselect),
+				jellyfinItemLock: String(jellyfinItemLock),
 				incrementalSync: String(incrementalSync),
 				thumbCacheTtlDays: String(thumbCacheTtlDays),
 				thumbCacheMaxMb: String(thumbCacheMaxMb),
@@ -448,6 +450,7 @@
 			bind:thumbCacheTtlDays
 			bind:thumbCacheMaxMb
 			bind:suggestPreselect
+			bind:jellyfinItemLock
 			bind:incrementalSync
 			bind:funEnabled
 			bind:libraryDefaultSort

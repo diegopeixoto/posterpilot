@@ -16,6 +16,11 @@ import {
 } from '$lib/server/revisions/kometa-state';
 import { sha256Bytes } from '$lib/server/revisions/verification';
 import {
+	createArtworkLockManager,
+	createMemoryArtworkLockStore,
+	type ArtworkLockKey
+} from './artwork-locks';
+import {
 	ArtworkUndoExecutionError,
 	createArtworkUndoExecutor,
 	type ArtworkUndoExecutorDependencies,
@@ -69,6 +74,7 @@ interface ServerHarness {
 	applyPosterBytes: ReturnType<typeof vi.fn>;
 	applyBackgroundBytes: ReturnType<typeof vi.fn>;
 	deleteArtwork: ReturnType<typeof vi.fn>;
+	lockField: ReturnType<typeof vi.fn>;
 }
 
 function serverHarness(input: {
@@ -94,6 +100,7 @@ function serverHarness(input: {
 	const deleteArtwork = vi.fn(async () => {
 		current = null;
 	});
+	const lockField = vi.fn(async () => undefined);
 	const type = input.type ?? 'plex';
 	const server: MediaServer = {
 		type,
@@ -119,14 +126,15 @@ function serverHarness(input: {
 		applyBackgroundBytes,
 		readArtwork: vi.fn(async () => current),
 		...(input.deleteSupported ? { deleteArtwork } : {}),
-		lockField: vi.fn()
+		lockField
 	};
 	return {
 		server,
 		getCurrent: () => current,
 		applyPosterBytes,
 		applyBackgroundBytes,
-		deleteArtwork
+		deleteArtwork,
+		lockField
 	};
 }
 
@@ -274,6 +282,7 @@ function ledgerHarness(): LedgerHarness {
 interface CandidateInput {
 	revisionId: string;
 	destination?: 'server' | 'kometa';
+	target?: UndoPlanCandidate['target'];
 	targetId?: string;
 	slot?: UndoPlanSlot;
 	current: FrozenUndoCurrentState;
@@ -287,7 +296,7 @@ function candidate(input: CandidateInput): UndoPlanCandidate {
 		revisionGroupId: 'source-group',
 		revisionCreatedAt: '2026-07-11T11:00:00.000Z',
 		serverInstanceId: 'server-1',
-		target: { kind: 'item', mediaItemId: 1 },
+		target: input.target ?? { kind: 'item', mediaItemId: 1 },
 		destination: input.destination ?? 'server',
 		targetId: input.targetId ?? 'server-target-1',
 		slot: input.slot ?? ROOT_POSTER,
@@ -298,9 +307,19 @@ function candidate(input: CandidateInput): UndoPlanCandidate {
 }
 
 function builtPlan(candidates: UndoPlanCandidate[]) {
+	const first = candidates[0];
+	const scope =
+		first.target.kind === 'collection'
+			? {
+					kind: 'destination' as const,
+					serverInstanceId: 'server-1',
+					target: first.target,
+					destination: 'server' as const
+				}
+			: { kind: 'item' as const, serverInstanceId: 'server-1', mediaItemId: 1 };
 	return buildUndoPlan({
 		plannedAt: NOW.toISOString(),
-		scope: { kind: 'item', serverInstanceId: 'server-1', mediaItemId: 1 },
+		scope,
 		operations: candidates
 	});
 }
@@ -370,6 +389,18 @@ function kometaUndoFixture(label: string) {
 	return { current, restore, desired, snapshots, kometa, plan };
 }
 
+const LOCKED_POSTER = {
+	serverInstanceId: 'server-1',
+	targetId: 'server-target-1',
+	kind: 'poster' as const
+};
+
+function heldLocks(keys: ArtworkLockKey[]) {
+	const store = createMemoryArtworkLockStore();
+	for (const key of keys) void store.add(key);
+	return { store, manager: createArtworkLockManager({ store, lockingEnabled: () => true }) };
+}
+
 function executorHarness(input: {
 	server?: MediaServer;
 	snapshots: SnapshotHarness;
@@ -377,6 +408,7 @@ function executorHarness(input: {
 	kometa?: ReturnType<typeof defaultKometa>;
 	preflightKometa?: ArtworkUndoExecutorDependencies['preflightKometa'];
 	withKometaCommit?: ArtworkUndoExecutorDependencies['withKometaCommit'];
+	artworkLocks?: ArtworkUndoExecutorDependencies['artworkLocks'];
 	serverUnavailable?: boolean;
 }) {
 	const ledger = input.ledger ?? ledgerHarness();
@@ -394,6 +426,7 @@ function executorHarness(input: {
 		readKometa: kometa.read,
 		mutateKometa: kometa.mutate,
 		withKometaCommit: input.withKometaCommit,
+		artworkLocks: input.artworkLocks,
 		clock: () => NOW
 	});
 	return { executor, ledger, kometa };
@@ -475,6 +508,167 @@ describe('server artwork undo execution', () => {
 		expect(withKometaCommit).not.toHaveBeenCalled();
 		const publicResult = JSON.stringify(result);
 		expect(publicResult).not.toMatch(/https?:|\/private\/|storagePath|bytes|url/i);
+	});
+
+	it('releases the lock PosterPilot took once the restore succeeds', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'unlock-current');
+		const desired = snapshot('snapshot-unlock', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/unlock',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		const server = serverHarness({ current });
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-unlock',
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const locks = heldLocks([LOCKED_POSTER]);
+		const harness = executorHarness({
+			server: server.server,
+			snapshots,
+			artworkLocks: locks.manager
+		});
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.status).toBe('success');
+		expect(server.lockField).toHaveBeenCalledWith('server-target-1', 'poster', false);
+		expect(server.lockField.mock.invocationCallOrder[0]).toBeGreaterThan(
+			server.applyPosterBytes.mock.invocationCallOrder[0]
+		);
+		expect(locks.store.keys()).toEqual([]);
+	});
+
+	it('keeps a successful restore when the unlock fails', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'unlock-failure-current');
+		const desired = snapshot('snapshot-unlock-failure', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/unlock-failure',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		const server = serverHarness({ current });
+		server.lockField.mockRejectedValueOnce(new Error('HTTP 500'));
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-unlock-failure',
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const locks = heldLocks([LOCKED_POSTER]);
+		const harness = executorHarness({
+			server: server.server,
+			snapshots,
+			artworkLocks: locks.manager
+		});
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.status).toBe('success');
+		// Still recorded, so a later undo can release it.
+		expect(locks.store.keys()).toEqual([LOCKED_POSTER]);
+	});
+
+	it('never releases a lock PosterPilot did not take', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'no-unlock-current');
+		const desired = snapshot('snapshot-no-unlock', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/no-unlock',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		// A lock the person set by hand has no record, so undo leaves it alone.
+		const server = serverHarness({ current, type: 'jellyfin' });
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-no-unlock',
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const harness = executorHarness({
+			server: server.server,
+			snapshots,
+			artworkLocks: heldLocks([]).manager
+		});
+
+		const result = await execute(harness.executor, plan);
+
+		expect(result.status).toBe('success');
+		expect(server.lockField).not.toHaveBeenCalled();
+	});
+
+	it('does not unlock native collection targets', async () => {
+		const old = Uint8Array.from([9, 8, 7]);
+		const current = artwork([1, 2, 3], 'collection-undo-current');
+		const desired = snapshot('snapshot-collection-unlock', {
+			destination: 'server',
+			kind: 'poster',
+			state: 'present',
+			sha256: sha256Bytes(old),
+			storagePath: '/private/snapshots/collection-unlock',
+			contentType: 'image/jpeg',
+			sizeBytes: old.byteLength
+		});
+		const snapshots = snapshotHarness([{ row: desired, bytes: old }]);
+		const server = serverHarness({ current });
+		const plan = builtPlan([
+			candidate({
+				revisionId: 'revision-collection-unlock',
+				target: { kind: 'collection', mediaCollectionId: 'collection-1' },
+				beforeSnapshotId: desired.id,
+				current: {
+					state: 'present',
+					fingerprint: sha256Bytes(current.data),
+					artworkVersion: 5
+				},
+				snapshot: { state: 'present', fingerprint: sha256Bytes(old), restorable: true }
+			})
+		]);
+		const harness = executorHarness({
+			server: server.server,
+			snapshots,
+			artworkLocks: heldLocks([LOCKED_POSTER]).manager
+		});
+
+		await execute(harness.executor, plan);
+
+		expect(server.lockField).not.toHaveBeenCalled();
 	});
 
 	it.each(['pending config checkpoint', 'corrupt config checkpoint', 'invalid Kometa guard'])(

@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { join } from 'node:path';
 import { createArtworkApplyCoordinator } from '$lib/server/artwork-revisions/apply-coordinator';
+import { createLiveArtworkLockManager } from '$lib/server/artwork-revisions/artwork-locks-db';
 import { createArtworkRevisionLedger } from '$lib/server/artwork-revisions/ledger';
 import {
 	ArtworkSnapshotStore,
@@ -200,6 +201,7 @@ export async function executeDatabaseFrozenApplyJob(
 	const coordinator = createArtworkApplyCoordinator({
 		snapshots: createArtworkSnapshotRepository(db, snapshotStore),
 		ledger: createArtworkRevisionLedger(db),
+		artworkLocks: createLiveArtworkLockManager(db),
 		planId: payload.planId,
 		jobId: context.jobId ?? null,
 		collectionHistory:

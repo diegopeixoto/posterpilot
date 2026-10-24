@@ -21,6 +21,7 @@ import {
 	verifyServerArtworkRead,
 	type ArtworkVerification
 } from '$lib/server/revisions/verification';
+import type { ArtworkLockManager } from './artwork-locks';
 import type { ArtworkRevisionLedger } from './ledger';
 import type { ArtworkSnapshotRepository } from './snapshots';
 import {
@@ -94,6 +95,8 @@ export interface ArtworkUndoExecutorDependencies {
 	serverRegistry: ApplyServerRegistry;
 	snapshots: UndoSnapshots;
 	ledger: UndoLedger;
+	/** Releases the apply-time lock on each restored slot; absent, nothing is unlocked. */
+	artworkLocks?: ArtworkLockManager;
 	/** Validate all Kometa guards before a mixed undo can produce a server effect. */
 	preflightKometa?(targets: readonly ArtworkUndoKometaPreflightTarget[]): Promise<void>;
 	/** null means an absent file/empty document; undefined means it could not be observed. */
@@ -749,6 +752,17 @@ export function createArtworkUndoExecutor(dependencies: ArtworkUndoExecutorDepen
 					status: 'failed',
 					verification: 'failed',
 					errorCode: unsupportedCode
+				});
+			}
+
+			// The applied artwork is gone, so release the lock PosterPilot took for it.
+			// Never throws: the restore itself stands either way. Native collections
+			// never took an apply-time lock.
+			if (!writeFailed && operation.target.kind === 'item') {
+				await dependencies.artworkLocks?.afterRestore(server, {
+					serverInstanceId: operation.serverInstanceId,
+					targetId: operation.targetId,
+					kind: serverArtworkKind(operation.slot)
 				});
 			}
 

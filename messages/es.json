@@ -625,6 +625,8 @@
 	"settings_suggest_preselect": "Preseleccionar la carátula mejor puntuada como sugerencia",
 	"settings_incremental_sync": "Volver a escanear solo los elementos cambiados en el servidor",
 	"settings_fun_enabled": "Activar la sección Diversión (experimentos como el selector aleatorio)",
+	"settings_jellyfin_item_lock": "Bloquear las ilustraciones aplicadas en Jellyfin/Emby",
+	"settings_jellyfin_item_lock_hint": "Activa el bloqueo de metadatos del elemento para que las actualizaciones programadas no reemplacen la ilustración. Jellyfin y Emby solo bloquean el elemento entero, así que el resto de sus metadatos también deja de actualizarse (incluidas las temporadas y episodios de una serie) hasta que deshagas el cambio. Deshacer solo libera los bloqueos que puso PosterPilot.",
 	"settings_library_default_sort": "Orden predeterminado de la biblioteca",
 	"settings_default_apply_method": "Método de aplicación predeterminado",
 	"settings_method_both": "{server} + Kometa",

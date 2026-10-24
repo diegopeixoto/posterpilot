@@ -365,6 +365,15 @@ and locks the control in the UI.
   review views compute and label the highest-scored candidate per slot. Accepting or
   staging that suggestion remains an explicit action; page load does not silently
   persist it. Turn it off to hide automatic suggestions.
+- **Lock artwork applied on Jellyfin/Emby** (`JELLYFIN_ITEM_LOCK`, default off).
+  Plex always locks the one field PosterPilot applied so its agents cannot replace
+  it. Jellyfin and Emby have no per-image lock, only the item-wide `LockData`,
+  which also stops the item's other metadata from refreshing (for a show, its
+  seasons and episodes too), so there it is opt-in. Undo releases only locks
+  PosterPilot set: a lock you set by hand stays, and an item stays locked until
+  the last artwork PosterPilot applied to it is undone. A "Replace all images"
+  refresh you start in Jellyfin still overrides the lock. A lock that cannot be
+  set or released is logged as a warning; the apply or undo itself still stands.
 - **Scoring weights.** PosterPilot ranks candidates on three terms — a per-provider
   base weight (MediUX, ThePosterDB, Fanart.tv, TMDB), a resolution score, and an
   aspect-fit score (2:3 for posters, 16:9 for backdrops and title cards). The
@@ -521,6 +530,7 @@ and are locked in the UI.
 | `HTTP_CACHE_TTL_DAYS`     | HTTP cache TTL            | `7`                                   | How long cached HTTP responses (scrapes) are reused, in days.                                 |
 | `APPLY_CONCURRENCY`       | Apply concurrency         | `4`                                   | How many items a bulk apply processes concurrently.                                           |
 | `SUGGEST_PRESELECT`       | Suggested artwork         | on                                    | Compute and label top-scored candidates; accepting/staging remains explicit.                  |
+| `JELLYFIN_ITEM_LOCK`      | Lock artwork on Jellyfin/Emby | off                               | Set the item's `LockData` after applying artwork. Also stops that item's metadata refreshes until undo. |
 | `INCREMENTAL_SYNC`        | Incremental sync          | on                                    | Skip unchanged items on repeat syncs (a full rescan stays available).                         |
 | `LIBRARY_DEFAULT_SORT`    | Library default sort      | `title`                               | Sort the library wall opens with: `title`, `year`, `rating`, `runtime`, `recent`, or `added`. |
 | `FUN_ENABLED`             | FUN section               | off                                   | Show the picker, Poster Match, ambient gallery, and session planner.                           |

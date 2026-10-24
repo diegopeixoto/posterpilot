@@ -625,6 +625,8 @@
 	"settings_suggest_preselect": "Pre-select the best-scored artwork as a suggestion",
 	"settings_incremental_sync": "Only re-scan items changed on the server",
 	"settings_fun_enabled": "Enable the Fun section (experiments like the random picker)",
+	"settings_jellyfin_item_lock": "Lock artwork applied on Jellyfin/Emby",
+	"settings_jellyfin_item_lock_hint": "Sets the item's metadata lock so scheduled refreshes can't replace the artwork. Jellyfin and Emby only lock the whole item, so its other metadata stops refreshing too (a show's seasons and episodes included) until you undo. Undo releases only locks PosterPilot set.",
 	"settings_library_default_sort": "Default library sort",
 	"settings_default_apply_method": "Default apply method",
 	"settings_method_both": "{server} + Kometa",

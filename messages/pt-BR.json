@@ -625,6 +625,8 @@
 	"settings_suggest_preselect": "Pré-selecionar a capa com melhor pontuação como sugestão",
 	"settings_incremental_sync": "Reescanear apenas os itens alterados no servidor",
 	"settings_fun_enabled": "Ativar a seção Diversão (experimentos como o sorteador aleatório)",
+	"settings_jellyfin_item_lock": "Travar as artes aplicadas no Jellyfin/Emby",
+	"settings_jellyfin_item_lock_hint": "Ativa a trava de metadados do item para que as atualizações agendadas não substituam a arte. O Jellyfin e o Emby só travam o item inteiro, então os outros metadados dele também param de atualizar (incluindo temporadas e episódios de uma série) até você desfazer. Desfazer libera apenas as travas que o PosterPilot colocou.",
 	"settings_library_default_sort": "Ordenação padrão da biblioteca",
 	"settings_default_apply_method": "Método de aplicação padrão",
 	"settings_method_both": "{server} + Kometa",

@@ -208,9 +208,16 @@ export interface MediaServer {
 
 	/**
 	 * Lock or unlock a field so the server's automatic agents do not overwrite an
-	 * applied image. A no-op on servers without a lock concept (Jellyfin/Emby).
+	 * applied image. Jellyfin/Emby have no per-field lock, so there it sets the
+	 * item-level `LockData` (capability limitation `field_lock_item_level`).
 	 */
 	lockField(itemId: string, field: LockField, locked: boolean): Promise<void>;
+
+	/**
+	 * Whether the field is locked right now, so a lock someone set by hand is
+	 * never mistaken for PosterPilot's own. Absent where it cannot be read.
+	 */
+	readFieldLock?(itemId: string, field: LockField): Promise<boolean>;
 }
 
 /** A discovered plex.tv server connection (local or remote). */

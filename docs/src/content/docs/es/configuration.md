@@ -59,6 +59,12 @@ proporción. La misma configuración determinista se usa en vista previa y ejecu
 `SUGGEST_PRESELECT` muestra la mejor sugerencia, pero aceptarla/prepararla siempre
 es explícito.
 
+`JELLYFIN_ITEM_LOCK` (desactivado por defecto) bloquea en Jellyfin/Emby las
+ilustraciones aplicadas con el `LockData` del elemento. Ese bloqueo es del elemento
+entero y también detiene la actualización de sus demás metadatos (temporadas y
+episodios incluidos en una serie), por eso es opcional; Plex siempre bloquea solo el
+campo aplicado. Deshacer libera únicamente los bloqueos que puso PosterPilot.
+
 ## Orden de proveedores
 
 **Metadatos y proveedores** también permite **reordenar** los cuatro proveedores,
@@ -234,6 +240,7 @@ admitidos son `en`, `es`, `zh`, `ja`, `pt-BR` y `fr`.
 | `HTTP_CACHE_TTL_DAYS` | `7` | TTL de respuestas HTTP en caché. |
 | `APPLY_CONCURRENCY` | `4` | Elementos simultáneos en aplicación por lotes. |
 | `SUGGEST_PRESELECT` | activado | Calcula y muestra sugerencias explícitas. |
+| `JELLYFIN_ITEM_LOCK` | desactivado | Pone el `LockData` del elemento al aplicar en Jellyfin/Emby; también congela sus metadatos hasta deshacer. |
 | `INCREMENTAL_SYNC` | activado | Omite elementos sin cambios en sincronizaciones normales. |
 | `LIBRARY_DEFAULT_SORT` | `title` | `title`, `year`, `rating`, `runtime`, `recent` o `added`. |
 | `FUN_ENABLED` | desactivado | Muestra las herramientas FUN. |

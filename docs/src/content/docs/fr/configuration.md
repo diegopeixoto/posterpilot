@@ -419,6 +419,12 @@ contrôle dans l'interface.
   le mieux noté pour chaque emplacement. Accepter ou préparer cette suggestion
   reste une action explicite ; le chargement de la page ne persiste rien en
   silence. Désactivez-le pour masquer les suggestions automatiques.
+- **Verrouiller les visuels appliqués sur Jellyfin/Emby** (`JELLYFIN_ITEM_LOCK`,
+  désactivé par défaut). Plex verrouille toujours le champ appliqué. Jellyfin et
+  Emby n'ont qu'un verrou d'élément (`LockData`), qui bloque aussi l'actualisation
+  de ses autres métadonnées (saisons et épisodes compris pour une série) : il faut
+  donc l'activer. Annuler ne libère que les verrous posés par PosterPilot, et un
+  élément reste verrouillé tant qu'un visuel appliqué par PosterPilot y subsiste.
 - **Poids de notation.** PosterPilot classe les candidats sur trois termes — un
   poids de base par fournisseur (MediUX, ThePosterDB, Fanart.tv, TMDB), un score
   de résolution et un score d'adéquation du format (2:3 pour les affiches, 16:9
@@ -581,6 +587,7 @@ l'environnement, ils prennent la priorité et sont verrouillés dans l'interface
 | `HTTP_CACHE_TTL_DAYS`     | TTL du cache HTTP                | `7`                                    | Durée de réutilisation des réponses HTTP en cache (collectes), en jours.                          |
 | `APPLY_CONCURRENCY`       | Concurrence d'application        | `4`                                    | Nombre d'éléments qu'une application en masse traite en parallèle.                                |
 | `SUGGEST_PRESELECT`       | Visuels suggérés                 | activé                                 | Calcule et étiquette les candidats les mieux notés ; accepter/préparer reste explicite.           |
+| `JELLYFIN_ITEM_LOCK`      | Verrouiller sur Jellyfin/Emby    | désactivé                              | Pose le `LockData` de l'élément après application ; bloque aussi ses métadonnées jusqu'à l'annulation. |
 | `INCREMENTAL_SYNC`        | Synchronisation incrémentale     | activée                                | Ignore les éléments inchangés aux synchronisations suivantes (une réanalyse complète reste disponible). |
 | `LIBRARY_DEFAULT_SORT`    | Tri par défaut de la médiathèque | `title`                                | Tri d'ouverture du mur de la médiathèque : `title`, `year`, `rating`, `runtime`, `recent` ou `added`. |
 | `FUN_ENABLED`             | Section FUN                      | désactivée                             | Affiche le sélecteur, Poster Match, la galerie ambiante et le planificateur de session.           |

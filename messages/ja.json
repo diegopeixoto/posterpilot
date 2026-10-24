@@ -625,6 +625,8 @@
 	"settings_suggest_preselect": "最高スコアのアートワークを提案として事前選択する",
 	"settings_incremental_sync": "サーバー上で変更されたアイテムのみ再スキャンする",
 	"settings_fun_enabled": "お楽しみセクションを有効にする（ランダムピッカーなどの実験的機能）",
+	"settings_jellyfin_item_lock": "Jellyfin/Emby で適用したアートワークをロックする",
+	"settings_jellyfin_item_lock_hint": "項目のメタデータロックを設定し、定期更新でアートワークが置き換えられないようにします。Jellyfin と Emby は項目全体しかロックできないため、元に戻すまでほかのメタデータ（シリーズのシーズンやエピソードを含む）も更新されなくなります。元に戻すと、PosterPilot が設定したロックだけが解除されます。",
 	"settings_library_default_sort": "ライブラリの既定の並び順",
 	"settings_default_apply_method": "既定の適用方法",
 	"settings_method_both": "{server} + Kometa",
