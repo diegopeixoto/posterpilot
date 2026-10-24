@@ -6,19 +6,20 @@
 	import { groupSetArtwork } from '$lib/posters/season-groups';
 	import { defaultExpanded, providerKey, setKey, seasonKey } from '$lib/posters/collapse';
 	import {
+		ARTWORK_LANGUAGE_CHOICE_SAVED,
 		CANDIDATE_DISCLOSURE_BATCH_SIZE,
 		artworkLanguageName,
+		availableArtworkLanguages,
 		candidateDisclosureKey,
 		disclosureState,
 		isLanguageFallbackCandidate,
+		itemArtworkLanguagePolicy,
 		nextDisclosureLimit,
 		summarizeCandidateLanguages,
-		visibleArtworkCandidates
+		visibleArtworkCandidates,
+		type ArtworkLanguageChoice
 	} from '$lib/posters/candidate-disclosure';
-	import {
-		resolveArtworkLanguagePolicy,
-		type ArtworkLanguagePolicy
-	} from '$lib/tmdb-artwork-language';
+	import { ARTWORK_LANGUAGE_ANY, resolveArtworkLanguagePolicy } from '$lib/tmdb-artwork-language';
 	import {
 		stagedArtworkMatchesCandidate,
 		toggleStagedArtworkCandidate
@@ -285,20 +286,45 @@
 		return out;
 	}
 	// ---- Artwork language ------------------------------------------------------
-	// The saved preference decides what this page shows; the toggle below is
-	// item-local `$state` and deliberately never writes to /api/settings, so
-	// browsing every language for one title cannot change the global default.
-	let showAllLanguages = $state(false);
+	// The saved preference decides what this page shows by default; the picker
+	// below is item-local `$state` and deliberately never writes to
+	// /api/settings, so choosing a language for one title cannot change the
+	// global default.
+	let languageChoice = $state<ArtworkLanguageChoice>(ARTWORK_LANGUAGE_CHOICE_SAVED);
 	const preferredLanguagePolicy = $derived(
 		resolveArtworkLanguagePolicy(data.tmdbArtworkLanguage, data.locale)
 	);
-	const languagePolicy = $derived<ArtworkLanguagePolicy>(
-		showAllLanguages ? { mode: 'all' } : preferredLanguagePolicy
+	const languagePolicy = $derived(
+		itemArtworkLanguagePolicy(languageChoice, preferredLanguagePolicy)
 	);
 	const preferredLanguageName = $derived(
 		preferredLanguagePolicy.mode === 'preferred'
 			? artworkLanguageName(preferredLanguagePolicy.language)
 			: ''
+	);
+	const activeLanguageName = $derived(
+		languagePolicy.mode === 'preferred' ? artworkLanguageName(languagePolicy.language) : ''
+	);
+	const showingAllLanguages = $derived(languagePolicy.mode === 'all');
+	// Without a saved preference there is no "saved" entry to show, so the picker
+	// reads "All languages" — which is exactly what the saved default resolves to.
+	const languagePickerValue = $derived(
+		languageChoice === ARTWORK_LANGUAGE_CHOICE_SAVED && preferredLanguagePolicy.mode === 'all'
+			? ARTWORK_LANGUAGE_ANY
+			: languageChoice
+	);
+	const languageOptions = $derived(
+		availableArtworkLanguages(data.candidates, [
+			preferredLanguagePolicy.mode === 'preferred' ? preferredLanguagePolicy.language : null,
+			languagePolicy.mode === 'preferred' ? languagePolicy.language : null
+		])
+	);
+	// Covers actually tagged with the active language — untagged artwork still
+	// shows, so "nothing in Danish" needs its own signal rather than an empty grid.
+	const activeLanguageCount = $derived(
+		languagePolicy.mode === 'preferred'
+			? (languageOptions.find((option) => option.code === languagePolicy.language)?.count ?? 0)
+			: 0
 	);
 	// A persisted pick stays visible under a restricted policy: an automatic
 	// language fallback has to be reviewable (and revocable) rather than hidden by
@@ -319,16 +345,19 @@
 		);
 	}
 	/**
-	 * True for a rendered tile the preference would otherwise have filtered away.
+	 * True for a rendered tile the language filter would otherwise have hidden.
 	 *
-	 * Under the preferred policy the only such tiles are pinned picks, so the
-	 * check suffices alone. In show-all mode every foreign tile renders by the
-	 * user's own choice — flagging them all would bury the one pinned fallback
-	 * the badge exists to surface — so only pinned picks keep the chip there.
+	 * Only pinned picks survive a filter they fail, so only they can carry the
+	 * chip. In show-all mode every foreign tile renders by the user's own choice —
+	 * flagging them all would bury the one pinned fallback the badge exists to
+	 * surface — so pinned picks are judged against the saved preference there.
 	 */
 	function isLanguageFallback(candidate: PosterCandidate): boolean {
-		if (!isLanguageFallbackCandidate(candidate, preferredLanguagePolicy)) return false;
-		return !showAllLanguages || pinnedCandidateIds.has(candidate.id);
+		if (!pinnedCandidateIds.has(candidate.id)) return false;
+		return isLanguageFallbackCandidate(
+			candidate,
+			showingAllLanguages ? preferredLanguagePolicy : languagePolicy
+		);
 	}
 	function candidateLanguageName(candidate: PosterCandidate): string {
 		return candidate.languageProvenance === 'tagged'
@@ -599,7 +628,7 @@
 			undoPreview = null;
 			undoContextLabel = '';
 			undoAvailable = false;
-			showAllLanguages = false;
+			languageChoice = ARTWORK_LANGUAGE_CHOICE_SAVED;
 			disclosureLimits = {};
 			disclosureAnnouncement = '';
 			previewOpen = false;
@@ -1799,52 +1828,76 @@
 
 <!-- Artwork sets, grouped by provider (collapsible) -->
 <div id="artwork-compare" tabindex="-1" class="scroll-mt-20 focus-visible:outline-none"></div>
-{#if preferredLanguagePolicy.mode === 'preferred' && data.providerGroups.length}
-	<!-- Item-local language filter. Flipping it never touches the saved preference. -->
+{#if data.providerGroups.length && (preferredLanguagePolicy.mode === 'preferred' || languageOptions.length)}
+	<!-- Item-local language picker. Changing it never touches the saved preference. -->
 	<section
 		class="mt-8 rounded-surface border border-border bg-background/60 p-3"
 		aria-label={m.item_language_filter_title()}
 	>
 		<div class="flex flex-wrap items-center justify-between gap-2">
-			<p class="text-xs text-text-secondary">
+			<p class="text-xs text-text-secondary" aria-live="polite">
 				<span aria-hidden="true">🌐</span>
-				{#if showAllLanguages}
-					{m.item_language_showing_all()}
+				{#if showingAllLanguages}
+					{preferredLanguagePolicy.mode === 'preferred'
+						? m.item_language_showing_all()
+						: m.item_language_pick_hint()}
 				{:else if languageSummary.foreign + languageSummary.unknown > 0}
 					{m.item_language_filter_hidden({
-						language: preferredLanguageName,
+						language: activeLanguageName,
 						hidden: languageSummary.foreign + languageSummary.unknown
 					})}
 				{:else}
-					{m.item_language_filter_active({ language: preferredLanguageName })}
+					{m.item_language_filter_active({ language: activeLanguageName })}
+				{/if}
+				{#if languageChoice !== ARTWORK_LANGUAGE_CHOICE_SAVED && !showingAllLanguages}
+					{m.item_language_choice_note()}
 				{/if}
 			</p>
-			<button
-				type="button"
-				class="btn btn-ghost min-h-11 px-3 text-xs"
-				aria-pressed={showAllLanguages}
-				onclick={() => (showAllLanguages = !showAllLanguages)}
-			>
-				{showAllLanguages
-					? m.item_language_show_preferred({ language: preferredLanguageName })
-					: m.item_language_show_all()}
-			</button>
+			<label class="flex items-center gap-2 text-xs text-text-secondary">
+				<span>{m.item_language_filter_title()}</span>
+				<select
+					class="input min-h-11 w-auto py-1 text-xs"
+					value={languagePickerValue}
+					onchange={(event) => (languageChoice = event.currentTarget.value)}
+				>
+					{#if preferredLanguagePolicy.mode === 'preferred'}
+						<option value={ARTWORK_LANGUAGE_CHOICE_SAVED}
+							>{m.item_language_option_saved({ language: preferredLanguageName })}</option
+						>
+					{/if}
+					<option value={ARTWORK_LANGUAGE_ANY}>{m.item_language_option_all()}</option>
+					{#each languageOptions as option (option.code)}
+						<option value={option.code}
+							>{m.item_language_option({
+								language: artworkLanguageName(option.code),
+								count: option.count
+							})}</option
+						>
+					{/each}
+				</select>
+			</label>
 		</div>
 		{#if languageSummary.emptyForPreference}
 			<div class="mt-2 flex flex-wrap items-center gap-2">
 				<p class="text-xs text-amber-300">
 					<span aria-hidden="true">⚠</span>
 					{m.item_language_empty({
-						language: preferredLanguageName,
+						language: activeLanguageName,
 						count: languageSummary.foreign + languageSummary.unknown
 					})}
 				</p>
 				<button
 					type="button"
 					class="btn btn-subtle min-h-11 px-3 text-xs"
-					onclick={() => (showAllLanguages = true)}>{m.item_language_show_all()}</button
+					onclick={() => (languageChoice = ARTWORK_LANGUAGE_ANY)}
+					>{m.item_language_show_all()}</button
 				>
 			</div>
+		{:else if languagePolicy.mode === 'preferred' && activeLanguageCount === 0}
+			<p class="mt-2 text-xs text-amber-300">
+				<span aria-hidden="true">⚠</span>
+				{m.item_language_none({ language: activeLanguageName })}
+			</p>
 		{/if}
 	</section>
 {/if}
@@ -1915,7 +1968,7 @@
 							<p class="text-xs text-text-muted">
 								{m.item_language_provider_empty({
 									provider: providerLabel(group.provider),
-									language: preferredLanguageName
+									language: activeLanguageName
 								})}
 							</p>
 						{/if}

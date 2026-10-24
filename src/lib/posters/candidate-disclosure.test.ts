@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
 	ARTWORK_LANGUAGE_CHOICES,
+	ARTWORK_LANGUAGE_CHOICE_SAVED,
 	CANDIDATE_DISCLOSURE_BATCH_SIZE,
 	artworkLanguageChoices,
 	artworkLanguageName,
+	availableArtworkLanguages,
 	candidateDisclosureKey,
 	disclosureState,
 	isLanguageFallbackCandidate,
+	itemArtworkLanguagePolicy,
 	nextDisclosureLimit,
 	summarizeCandidateLanguages,
 	visibleArtworkCandidates,
@@ -140,8 +143,14 @@ describe('summarizeCandidateLanguages', () => {
 describe('artwork language options', () => {
 	it('names curated codes natively and falls back to the code itself', () => {
 		expect(artworkLanguageName('pt-BR')).toBe('Português');
-		expect(artworkLanguageName('nl')).toBe('NL');
+		expect(artworkLanguageName('qq')).toBe('QQ');
 		expect(artworkLanguageName(null)).toBe('');
+	});
+
+	it('names uncurated codes in their own language', () => {
+		// Artwork arrives tagged in far more languages than Settings lists.
+		expect(artworkLanguageName('da')).toBe('Dansk');
+		expect(artworkLanguageName('nl')).toBe('Nederlands');
 	});
 
 	it('offers the curated list untouched for the preset preferences', () => {
@@ -153,5 +162,68 @@ describe('artwork language options', () => {
 	it('appends an env-supplied code the curated list does not carry', () => {
 		expect(artworkLanguageChoices('nl')).toContain('nl');
 		expect(artworkLanguageChoices('nl')).toHaveLength(ARTWORK_LANGUAGE_CHOICES.length + 1);
+	});
+});
+
+describe('itemArtworkLanguagePolicy', () => {
+	it('follows the saved preference by default', () => {
+		expect(itemArtworkLanguagePolicy(ARTWORK_LANGUAGE_CHOICE_SAVED, EN)).toBe(EN);
+		expect(itemArtworkLanguagePolicy(ARTWORK_LANGUAGE_CHOICE_SAVED, ALL)).toBe(ALL);
+	});
+
+	it('shows every language on request', () => {
+		expect(itemArtworkLanguagePolicy('any', EN)).toEqual(ALL);
+	});
+
+	it('filters every language-tagging provider on a picked language', () => {
+		expect(itemArtworkLanguagePolicy('DA', ALL)).toEqual({
+			mode: 'preferred',
+			language: 'da',
+			providers: 'tagging'
+		});
+	});
+
+	it('never turns a malformed pick into a filter', () => {
+		expect(itemArtworkLanguagePolicy('danish', EN)).toBe(EN);
+	});
+
+	it('hides foreign Fanart.tv artwork only under a picked language', () => {
+		const candidates = [
+			artwork('da', 'tagged', 1, 'fanarttv'),
+			artwork('en', 'tagged', 2, 'fanarttv'),
+			artwork(null, 'untagged', 3, 'fanarttv'),
+			artwork('en', 'tagged', 4)
+		];
+		const picked = itemArtworkLanguagePolicy('da', EN);
+		expect(visibleArtworkCandidates(candidates, picked).map((c) => c.id)).toEqual([1, 3]);
+		expect(visibleArtworkCandidates(candidates, EN).map((c) => c.id)).toEqual([1, 2, 3, 4]);
+	});
+});
+
+describe('availableArtworkLanguages', () => {
+	it('counts tagged covers from language-tagging providers, most first', () => {
+		const options = availableArtworkLanguages([
+			artwork('en', 'tagged', 1),
+			artwork('da', 'tagged', 2, 'fanarttv'),
+			artwork('da', 'tagged', 3),
+			artwork('pt-BR', 'tagged', 4),
+			artwork(null, 'untagged', 5),
+			artwork(null, 'unknown', 6, 'mediux'),
+			// Not a language-tagging provider: whatever it claims is not offered.
+			artwork('de', 'tagged', 7, 'mediux')
+		]);
+		expect(options).toEqual([
+			{ code: 'da', count: 2 },
+			{ code: 'en', count: 1 },
+			{ code: 'pt', count: 1 }
+		]);
+	});
+
+	it('keeps a requested language on the list with no covers', () => {
+		const options = availableArtworkLanguages([artwork('en', 'tagged', 1)], ['da', null, 'en']);
+		expect(options).toEqual([
+			{ code: 'en', count: 1 },
+			{ code: 'da', count: 0 }
+		]);
 	});
 });

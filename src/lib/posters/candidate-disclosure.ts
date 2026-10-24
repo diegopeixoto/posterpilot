@@ -20,6 +20,7 @@ import {
 	artworkLanguageCode,
 	classifyCandidateLanguage,
 	isArtworkLanguageEligible,
+	providerTagsArtworkLanguage,
 	type ArtworkLanguagePolicy,
 	type TmdbArtworkLanguage
 } from '$lib/tmdb-artwork-language';
@@ -90,11 +91,28 @@ export const ARTWORK_LANGUAGE_NAMES: Record<string, string> = {
 /** The curated ISO 639-1 codes the Settings select offers, in stable order. */
 export const ARTWORK_LANGUAGE_CHOICES: string[] = Object.keys(ARTWORK_LANGUAGE_NAMES).sort();
 
-/** Name an artwork language for display; an uncurated code falls back to itself. */
+/**
+ * Name an artwork language for display.
+ *
+ * An uncurated code is named natively through `Intl.DisplayNames` — artwork
+ * arrives tagged in far more languages than Settings lists (`da` → `Dansk`) —
+ * and falls back to the bare code where the runtime does not know it.
+ */
 export function artworkLanguageName(code: string | null | undefined): string {
 	const base = artworkLanguageCode(code);
 	if (!base) return '';
-	return ARTWORK_LANGUAGE_NAMES[base] ?? base.toUpperCase();
+	return ARTWORK_LANGUAGE_NAMES[base] ?? nativeLanguageName(base) ?? base.toUpperCase();
+}
+
+function nativeLanguageName(code: string): string | null {
+	try {
+		const name = new Intl.DisplayNames([code], { type: 'language' }).of(code);
+		// An unknown code comes back as itself rather than throwing.
+		if (!name || name.toLowerCase() === code) return null;
+		return name.charAt(0).toLocaleUpperCase(code) + name.slice(1);
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -174,4 +192,74 @@ export function summarizeCandidateLanguages(
 		emptyForPreference: restricted && eligible === 0 && foreign + unknown > 0,
 		needsRefresh: restricted && unknown > 0
 	};
+}
+
+// ---- Item-local language picker ----------------------------------------------
+
+/** The picker follows the saved preference — the item view's default. */
+export const ARTWORK_LANGUAGE_CHOICE_SAVED = 'saved';
+
+/**
+ * What the item view's language picker holds: the saved preference, every
+ * language (`any`), or one ISO 639-1 code picked for this title alone.
+ */
+export type ArtworkLanguageChoice =
+	| typeof ARTWORK_LANGUAGE_CHOICE_SAVED
+	| typeof ARTWORK_LANGUAGE_ANY
+	| (string & {});
+
+/**
+ * The policy one item view filters against.
+ *
+ * A language picked for this title governs every provider that tags languages,
+ * not only TMDB: someone picking Danish for one cartoon wants Danish Fanart.tv
+ * posters too. A malformed code falls back to the saved preference rather than
+ * becoming a filter.
+ */
+export function itemArtworkLanguagePolicy(
+	choice: ArtworkLanguageChoice,
+	saved: ArtworkLanguagePolicy
+): ArtworkLanguagePolicy {
+	if (choice === ARTWORK_LANGUAGE_CHOICE_SAVED) return saved;
+	if (choice === ARTWORK_LANGUAGE_ANY) return { mode: 'all' };
+	const language = artworkLanguageCode(choice);
+	return language ? { mode: 'preferred', language, providers: 'tagging' } : saved;
+}
+
+/** One language the picker offers, with how many covers carry its tag. */
+export interface ArtworkLanguageOption {
+	code: string;
+	count: number;
+}
+
+/**
+ * The languages an item's artwork is tagged in, most covers first, for the
+ * picker. Only providers that tag languages contribute; untagged (textless)
+ * artwork belongs to no language and stays visible under every choice.
+ *
+ * `include` keeps codes on the list even when nothing carries them — the saved
+ * preference and the current pick — so the picker can say "0" instead of
+ * silently dropping the language someone is looking for.
+ */
+export function availableArtworkLanguages(
+	candidates: readonly LanguageTaggedArtwork[],
+	include: readonly (string | null | undefined)[] = []
+): ArtworkLanguageOption[] {
+	const counts = new Map<string, number>();
+	for (const candidate of candidates) {
+		if (candidate.languageProvenance !== 'tagged') continue;
+		if (!providerTagsArtworkLanguage(candidate.provider)) continue;
+		const code = artworkLanguageCode(candidate.language);
+		if (code) counts.set(code, (counts.get(code) ?? 0) + 1);
+	}
+	for (const extra of include) {
+		const code = artworkLanguageCode(extra);
+		if (code && !counts.has(code)) counts.set(code, 0);
+	}
+	return [...counts]
+		.map(([code, count]) => ({ code, count }))
+		.sort(
+			(a, b) =>
+				b.count - a.count || artworkLanguageName(a.code).localeCompare(artworkLanguageName(b.code))
+		);
 }
