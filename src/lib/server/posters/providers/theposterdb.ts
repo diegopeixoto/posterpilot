@@ -5,6 +5,7 @@ import type { MediaItem } from '$lib/server/db/schema';
 import type { PosterProvider } from './types';
 import { bestThePosterDbResultId, parseThePosterDbAssets } from './parse';
 import { getThePosterDbSession, invalidateThePosterDbSession } from './theposterdb-session';
+import { isCloudflareChallenge, ProviderScrapeError } from './scrape-error';
 
 /**
  * ThePosterDB provider (experimental, opt-in, disabled by default).
@@ -15,8 +16,8 @@ import { getThePosterDbSession, invalidateThePosterDbSession } from './theposter
  *
  * The hit is chosen by title rather than by rank — searching "Saving Private Ryan
  * 1998" ranks the documentary "Making 'Saving Private Ryan'" first, whose page holds
- * no posters. The parser is pure and tested; the live `discover` returns [] on any
- * mismatch so enabling this provider can never break discovery of the others.
+ * no posters. A title mismatch still returns [] while explicit scrape failures
+ * are isolated and recorded by the discovery service.
  *
  * Credentials are optional: anonymous scraping keeps working as before, but the site
  * serves a placeholder image instead of real artwork to anonymous requests on some
@@ -50,26 +51,66 @@ export const thePosterDbProvider: PosterProvider = {
 			const term = encodeURIComponent(`${item.title} ${item.year ?? ''}`.trim());
 			const section = item.type === 'show' ? 'shows' : 'movies';
 			const searchHtml = await get(`${BASE_URL}/search?term=${term}&section=${section}`);
+			if (isCloudflareChallenge(searchHtml)) {
+				throw new ProviderScrapeError(
+					'theposterdb_blocked',
+					'ThePosterDB returned a Cloudflare challenge.'
+				);
+			}
 			// The search page lists sets but embeds no poster images: the matching hit has
 			// to be opened. Chosen by title, not by rank — see bestThePosterDbResultId.
 			const setId = bestThePosterDbResultId(searchHtml, { title: item.title, year: item.year });
-			if (!setId) return [];
-			return parseThePosterDbAssets(await get(`${BASE_URL}/posters/${setId}`));
+			if (!setId) return { sets: [], placeholderOnly: false };
+			const html = await get(`${BASE_URL}/posters/${setId}`);
+			if (isCloudflareChallenge(html)) {
+				throw new ProviderScrapeError(
+					'theposterdb_blocked',
+					'ThePosterDB returned a Cloudflare challenge.'
+				);
+			}
+			const sets = parseThePosterDbAssets(html);
+			// Authenticated cards also carry a fallback img; only a poster card with
+			// no usable source anywhere on the page is evidence of placeholder-only output.
+			const placeholderOnly =
+				!sets.length &&
+				/<picture\b[^>]*>[\s\S]{0,2000}?<img\b[^>]*class=["'][^"']*\btpdb-poster\b[^"']*["'][^>]*src=["'][^"']*missing_poster\.jpg["'][^>]*>[\s\S]{0,200}?<\/picture>\s*<div\b[^>]*data-poster-id=["']\d+["']/i.test(
+					html
+				);
+			return { sets, placeholderOnly };
 		};
 
-		let cookie = await getThePosterDbSession(
-			config.thePosterDbUsername,
-			config.thePosterDbPassword
-		);
-		let sets = await attempt(cookie, opts?.forceRefresh);
-		if (!sets.length && cookie) {
-			// An authenticated scrape that comes back empty usually means the session
-			// expired (the page loaded, but every image was the anonymous placeholder).
-			// Re-login once and re-scrape past the cache.
+		const session = async () => {
+			try {
+				return await getThePosterDbSession(config.thePosterDbUsername, config.thePosterDbPassword, {
+					throwOnFailure: true
+				});
+			} catch {
+				throw new ProviderScrapeError(
+					'theposterdb_auth_failed',
+					'ThePosterDB login failed; check credentials and service availability.'
+				);
+			}
+		};
+		let cookie = await session();
+		let result = await attempt(cookie, opts?.forceRefresh);
+		if (!result.sets.length && cookie) {
+			// A stale session can yield placeholders; retain the existing one-retry
+			// behavior for all empty responses, including title mismatches.
 			invalidateThePosterDbSession();
-			cookie = await getThePosterDbSession(config.thePosterDbUsername, config.thePosterDbPassword);
-			if (cookie) sets = await attempt(cookie, true);
+			cookie = result.placeholderOnly
+				? await session()
+				: await getThePosterDbSession(config.thePosterDbUsername, config.thePosterDbPassword);
+			if (cookie) {
+				const refreshed = await attempt(cookie, true);
+				if (refreshed.sets.length || !result.placeholderOnly) result = refreshed;
+			}
 		}
-		return sets;
+		if (result.placeholderOnly) {
+			throw new ProviderScrapeError(
+				'theposterdb_placeholder_only',
+				'ThePosterDB returned poster cards without accessible artwork.'
+			);
+		}
+		return result.sets;
 	}
 };

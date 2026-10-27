@@ -15,6 +15,7 @@ import { logEvent } from '$lib/server/events';
 import { PROVIDERS } from './providers';
 import { providerAvailability } from './providers/availability';
 import { providerDiscovery } from './providers/types';
+import { ProviderScrapeError } from './providers/scrape-error';
 import { scorePoster } from './score';
 import { getScoreWeights } from './score-weights';
 import {
@@ -173,7 +174,8 @@ export async function discoverForItem(
 					.where(and(scope, eq(posterCandidates.active, true)));
 				const rawError = error instanceof Error ? error.message : String(error);
 				const safeError = redact(rawError, config).slice(0, 500);
-				const timedOut = /timed?\s*out|abort/i.test(rawError);
+				const typedFailure = error instanceof ProviderScrapeError;
+				const timedOut = !typedFailure && /timed?\s*out|abort/i.test(rawError);
 				await serializeWrite(async () => {
 					await db.update(posterCandidates).set({ stale: true }).where(scope);
 					await db.insert(providerDiscoveryOutcomes).values({
@@ -185,7 +187,12 @@ export async function discoverForItem(
 						candidateCount: retained.length,
 						retainedStaleCandidates: retained.length > 0,
 						latencyMs: Date.now() - providerStarted.getTime(),
-						errorCode: timedOut ? 'provider_timeout' : 'provider_failed',
+						errorCode:
+							error instanceof ProviderScrapeError
+								? error.code
+								: timedOut
+									? 'provider_timeout'
+									: 'provider_failed',
 						error: safeError,
 						startedAt: providerStarted,
 						completedAt: new Date()
