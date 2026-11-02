@@ -2202,9 +2202,13 @@
 					: m.review_apply_next_preview_incomplete()}
 			</p>
 		{/if}
+		<!-- An empty slot is drawn as a dashed outline so it reads as "nothing staged
+		     here yet" rather than as a broken or still-loading image. -->
 		<div class="flex items-center gap-2">
 			<div
-				class="h-[51px] w-[34px] flex-none overflow-hidden rounded-control border border-border-strong bg-surface"
+				class="h-[51px] w-[34px] flex-none overflow-hidden rounded-control border {selectedPosterPreview
+					? 'border-border-strong bg-surface'
+					: 'border-dashed border-border-hover'}"
 			>
 				{#if selectedPosterPreview}<img
 						src={selectedPosterPreview}
@@ -2213,7 +2217,9 @@
 					/>{/if}
 			</div>
 			<div
-				class="h-[45px] w-20 flex-none overflow-hidden rounded-control border border-border-strong bg-surface"
+				class="h-[45px] w-20 flex-none overflow-hidden rounded-control border {selectedBackgroundPreview
+					? 'border-border-strong bg-surface'
+					: 'border-dashed border-border-hover'}"
 			>
 				{#if selectedBackgroundPreview}<img
 						src={selectedBackgroundPreview}
@@ -2231,17 +2237,20 @@
 		</span>
 
 		<details class="text-xs">
-			<summary class="cursor-pointer text-text-muted hover:text-text-strong"
+			<summary
+				class="btn btn-ghost cursor-pointer list-none px-2.5 py-1 text-xs text-text-secondary [&::-webkit-details-marker]:hidden"
 				>{m.item_custom()}</summary
 			>
+			<!-- Anchored to the tray's top edge, not a fixed offset: on a phone the tray
+			     wraps to two rows and a fixed offset left the panel covering it. -->
 			<div
-				class="absolute bottom-14 left-4 flex flex-col gap-2 rounded-surface border border-border bg-surface p-3 shadow-xl"
+				class="absolute inset-x-4 bottom-full mb-2 flex flex-col gap-2 rounded-surface border border-border bg-surface p-3 shadow-xl sm:right-auto"
 			>
 				<div class="flex gap-1.5">
 					<input
 						bind:value={posterUrlInput}
 						placeholder={m.item_poster_url_placeholder()}
-						class="input w-56 py-1 text-xs"
+						class="input min-w-0 flex-1 py-1 text-xs sm:w-56 sm:flex-none"
 					/>
 					<button onclick={() => useCustomUrl('poster')} class="btn btn-subtle px-2 py-1 text-xs"
 						>{m.item_set()}</button
@@ -2251,7 +2260,7 @@
 					<input
 						bind:value={backgroundUrlInput}
 						placeholder={m.item_backdrop_url_placeholder()}
-						class="input w-56 py-1 text-xs"
+						class="input min-w-0 flex-1 py-1 text-xs sm:w-56 sm:flex-none"
 					/>
 					<button
 						onclick={() => useCustomUrl('background')}

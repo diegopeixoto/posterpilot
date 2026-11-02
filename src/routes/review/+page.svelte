@@ -446,7 +446,7 @@
 				never quietly filter by the other.
 			-->
 			<select
-				class="input mt-1 min-h-11 w-full"
+				class="input mt-1 w-full"
 				value={data.coverage ?? ''}
 				onchange={(event) =>
 					setFilter('coverage', serializeCoverageFilter(event.currentTarget.value))}
