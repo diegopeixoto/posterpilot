@@ -210,8 +210,11 @@ de cien miniaturas de TMDB descarga cien miniaturas y cero originales hasta que 
 
 **Idioma de las carátulas.** Con un idioma de ilustraciones de TMDB configurado, la
 página filtra las cuadrículas a ese idioma y lo dice encima —nombrando el idioma y
-cuántas carátulas oculta en otros—, con un conmutador **Mostrar todos los idiomas** local
-a la página que nunca toca tu preferencia guardada. Si nada coincide para ese título, la
+cuántas carátulas oculta en otros—, con un selector **Idioma de las carátulas** local a la
+página que cambia ese título a **Todos los idiomas** o a cualquier idioma en que estén
+etiquetadas sus carátulas, con su recuento, y nunca toca tu preferencia guardada. Un
+idioma elegido ahí filtra también **Fanart.tv**; las carátulas sin texto y los sets de
+MediUX o ThePosterDB siguen visibles. Si nada coincide para ese título, la
 página dice cuántas carátulas existen en otros idiomas y ofrece la misma salida en lugar
 de una cuadrícula vacía. La preferencia rige **solo la ilustración de TMDB**; el
 razonamiento está en

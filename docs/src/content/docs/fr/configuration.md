@@ -367,9 +367,9 @@ TMDB d'une médiathèque antérieur à la mise à jour dès qu'une préférence 
 définie serait pire — et le groupe du fournisseur propose une **relance de la
 recherche**, pour qu'une nouvelle exécution enregistre les véritables étiquettes.
 
-Les pages d'élément portent un basculement **Afficher toutes les langues** (et
-**Afficher uniquement _langue_** pour revenir en arrière), qui permet de regarder
-au-delà de la préférence pour un titre donné sans modifier le réglage global.
+Les pages d'élément portent un sélecteur **Langue des visuels**, qui permet de
+regarder au-delà de la préférence pour un titre donné — ou d'y choisir une autre
+langue, qui filtre alors aussi Fanart.tv — sans modifier le réglage global.
 Lorsque la préférence ne correspond à rien pour un titre, la page indique combien
 de visuels existent dans d'autres langues et propose la même échappatoire, au
 lieu d'afficher une grille vide.

@@ -129,8 +129,9 @@ registramos», no «TMDB dijo que no lleva texto». Se conservan en lugar de ocu
 preferencia sería peor— y el grupo del proveedor ofrece **Volver a buscar** para que
 una ejecución nueva registre las etiquetas reales.
 
-La página del elemento lleva un conmutador **Mostrar todos los idiomas** (y **Mostrar
-solo _idioma_** para volver) que no modifica el ajuste global. Cuando la preferencia no
+La página del elemento lleva un selector **Idioma de las carátulas** para ver más allá
+de la preferencia en un título —o elegir otro idioma, que entonces filtra también
+Fanart.tv— sin modificar el ajuste global. Cuando la preferencia no
 coincide con nada para un título, la página dice cuántas carátulas existen en otros
 idiomas y ofrece la misma salida en vez de mostrar una cuadrícula vacía.
 

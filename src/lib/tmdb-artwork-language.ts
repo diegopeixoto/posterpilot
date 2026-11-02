@@ -29,8 +29,18 @@ export type TmdbArtworkLanguage =
 	| typeof ARTWORK_LANGUAGE_UI
 	| (string & {});
 
-/** The resolved policy discovery, selection, and the UI all filter against. */
-export type ArtworkLanguagePolicy = { mode: 'all' } | { mode: 'preferred'; language: string };
+/**
+ * The resolved policy discovery, selection, and the UI all filter against.
+ *
+ * `providers` says which providers the language governs. The saved preference
+ * governs TMDB alone (`tmdb`, the default — see `classifyCandidateLanguage`).
+ * A language picked for one title in the item view governs every provider that
+ * tags languages (`tagging`): the person asked for that language explicitly, so
+ * a Fanart.tv poster in another language is just as unwanted there.
+ */
+export type ArtworkLanguagePolicy =
+	| { mode: 'all' }
+	| { mode: 'preferred'; language: string; providers?: 'tmdb' | 'tagging' };
 
 /** How one candidate stands against a policy. */
 export type ArtworkLanguageEligibility = 'eligible' | 'foreign' | 'unknown';
@@ -113,8 +123,9 @@ export function resolveArtworkLanguagePolicy(
 /**
  * Classify one candidate against a policy.
  *
- * This is a *TMDB* artwork-language preference, so every other provider is
- * always eligible. That is not a shortcut — it is the whole rule:
+ * The saved preference is a *TMDB* artwork-language preference, so every other
+ * provider is always eligible under it. That is not a shortcut — it is the
+ * whole rule:
  *
  * - MediUX and ThePosterDB record `unknown` for every candidate they will ever
  *   produce, so treating `unknown` as ineligible would erase their grids
@@ -123,18 +134,27 @@ export function resolveArtworkLanguagePolicy(
  * - Fanart.tv *does* tag languages, so it would be filtered on a signal this
  *   setting was never meant to govern, silently losing a higher-ranked asset.
  *
- * Within TMDB: explicitly untagged artwork counts as language-neutral and stays
- * eligible, while `unknown` is genuinely legacy — rows stored before provenance
- * was recorded. Those are reported as `unknown` so the caller can offer
- * refreshed discovery, which now does record provenance, rather than silently
- * including or excluding them.
+ * An item-local pick (`providers: 'tagging'`) also governs Fanart.tv, because
+ * there the person chose the language for this title on purpose; MediUX and
+ * ThePosterDB still pass, for the first reason above.
+ *
+ * Within a governed provider: explicitly untagged artwork counts as
+ * language-neutral and stays eligible, while `unknown` is genuinely legacy — rows
+ * stored before provenance was recorded (or, for Fanart.tv, before its `00`
+ * textless tag was read as untagged). Those are reported as `unknown` so the
+ * caller can offer refreshed discovery, which now does record provenance, rather
+ * than silently including or excluding them.
  */
 export function classifyCandidateLanguage(
 	candidate: CandidateLanguageFields,
 	policy: ArtworkLanguagePolicy
 ): ArtworkLanguageEligibility {
 	if (policy.mode === 'all') return 'eligible';
-	if (candidate.provider !== TMDB_PROVIDER) return 'eligible';
+	const governed =
+		policy.providers === 'tagging'
+			? providerTagsArtworkLanguage(candidate.provider)
+			: candidate.provider === TMDB_PROVIDER;
+	if (!governed) return 'eligible';
 	if (candidate.languageProvenance === 'untagged') return 'eligible';
 	if (candidate.languageProvenance === 'unknown') return 'unknown';
 	return artworkLanguageCode(candidate.language) === policy.language ? 'eligible' : 'foreign';

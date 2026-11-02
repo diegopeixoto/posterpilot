@@ -422,8 +422,11 @@ taille du cache sont à vous de régler — voir
 Lorsqu'une langue de visuels TMDB est configurée, la page de l'élément filtre les
 grilles sur cette langue et le dit au-dessus d'elles — en nommant la langue, et
 en indiquant combien de visuels elle masque dans d'autres langues — avec un
-basculement **Afficher toutes les langues** local à la page, qui ne modifie
-jamais votre préférence enregistrée. Si rien ne correspond pour ce titre, la page
+sélecteur **Langue des visuels** local à la page, qui fait passer ce titre à
+**Toutes les langues** ou à n'importe quelle langue de ses visuels, avec leur
+nombre, sans jamais modifier votre préférence enregistrée. Une langue choisie là
+filtre aussi **Fanart.tv** ; les visuels sans texte et les sets MediUX ou
+ThePosterDB restent affichés. Si rien ne correspond pour ce titre, la page
 indique combien de visuels existent dans d'autres langues et propose la même
 échappatoire, au lieu de vous montrer une grille vide.
 

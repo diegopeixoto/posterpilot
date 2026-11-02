@@ -206,8 +206,11 @@ miniaturas do TMDB baixa cem miniaturas e zero originais até você pedir uma.
 
 **Idioma das capas.** Com um idioma de artes do TMDB configurado, a página do item filtra
 as grades para ele e diz isso acima delas — nomeando o idioma e quantas capas está
-escondendo em outros —, com um alternador **Mostrar todos os idiomas** local à página que
-nunca altera a sua preferência salva. Se nada corresponder para aquele título, a página
+escondendo em outros —, com um seletor **Idioma das capas** local à página que muda
+aquele título para **Todos os idiomas** ou para qualquer idioma em que as capas estejam
+marcadas, com a contagem de cada um, e nunca altera a sua preferência salva. Um idioma
+escolhido ali filtra também o **Fanart.tv**; capas sem texto e sets do MediUX ou do
+ThePosterDB continuam visíveis. Se nada corresponder para aquele título, a página
 diz quantas capas existem em outros idiomas e oferece a mesma saída em vez de uma grade
 vazia. A preferência rege **apenas as artes do TMDB**; o raciocínio está em
 [Configuração → Idioma das artes do TMDB](../configuration/#idioma-das-artes-do-tmdb).

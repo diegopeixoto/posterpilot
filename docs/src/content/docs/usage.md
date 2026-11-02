@@ -348,10 +348,13 @@ however often you revisit the item. Cache lifetime and size are yours to tune �
 
 When a TMDB artwork language is configured, the item page filters the grids to it and
 says so above them — naming the language, and how many covers it is hiding in other
-languages — with a **Show all languages** toggle that is local to the page and never
-edits your saved preference. If nothing matches for this title, the page says how many
-covers exist in other languages and offers the same escape hatch instead of showing
-you an empty grid.
+languages. Beside that line, an **Artwork language** picker switches this one title to
+**All languages** or to any language its covers are tagged in, each listed with its
+cover count, and it never edits your saved preference. A language picked there filters
+**Fanart.tv** as well as TMDB, because you asked for it on purpose; textless artwork and
+MediUX or ThePosterDB sets stay visible. If nothing matches for this title, the page
+says so — and how many covers exist in other languages — instead of showing you an
+empty grid.
 
 The preference governs **TMDB artwork only**, and the reasoning is worth knowing
 before you set it: see
