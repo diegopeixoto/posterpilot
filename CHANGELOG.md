@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/diegopeixoto/posterpilot/compare/v0.14.0...v0.14.1) (2026-11-02)
+
+
+### Under the hood
+
+* write 0.14.0 release notes ([#129](https://github.com/diegopeixoto/posterpilot/issues/129)) ([177a2fe](https://github.com/diegopeixoto/posterpilot/commit/177a2febbea19efd72604afe9ea6c780eecbffac))
+
 ## [0.14.0](https://github.com/diegopeixoto/posterpilot/compare/v0.13.1...v0.14.0) (2026-11-02)
 
 Pick a poster language title by title, keep Jellyfin and Emby from overwriting the artwork you applied, and a tidier library on phones.
