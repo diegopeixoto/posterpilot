@@ -20,6 +20,7 @@ import {
 	uploadPosterFromUrl,
 	uploadPosterBytes,
 	setPosterLock,
+	readFieldLock as readPlexFieldLock,
 	uploadBackgroundFromUrl,
 	uploadBackgroundBytes,
 	setBackgroundLock,
@@ -174,6 +175,10 @@ export function plexProvider(
 			} else {
 				await setBackgroundLock(baseUrl, token, itemId, locked);
 			}
+		},
+
+		async readFieldLock(itemId: string, field: LockField): Promise<boolean> {
+			return readPlexFieldLock(baseUrl, token, itemId, field);
 		}
 	};
 }

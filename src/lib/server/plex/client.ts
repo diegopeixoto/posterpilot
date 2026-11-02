@@ -65,6 +65,8 @@ interface MetadataEntry {
 	/** Played episodes of a show. */
 	viewedLeafCount?: number;
 	Guid?: PlexRawGuid[];
+	/** Fields locked against the agents, e.g. `{ name: 'thumb', locked: true }`. */
+	Field?: { name: string; locked?: boolean | number | string }[];
 }
 
 interface MetadataContainer {
@@ -470,6 +472,25 @@ export async function uploadBackgroundBytes(
 	contentType = 'image/jpeg'
 ): Promise<void> {
 	await uploadImageBytes(baseUrl, token, ratingKey, data, contentType, 'background');
+}
+
+/**
+ * Whether an item's poster (`thumb`) or background (`art`) field is locked.
+ * Plex lists only the locked fields in the item's `Field` array.
+ */
+export async function readFieldLock(
+	baseUrl: string,
+	token: string,
+	ratingKey: string,
+	kind: ImageKind
+): Promise<boolean> {
+	const container = await getContainer<MetadataContainer>(
+		baseUrl,
+		token,
+		`/library/metadata/${encodeURIComponent(ratingKey)}`
+	);
+	const field = container.Metadata?.[0]?.Field?.find((entry) => entry.name === LOCK_FIELD[kind]);
+	return field ? [true, 1, '1', 'true'].includes(field.locked ?? false) : false;
 }
 
 /** Lock or unlock an item's background/art field (`art.locked`). */

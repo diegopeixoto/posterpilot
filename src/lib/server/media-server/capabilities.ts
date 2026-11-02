@@ -26,15 +26,23 @@ export function defaultMediaServerCapabilities(type: ServerType): MediaServerCap
 		backgroundWrite: 'supported',
 		seasonWrite: 'supported',
 		episodeWrite: 'supported',
-		fieldLock: type === 'plex' ? 'supported' : 'unsupported',
+		// Jellyfin/Emby lock via the item-level `LockData` flag (no per-image lock
+		// exists); Plex locks the artwork fields directly. Both protect applied
+		// artwork from the server's automatic metadata agents.
+		fieldLock: 'supported',
 		currentImageRetrieval: 'supported',
 		artworkDelete: type === 'plex' ? 'unsupported' : 'supported',
 		nativeCollectionDiscovery: 'supported',
 		collectionArtwork: 'supported',
 		evidence: 'provider_contract',
-		limitations: type === 'plex' ? ['artwork_delete_unavailable'] : ['field_lock_not_applicable']
+		limitations:
+			type === 'plex'
+				? ['artwork_delete_unavailable']
+				: ['field_lock_item_level', 'field_lock_blocks_item_metadata_refresh']
 	};
 }
+
+const FIELD_LOCK_LIMITATION = 'field_lock_';
 
 /** Merge stored advertised/verified values into the conservative provider contract. */
 export function normalizeMediaServerCapabilities(
@@ -54,7 +62,11 @@ export function normalizeMediaServerCapabilities(
 		backgroundWrite: support(value.backgroundWrite, fallback.backgroundWrite),
 		seasonWrite: support(value.seasonWrite, fallback.seasonWrite),
 		episodeWrite: support(value.episodeWrite, fallback.episodeWrite),
-		fieldLock: support(value.fieldLock, fallback.fieldLock),
+		// fieldLock is a shipped code contract, not a discovered capability: older
+		// stored snapshots predate the Jellyfin/Emby LockData implementation and
+		// claim "unsupported". A stale cache must not keep locking disabled, so the
+		// contract always wins for this field.
+		fieldLock: fallback.fieldLock,
 		currentImageRetrieval: support(value.currentImageRetrieval, fallback.currentImageRetrieval),
 		artworkDelete: support(value.artworkDelete, fallback.artworkDelete),
 		nativeCollectionDiscovery: support(
@@ -64,7 +76,15 @@ export function normalizeMediaServerCapabilities(
 		collectionArtwork: support(value.collectionArtwork, fallback.collectionArtwork ?? 'unknown'),
 		evidence,
 		limitations: Array.isArray(value.limitations)
-			? value.limitations.filter((entry): entry is string => typeof entry === 'string')
+			? [
+					// The field-lock limitations describe the same shipped contract as
+					// `fieldLock` above, so they come from the code, never the snapshot.
+					...value.limitations.filter(
+						(entry): entry is string =>
+							typeof entry === 'string' && !entry.startsWith(FIELD_LOCK_LIMITATION)
+					),
+					...fallback.limitations.filter((entry) => entry.startsWith(FIELD_LOCK_LIMITATION))
+				]
 			: fallback.limitations
 	};
 }

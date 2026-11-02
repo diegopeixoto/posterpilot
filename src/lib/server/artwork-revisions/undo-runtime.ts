@@ -46,6 +46,7 @@ import {
 	restoreKometaSlot
 } from '$lib/server/revisions/kometa-state';
 import { getActiveServerInstance } from '$lib/server/server-instances';
+import { createLiveArtworkLockManager } from './artwork-locks-db';
 import { createArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore, resolveArtworkSnapshotDirectory } from './snapshot-store';
 import { createArtworkSnapshotRepository } from './snapshots';
@@ -650,6 +651,7 @@ function executor(): ArtworkUndoExecutor {
 		serverRegistry,
 		snapshots: createArtworkSnapshotRepository(db, snapshotStore),
 		ledger: createArtworkRevisionLedger(db),
+		artworkLocks: createLiveArtworkLockManager(db),
 		preflightKometa: kometa.preflightKometa,
 		readKometa: kometa.readKometa,
 		mutateKometa: kometa.mutateKometa,

@@ -20,6 +20,8 @@ import {
 	type CustomUploadPlanPreview
 } from './custom-upload-plan';
 import { refreshCoverageAfter } from '$lib/server/coverage/refresh';
+import type { ArtworkLockManager } from './artwork-locks';
+import { createLiveArtworkLockManager } from './artwork-locks-db';
 import { createArtworkRevisionLedger, type ArtworkRevisionLedger } from './ledger';
 import { ArtworkSnapshotStore, resolveArtworkSnapshotDirectory } from './snapshot-store';
 import { createArtworkSnapshotRepository, type ArtworkSnapshotRepository } from './snapshots';
@@ -53,6 +55,8 @@ export interface CustomUploadRuntimeDependencies {
 	getActiveServerInstanceId(): Promise<string | null>;
 	getItem(mediaItemId: number, serverInstanceId: string): Promise<CustomUploadRuntimeItem | null>;
 	resolveServer(serverInstanceId: string): Promise<MediaServer>;
+	/** Locks the uploaded poster against the server's agents; absent, nothing is locked. */
+	artworkLocks?: ArtworkLockManager;
 	/**
 	 * Told about a finished upload so coverage learns about it.
 	 *
@@ -229,6 +233,14 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 			initiator: 'user'
 		});
 
+		const lockKey = {
+			serverInstanceId: scope.serverInstanceId,
+			targetId: scope.item.targetId,
+			kind: 'poster' as const
+		};
+		// Read before the write, which on Plex takes the lock itself.
+		const lockClaim = await dependencies.artworkLocks?.beforeApply(scope.server, lockKey);
+
 		let writeFailed = false;
 		try {
 			await scope.server.applyPosterBytes(
@@ -238,6 +250,12 @@ export function createCustomUploadRuntime(dependencies: CustomUploadRuntimeDepen
 			);
 		} catch {
 			writeFailed = true;
+		}
+
+		// Same contract as the plan-based apply: lock the uploaded poster against the
+		// server's agents, and never let a lock failure mark the upload as failed.
+		if (!writeFailed && lockClaim) {
+			await dependencies.artworkLocks?.afterApply(scope.server, lockKey, lockClaim);
 		}
 
 		let afterArtwork: ServerArtwork | null | undefined;
@@ -349,6 +367,7 @@ function runtime() {
 		store: operationPlanStore,
 		snapshots: createArtworkSnapshotRepository(db, snapshotStore),
 		ledger: createArtworkRevisionLedger(db),
+		artworkLocks: createLiveArtworkLockManager(db),
 		getActiveServerInstanceId: async () => (await getActiveServerInstance())?.id ?? null,
 		getItem: async (mediaItemId, serverInstanceId) => {
 			const item = await getMediaItem(mediaItemId, serverInstanceId);

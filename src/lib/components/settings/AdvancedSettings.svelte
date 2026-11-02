@@ -23,6 +23,7 @@
 		thumbCacheTtlDays = $bindable(),
 		thumbCacheMaxMb = $bindable(),
 		suggestPreselect = $bindable(),
+		jellyfinItemLock = $bindable(),
 		incrementalSync = $bindable(),
 		funEnabled = $bindable(),
 		libraryDefaultSort = $bindable()
@@ -52,6 +53,7 @@
 		thumbCacheTtlDays: string | number;
 		thumbCacheMaxMb: string | number;
 		suggestPreselect: boolean;
+		jellyfinItemLock: boolean;
 		incrementalSync: boolean;
 		funEnabled: boolean;
 		libraryDefaultSort: LibrarySort;
@@ -298,6 +300,21 @@
 			{m.settings_fun_enabled()}
 		</label>
 		{#if env.funEnabled}<p class="text-xs text-amber-400">{m.settings_set_from_env()}</p>{/if}
+		<label class="flex items-center gap-2 text-sm text-text-secondary">
+			<input
+				type="checkbox"
+				bind:checked={jellyfinItemLock}
+				disabled={env.jellyfinItemLock}
+				aria-describedby="jellyfinItemLockHint"
+			/>
+			{m.settings_jellyfin_item_lock()}
+		</label>
+		<p id="jellyfinItemLockHint" class="pl-6 text-xs text-text-muted">
+			{m.settings_jellyfin_item_lock_hint()}
+		</p>
+		{#if env.jellyfinItemLock}<p class="text-xs text-amber-400">
+				{m.settings_set_from_env()}
+			</p>{/if}
 	</div>
 
 	<div class="mt-4 max-w-xs">

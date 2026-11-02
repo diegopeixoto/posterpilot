@@ -212,6 +212,7 @@ export async function createSupportBundle(includeTitles = false) {
 			defaultApplyMethod: config.defaultApplyMethod,
 			incrementalSync: config.incrementalSync,
 			suggestPreselect: config.suggestPreselect,
+			jellyfinItemLock: config.jellyfinItemLock,
 			applyConcurrency: config.applyConcurrency,
 			httpCacheTtlDays: config.httpCacheTtlDays
 		}

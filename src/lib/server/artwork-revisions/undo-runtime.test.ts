@@ -276,6 +276,7 @@ function config(serverInstanceId: string | null = 'server-a'): AppConfig {
 		eventRetention: 100,
 		applyConcurrency: 1,
 		suggestPreselect: false,
+		jellyfinItemLock: false,
 		incrementalSync: true,
 		thumbCacheTtlDays: 1,
 		thumbCacheMaxMb: 10,

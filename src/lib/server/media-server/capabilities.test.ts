@@ -18,9 +18,18 @@ describe('media-server capability normalization', () => {
 			evidence: 'provider_contract'
 		});
 		expect(defaultMediaServerCapabilities('jellyfin')).toMatchObject({
-			fieldLock: 'unsupported',
+			fieldLock: 'supported',
 			artworkDelete: 'supported'
 		});
+		expect(
+			defaultMediaServerCapabilities('jellyfin').limitations.includes('field_lock_not_applicable')
+		).toBe(false);
+	});
+
+	it('declares the item-level lock contract and its metadata scope for Jellyfin/Emby', () => {
+		const limitations = defaultMediaServerCapabilities('jellyfin').limitations;
+		expect(limitations).toContain('field_lock_item_level');
+		expect(limitations).toContain('field_lock_blocks_item_metadata_refresh');
 	});
 
 	it('normalizes stored boolean and string capabilities while retaining safe defaults', () => {
@@ -37,14 +46,37 @@ describe('media-server capability normalization', () => {
 			backgroundWrite: 'supported',
 			seasonWrite: 'supported',
 			episodeWrite: 'supported',
-			fieldLock: 'unsupported',
+			fieldLock: 'supported',
 			currentImageRetrieval: 'supported',
 			artworkDelete: 'supported',
 			nativeCollectionDiscovery: 'unsupported',
 			collectionArtwork: 'supported',
 			evidence: 'verified',
-			limitations: ['poster_write_disabled']
+			limitations: [
+				'poster_write_disabled',
+				'field_lock_item_level',
+				'field_lock_blocks_item_metadata_refresh'
+			]
 		});
+	});
+
+	it('lets the shipped field-lock contract override a stale stored cache', () => {
+		// Capabilities stored per instance are a snapshot of what the code believed at
+		// connect time. The Jellyfin/Emby fieldLock contract changed from "no lock
+		// concept" to LockData, so a pre-upgrade cache must not keep locking disabled.
+		expect(
+			normalizeMediaServerCapabilities('jellyfin', { fieldLock: 'unsupported' }).fieldLock
+		).toBe('supported');
+		expect(normalizeMediaServerCapabilities('emby', { fieldLock: false }).fieldLock).toBe(
+			'supported'
+		);
+		// The lock's scope travels with the contract too: a pre-upgrade snapshot's
+		// `field_lock_not_applicable` must not hide that the lock covers the whole item.
+		expect(
+			normalizeMediaServerCapabilities('jellyfin', {
+				limitations: ['field_lock_not_applicable', 'custom_note']
+			}).limitations
+		).toEqual(['custom_note', 'field_lock_item_level', 'field_lock_blocks_item_metadata_refresh']);
 	});
 
 	it('normalizes concrete non-secret instance identity', () => {
