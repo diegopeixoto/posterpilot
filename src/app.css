@@ -528,6 +528,16 @@ body {
 		@apply rounded-control border border-border-strong bg-surface px-3 py-1.5 text-sm transition-colors focus:border-accent-500;
 	}
 
+	/* Touch screens get a 44px minimum target on every button and field, so no single
+	   control has to opt in (and stand taller than its neighbours on desktop). A mouse
+	   keeps the compact rhythm. */
+	@media (pointer: coarse) {
+		.btn,
+		.input {
+			min-height: 2.75rem;
+		}
+	}
+
 	/* Rendered GitHub release notes in the What's New modal. */
 	.release-notes :where(h2) {
 		@apply mt-5 mb-2 text-base font-semibold text-text-bright first:mt-0;

@@ -462,6 +462,36 @@
 <!-- Spotlight -->
 <LibrarySpotlight spotlight={data.spotlight} />
 
+<!--
+	Coverage sits in the toolbar row rather than inside its filter popover. The
+	popover's filters describe the library's own metadata; this one asks what
+	PosterPilot has actually put where, and it is the single filter whose empty
+	result is a real answer ("nothing here is applied yet") — a user reading that
+	answer has to see what produced it without opening anything first.
+-->
+{#snippet coverageControl()}
+	<label
+		class="inline-flex items-center gap-1.5 rounded-control border bg-surface pl-3 transition-colors pointer-coarse:min-h-11 {coverage
+			? 'border-accent-600'
+			: 'border-border-strong hover:border-border-hover'}"
+	>
+		<span class="text-xs whitespace-nowrap text-text-muted">{m.coverage_filter_label()}</span>
+		<select
+			id="library-coverage"
+			class="max-w-48 self-stretch truncate rounded-r-control bg-transparent py-1.5 pr-2 text-sm {coverage
+				? 'text-accent-200'
+				: 'text-text-strong'}"
+			value={coverage ?? ''}
+			onchange={(event) => setCoverage(event.currentTarget.value)}
+		>
+			<option value="">{m.coverage_filter_all()}</option>
+			{#each COVERAGE_FILTER_VALUES as value (value)}
+				<option {value}>{coverageFilterLabels[value]()}</option>
+			{/each}
+		</select>
+	</label>
+{/snippet}
+
 <LibraryToolbar
 	filter={data.filter}
 	genres={data.genres}
@@ -490,29 +520,8 @@
 	onSelectPage={selectPage}
 	onSelectAllMatching={selectAllMatching}
 	onRemoveParam={removeParam}
+	{coverageControl}
 />
-
-<!--
-	Coverage sits beside the toolbar rather than inside its filter popover. The
-	toolbar's filters describe the library's own metadata; this one asks what
-	PosterPilot has actually put where, and it is the single filter whose empty
-	result is a real answer ("nothing here is applied yet") — a user reading that
-	answer has to see what produced it without opening anything first.
--->
-<div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
-	<label for="library-coverage" class="text-xs text-text-muted">{m.coverage_filter_label()}</label>
-	<select
-		id="library-coverage"
-		class="input min-h-11"
-		value={coverage ?? ''}
-		onchange={(event) => setCoverage(event.currentTarget.value)}
-	>
-		<option value="">{m.coverage_filter_all()}</option>
-		{#each COVERAGE_FILTER_VALUES as value (value)}
-			<option {value}>{coverageFilterLabels[value]()}</option>
-		{/each}
-	</select>
-</div>
 
 {#if selectedCount > 0}
 	<div

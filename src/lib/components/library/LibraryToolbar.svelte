@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import Popover from '$lib/components/Popover.svelte';
 	import type { LibraryFilterParsed } from '$lib/library-filter';
 	import { LIBRARY_SORTS, type LibrarySort, type SortDir } from '$lib/library-sort';
@@ -34,7 +35,8 @@
 		onClearAll,
 		onSelectPage,
 		onSelectAllMatching,
-		onRemoveParam
+		onRemoveParam,
+		coverageControl
 	}: {
 		filter: LibraryFilterParsed;
 		genres: string[];
@@ -63,6 +65,8 @@
 		onSelectPage: () => void;
 		onSelectAllMatching: () => void;
 		onRemoveParam: (...keys: string[]) => void;
+		/** Rendered inline with the other view controls (the page owns its state). */
+		coverageControl?: Snippet;
 	} = $props();
 
 	const typeLabels: Record<string, () => string> = {
@@ -80,13 +84,34 @@
 	}
 </script>
 
+<!--
+	One row, grouped left to right by what each control does: find (search), narrow
+	(filter, sort, ignore view, coverage), then — pushed to the far edge — act on what
+	is shown (selection). Every control shares one height so the row reads as a single
+	toolbar instead of a stack of differently sized widgets.
+-->
 <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
 	<form
+		role="search"
+		class="relative w-full sm:w-auto"
 		onsubmit={(event) => {
 			event.preventDefault();
 			onSearchSubmit();
 		}}
 	>
+		<svg
+			class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-faint"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<circle cx="11" cy="11" r="7" />
+			<path d="m20 20-3.5-3.5" />
+		</svg>
 		<input
 			name="q"
 			type="search"
@@ -94,7 +119,7 @@
 			placeholder={m.library_search_placeholder()}
 			aria-label={m.library_search_placeholder()}
 			oninput={(event) => onSearchInput(valueFrom(event))}
-			class="input w-44"
+			class="input w-full pl-8 sm:w-56"
 		/>
 	</form>
 
@@ -278,13 +303,19 @@
 		{/each}
 	</div>
 
+	{@render coverageControl?.()}
+
+	<!-- Active reads like an active Filter/Sort trigger (accent outline), not a filled
+	     accent button: the filled accent is reserved for the primary action. -->
 	<button
 		type="button"
 		onclick={onToggleAuto}
 		title={m.library_autoapply()}
 		aria-label={m.library_autoapply()}
 		aria-pressed={autoApply}
-		class="btn px-2.5 py-2 {autoApply ? 'btn-accent' : 'btn-ghost text-text-muted'}"
+		class="btn btn-ghost px-2.5 py-2 {autoApply
+			? 'border-accent-600 text-accent-200'
+			: 'text-text-muted'}"
 	>
 		<svg
 			class="size-4"
@@ -307,17 +338,19 @@
 	{/if}
 
 	{#if visibleCount > 0}
-		<button type="button" onclick={onSelectPage} class="btn btn-ghost px-2.5 py-2 text-xs">
-			{m.library_select_page()}
-		</button>
-		<button
-			type="button"
-			disabled={selectingAll}
-			onclick={onSelectAllMatching}
-			class="btn btn-ghost px-2.5 py-2 text-xs"
-		>
-			{selectingAll ? m.library_selecting_all() : m.library_select_all_matching({ count: total })}
-		</button>
+		<div class="flex items-center gap-2 sm:ml-auto">
+			<button type="button" onclick={onSelectPage} class="btn btn-ghost px-2.5 py-2 text-xs">
+				{m.library_select_page()}
+			</button>
+			<button
+				type="button"
+				disabled={selectingAll}
+				onclick={onSelectAllMatching}
+				class="btn btn-ghost px-2.5 py-2 text-xs"
+			>
+				{selectingAll ? m.library_selecting_all() : m.library_select_all_matching({ count: total })}
+			</button>
+		</div>
 	{/if}
 </div>
 
