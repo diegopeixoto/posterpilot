@@ -25,27 +25,36 @@ function sessionKey(username: string, password: string): string {
 /** Get a cached (or freshly logged-in) session cookie, or null when unconfigured/failed. */
 export async function getThePosterDbSession(
 	username: string | null,
-	password: string | null
+	password: string | null,
+	options?: { throwOnFailure?: boolean }
 ): Promise<string | null> {
 	if (!username || !password) return null;
 	const key = sessionKey(username, password);
 	if (cached && cached.key === key && cached.expiresAt > Date.now()) return cached.cookie;
-	if (inflight && inflight.key === key) return inflight.promise;
 
-	const promise = (async () => {
+	if (inflight?.key === key) {
 		try {
-			const cookie = await loginToThePosterDb(username, password);
-			cached = { key, cookie, expiresAt: Date.now() + SESSION_TTL_MS };
-			return cookie;
-		} catch {
-			cached = null;
+			return await inflight.promise;
+		} catch (error) {
+			if (options?.throwOnFailure) throw error;
 			return null;
-		} finally {
-			inflight = null;
 		}
-	})();
+	}
+	const promise = loginToThePosterDb(username, password);
 	inflight = { key, promise };
-	return promise;
+	try {
+		const cookie = await promise;
+		cached = { key, cookie, expiresAt: Date.now() + SESSION_TTL_MS };
+		return cookie;
+	} catch (error) {
+		cached = null;
+		// Other consumers retain their best-effort anonymous fallback; discovery
+		// must record configured login failures instead of calling them empty.
+		if (options?.throwOnFailure) throw error;
+		return null;
+	} finally {
+		if (inflight?.promise === promise) inflight = null;
+	}
 }
 
 /** Force the next call to log in again (e.g. a request came back looking logged-out). */
