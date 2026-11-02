@@ -21,6 +21,10 @@ vi.mock('./score-weights', () => ({
 		aspectWeight: 0.3
 	}))
 }));
+vi.mock('./providers/theposterdb-auth', async (importOriginal) => ({
+	...(await importOriginal<typeof import('./providers/theposterdb-auth')>()),
+	loginToThePosterDb: vi.fn()
+}));
 
 import { db } from '$lib/server/db';
 import {
@@ -31,6 +35,7 @@ import {
 	serverInstances
 } from '$lib/server/db/schema';
 import { fetchText } from '$lib/server/http';
+import { loginToThePosterDb } from './providers/theposterdb-auth';
 import { discoverForItem } from './service';
 
 const config = {
@@ -47,6 +52,7 @@ const challenge = '<form id="challenge-form" action="/cdn-cgi/challenge-platform
 
 beforeEach(async () => {
 	vi.mocked(fetchText).mockReset();
+	vi.mocked(loginToThePosterDb).mockReset();
 	await db.delete(posterCandidates);
 	await db.delete(providerDiscoveryOutcomes);
 	await db.delete(providerDiscoveryRuns);
@@ -72,17 +78,15 @@ beforeEach(async () => {
 
 describe('discovery outcome persistence', () => {
 	it('retains stale candidates on blocked MediUX while ThePosterDB succeeds independently', async () => {
-		await db
-			.insert(posterCandidates)
-			.values({
-				serverInstanceId: 'server-a',
-				mediaItemId: item.id,
-				provider: 'mediux',
-				setId: 'old',
-				url: 'https://example.com/old.jpg',
-				kind: 'poster',
-				score: 0
-			});
+		await db.insert(posterCandidates).values({
+			serverInstanceId: 'server-a',
+			mediaItemId: item.id,
+			provider: 'mediux',
+			setId: 'old',
+			url: 'https://example.com/old.jpg',
+			kind: 'poster',
+			score: 0
+		});
 		vi.mocked(fetchText).mockImplementation(async (url) =>
 			url.includes('mediux.pro')
 				? challenge
@@ -115,13 +119,37 @@ describe('discovery outcome persistence', () => {
 		expect((await db.select().from(mediaItems))[0].discoveryStatus).toBe('partial');
 	});
 
-	it('records a placeholder-only ThePosterDB page as failed instead of empty', async () => {
+	it('records an anonymous placeholder-only ThePosterDB page as empty, not a failure', async () => {
 		vi.mocked(fetchText)
 			.mockResolvedValueOnce(search)
 			.mockResolvedValueOnce(
 				'<picture><img class="tpdb-poster" src="/images/defaults/missing_poster.jpg"></picture><div data-poster-id="123"></div>'
 			);
 		await discoverForItem(item, config, { providers: ['theposterdb'] });
+		expect((await db.select().from(providerDiscoveryOutcomes))[0]).toMatchObject({
+			status: 'empty',
+			candidateCount: 0,
+			errorCode: null
+		});
+	});
+
+	it('records a configured placeholder-only ThePosterDB page as failed instead of empty', async () => {
+		const withCredentials = {
+			...config,
+			thePosterDbUsername: 'user',
+			thePosterDbPassword: 'secret'
+		} as AppConfig;
+		vi.mocked(loginToThePosterDb).mockResolvedValue('session=abc');
+		vi.mocked(fetchText)
+			.mockResolvedValueOnce(search)
+			.mockResolvedValueOnce(
+				'<picture><img class="tpdb-poster" src="/images/defaults/missing_poster.jpg"></picture><div data-poster-id="123"></div>'
+			)
+			.mockResolvedValueOnce(search)
+			.mockResolvedValueOnce(
+				'<picture><img class="tpdb-poster" src="/images/defaults/missing_poster.jpg"></picture><div data-poster-id="123"></div>'
+			);
+		await discoverForItem(item, withCredentials, { providers: ['theposterdb'] });
 		expect((await db.select().from(providerDiscoveryOutcomes))[0]).toMatchObject({
 			status: 'failed',
 			candidateCount: 0,

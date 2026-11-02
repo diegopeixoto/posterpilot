@@ -34,10 +34,37 @@ beforeEach(() => {
 });
 
 describe('ThePosterDB discovery failure signals', () => {
-	it('reports a configured login failure rather than silently falling back to anonymous', async () => {
+	it('falls back to anonymous scraping when a configured login fails, keeping artwork', async () => {
 		vi.mocked(loginToThePosterDb).mockRejectedValue(
 			new ThePosterDbAuthError('ThePosterDB rejected the username or password.')
 		);
+		vi.mocked(fetchText).mockResolvedValueOnce(search).mockResolvedValueOnce(artwork);
+		const result = await thePosterDbProvider.discover(item, config);
+		expect(Array.isArray(result) && result.flatMap((s) => s.candidates).map((c) => c.url)).toEqual([
+			'https://images.theposterdb.com/prod/public/images/posters/optimized/movies/123/poster.webp'
+		]);
+		// The fallback request is anonymous, with no session cookie attached.
+		const firstCall = vi.mocked(fetchText).mock.calls[0][1] as {
+			headers: Record<string, string>;
+		};
+		expect(firstCall.headers.Cookie).toBeUndefined();
+	});
+
+	it('records a configured login failure when the anonymous fallback yields no artwork', async () => {
+		vi.mocked(loginToThePosterDb).mockRejectedValue(
+			new ThePosterDbAuthError('ThePosterDB rejected the username or password.')
+		);
+		vi.mocked(fetchText).mockResolvedValue('<html>no matching titles</html>');
+		await expect(thePosterDbProvider.discover(item, config)).rejects.toMatchObject({
+			code: 'theposterdb_auth_failed'
+		});
+	});
+
+	it('records a configured login failure when the anonymous fallback is placeholder-only', async () => {
+		vi.mocked(loginToThePosterDb).mockRejectedValue(
+			new ThePosterDbAuthError('ThePosterDB rejected the username or password.')
+		);
+		vi.mocked(fetchText).mockResolvedValueOnce(search).mockResolvedValueOnce(placeholder);
 		await expect(thePosterDbProvider.discover(item, config)).rejects.toMatchObject({
 			code: 'theposterdb_auth_failed'
 		});
@@ -90,7 +117,7 @@ describe('ThePosterDB discovery failure signals', () => {
 		]);
 	});
 
-	it('reports an anonymous placeholder-only page but preserves no-match and empty title pages', async () => {
+	it('treats an anonymous placeholder-only page as empty, and preserves no-match and empty title pages', async () => {
 		const anonymous = { ...config, thePosterDbUsername: null, thePosterDbPassword: null };
 		vi.mocked(fetchText)
 			.mockResolvedValueOnce(search)
@@ -98,9 +125,7 @@ describe('ThePosterDB discovery failure signals', () => {
 			.mockResolvedValueOnce('<html>no matching titles</html>')
 			.mockResolvedValueOnce(search)
 			.mockResolvedValueOnce('<html>no posters</html>');
-		await expect(thePosterDbProvider.discover(item, anonymous)).rejects.toMatchObject({
-			code: 'theposterdb_placeholder_only'
-		});
+		await expect(thePosterDbProvider.discover(item, anonymous)).resolves.toEqual([]);
 		await expect(thePosterDbProvider.discover(item, anonymous)).resolves.toEqual([]);
 		await expect(thePosterDbProvider.discover(item, anonymous)).resolves.toEqual([]);
 	});

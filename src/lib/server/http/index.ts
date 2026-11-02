@@ -37,6 +37,13 @@ export interface FetchOptions {
 	retries?: number;
 	/** Per-attempt timeout in milliseconds. */
 	timeoutMs?: number;
+	/**
+	 * Reject a response body that must never be cached — and ignore one already in the
+	 * cache — so a transient body such as a Cloudflare challenge page cannot pin a block
+	 * for the whole TTL. Only consulted when caching is enabled; a body the predicate
+	 * returns false for is fetched again on the next call.
+	 */
+	isCacheableBody?: (body: string) => boolean;
 }
 
 async function readCacheRow(cacheKey: string): Promise<{ body: string; ageMs: number } | null> {
@@ -112,12 +119,15 @@ function revalidate(
 	url: string,
 	headers: Record<string, string> | undefined,
 	retries: number,
-	timeoutMs: number
+	timeoutMs: number,
+	isCacheableBody?: (body: string) => boolean
 ): void {
 	if (revalidating.has(cacheKey)) return;
 	revalidating.add(cacheKey);
 	void fetchFresh(url, headers, retries, timeoutMs)
-		.then((body) => writeCache(cacheKey, body))
+		.then((body) => {
+			if (isCacheableBody?.(body) ?? true) return writeCache(cacheKey, body);
+		})
 		.catch(() => {})
 		.finally(() => revalidating.delete(cacheKey));
 }
@@ -125,6 +135,7 @@ function revalidate(
 /**
  * Fetch a URL as text with retry-with-backoff and optional SQLite response caching.
  * Retries on 429/5xx and network errors; fails fast (no retry) on other 4xx.
+ * A body rejected by `isCacheableBody` is never served from nor written to the cache.
  */
 export async function fetchText(url: string, opts: FetchOptions = {}): Promise<string> {
 	const {
@@ -134,23 +145,26 @@ export async function fetchText(url: string, opts: FetchOptions = {}): Promise<s
 		cacheNamespace,
 		headers,
 		retries = 3,
-		timeoutMs = 20_000
+		timeoutMs = 20_000,
+		isCacheableBody
 	} = opts;
 	const cacheKey = httpCacheKey(url, headers, cacheNamespace);
 
 	if (cacheTtlDays > 0 && !forceRefresh) {
 		const row = await readCacheRow(cacheKey);
-		if (row) {
+		// A cached body the caller rejects (e.g. a persisted challenge page) is treated
+		// as a miss so it cannot pin a bad representation for the whole TTL.
+		if (row && (isCacheableBody?.(row.body) ?? true)) {
 			if (row.ageMs <= cacheTtlDays * DAY_MS) return row.body; // fresh
 			if (staleWhileRevalidate) {
-				revalidate(cacheKey, url, headers, retries, timeoutMs); // refresh for next time
+				revalidate(cacheKey, url, headers, retries, timeoutMs, isCacheableBody); // refresh for next time
 				return row.body; // serve stale now, never blocking
 			}
 		}
 	}
 
 	const body = await fetchFresh(url, headers, retries, timeoutMs);
-	if (cacheTtlDays > 0) await writeCache(cacheKey, body);
+	if (cacheTtlDays > 0 && (isCacheableBody?.(body) ?? true)) await writeCache(cacheKey, body);
 	return body;
 }
 

@@ -46,7 +46,10 @@ export async function discoverCandidates(
 		headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'text/html' },
 		cacheTtlDays: opts.cacheTtlDays,
 		forceRefresh: opts.forceRefresh,
-		retries: 2
+		retries: 2,
+		// A 200 challenge page must not be cached, or the block would outlive the
+		// request that hit it for the whole cache TTL.
+		isCacheableBody: (body) => !isCloudflareChallenge(body)
 	});
 	if (isCloudflareChallenge(html)) {
 		throw new ProviderScrapeError('mediux_blocked', 'MediUX returned a Cloudflare challenge.');

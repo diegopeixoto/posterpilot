@@ -24,7 +24,9 @@ import { isCloudflareChallenge, ProviderScrapeError } from './scrape-error';
  * pages, so when a ThePosterDB account is configured the scrape signs in first (see
  * theposterdb-session.ts) and retries once with a fresh session on an empty scrape —
  * a stale session still returns HTTP 200 with normal-looking markup, so an empty
- * result is the only "logged out" signal there is.
+ * result is the only "logged out" signal there is. A failed sign-in falls back to
+ * anonymous scraping rather than failing the run; the failure is recorded only when
+ * that anonymous attempt yields no artwork at all.
  */
 
 const BASE_URL = 'https://theposterdb.com';
@@ -45,7 +47,10 @@ export const thePosterDbProvider: PosterProvider = {
 					},
 					cacheTtlDays: config.httpCacheTtlDays,
 					forceRefresh,
-					retries: 1
+					retries: 1,
+					// A 200 challenge page must not be cached, or the block would outlive
+					// the request that hit it for the whole cache TTL.
+					isCacheableBody: (body) => !isCloudflareChallenge(body)
 				});
 
 			const term = encodeURIComponent(`${item.title} ${item.year ?? ''}`.trim());
@@ -79,37 +84,62 @@ export const thePosterDbProvider: PosterProvider = {
 			return { sets, placeholderOnly };
 		};
 
-		const session = async () => {
+		const credentialsConfigured = Boolean(config.thePosterDbUsername && config.thePosterDbPassword);
+		// A configured login that fails must not fail ThePosterDB for the whole run: a
+		// wrong password or a brief outage of the login endpoint still leaves anonymous
+		// scraping, which returns real posters for many titles. Fall back to anonymous
+		// and record the failure only when that fallback produced no artwork at all.
+		const resolveSession = async (): Promise<{ cookie: string | null; authFailed: boolean }> => {
 			try {
-				return await getThePosterDbSession(config.thePosterDbUsername, config.thePosterDbPassword, {
-					throwOnFailure: true
-				});
-			} catch {
-				throw new ProviderScrapeError(
-					'theposterdb_auth_failed',
-					'ThePosterDB login failed; check credentials and service availability.'
+				const cookie = await getThePosterDbSession(
+					config.thePosterDbUsername,
+					config.thePosterDbPassword,
+					{ throwOnFailure: true }
 				);
+				return { cookie, authFailed: false };
+			} catch {
+				return { cookie: null, authFailed: true };
 			}
 		};
-		let cookie = await session();
+		let { cookie, authFailed } = await resolveSession();
 		let result = await attempt(cookie, opts?.forceRefresh);
 		if (!result.sets.length && cookie) {
 			// A stale session can yield placeholders; retain the existing one-retry
 			// behavior for all empty responses, including title mismatches.
 			invalidateThePosterDbSession();
-			cookie = result.placeholderOnly
-				? await session()
-				: await getThePosterDbSession(config.thePosterDbUsername, config.thePosterDbPassword);
+			const reloaded = result.placeholderOnly
+				? await resolveSession()
+				: {
+						cookie: await getThePosterDbSession(
+							config.thePosterDbUsername,
+							config.thePosterDbPassword
+						),
+						authFailed: false
+					};
+			cookie = reloaded.cookie;
+			authFailed = authFailed || reloaded.authFailed;
 			if (cookie) {
 				const refreshed = await attempt(cookie, true);
 				if (refreshed.sets.length || !result.placeholderOnly) result = refreshed;
 			}
 		}
-		if (result.placeholderOnly) {
+		if (authFailed && (!result.sets.length || result.placeholderOnly)) {
 			throw new ProviderScrapeError(
-				'theposterdb_placeholder_only',
-				'ThePosterDB returned poster cards without accessible artwork.'
+				'theposterdb_auth_failed',
+				'ThePosterDB login failed and the anonymous fallback returned no artwork; check credentials and service availability.'
 			);
+		}
+		if (result.placeholderOnly) {
+			// The site serves the placeholder to anonymous requests on some pages; without
+			// credentials that is the expected outcome, not a fault. Only a session that
+			// should have worked makes placeholder-only output a failure.
+			if (credentialsConfigured) {
+				throw new ProviderScrapeError(
+					'theposterdb_placeholder_only',
+					'ThePosterDB returned poster cards without accessible artwork.'
+				);
+			}
+			return [];
 		}
 		return result.sets;
 	}
