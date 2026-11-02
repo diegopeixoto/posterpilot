@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/diegopeixoto/posterpilot/compare/v0.13.1...v0.14.0) (2026-11-02)
+
+
+### Features
+
+* **media-server:** lock applied artwork on Jellyfin/Emby (opt-in) and restore apply-time locking ([#126](https://github.com/diegopeixoto/posterpilot/issues/126)) ([1bf61fc](https://github.com/diegopeixoto/posterpilot/commit/1bf61fc08141d1415d1d4468b86be2df40f38499))
+* pick an artwork language per title in the poster picker ([#125](https://github.com/diegopeixoto/posterpilot/issues/125)) ([b03d37f](https://github.com/diegopeixoto/posterpilot/commit/b03d37fc2211761fbc6afce194e376b745f82e48))
+* **ui:** tidy the library toolbar, touch targets and the item apply tray ([#128](https://github.com/diegopeixoto/posterpilot/issues/128)) ([870d09e](https://github.com/diegopeixoto/posterpilot/commit/870d09e1359fad9d8ef1e73dd72a4acbed39e2fc))
+
+
+### Under the hood
+
+* write 0.13.1 release notes ([#118](https://github.com/diegopeixoto/posterpilot/issues/118)) ([ae616f3](https://github.com/diegopeixoto/posterpilot/commit/ae616f38cf99e70d2e351c529248bc4bed35f64d))
+
 ## [0.13.1](https://github.com/diegopeixoto/posterpilot/compare/v0.13.0...v0.13.1) (2026-08-22)
 
 One fix, for the minute right after an upgrade: a tab you left open now notices the new release by itself.
