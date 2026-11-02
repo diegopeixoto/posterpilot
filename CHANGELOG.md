@@ -2,17 +2,28 @@
 
 ## [0.14.0](https://github.com/diegopeixoto/posterpilot/compare/v0.13.1...v0.14.0) (2026-11-02)
 
+Pick a poster language title by title, keep Jellyfin and Emby from overwriting the artwork you applied, and a tidier library on phones.
 
 ### Features
 
-* **media-server:** lock applied artwork on Jellyfin/Emby (opt-in) and restore apply-time locking ([#126](https://github.com/diegopeixoto/posterpilot/issues/126)) ([1bf61fc](https://github.com/diegopeixoto/posterpilot/commit/1bf61fc08141d1415d1d4468b86be2df40f38499))
-* pick an artwork language per title in the poster picker ([#125](https://github.com/diegopeixoto/posterpilot/issues/125)) ([b03d37f](https://github.com/diegopeixoto/posterpilot/commit/b03d37fc2211761fbc6afce194e376b745f82e48))
-* **ui:** tidy the library toolbar, touch targets and the item apply tray ([#128](https://github.com/diegopeixoto/posterpilot/issues/128)) ([870d09e](https://github.com/diegopeixoto/posterpilot/commit/870d09e1359fad9d8ef1e73dd72a4acbed39e2fc))
+* **Pick an artwork language per title, right in the poster picker.** The language toggle on an item page is now a picker: your saved preference (the default, unchanged), **All languages**, or any language this title's covers are actually tagged in, with a count for each (`Dansk (12)`). The pick filters **Fanart.tv as well as TMDB**; MediUX, ThePosterDB and textless artwork always stay visible. It only lasts for that page and never touches your global setting, and when nothing exists in the picked language the page says so instead of just showing a shorter grid. Languages outside the curated list are now named in their own language instead of a bare code. ([#125](https://github.com/diegopeixoto/posterpilot/pull/125))
+* **Jellyfin and Emby can now lock the artwork you apply.** A library refresh that downloads images could replace what PosterPilot had just applied. A new setting, **Lock artwork applied on Jellyfin/Emby** (`JELLYFIN_ITEM_LOCK`, under Settings → Kometa & advanced), sets Jellyfin's `LockData` on apply. It is **off by default** because Jellyfin locks the whole item, not one image: it also stops that item's metadata refreshes and cascades from a show to its seasons and episodes. A "Replace all images" refresh started in Jellyfin still overrides it. ([#126](https://github.com/diegopeixoto/posterpilot/pull/126))
+* **A tidier library toolbar, and controls sized for touch.** The library's search, filters, sort, ignore view and artwork coverage now sit in one row, with the selection actions at the far end; on a phone the search takes the full width. On touch screens every button and field is at least 44px tall. On an item page, empty poster and backdrop slots in the apply bar are drawn as outlines, and the custom URL/upload panel no longer covers the apply bar on phones. ([#128](https://github.com/diegopeixoto/posterpilot/pull/128))
 
+### Bug Fixes
 
-### Under the hood
+* **Plex locks the applied field again.** An earlier rework of the apply pipeline stopped locking the poster or background field after an apply, on every server, so a Plex metadata refresh could put the agent's artwork back. Applying on Plex now locks just the field it changed, as it used to. ([#126](https://github.com/diegopeixoto/posterpilot/pull/126))
+* **Undo only unlocks what PosterPilot locked.** PosterPilot now records each lock it takes, and undo releases only those. A lock you set yourself is never cleared, undoing a replacement keeps the earlier PosterPilot artwork it restores locked, and undoing a poster no longer unprotects a backdrop PosterPilot still owns. If locking fails, the artwork change is still recorded as it happened and the failure is logged as a warning. ([#126](https://github.com/diegopeixoto/posterpilot/pull/126))
 
-* write 0.13.1 release notes ([#118](https://github.com/diegopeixoto/posterpilot/issues/118)) ([ae616f3](https://github.com/diegopeixoto/posterpilot/commit/ae616f38cf99e70d2e351c529248bc4bed35f64d))
+### Upgrading
+
+* One database migration (`0013`) adds an `artwork_field_locks` table. It only adds a table, so rolling back to 0.13.1 leaves it unused.
+* Jellyfin/Emby locking stays off until you turn it on. Applies made before this release have no lock record, so undoing them leaves any lock they set in place.
+
+### Contributors
+
+* [@SaxxyToo](https://github.com/SaxxyToo) asked for Jellyfin/Emby locking in [#121](https://github.com/diegopeixoto/posterpilot/issues/121) and built it in [#122](https://github.com/diegopeixoto/posterpilot/pull/122), which [#126](https://github.com/diegopeixoto/posterpilot/pull/126) carries forward with their authorship. The Jellyfin research is theirs, and so is the catch that applies had stopped locking fields on Plex too.
+* [@LoveMyslf-1](https://github.com/LoveMyslf-1) asked for the per-title language picker in [#124](https://github.com/diegopeixoto/posterpilot/issues/124), down to Fanart.tv support and an explicit empty state, which is how it shipped.
 
 ## [0.13.1](https://github.com/diegopeixoto/posterpilot/compare/v0.13.0...v0.13.1) (2026-08-22)
 
