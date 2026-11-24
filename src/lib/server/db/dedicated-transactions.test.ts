@@ -5,7 +5,13 @@ import { createClient, type Client, type InStatement, type ResultSet } from '@li
 import { drizzle } from 'drizzle-orm/libsql';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTransactionLane, withDedicatedTransactions } from './dedicated-transactions';
+import { isTransientError, withBusyRetry } from './busy-retry';
+import {
+	LANE_TIMEOUT_CODE,
+	createTransactionLane,
+	isReadOnlyStatement,
+	withDedicatedTransactions
+} from './dedicated-transactions';
 
 let directory: string;
 let url: string;
@@ -16,7 +22,8 @@ function trackedOpener() {
 	let opened = 0;
 	let closed = 0;
 	const open = (): Client => {
-		const client = createClient({ url, timeout: 5000 });
+		// No busy timeout, matching production (see db/index.ts).
+		const client = createClient({ url });
 		clients.push(client);
 		opened++;
 		const close = client.close.bind(client);
@@ -204,16 +211,32 @@ describe('createTransactionLane', () => {
 	it('releases the lane and keeps the connection when BEGIN fails', async () => {
 		let failBegin = true;
 		const opener = fakeOpener(async (stmt) => {
-			if (stmt.startsWith('BEGIN') && failBegin) throw new Error('SQLITE_BUSY: database is locked');
+			if (stmt.startsWith('BEGIN') && failBegin) throw new Error('disk I/O error');
 			return ok();
 		});
 		const lane = createTransactionLane(opener.open);
 
-		await expect(lane.begin()).rejects.toThrow('locked');
+		await expect(lane.begin()).rejects.toThrow('disk I/O error');
 		failBegin = false;
 		await (await lane.begin()).commit();
 		expect(opener.opened).toBe(1);
 		expect(opener.closed).toBe(0);
+	});
+
+	it('retries a BEGIN that finds the write lock held, without blocking', async () => {
+		let busyBegins = 2;
+		const opener = fakeOpener(async (stmt) => {
+			if (stmt.startsWith('BEGIN') && busyBegins-- > 0) {
+				throw Object.assign(new Error('SQLITE_BUSY: database is locked'), {
+					code: 'SQLITE_BUSY'
+				});
+			}
+			return ok();
+		});
+		const lane = createTransactionLane(opener.open);
+
+		await (await lane.begin()).commit();
+		expect(opener.statements.filter((s) => s.startsWith('BEGIN'))).toHaveLength(3);
 	});
 
 	it('fails a transaction that waits too long, without stalling the queue', async () => {
@@ -221,7 +244,7 @@ describe('createTransactionLane', () => {
 		const lane = createTransactionLane(opener.open, { queueTimeoutMs: 30 });
 
 		const holder = await lane.begin();
-		await expect(lane.begin()).rejects.toMatchObject({ code: 'SQLITE_BUSY' });
+		await expect(lane.begin()).rejects.toMatchObject({ code: LANE_TIMEOUT_CODE });
 		await holder.commit();
 		await expect(lane.begin().then((tx) => tx.commit())).resolves.toBeUndefined();
 	});
@@ -237,6 +260,94 @@ describe('createTransactionLane', () => {
 			'BEGIN TRANSACTION READONLY',
 			'BEGIN DEFERRED'
 		]);
+	});
+});
+
+describe('writes that collide with an open transaction', () => {
+	it('wait without freezing the event loop and land once the transaction commits', async () => {
+		// The production stack: busy retry over the transaction lane, no busy timeout.
+		const base = createClient({ url });
+		clients.push(base);
+		const client = withBusyRetry(withDedicatedTransactions(base, trackedOpener().open));
+
+		const tx = await client.transaction('write');
+		await tx.execute({ sql: 'INSERT INTO t (v) VALUES (?)', args: ['in-transaction'] });
+
+		// A plain write (like the job heartbeat) arrives while the write lock is held.
+		const plainWrite = client.execute({ sql: 'INSERT INTO t (v) VALUES (?)', args: ['plain'] });
+
+		// The event loop keeps turning while that write waits: a timer still fires.
+		const ticked = await new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 100));
+		expect(ticked).toBe(true);
+
+		await tx.commit();
+		await expect(plainWrite).resolves.toBeDefined();
+		expect(await countRows()).toBe(2);
+
+		// And the connection that queued keeps persisting writes afterwards. (A connection
+		// whose statement hits SQLITE_BUSY silently discards every later write in libsql.)
+		await client.execute({ sql: 'INSERT INTO t (v) VALUES (?)', args: ['later'] });
+		expect(await countRows()).toBe(3);
+		client.close();
+	});
+
+	it('recovers a connection that hit SQLITE_BUSY from an outside writer', async () => {
+		const base = createClient({ url });
+		clients.push(base);
+		const client = withDedicatedTransactions(base, trackedOpener().open);
+		// Another process (outside the queue) holds the write lock.
+		const outsider = createClient({ url });
+		clients.push(outsider);
+		await outsider.execute('BEGIN IMMEDIATE');
+
+		await expect(
+			client.execute({ sql: 'INSERT INTO t (v) VALUES (?)', args: ['collided'] })
+		).rejects.toMatchObject({ code: 'SQLITE_BUSY' });
+		await outsider.execute('COMMIT');
+
+		// Without the reconnect, libsql leaves the collided statement un-reset, which keeps an
+		// implicit transaction open: a later write with different SQL reports success but is
+		// never committed.
+		await client.execute("INSERT INTO t (v) VALUES ('later')");
+		expect(await countRows()).toBe(1);
+		client.close();
+	});
+
+	it('lets reads run beside an open transaction without queueing', async () => {
+		const base = createClient({ url });
+		clients.push(base);
+		const client = withDedicatedTransactions(base, trackedOpener().open);
+
+		const tx = await client.transaction('write');
+		await tx.execute({ sql: 'INSERT INTO t (v) VALUES (?)', args: ['pending'] });
+		// Resolves while the transaction is still open, and sees only committed data.
+		const rows = await client.execute('SELECT count(*) AS n FROM t');
+		expect(Number(rows.rows[0].n)).toBe(0);
+		await tx.commit();
+		client.close();
+	});
+
+	it('fails a write that waits past the queue timeout with a code the retry layer skips', async () => {
+		const opener = fakeOpener();
+		const lane = createTransactionLane(opener.open, { queueTimeoutMs: 30 });
+		const holder = await lane.begin();
+		await expect(lane.exclusive(async () => 'never')).rejects.toMatchObject({
+			code: LANE_TIMEOUT_CODE
+		});
+		expect(isTransientError(Object.assign(new Error('x'), { code: LANE_TIMEOUT_CODE }))).toBe(
+			false
+		);
+		await holder.commit();
+	});
+});
+
+describe('isReadOnlyStatement', () => {
+	it('treats only SELECT statements as reads', () => {
+		expect(isReadOnlyStatement('select 1')).toBe(true);
+		expect(isReadOnlyStatement({ sql: '  SELECT * FROM t', args: [] })).toBe(true);
+		expect(isReadOnlyStatement('insert into t values (1)')).toBe(false);
+		expect(isReadOnlyStatement('PRAGMA wal_checkpoint(FULL)')).toBe(false);
+		expect(isReadOnlyStatement('selective_update()')).toBe(false);
 	});
 });
 

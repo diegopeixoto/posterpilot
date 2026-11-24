@@ -3,11 +3,13 @@ import type { Client, InArgs, InStatement, ResultSet, TransactionMode } from '@l
 /**
  * Retries individual statements that fail with SQLite contention (SQLITE_BUSY).
  *
- * Writes serialize through db/write-queue.ts, but reads run unthrottled. During a sync's
- * write bursts a read can land while the WAL writer holds the lock and fail instantly —
- * historically the busy timeout did not reliably hold on this local libsql client (see the
- * comment in db/index.ts) — surfacing to the UI as a transient HTTP 500 that self-heals on
- * the next poll. A short, bounded per-statement retry absorbs those collisions instead.
+ * The database runs with SQLite's busy timeout OFF (see db/index.ts): libsql executes every
+ * statement synchronously on the event-loop thread, so SQLite's busy-wait froze the whole
+ * server — HTTP requests and health checks included — for the full timeout on every lock
+ * collision. A statement that finds the write lock held (typically a plain write landing
+ * while a transaction is open on the shared transaction connection) now fails instantly
+ * with SQLITE_BUSY, and this wrapper waits with setTimeout instead, so other requests keep
+ * being served while it waits.
  *
  * `transaction()` is deliberately not wrapped: write transactions already serialize through
  * the write queue, and re-running a failed interactive transaction wholesale from this layer
@@ -15,7 +17,7 @@ import type { Client, InArgs, InStatement, ResultSet, TransactionMode } from '@l
  * lifecycle is handled by db/dedicated-transactions.ts underneath this wrapper.)
  */
 
-const MAX_ATTEMPTS = 8;
+export const BUSY_RETRY_MAX_ATTEMPTS = 24;
 const INITIAL_DELAY_MS = 40;
 const MAX_DELAY_MS = 500;
 
@@ -39,7 +41,7 @@ const TRANSIENT_MESSAGE_PATTERNS = [
 	'unable to open database'
 ];
 
-function isTransientError(error: unknown): boolean {
+export function isTransientError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
 	const code = (error as { code?: unknown }).code;
 	if (typeof code === 'string' && code !== '') {
@@ -53,17 +55,17 @@ function isTransientError(error: unknown): boolean {
 	return TRANSIENT_MESSAGE_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
-// Deterministic exponential backoff capped at 500ms: 40, 80, 160, 320, 500, 500, 500 —
-// about 2.1s worst case before the final error is rethrown. The cap keeps a request from
-// hanging on a long backoff while still spanning a sync's write burst, which the previous
-// 600ms budget did not. Non-transient errors rethrow immediately.
-async function retryOnBusy<T>(run: () => Promise<T>): Promise<T> {
+// Deterministic exponential backoff capped at 500ms: 40, 80, 160, 320, then 500ms — about
+// 10s worst case before the final error is rethrown. The wait is asynchronous, so a long
+// budget costs nothing but latency for the one waiting statement; it only has to outlast the
+// longest transaction holding the write lock. Non-transient errors rethrow immediately.
+export async function retryOnBusy<T>(run: () => Promise<T>): Promise<T> {
 	let delay = INITIAL_DELAY_MS;
 	for (let attempt = 1; ; attempt++) {
 		try {
 			return await run();
 		} catch (error) {
-			if (attempt >= MAX_ATTEMPTS || !isTransientError(error)) throw error;
+			if (attempt >= BUSY_RETRY_MAX_ATTEMPTS || !isTransientError(error)) throw error;
 			await new Promise((resolve) => setTimeout(resolve, delay));
 			delay = Math.min(delay * 2, MAX_DELAY_MS);
 		}

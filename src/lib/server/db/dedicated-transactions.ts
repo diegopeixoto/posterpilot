@@ -7,6 +7,7 @@ import {
 	type Transaction,
 	type TransactionMode
 } from '@libsql/client';
+import { isTransientError, retryOnBusy } from './busy-retry';
 
 /**
  * Runs every interactive transaction on ONE long-lived connection, one transaction at a time.
@@ -23,9 +24,10 @@ import {
  *
  * Reusing a single connection removes that churn entirely. It costs no real concurrency:
  * Drizzle opens every transaction as `BEGIN IMMEDIATE` (a write transaction), and SQLite
- * already admits only one writer at a time — concurrent transactions used to wait on the
- * busy timeout, and now wait in this in-process queue instead. Plain reads keep using the
- * main client's connection and are not queued.
+ * already admits only one writer at a time — concurrent transactions used to wait on
+ * SQLite's busy timeout, which blocks the whole event-loop thread, and now wait in this
+ * in-process queue instead. Plain reads keep using the main client's connection and are not
+ * queued.
  */
 
 const BEGIN: Record<TransactionMode, string> = {
@@ -37,7 +39,7 @@ const BEGIN: Record<TransactionMode, string> = {
 /**
  * How long a transaction may wait for its turn before failing. Bounded so a transaction that
  * is accidentally opened from inside another one (which would wait on itself forever) fails
- * loudly instead of hanging the job; generous compared with the 5s busy timeout it replaces.
+ * loudly instead of hanging the job.
  */
 const DEFAULT_QUEUE_TIMEOUT_MS = 60_000;
 
@@ -118,13 +120,21 @@ class LaneTransaction implements Transaction {
 }
 
 export interface TransactionLane {
+	/** Wait for the lane, then BEGIN; the returned transaction holds the lane until it ends. */
 	begin(mode?: TransactionMode): Promise<Transaction>;
+	/** Wait for the lane, run `fn` (a write on another connection), then hand the lane on. */
+	exclusive<T>(fn: () => Promise<T>): Promise<T>;
 	close(): void;
 }
 
+/** Error code for a caller that waited longer than the queue timeout. Not retried. */
+export const LANE_TIMEOUT_CODE = 'TRANSACTION_QUEUE_TIMEOUT';
+
 /**
- * A single reusable transaction connection with a FIFO queue in front of it. The connection
- * is opened on first use and replaced only if a transaction leaves it in an unknown state.
+ * A single reusable transaction connection with a FIFO queue in front of it. Transactions and
+ * plain writes take turns through the same queue, so no two writers in this process ever meet
+ * SQLite's write lock at the same time. The connection is opened on first use and replaced
+ * only if a transaction leaves it in an unknown state.
  */
 export function createTransactionLane(
 	openConnection: () => Client,
@@ -140,15 +150,21 @@ export function createTransactionLane(
 		retired?.close();
 	}
 
-	async function waitForTurn(previous: Promise<void>): Promise<void> {
+	/** Queue for a turn; resolves with the function that hands the lane on. */
+	async function acquire(): Promise<() => void> {
+		let release!: () => void;
+		const turn = new Promise<void>((resolve) => (release = resolve));
+		const previous = tail;
+		tail = previous.then(() => turn);
+
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const timeout = new Promise<never>((_, reject) => {
 			timer = setTimeout(
 				() =>
 					reject(
 						new LibsqlError(
-							`SQLITE_BUSY: waited ${queueTimeoutMs}ms for another transaction to finish`,
-							'SQLITE_BUSY'
+							`waited ${queueTimeoutMs}ms for another database write to finish`,
+							LANE_TIMEOUT_CODE
 						)
 					),
 				queueTimeoutMs
@@ -156,41 +172,53 @@ export function createTransactionLane(
 		});
 		try {
 			await Promise.race([previous, timeout]);
+		} catch (error) {
+			// Give up this turn, but only once the holder ahead finishes, so callers queued
+			// behind this one keep their order instead of jumping ahead of it.
+			void previous.then(release);
+			throw error;
 		} finally {
 			clearTimeout(timer);
 		}
+		return release;
 	}
 
 	return {
 		async begin(mode: TransactionMode = 'write'): Promise<Transaction> {
-			let release!: () => void;
-			const turn = new Promise<void>((resolve) => (release = resolve));
-			const previous = tail;
-			tail = previous.then(() => turn);
-
+			const release = await acquire();
+			let current: Client;
 			try {
-				await waitForTurn(previous);
+				current = await retryOnBusy(async () => {
+					const candidate = (connection ??= openConnection());
+					try {
+						await candidate.execute(BEGIN[mode]);
+					} catch (error) {
+						// libsql leaves a connection whose statement hit SQLITE_BUSY silently
+						// discarding every later write, so never reuse one: reopen for the retry.
+						// (Within this process the queue makes a busy BEGIN impossible; this only
+						// guards against another process holding the lock.)
+						if (isTransientError(error)) retire();
+						throw error;
+					}
+					return candidate;
+				});
 			} catch (error) {
-				// Give up this turn, but only once the transaction ahead finishes, so callers
-				// queued behind this one keep their order instead of jumping ahead of it.
-				void previous.then(release);
-				throw error;
-			}
-
-			try {
-				connection ??= openConnection();
-				await connection.execute(BEGIN[mode]);
-			} catch (error) {
-				// A failed BEGIN (typically SQLITE_BUSY) opens no transaction, so the connection
-				// stays usable. Retiring it would only bring back the churn this module removes.
 				release();
 				throw error;
 			}
 
-			return new LaneTransaction(connection, (connectionHealthy) => {
+			return new LaneTransaction(current, (connectionHealthy) => {
 				if (!connectionHealthy) retire();
 				release();
 			});
+		},
+		async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+			const release = await acquire();
+			try {
+				return await fn();
+			} finally {
+				release();
+			}
 		},
 		close(): void {
 			retire();
@@ -198,22 +226,50 @@ export function createTransactionLane(
 	};
 }
 
+/** True for statements that only read, which may run beside an open transaction in WAL mode. */
+export function isReadOnlyStatement(stmt: InStatement): boolean {
+	const text = typeof stmt === 'string' ? stmt : stmt.sql;
+	return /^\s*select\b/i.test(text);
+}
+
 /**
- * Wrap a client so `transaction()` runs on a shared, reused connection (see above).
+ * Wrap a client so that:
+ * - `transaction()` runs on a shared, reused connection (see above);
+ * - every other write waits its turn in the same queue, so it can never collide with an open
+ *   transaction (a collision used to busy-wait with the event loop frozen, and then, failing
+ *   with SQLITE_BUSY, left the connection silently discarding later writes);
+ * - reads (`SELECT`) run immediately — WAL lets them proceed beside the single writer;
+ * - should a statement still hit SQLITE_BUSY (another process holding the lock), the
+ *   connection is reopened before the error propagates, so the retry runs on a healthy one.
+ *
  * `openConnection` must open the same database the client uses — a `file:` URL. (A plain
  * `:memory:` URL opens a different, empty database per connection, so leave such clients
- * unwrapped.) Every other member delegates untouched.
+ * unwrapped.)
  */
 export function withDedicatedTransactions(client: Client, openConnection: () => Client): Client {
 	const lane = createTransactionLane(openConnection);
+
+	async function guarded<T>(run: () => Promise<T>): Promise<T> {
+		try {
+			return await run();
+		} catch (error) {
+			if (isTransientError(error)) await client.reconnect();
+			throw error;
+		}
+	}
+	const write = <T>(run: () => Promise<T>): Promise<T> => lane.exclusive(() => guarded(run));
+
 	return {
-		execute: (stmtOrSql: InStatement, args?: InArgs): Promise<ResultSet> =>
-			typeof stmtOrSql === 'string' ? client.execute(stmtOrSql, args) : client.execute(stmtOrSql),
+		execute: (stmtOrSql: InStatement, args?: InArgs): Promise<ResultSet> => {
+			const run = () =>
+				typeof stmtOrSql === 'string' ? client.execute(stmtOrSql, args) : client.execute(stmtOrSql);
+			return isReadOnlyStatement(stmtOrSql) ? guarded(run) : write(run);
+		},
 		batch: (stmts: Array<InStatement | [string, InArgs?]>, mode?: TransactionMode) =>
-			client.batch(stmts, mode),
-		migrate: (stmts: Array<InStatement>) => client.migrate(stmts),
+			write(() => client.batch(stmts, mode)),
+		migrate: (stmts: Array<InStatement>) => write(() => client.migrate(stmts)),
 		transaction: (mode?: TransactionMode) => lane.begin(mode),
-		executeMultiple: (sql: string) => client.executeMultiple(sql),
+		executeMultiple: (sql: string) => write(() => client.executeMultiple(sql)),
 		sync: () => client.sync(),
 		close: () => {
 			lane.close();

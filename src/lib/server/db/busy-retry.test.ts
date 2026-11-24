@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Client, ResultSet } from '@libsql/client';
-import { withBusyRetry } from './busy-retry';
+import { BUSY_RETRY_MAX_ATTEMPTS, withBusyRetry } from './busy-retry';
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 function busyError(): Error {
 	const error = new Error('SQLITE_BUSY: database is locked');
@@ -57,7 +61,8 @@ describe('withBusyRetry', () => {
 		expect(calls).toBe(1);
 	});
 
-	it('rethrows the busy error after exhausting all attempts', async () => {
+	it('rethrows the busy error after exhausting all attempts, waiting about 10s', async () => {
+		vi.useFakeTimers();
 		let calls = 0;
 		const client = withBusyRetry(
 			fakeClient({
@@ -67,8 +72,13 @@ describe('withBusyRetry', () => {
 				}
 			})
 		);
-		await expect(client.execute('select 1')).rejects.toThrow('database is locked');
-		expect(calls).toBe(8);
+		const started = Date.now();
+		const outcome = expect(client.execute('select 1')).rejects.toThrow('database is locked');
+		await vi.runAllTimersAsync();
+		await outcome;
+		expect(calls).toBe(BUSY_RETRY_MAX_ATTEMPTS);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(9_000);
+		expect(Date.now() - started).toBeLessThanOrEqual(11_000);
 	});
 
 	it('retries a connection that could not be opened, which reports an empty code', async () => {
