@@ -1,9 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { eq, lt } from 'drizzle-orm';
 import pRetry, { AbortError } from 'p-retry';
 import { db } from '$lib/server/db';
 import { httpCache } from '$lib/server/db/schema';
 import { parseRetryAfter } from './retry-after';
 import { httpCacheKey, safeHttpTarget } from './cache-key';
+import { readThroughParsed } from './parsed-cache';
 
 /** A retryable HTTP failure (429/5xx) carrying an optional server-requested delay. */
 class RetryableHttpError extends Error {
@@ -152,6 +153,53 @@ export async function fetchText(url: string, opts: FetchOptions = {}): Promise<s
 	const body = await fetchFresh(url, headers, retries, timeoutMs);
 	if (cacheTtlDays > 0) await writeCache(cacheKey, body);
 	return body;
+}
+
+export interface FetchParsedOptions<T> extends Omit<FetchOptions, 'staleWhileRevalidate'> {
+	/**
+	 * Identifies the parser — and any inputs it closes over — in the cache key. Bump its
+	 * version when the parser's output shape changes, so old cached values are not reused.
+	 */
+	parseKey: string;
+	/** Turns the page into JSON-serializable data; only this result is cached. */
+	parse: (body: string) => T;
+}
+
+/**
+ * Fetch a page and cache its parsed result rather than the raw body (see
+ * http/parsed-cache.ts). Same retry, timeout and TTL semantics as fetchText.
+ */
+export async function fetchParsed<T>(url: string, opts: FetchParsedOptions<T>): Promise<T> {
+	const {
+		cacheTtlDays = 0,
+		forceRefresh = false,
+		cacheNamespace,
+		headers,
+		retries = 3,
+		timeoutMs = 20_000,
+		parseKey,
+		parse
+	} = opts;
+	const namespace = `parsed:${parseKey}${cacheNamespace ? `:${cacheNamespace}` : ''}`;
+	return readThroughParsed(
+		{ read: readCacheRow, write: writeCache },
+		{
+			key: httpCacheKey(url, headers, namespace),
+			ttlDays: cacheTtlDays,
+			forceRefresh,
+			fetchBody: () => fetchFresh(url, headers, retries, timeoutMs),
+			parse
+		}
+	);
+}
+
+/** Delete cached responses fetched before `cutoff`. Returns how many rows were removed. */
+export async function pruneHttpCache(cutoff: Date): Promise<number> {
+	const removed = await db
+		.delete(httpCache)
+		.where(lt(httpCache.fetchedAt, cutoff))
+		.returning({ url: httpCache.url });
+	return removed.length;
 }
 
 /** Fetch and parse JSON, with the same retry/cache behavior as fetchText. */

@@ -99,6 +99,27 @@
       "when": 1792868731611,
       "tag": "0013_same_starfox",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795532261322,
+      "tag": "0014_applied_posters_item_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1795537961153,
+      "tag": "0015_drop_cached_html_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1795547447296,
+      "tag": "0016_scope_trigger_skip_unchanged",
+      "breakpoints": true
     }
   ]
 }

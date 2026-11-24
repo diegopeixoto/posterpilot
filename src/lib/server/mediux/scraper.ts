@@ -7,7 +7,7 @@
  * listing page plus pure parsing — no per-set requests, no fan-out.
  */
 
-import { fetchText } from '$lib/server/http';
+import { fetchParsed } from '$lib/server/http';
 import { BROWSER_USER_AGENT } from '$lib/server/ua';
 import type { MediuxSet, TmdbMediaType } from '$lib/server/types';
 import { parseListingSets } from './parser';
@@ -38,11 +38,14 @@ export async function discoverCandidates(
 	mediaType: TmdbMediaType,
 	opts: DiscoverOptions
 ): Promise<MediuxSet[]> {
-	const html = await fetchText(listingUrl(tmdbId, mediaType), {
+	// The listing page is ~1 MB (up to ~12 MB) of Next.js payload; cache only the parsed
+	// sets. tmdbId and mediaType are in the URL, so the key already covers the parser inputs.
+	return fetchParsed(listingUrl(tmdbId, mediaType), {
 		headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'text/html' },
 		cacheTtlDays: opts.cacheTtlDays,
 		forceRefresh: opts.forceRefresh,
-		retries: 2
+		retries: 2,
+		parseKey: 'mediux-listing-sets:v1',
+		parse: (html) => parseListingSets(html, tmdbId, mediaType)
 	});
-	return parseListingSets(html, tmdbId, mediaType);
 }
