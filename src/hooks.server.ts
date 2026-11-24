@@ -12,7 +12,9 @@ import {
 import { materializeLegacyServerInstanceAtBoot } from '$lib/server/server-instances/legacy-boot';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { registerServerLocaleStrategy } from '$lib/i18n/strategy.server';
-import { getAuthState } from '$lib/server/config';
+import { getAuthState, resolveConfig } from '$lib/server/config';
+import { pruneHttpCache } from '$lib/server/http';
+import { httpCachePruneCutoff } from '$lib/server/http/parsed-cache';
 import { warnIfKeyFileInsecure } from '$lib/server/secrets/key';
 import { bypassesAuthStateLookup, classifyPath, safeRedirectTarget } from '$lib/server/auth/guard';
 import { decideLocalBypass } from '$lib/server/auth/local-address';
@@ -55,6 +57,19 @@ const operationPlanPruner = setInterval(() => {
 	void pruneEphemeralPlans().catch(() => undefined);
 }, PLAN_PRUNE_INTERVAL_MS);
 operationPlanPruner.unref();
+
+// Cached HTTP responses are only ever overwritten, never removed, so without this the
+// cache grows with every title and provider ever looked up. Drop rows past every
+// caller's freshness window (see httpCachePruneCutoff) on the same hourly cadence.
+async function pruneExpiredHttpCache(): Promise<void> {
+	const config = await resolveConfig();
+	await pruneHttpCache(httpCachePruneCutoff(new Date(), config.httpCacheTtlDays));
+}
+await pruneExpiredHttpCache().catch(() => undefined);
+const httpCachePruner = setInterval(() => {
+	void pruneExpiredHttpCache().catch(() => undefined);
+}, PLAN_PRUNE_INTERVAL_MS);
+httpCachePruner.unref();
 
 // Configure scheduling before durable recovery can resume a sync that emits an
 // automation event. The scheduler module deliberately does not import the worker.

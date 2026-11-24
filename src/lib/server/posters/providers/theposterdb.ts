@@ -1,4 +1,4 @@
-import { fetchText } from '$lib/server/http';
+import { fetchParsed } from '$lib/server/http';
 import { BROWSER_USER_AGENT } from '$lib/server/ua';
 import type { AppConfig } from '$lib/server/config';
 import type { MediaItem } from '$lib/server/db/schema';
@@ -35,26 +35,36 @@ export const thePosterDbProvider: PosterProvider = {
 	isAvailable: (config) => config.providerThePosterDb,
 	async discover(item: MediaItem, config: AppConfig, opts) {
 		const attempt = async (cookie: string | null, forceRefresh?: boolean) => {
-			const get = (url: string) =>
-				fetchText(url, {
-					headers: {
-						'User-Agent': BROWSER_USER_AGENT,
-						Accept: 'text/html',
-						...(cookie ? { Cookie: cookie } : {})
-					},
-					cacheTtlDays: config.httpCacheTtlDays,
-					forceRefresh,
-					retries: 1
-				});
+			// Only the parsed result of each page is cached, not the page itself (see
+			// http/parsed-cache.ts). The session cookie stays in the cache identity, as before.
+			const request = {
+				headers: {
+					'User-Agent': BROWSER_USER_AGENT,
+					Accept: 'text/html',
+					...(cookie ? { Cookie: cookie } : {})
+				},
+				cacheTtlDays: config.httpCacheTtlDays,
+				forceRefresh,
+				retries: 1
+			};
 
 			const term = encodeURIComponent(`${item.title} ${item.year ?? ''}`.trim());
 			const section = item.type === 'show' ? 'shows' : 'movies';
-			const searchHtml = await get(`${BASE_URL}/search?term=${term}&section=${section}`);
 			// The search page lists sets but embeds no poster images: the matching hit has
 			// to be opened. Chosen by title, not by rank — see bestThePosterDbResultId.
-			const setId = bestThePosterDbResultId(searchHtml, { title: item.title, year: item.year });
+			const want = { title: item.title, year: item.year };
+			const setId = await fetchParsed(`${BASE_URL}/search?term=${term}&section=${section}`, {
+				...request,
+				// The match depends on the wanted title and year, so they key the cached result.
+				parseKey: `theposterdb-search-match:v1:${JSON.stringify(want)}`,
+				parse: (html) => bestThePosterDbResultId(html, want)
+			});
 			if (!setId) return [];
-			return parseThePosterDbAssets(await get(`${BASE_URL}/posters/${setId}`));
+			return fetchParsed(`${BASE_URL}/posters/${setId}`, {
+				...request,
+				parseKey: 'theposterdb-set-assets:v1',
+				parse: parseThePosterDbAssets
+			});
 		};
 
 		let cookie = await getThePosterDbSession(
