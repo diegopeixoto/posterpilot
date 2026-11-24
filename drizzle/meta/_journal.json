@@ -99,6 +99,13 @@
       "when": 1792868731611,
       "tag": "0013_same_starfox",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795532261322,
+      "tag": "0014_applied_posters_item_index",
+      "breakpoints": true
     }
   ]
 }
