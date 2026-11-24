@@ -32,11 +32,11 @@ if (restoreBootResult.status === 'rejected' || restoreBootResult.status === 'rol
 // db/write-queue.ts); the client's `timeout` (busy timeout) is a secondary safety net for
 // any write path serializeWrite misses.
 //
-// withDedicatedTransactions gives every transaction() its own connection and closes it on
-// commit/rollback. The stock local client hands its connection to the transaction and never
-// closes it, so each transaction leaked a native connection (file descriptor + page cache)
-// until GC — gigabytes over a library sync. Skipped for in-memory URLs, where a second
-// connection would open a different, empty database.
+// withDedicatedTransactions runs every transaction() on one reused connection, one at a time.
+// The stock local client opened a fresh native connection per transaction, and those are
+// only freed when GC finalizes them — which barely happens under load — so a library sync
+// piled up gigabytes and thousands of descriptors. Skipped for in-memory URLs, where a
+// second connection would open a different, empty database.
 //
 // withBusyRetry is the read-side complement of that write queue: reads never go through
 // serializeWrite, so during a sync's write bursts they can hit SQLITE_BUSY and 500 (issue
