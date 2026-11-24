@@ -1,4 +1,4 @@
-import { createClient } from '@libsql/client';
+import { createClient, type Client } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { mkdirSync } from 'node:fs';
@@ -6,6 +6,8 @@ import { dirname } from 'node:path';
 import { env } from '$env/dynamic/private';
 import { resolveDataPaths } from '$lib/server/data-paths';
 import { withBusyRetry } from './busy-retry';
+import { withDedicatedTransactions } from './dedicated-transactions';
+import { createStatementCollector, withStatementCollection } from './statement-collection';
 import { processPendingRestore } from './pending-restore';
 import * as schema from './schema';
 
@@ -26,20 +28,48 @@ if (restoreBootResult.status === 'rejected' || restoreBootResult.status === 'rol
 	);
 }
 
-// Plain SQLite rejects a write immediately (SQLITE_BUSY) instead of waiting when another
-// writer holds the lock. The actual fix for concurrent writers is serializeWrite (see
-// db/write-queue.ts) — a PRAGMA busy_timeout doesn't reliably survive this local sqlite3
-// client discarding and lazily reopening its native connection after every transaction(),
-// and even the client's own `timeout` option (which is supposed to apply to every
-// connection it opens) didn't hold up under genuinely concurrent writers in testing. Set
-// here anyway as a harmless secondary safety net for any write path serializeWrite misses.
+// No busy timeout, on purpose. libsql runs each statement synchronously on the event-loop
+// thread, so SQLite's busy-wait (the `timeout` option) froze the entire server — every HTTP
+// request and the container health check — for the whole timeout on each lock collision,
+// and withBusyRetry then repeated it. A collision now fails at once with SQLITE_BUSY and is
+// retried asynchronously (withBusyRetry, and the transaction lane for BEGIN), so the server
+// keeps answering while it waits. Concurrent writers are still ordered by serializeWrite
+// (db/write-queue.ts).
+//
+// withDedicatedTransactions runs every transaction() on one reused connection, one at a time.
+// The stock local client opened a fresh native connection per transaction, and those are
+// only freed when GC finalizes them — which barely happens under load — so a library sync
+// piled up gigabytes and thousands of descriptors. Skipped for in-memory URLs, where a
+// second connection would open a different, empty database.
 //
 // withBusyRetry is the read-side complement of that write queue: reads never go through
-// serializeWrite and have no busy timeout for the same reason the pragma doesn't stick, so
-// during a sync's write bursts they can hit SQLITE_BUSY and 500 (issue #56). The wrapper
-// retries the individual statement a few times with a small backoff instead.
+// serializeWrite, so during a sync's write bursts they can hit SQLITE_BUSY and 500 (issue
+// #56). The wrapper retries the individual statement a few times with a small backoff.
+const clientConfig = { url: dataPaths.databaseUrl };
+const baseClient = createClient(clientConfig);
+
+// synchronous=NORMAL is SQLite's recommended setting for WAL mode: the WAL is fsynced at
+// checkpoints instead of on every commit. It cannot corrupt the database; a power cut or OS
+// crash (not an app crash) may lose only the last few commits. The default, FULL, fsyncs on
+// every commit — and because libsql runs statements on the event-loop thread, each fsync
+// stalled the whole server. On a copy-on-write filesystem (btrfs, as on Unraid cache pools)
+// a sync's thousands of commits kept the server unresponsive for its whole run.
+// The setting is per connection, so it is applied to each one as it opens.
+async function prepareConnection(connection: Client): Promise<void> {
+	await connection.execute('PRAGMA synchronous = NORMAL');
+}
+
+// withStatementCollection frees libsql's per-query native statements every few thousand
+// queries (see db/statement-collection.ts); without it a sync left ~1.5 GB behind.
 export const databaseClient = withBusyRetry(
-	createClient({ url: dataPaths.databaseUrl, timeout: 5000 })
+	withStatementCollection(
+		dataPaths.databaseFile
+			? withDedicatedTransactions(baseClient, () => createClient(clientConfig), {
+					prepareConnection
+				})
+			: baseClient,
+		createStatementCollector()
+	)
 );
 
 export const db = drizzle(databaseClient, { schema });
@@ -54,6 +84,8 @@ export async function migrateDb(): Promise<void> {
 	// real file.
 	if (dataPaths.databaseFile) {
 		await databaseClient.execute('PRAGMA journal_mode = WAL;');
+		// The main connection is opened above, before the wrapper can prepare it.
+		await prepareConnection(baseClient);
 	}
 	await migrate(db, { migrationsFolder: './drizzle' });
 	migrated = true;

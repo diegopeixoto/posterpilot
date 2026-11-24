@@ -305,7 +305,13 @@ export const appliedPosters = sqliteTable(
 			.notNull()
 			.$defaultFn(() => new Date())
 	},
-	(t) => [index('applied_posters_server_item_idx').on(t.serverInstanceId, t.mediaItemId)]
+	(t) => [
+		index('applied_posters_server_item_idx').on(t.serverInstanceId, t.mediaItemId),
+		// Per-item "last successful application" lookups (the library's recent sort,
+		// spotlight and "unchanged" filter) correlate on media_item_id alone; without
+		// this they scanned the whole table once per library item.
+		index('applied_posters_item_status_applied_idx').on(t.mediaItemId, t.status, t.appliedAt)
+	]
 );
 
 /** Durable background work and its immutable execution inputs. */

@@ -1,0 +1,1 @@
+CREATE INDEX `applied_posters_item_status_applied_idx` ON `applied_posters` (`media_item_id`,`status`,`applied_at`);
