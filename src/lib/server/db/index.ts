@@ -1,4 +1,4 @@
-import { createClient } from '@libsql/client';
+import { createClient, type Client } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { mkdirSync } from 'node:fs';
@@ -46,9 +46,23 @@ if (restoreBootResult.status === 'rejected' || restoreBootResult.status === 'rol
 // #56). The wrapper retries the individual statement a few times with a small backoff.
 const clientConfig = { url: dataPaths.databaseUrl };
 const baseClient = createClient(clientConfig);
+
+// synchronous=NORMAL is SQLite's recommended setting for WAL mode: the WAL is fsynced at
+// checkpoints instead of on every commit. It cannot corrupt the database; a power cut or OS
+// crash (not an app crash) may lose only the last few commits. The default, FULL, fsyncs on
+// every commit — and because libsql runs statements on the event-loop thread, each fsync
+// stalled the whole server. On a copy-on-write filesystem (btrfs, as on Unraid cache pools)
+// a sync's thousands of commits kept the server unresponsive for its whole run.
+// The setting is per connection, so it is applied to each one as it opens.
+async function prepareConnection(connection: Client): Promise<void> {
+	await connection.execute('PRAGMA synchronous = NORMAL');
+}
+
 export const databaseClient = withBusyRetry(
 	dataPaths.databaseFile
-		? withDedicatedTransactions(baseClient, () => createClient(clientConfig))
+		? withDedicatedTransactions(baseClient, () => createClient(clientConfig), {
+				prepareConnection
+			})
 		: baseClient
 );
 
@@ -64,6 +78,8 @@ export async function migrateDb(): Promise<void> {
 	// real file.
 	if (dataPaths.databaseFile) {
 		await databaseClient.execute('PRAGMA journal_mode = WAL;');
+		// The main connection is opened above, before the wrapper can prepare it.
+		await prepareConnection(baseClient);
 	}
 	await migrate(db, { migrationsFolder: './drizzle' });
 	migrated = true;

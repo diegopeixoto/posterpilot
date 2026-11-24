@@ -45,6 +45,13 @@ const DEFAULT_QUEUE_TIMEOUT_MS = 60_000;
 
 type Finish = (connectionHealthy: boolean) => void;
 
+/**
+ * Applies per-connection settings (PRAGMAs such as `synchronous`) to a freshly opened
+ * connection. SQLite keeps these per connection, so every open — including a reopen after
+ * SQLITE_BUSY — must run it again.
+ */
+export type PrepareConnection = (connection: Client) => Promise<void>;
+
 class LaneTransaction implements Transaction {
 	#connection: Client;
 	#finish: Finish;
@@ -138,10 +145,25 @@ export const LANE_TIMEOUT_CODE = 'TRANSACTION_QUEUE_TIMEOUT';
  */
 export function createTransactionLane(
 	openConnection: () => Client,
-	options: { queueTimeoutMs?: number } = {}
+	options: { queueTimeoutMs?: number; prepareConnection?: PrepareConnection } = {}
 ): TransactionLane {
 	const queueTimeoutMs = options.queueTimeoutMs ?? DEFAULT_QUEUE_TIMEOUT_MS;
+	const prepareConnection = options.prepareConnection;
 	let connection: Client | null = null;
+
+	/** The lane's connection, opening (and preparing) a fresh one when there is none. */
+	async function ensureConnection(): Promise<Client> {
+		if (connection) return connection;
+		const opened = openConnection();
+		try {
+			await prepareConnection?.(opened);
+		} catch (error) {
+			opened.close();
+			throw error;
+		}
+		connection = opened;
+		return opened;
+	}
 	let tail: Promise<void> = Promise.resolve();
 
 	function retire(): void {
@@ -189,7 +211,7 @@ export function createTransactionLane(
 			let current: Client;
 			try {
 				current = await retryOnBusy(async () => {
-					const candidate = (connection ??= openConnection());
+					const candidate = await ensureConnection();
 					try {
 						await candidate.execute(BEGIN[mode]);
 					} catch (error) {
@@ -246,14 +268,23 @@ export function isReadOnlyStatement(stmt: InStatement): boolean {
  * `:memory:` URL opens a different, empty database per connection, so leave such clients
  * unwrapped.)
  */
-export function withDedicatedTransactions(client: Client, openConnection: () => Client): Client {
-	const lane = createTransactionLane(openConnection);
+export function withDedicatedTransactions(
+	client: Client,
+	openConnection: () => Client,
+	options: { prepareConnection?: PrepareConnection } = {}
+): Client {
+	const { prepareConnection } = options;
+	const lane = createTransactionLane(openConnection, { prepareConnection });
 
 	async function guarded<T>(run: () => Promise<T>): Promise<T> {
 		try {
 			return await run();
 		} catch (error) {
-			if (isTransientError(error)) await client.reconnect();
+			if (isTransientError(error)) {
+				await client.reconnect();
+				// Per-connection settings do not survive the reopen.
+				await prepareConnection?.(client);
+			}
 			throw error;
 		}
 	}

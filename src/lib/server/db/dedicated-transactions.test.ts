@@ -390,3 +390,54 @@ describe('withDedicatedTransactions under drizzle', () => {
 		expect(opener.closed).toBe(1);
 	});
 });
+
+describe('per-connection preparation', () => {
+	const prepare = async (connection: Client) => {
+		await connection.execute('PRAGMA synchronous = NORMAL');
+	};
+
+	it('prepares the transaction connection once, before its first BEGIN, and again on reopen', async () => {
+		let failRollback = true;
+		const opener = fakeOpener(async (stmt) => {
+			if (stmt === 'ROLLBACK' && failRollback) throw new Error('no transaction is active');
+			return ok();
+		});
+		const lane = createTransactionLane(opener.open, { prepareConnection: prepare });
+
+		await (await lane.begin()).commit();
+		await (await lane.begin()).commit();
+		expect(opener.statements.slice(0, 2)).toEqual([
+			'PRAGMA synchronous = NORMAL',
+			'BEGIN IMMEDIATE'
+		]);
+		expect(opener.statements.filter((s) => s.startsWith('PRAGMA'))).toHaveLength(1);
+
+		// A failed ROLLBACK retires the connection; its replacement is prepared too.
+		await (await lane.begin()).rollback();
+		failRollback = false;
+		await (await lane.begin()).commit();
+		expect(opener.opened).toBe(2);
+		expect(opener.statements.filter((s) => s.startsWith('PRAGMA'))).toHaveLength(2);
+	});
+
+	it('re-prepares the main connection after reopening it for SQLITE_BUSY', async () => {
+		const base = createClient({ url });
+		clients.push(base);
+		await prepare(base);
+		const client = withDedicatedTransactions(base, trackedOpener().open, {
+			prepareConnection: prepare
+		});
+		const outsider = createClient({ url });
+		clients.push(outsider);
+		await outsider.execute('BEGIN IMMEDIATE');
+		await expect(
+			client.execute({ sql: 'INSERT INTO t (v) VALUES (?)', args: ['collided'] })
+		).rejects.toMatchObject({ code: 'SQLITE_BUSY' });
+		await outsider.execute('COMMIT');
+
+		// 1 = NORMAL; a reopened connection without preparation would read back 2 (FULL).
+		const setting = await client.execute('PRAGMA synchronous');
+		expect(Number(Object.values(setting.rows[0])[0])).toBe(1);
+		client.close();
+	});
+});
