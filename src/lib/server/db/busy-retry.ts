@@ -3,17 +3,16 @@ import type { Client, InArgs, InStatement, ResultSet, TransactionMode } from '@l
 /**
  * Retries individual statements that fail with SQLite contention (SQLITE_BUSY).
  *
- * Writes serialize through db/write-queue.ts, but reads run unthrottled — and they wait for
- * no one, because neither `PRAGMA busy_timeout` nor the client's `timeout` option reliably
- * survives this local libsql client discarding and lazily reopening its native connection
- * (see the comment in db/index.ts). During a sync's write bursts a read can therefore land
- * while the WAL writer holds the lock and fail instantly, surfacing to the UI as a transient
- * HTTP 500 that self-heals on the next poll. A short, bounded per-statement retry absorbs
- * those collisions instead.
+ * Writes serialize through db/write-queue.ts, but reads run unthrottled. During a sync's
+ * write bursts a read can land while the WAL writer holds the lock and fail instantly —
+ * historically the busy timeout did not reliably hold on this local libsql client (see the
+ * comment in db/index.ts) — surfacing to the UI as a transient HTTP 500 that self-heals on
+ * the next poll. A short, bounded per-statement retry absorbs those collisions instead.
  *
  * `transaction()` is deliberately not wrapped: write transactions already serialize through
  * the write queue, and re-running a failed interactive transaction wholesale from this layer
- * would replay statements chosen against state that may no longer hold.
+ * would replay statements chosen against state that may no longer hold. (Its connection
+ * lifecycle is handled by db/dedicated-transactions.ts underneath this wrapper.)
  */
 
 const MAX_ATTEMPTS = 8;
