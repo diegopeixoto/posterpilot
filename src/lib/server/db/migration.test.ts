@@ -20,7 +20,11 @@ const MIGRATIONS = [
 	'0009_silent_zaran.sql',
 	'0010_canonical_artwork_assets.sql',
 	'0011_provider_discovery_truncation.sql',
-	'0012_artwork_coverage_projection.sql'
+	'0012_artwork_coverage_projection.sql',
+	'0013_same_starfox.sql',
+	'0014_applied_posters_item_index.sql',
+	'0015_drop_cached_html_pages.sql',
+	'0016_scope_trigger_skip_unchanged.sql'
 ] as const;
 
 const clients: Client[] = [];
@@ -749,6 +753,73 @@ describe('0008 multi-server foundation migration', () => {
 			'review_events_scope_insert',
 			'review_events_scope_update'
 		]);
+	});
+
+	it('runs the parent scope checks only when server_instance_id actually changes', async () => {
+		const client = memoryClient();
+		await applyThrough(client, 16);
+		const now = 1_700_000_000;
+		for (const id of ['server-a', 'server-b']) {
+			await client.execute({
+				sql: `insert into server_instances
+					(id, name, normalized_name, type, enabled, protected, connection_status, created_at, updated_at)
+					values (?, ?, ?, 'plex', 1, 0, 'unknown', ?, ?)`,
+				args: [id, id, id, now, now]
+			});
+		}
+		const media = await client.execute({
+			sql: `insert into media_items
+				(server_instance_id, rating_key, section_key, type, title, resolved, ignored,
+				 has_candidates, has_mediux, watched, artwork_version, manual_match_pinned,
+				 discovery_status, updated_at)
+				values ('server-b', 'item-b', 'movies', 'movie', 'B', 0, 0, 0, 0, 0, 0, 0,
+				 'not_started', ?)`,
+			args: [now]
+		});
+		const mediaItemId = Number(media.lastInsertRowid);
+		await client.execute({
+			sql: `insert into poster_candidates
+				(server_instance_id, media_item_id, set_id, provider, url, kind, created_at)
+				values ('server-b', ?, 'set-b', 'mediux', 'https://example.test/poster.jpg', 'poster', ?)`,
+			args: [mediaItemId, now]
+		});
+
+		// A whole-row rewrite names server_instance_id without changing it (as every sync
+		// does): the probes are skipped, so this succeeds without scanning any child table.
+		await client.execute({
+			sql: 'update media_items set server_instance_id = ?, title = ? where id = ?',
+			args: ['server-b', 'B renamed', mediaItemId]
+		});
+		// A real move still sees the child left in the old scope.
+		await expect(
+			client.execute({
+				sql: 'update media_items set server_instance_id = ? where id = ?',
+				args: ['server-a', mediaItemId]
+			})
+		).rejects.toThrow('scope_mismatch:media_items.server_instance_id');
+
+		// Proof that an unchanged value skips the body: with a child planted out of scope
+		// (bypassing its own trigger), only a real change trips the parent check.
+		await client.execute('drop trigger poster_candidates_scope_insert');
+		await client.execute({
+			sql: `insert into poster_candidates
+				(server_instance_id, media_item_id, set_id, provider, url, kind, created_at)
+				values ('server-a', ?, 'set-a', 'mediux', 'https://example.test/a.jpg', 'poster', ?)`,
+			args: [mediaItemId, now]
+		});
+		await client.execute({
+			sql: 'update media_items set server_instance_id = ? where id = ?',
+			args: ['server-b', mediaItemId]
+		});
+
+		const collections = await client.execute(
+			"select sql from sqlite_master where type = 'trigger' and name in ('media_items_scope_update', 'media_collections_scope_update')"
+		);
+		for (const row of collections.rows) {
+			expect(String(row.sql)).toContain(
+				'WHEN OLD.`server_instance_id` IS NOT NEW.`server_instance_id`'
+			);
+		}
 	});
 
 	it('purges disposable URL payloads and clears credential-bearing current artwork URLs', async () => {
